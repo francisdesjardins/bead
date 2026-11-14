@@ -72,9 +72,14 @@ interface IDispatched<Handle extends string> {
   session?: ICallSession | undefined;
 }
 
-/** A request routed to its handler, with its payload as it came: a transfer's opening, for one. */
+/**
+ * A request routed to its handler, with its payload as it came: a transfer's opening, for one, and
+ * the bytes of its payload that opening carries as its sender places them, by its header as it
+ * came.
+ */
 interface IRouted<Handle extends string> {
   readonly dispatched: IDispatched<Handle>;
+  readonly openingBytes: number | undefined;
   readonly payload: Uint8Array;
   readonly resolver: IRequestHandler<Handle>;
 }
@@ -219,6 +224,7 @@ export const createRouterCore = <Handle extends string>(
   const placement = createPayloadPlacement(failures, limits);
   const {
     chunkEnvelopeOf,
+    openingBytesOf,
     payloadBytesPerChunk,
     payloadLimitOf,
     tooLargeOf,
@@ -1060,7 +1066,7 @@ export const createRouterCore = <Handle extends string>(
   // a request admitted on the call's session, then where it goes: refused — a subscription where
   // nothing goes back, a payload past its limit, a transfer's opening refused — dispatched, or its
   // transfer opened, whose first credit goes only now
-  const admitRouted = ({ dispatched, payload, resolver }: IRouted<Handle>): void => {
+  const admitRouted = ({ dispatched, openingBytes, payload, resolver }: IRouted<Handle>): void => {
     const { connectionHandle, header, session } = dispatched;
     const { callId, total } = header;
     const refusal = refusalOf(resolver, { connectionHandle, header, session });
@@ -1114,6 +1120,7 @@ export const createRouterCore = <Handle extends string>(
 
         refuse({ ...failures.transferStalled, detail }, dispatched);
       },
+      openingBytes,
       total,
     });
 
@@ -1475,7 +1482,11 @@ export const createRouterCore = <Handle extends string>(
       return undefined;
     }
 
-    resolveSession({ dispatched, payload, resolver }, { isForwarded, request: came });
+    // * counted by the header as it came, a JWT's token among it, as its sender placed it
+    const openingBytes =
+      header.total === undefined ? undefined : openingBytesOf({ ...header, total: header.total });
+
+    resolveSession({ dispatched, openingBytes, payload, resolver }, { isForwarded, request: came });
   };
 
   // a chunk no transfer takes: on a call abandoned, one under the credit it granted is late, and

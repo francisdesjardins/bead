@@ -207,7 +207,7 @@ export const createRouterRequester = <Handle extends string>(
 ): IRouterRequester<Handle> => {
   const { failures, reportFailure: report } = port;
   const { deliver, sendReporting } = writer;
-  const { chunkEnvelopeOf, payloadLimitOf, tooLargeOf, transferOf } = placement;
+  const { chunkEnvelopeOf, openingBytesOf, payloadLimitOf, tooLargeOf, transferOf } = placement;
 
   // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
   // transfers it sends and receives
@@ -536,6 +536,7 @@ export const createRouterRequester = <Handle extends string>(
               wait(limits.transferInactivityTimeout, { call, pendingRequest });
             },
             onRefused: refuse,
+            openingBytes: openingBytesOf({ ...envelope.header, total }),
             total,
           });
 

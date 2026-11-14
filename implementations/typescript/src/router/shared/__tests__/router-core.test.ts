@@ -4079,6 +4079,11 @@ test.describe('createRouterCore', () => {
           ],
         ],
         [
+          {},
+          [requestOf(3, { payload: Uint8Array.of(1), total: 8 })],
+          [[3, ProtocolCode.CHUNK_INVALID, 'an opening carries 44 bytes of its payload, not 1']],
+        ],
+        [
           // a wait of 0 for the budget refuses at once an opening the budget left cannot hold
           { bufferedBytesBudget: 128, maximumPayloadBytes: 128, transferInactivityTimeout: 1 },
           [opening, requestOf(3, { payload: new Uint8Array(44), total: 100 })],
@@ -4122,6 +4127,43 @@ test.describe('createRouterCore', () => {
         expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
         expect(seen).toEqual([]);
       }
+    });
+
+    test('answer CHUNK_INVALID to an opening that carries other than its sender places in it', async () => {
+      const { port, sent } = createPort();
+      // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
+      using core = createRouterCore(port, {
+        limits: { chunkBytes: 64, maximumPayloadBytes: 1_024, windowBytes: 128 },
+      });
+      const seen: IRequestResolverProps<Handle>[] = [];
+      const payload = patternOf(300);
+
+      core.registerResolver(resolverOf(echo, seen));
+
+      // a byte short of what its sender places, all but a byte short, then just that; a request
+      // past it is past its chunk, too large before its transfer is read
+      for (const [callId, opening] of [
+        [1, 43],
+        [3, 1],
+        [5, 44],
+      ] as const) {
+        core.receive(requestOf(callId, { payload: payload.subarray(0, opening), total: 300 }), 'a');
+      }
+
+      await sleep(0);
+
+      expect(
+        sent.map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+            : [envelope?.header.callId, envelope?.kind];
+        })
+      ).toEqual([
+        [1, ProtocolCode.CHUNK_INVALID, 'an opening carries 44 bytes of its payload, not 43'],
+        [3, ProtocolCode.CHUNK_INVALID, 'an opening carries 44 bytes of its payload, not 1'],
+        [5, EnvelopeKind.CREDIT],
+      ]);
+      expect(seen).toEqual([]);
     });
 
     test('find a transfer that a chunk comes for at once, as its first credit goes out', async () => {
@@ -4801,25 +4843,23 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('refuses the opening of a sender whose chunkBytes is larger than its own ENVELOPE_TOO_LARGE, and the chunks of one whose chunkBytes is smaller CHUNK_INVALID, both ends setting their limits alike', async () => {
+    test('refuses the opening of a sender whose chunkBytes is larger than its own ENVELOPE_TOO_LARGE, and that of one whose chunkBytes is smaller CHUNK_INVALID, both ends setting their limits alike', async () => {
       const payload = patternOf(300);
 
-      for (const [requester, receiver, chunks, code, detail] of [
+      for (const [requester, receiver, code, detail] of [
         // its opening of 128 bytes past the receiver's request of 64 at most, nothing credited
         [
           { chunkBytes: 128, windowBytes: 256 },
           { chunkBytes: 64, windowBytes: 128 },
-          undefined,
           ProtocolCode.ENVELOPE_TOO_LARGE,
           'a request is 64 bytes at most, not 128',
         ],
-        // its chunks of 48 under the receiver's full of 112, every one under the credit
+        // its opening of 44 bytes short of the 108 the receiver places in one, nothing credited
         [
           { chunkBytes: 64, windowBytes: 128 },
           { chunkBytes: 128, windowBytes: 256 },
-          [48, 48, 48, 48, 48, 16],
           ProtocolCode.CHUNK_INVALID,
-          'a chunk before the last carries 112 bytes, not 48',
+          'an opening carries 108 bytes of its payload, not 44',
         ],
       ] as const) {
         const loop = createLoopback({ limits: requester, serverLimits: receiver });
@@ -4844,7 +4884,7 @@ test.describe('createRouterCore', () => {
         const label = `${String(requester.chunkBytes)} to ${String(receiver.chunkBytes)}`;
 
         expect(await failed, label).toMatchObject({ code, detail, origin: 'peer' });
-        // the opening refused; or taken and credited, then the first chunk refused
+        // the opening refused, before any credit
         expect(
           loop.traffic.sent.map(({ bytes, to }) => {
             return [to, bytes[1], bytes.length];
@@ -4852,14 +4892,6 @@ test.describe('createRouterCore', () => {
           label
         ).toEqual([
           ['server', EnvelopeKind.REQUEST, requester.chunkBytes],
-          ...(chunks === undefined
-            ? []
-            : [
-                ['client', EnvelopeKind.CREDIT, 16],
-                ...chunks.map((bytes) => {
-                  return ['server', EnvelopeKind.CHUNK, 16 + bytes];
-                }),
-              ]),
           ['client', EnvelopeKind.FAILURE, expect.any(Number)],
         ]);
         expect(heard, label).toEqual([]);

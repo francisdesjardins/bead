@@ -50,6 +50,7 @@ test.describe('createReceivingTransfers', () => {
         receiving.open(new Uint8Array(1), { call, total: 0 }),
         receiving.open(new Uint8Array(1), { call, total: 51 }),
         receiving.open(new Uint8Array(4), { call, total: 4 }),
+        receiving.open(new Uint8Array(2), { call, openingBytes: 3, total: 8 }),
       ].map((refused) => {
         return 'code' in refused ? [refused.code, refused.detail] : refused;
       })
@@ -57,6 +58,7 @@ test.describe('createReceivingTransfers', () => {
       [ProtocolCode.PAYLOAD_TOO_LARGE, 'a transfer declares its total, not 0'],
       [ProtocolCode.PAYLOAD_TOO_LARGE, 'a payload is 50 bytes at most, not 51'],
       [ProtocolCode.CHUNK_INVALID, 'an opening of 4 bytes holds its whole total of 4'],
+      [ProtocolCode.CHUNK_INVALID, 'an opening carries 3 bytes of its payload, not 2'],
     ]);
     expect(receiving.available).toBe(64);
 

@@ -303,31 +303,31 @@ the code is the procedure's own, and a readable detail — `maximumDetailBytes` 
 default, and never past what its envelope holds. The protocol's codes come in blocks of 16, by how
 far a request went:
 
-| Code | Name                       | Raised when                                                                                                                                                                                                                 |
-| ---- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | `ENVELOPE_MALFORMED`       | the bytes are not an envelope this layout reads                                                                                                                                                                             |
-| 2    | `LAYOUT_UNSUPPORTED`       | the layout is one to come                                                                                                                                                                                                   |
-| 3    | `KIND_UNSUPPORTED`         | the kind is one to come, or one this side does not take                                                                                                                                                                     |
-| 4    | `ENVELOPE_TOO_LARGE`       | the envelope is larger than this peer reads                                                                                                                                                                                 |
-| 16   | `DESTINATION_UNKNOWN`      | the request names a destination its relay has none of — or its router relays nothing                                                                                                                                        |
-| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination, or a transport cannot carry its credential — leg B's, or the requester's own: nothing was tried                                                                    |
-| 18   | `SERVICE_UNKNOWN`          | no resolver is registered for the service among those its connection's transport takes                                                                                                                                      |
-| 19   | `PROCEDURE_UNKNOWN`        | the service is known there, the procedure is not                                                                                                                                                                            |
-| 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                                                      |
-| 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                                                          |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                                                  |
-| 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                                                        |
-| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                                                   |
-| 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                                                             |
-| 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place, or an opening waited for the budget past half `transferInactivityTimeout`: a request's, or a result's, after its procedure ran |
-| 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                                                   |
-| 48   | `CHUNK_INVALID`            | a chunk runs past the total or past full, is empty, does not read, is short with MORE set, says wrongly if it is the last, overlaps bytes received in part, or leaves too many runs apart                                   |
-| 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                                                        |
-| 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                                                          |
-| 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                                                  |
-| 52   | `PAYLOAD_INVALID`          | the payload reads, and its procedure's rules refuse it: its violations in its detail (spec 18)                                                                                                                              |
-| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries                                           |
-| 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                                                      |
+| Code | Name                       | Raised when                                                                                                                                                                                                                                         |
+| ---- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `ENVELOPE_MALFORMED`       | the bytes are not an envelope this layout reads                                                                                                                                                                                                     |
+| 2    | `LAYOUT_UNSUPPORTED`       | the layout is one to come                                                                                                                                                                                                                           |
+| 3    | `KIND_UNSUPPORTED`         | the kind is one to come, or one this side does not take                                                                                                                                                                                             |
+| 4    | `ENVELOPE_TOO_LARGE`       | the envelope is larger than this peer reads                                                                                                                                                                                                         |
+| 16   | `DESTINATION_UNKNOWN`      | the request names a destination its relay has none of — or its router relays nothing                                                                                                                                                                |
+| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination, or a transport cannot carry its credential — leg B's, or the requester's own: nothing was tried                                                                                            |
+| 18   | `SERVICE_UNKNOWN`          | no resolver is registered for the service among those its connection's transport takes                                                                                                                                                              |
+| 19   | `PROCEDURE_UNKNOWN`        | the service is known there, the procedure is not                                                                                                                                                                                                    |
+| 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                                                                              |
+| 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                                                                                  |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                                                                          |
+| 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                                                                                |
+| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                                                                           |
+| 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                                                                                     |
+| 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place, or an opening waited for the budget past half `transferInactivityTimeout`: a request's, or a result's, after its procedure ran                         |
+| 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                                                                           |
+| 48   | `CHUNK_INVALID`            | a chunk runs past the total or past full, is empty, does not read, is short with MORE set, says wrongly if it is the last, overlaps bytes received in part, or leaves too many runs apart, or an opening carries other than its sender places in it |
+| 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                                                                                |
+| 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                                                                                  |
+| 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                                                                          |
+| 52   | `PAYLOAD_INVALID`          | the payload reads, and its procedure's rules refuse it: its violations in its detail (spec 18)                                                                                                                                                      |
+| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries                                                                   |
+| 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                                                                              |
 
 A requester catches a `FailureError`: `isProtocol(codes, side?)` for the protocol's codes,
 `isApplication(codes?)` for the procedure's own, so a service's code 19 never passes for
@@ -776,19 +776,21 @@ A1 14 00 04  00 00 00 07  00 00 00 00 01 3F FE BC | <324 bytes>
 A transfer is refused before its bulk crosses. Its opening is routed, its credential resolved,
 admitted — `beforeRequest` sees the header and the call's session, never the payload — and held to
 its procedure's limit and the router's before anything is granted: a refusal falls on the opening,
-and no chunk follows it. An opening carries one byte of its payload at least, and one that holds its
-whole total needed no transfer: either is refused with `CHUNK_INVALID`. A requester whose header,
-its TRANSFER block added, passes 1,020 bytes or leaves its opening no byte fails the call before it
-goes, with `PAYLOAD_TOO_LARGE`: a `JWT` of 997 bytes or more, 993 beside a destination, goes whole
-only. A receiver holds `maximumTransfers` transfers per connection at once, each until its call
-ends; an opening past them is refused with `CAPACITY_EXCEEDED`. All of them together reserve at most
-`bufferedBytesBudget` bytes, each its whole total, from its admission until its payload is whole or
-it ends. An opening is admitted at once when no opening waits and the budget left holds its total;
-otherwise it waits, behind every opening before it on any connection, holding its place and none of
-the budget, and is granted nothing. The openings that wait are admitted in the order they came as
-the budget frees, and one still waiting at half `transferInactivityTimeout` is refused with
-`CAPACITY_EXCEEDED`: a request's is answered with it, a result's ends its call with it, which is
-cancelled. No credit waits on the budget, so no transfer waits on another's.
+and no chunk follows it. An opening carries exactly the bytes of its payload its sender places in
+it, `chunkBytes` less its header, a result's less the 20 bytes of an announcement too; one with no
+byte, one that holds its whole total, which needed no transfer, and one with any other count are
+refused with `CHUNK_INVALID`. A requester whose header, its TRANSFER block added, passes 1,020
+bytes or leaves its opening no byte fails the call before it goes, with `PAYLOAD_TOO_LARGE`: a
+`JWT` of 997 bytes or more, 993 beside a destination, goes whole only. A receiver holds
+`maximumTransfers` transfers per connection at once, each until its call ends; an opening past them
+is refused with `CAPACITY_EXCEEDED`. All of them together reserve at most `bufferedBytesBudget`
+bytes, each its whole total, from its admission until its payload is whole or it ends. An opening
+is admitted at once when no opening waits and the budget left holds its total; otherwise it waits,
+behind every opening before it on any connection, holding its place and none of the budget, and is
+granted nothing. The openings that wait are admitted in the order they came as the budget frees,
+and one still waiting at half `transferInactivityTimeout` is refused with `CAPACITY_EXCEEDED`: a
+request's is answered with it, a result's ends its call with it, which is cancelled. No credit waits
+on the budget, so no transfer waits on another's.
 
 The requester ends a transfer with a cancel, the side that answers with a failure:
 `TRANSFER_STALLED` when nothing came for `transferInactivityTimeout`, `CHUNK_INVALID` or

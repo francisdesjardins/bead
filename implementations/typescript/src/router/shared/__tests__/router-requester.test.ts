@@ -690,6 +690,32 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 2]);
     });
 
+    test('reject a result whose opening carries other than its sender places in it, CHUNK_INVALID, and cancel its call', async () => {
+      const { port, sent } = createPort();
+      using core = createRouterCore(port, { limits });
+      const answering = core.request(new Uint8Array(0), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+
+      await sleep(0);
+      // its sender places 28 bytes in it, counted with an announcement's 20
+      core.receive(resultOpeningOf(2, { payload: patternOf(27), total: 300 }), 'a');
+
+      await expect(answering).rejects.toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        detail: 'an opening carries 28 bytes of its payload, not 27',
+        header: { callId: 2, kind: EnvelopeKind.RESULT },
+        origin: 'local',
+        side: 'server',
+      });
+      expect(answersOf(sent)).toEqual([
+        ['a', EnvelopeKind.REQUEST, 2],
+        ['a', EnvelopeKind.CANCEL, 2],
+      ]);
+    });
+
     test('time out, and reject — never throw — what their payload or the transport fails with', async () => {
       const { control, port, sent } = createPort();
       const clock = createTestClock();

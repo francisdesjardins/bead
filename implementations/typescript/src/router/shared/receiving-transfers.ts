@@ -93,8 +93,9 @@ export interface IReceivingTransfers<Handle extends string> {
    * order (spec 12.3): `payloadTooLarge` when this side takes no transfer, for a total of 0 or past
    * the payload's limit; `capacityExceeded` when the connection holds its transfers already, or
    * twice as many with those whose call's resolver outlives the call; `chunkInvalid` for an opening
-   * that carries no byte of its payload, or holds its whole total. Then the budget admits it, when
-   * no opening waits and the budget left holds its total; otherwise it waits for the budget, and `onRefused` hears it past half the
+   * that carries no byte of its payload, holds its whole total, or carries other than
+   * `openingBytes`, when given. Then the budget admits it, when no opening waits and the budget
+   * left holds its total; otherwise it waits for the budget, and `onRefused` hears it past half the
    * inactivity allowed — or it is refused `capacityExceeded` at once, when that half is 0. Given
    * `onStall`, a timer hears the transfer stall when nothing comes for the inactivity allowed once
    * admitted; `onAdmitted` hears it admitted once it waited, before its first credit goes.
@@ -106,6 +107,7 @@ export interface IReceivingTransfers<Handle extends string> {
       onAdmitted?: (() => void) | undefined;
       onRefused?: ((failure: IProtocolFailure) => void) | undefined;
       onStall?: (() => void) | undefined;
+      openingBytes?: number | undefined;
       total: number;
     }
   ): IReceiving<Handle> | IProtocolFailure;
@@ -347,7 +349,7 @@ export const createReceivingTransfers = <Handle extends string>({
     isWaiting: (receiving) => {
       return waiting.has(receiving);
     },
-    open: (opening, { call, onAdmitted, onRefused, onStall, total }) => {
+    open: (opening, { call, onAdmitted, onRefused, onStall, openingBytes, total }) => {
       const { connectionHandle } = call;
       const connection = connections.get(connectionHandle) ?? { outliving: 0, transfers: 0 };
 
@@ -391,6 +393,16 @@ export const createReceivingTransfers = <Handle extends string>({
 
       if ('code' in incoming) {
         return incoming;
+      }
+
+      // ! an opening carries what its sender places in it, to the byte: the budget is reserved by
+      // the total it declares, which a full opening prices, and every sender fills its own (spec
+      // 12.3)
+      if (openingBytes !== undefined && opening.length !== openingBytes) {
+        return {
+          ...failures.chunkInvalid,
+          detail: `an opening carries ${String(openingBytes)} bytes of its payload, not ${String(opening.length)}`,
+        };
       }
 
       // * no opening passes one that waits, though the budget left holds it (spec 12.4)

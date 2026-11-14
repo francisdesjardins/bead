@@ -101,6 +101,9 @@ const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
 const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
 
+// chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
+const SMALL_CHUNKS = Object.freeze({ chunkBytes: 64, windowBytes: 128 });
+
 /** A request header of the server's, for procedure 1 of service 2. */
 const requestHeaderOf = (callId: number): IRequestHeader => {
   return { callId, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 };
@@ -598,24 +601,82 @@ test.describe('createRouterClient', () => {
 
     test('learns the session from a result’s opening, before the rest of its transfer comes', async () => {
       const { deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      // chunks of 64 bytes: a result's opening carries 28, and a chunk 48
+      using router = createRouterClient(transport, { limits: SMALL_CHUNKS });
       const asking = router.request(new Uint8Array(0), { options, procedure: service });
 
       deliver({
-        header: { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT, total: 100 },
+        header: { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT, total: 76 },
         kind: EnvelopeKind.RESULT,
-        payload: new Uint8Array(16),
+        payload: new Uint8Array(28),
       });
 
       expect(router.sessionToken).toBe(TOKEN);
 
       deliver({
-        header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 16 },
+        header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 28 },
         kind: EnvelopeKind.CHUNK,
-        payload: new Uint8Array(84),
+        payload: new Uint8Array(48),
       });
 
-      await expect(asking).resolves.toMatchObject({ payload: new Uint8Array(100) });
+      await expect(asking).resolves.toMatchObject({ payload: new Uint8Array(76) });
+    });
+
+    test('take a result’s opening that carries an announcement, OPAQUE or NONE, counted as its sender placed it', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { limits: SMALL_CHUNKS });
+      const payload = new Uint8Array(76).map((_, index) => {
+        return index;
+      });
+
+      // its sender places 28 bytes in it, and attaches what it announces as it goes: an OPAQUE
+      // fills its 64 bytes, a NONE falls short by 16, and none by 20
+      for (const [callId, credential] of [
+        [1, OPAQUE],
+        [3, ENDED],
+        [5, undefined],
+      ] as const) {
+        const asking = router.request(new Uint8Array(0), { options, procedure: service });
+
+        deliver({
+          header: { callId, credential, kind: EnvelopeKind.RESULT, total: 76 },
+          kind: EnvelopeKind.RESULT,
+          payload: payload.subarray(0, 28),
+        });
+        deliver({
+          header: { callId, isLast: true, kind: EnvelopeKind.CHUNK, offset: 28 },
+          kind: EnvelopeKind.CHUNK,
+          payload: payload.subarray(28),
+        });
+
+        await expect(asking, String(callId)).resolves.toMatchObject({ payload });
+      }
+
+      // one that fills its envelope without an announcement carries 20 bytes more than its sender
+      // places
+      const filled = router.request(new Uint8Array(0), { options, procedure: service });
+
+      deliver({
+        header: { callId: 7, kind: EnvelopeKind.RESULT, total: 76 },
+        kind: EnvelopeKind.RESULT,
+        payload: payload.subarray(0, 48),
+      });
+
+      await expect(filled).rejects.toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        detail: 'an opening carries 28 bytes of its payload, not 48',
+        header: { kind: EnvelopeKind.RESULT },
+        origin: 'local',
+      });
+      expect(
+        sent
+          .filter((envelope) => {
+            return envelope?.kind === EnvelopeKind.CREDIT;
+          })
+          .map((envelope) => {
+            return envelope.header.callId;
+          })
+      ).toEqual([1, 3, 5]);
     });
 
     test('learns the session from every answer, paired or not, keeps it, loses it, and presents it on no call that does not ask for it', async () => {
