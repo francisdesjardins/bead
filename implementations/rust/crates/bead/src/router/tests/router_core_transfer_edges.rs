@@ -491,6 +491,69 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
 
 // spec 12.3
 #[tokio::test]
+async fn answer_chunk_invalid_to_an_opening_that_carries_other_than_its_sender_places_in_it() {
+    // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
+    let (peer, handed) = serving(
+        false,
+        &RouterLimitsOptions {
+            chunk_bytes: Some(64),
+            maximum_payload_bytes: Some(1_024),
+            window_bytes: Some(128),
+            ..RouterLimitsOptions::default()
+        },
+    )
+    .await;
+    peer.owner
+        .run(|state| {
+            // a byte short of what its sender places, all but a byte short, then just that
+            for (call_id, size) in [(1, 43), (3, 1), (5, 44)] {
+                receive(state, (opening(call_id, (pattern(size), 300)), "a", None));
+            }
+        })
+        .await
+        .expect("three openings");
+    peer.settle().await;
+    let sent: Vec<(u32, Option<(u16, String)>)> = peer
+        .sent()
+        .await
+        .into_iter()
+        .map(|(_, envelope)| match envelope {
+            Envelope::Failure { header, failure } => {
+                (header.call_id, Some((failure.code.get(), failure.detail)))
+            }
+            Envelope::Credit { header } => (header.call_id, None),
+            other @ (Envelope::Request { .. }
+            | Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Cancel { .. }) => panic!("a refusal or a credit, not {other:?}"),
+        })
+        .collect();
+    let invalid = ProtocolCode::CHUNK_INVALID.get().get();
+    assert_eq!(
+        sent,
+        [
+            (
+                1,
+                Some((
+                    invalid,
+                    "an opening carries 44 bytes of its payload, not 43".to_owned()
+                ))
+            ),
+            (
+                3,
+                Some((
+                    invalid,
+                    "an opening carries 44 bytes of its payload, not 1".to_owned()
+                ))
+            ),
+            (5, None),
+        ]
+    );
+    assert!(locked(&handed).is_empty());
+}
+
+#[tokio::test]
 async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() {
     let (peer, handed) = serving(false, &narrow()).await;
     peer.owner

@@ -40,6 +40,7 @@ fn opened(
         OpeningOf {
             call: &call((id, handle)),
             total,
+            opening_bytes: u64::try_from(size).expect("a size"),
         },
     )
 }
@@ -79,14 +80,16 @@ fn refuses_an_opening_by_its_own_failure_and_holds_nothing_of_one_refused() {
         maximum_payload_bytes: 50,
         ..LIMIT_DEFAULTS
     });
-    for (size, total, code, detail) in [
+    for (size, placed, total, code, detail) in [
         (
+            1,
             1,
             0,
             ProtocolCode::PAYLOAD_TOO_LARGE,
             "a transfer declares its total, not 0",
         ),
         (
+            1,
             1,
             51,
             ProtocolCode::PAYLOAD_TOO_LARGE,
@@ -95,8 +98,23 @@ fn refuses_an_opening_by_its_own_failure_and_holds_nothing_of_one_refused() {
         (
             4,
             4,
+            4,
             ProtocolCode::CHUNK_INVALID,
             "an opening of 4 bytes holds its whole total of 4",
+        ),
+        (
+            3,
+            4,
+            8,
+            ProtocolCode::CHUNK_INVALID,
+            "an opening carries 4 bytes of its payload, not 3",
+        ),
+        (
+            5,
+            4,
+            8,
+            ProtocolCode::CHUNK_INVALID,
+            "an opening carries 4 bytes of its payload, not 5",
         ),
     ] {
         let refused = receiving
@@ -105,6 +123,7 @@ fn refuses_an_opening_by_its_own_failure_and_holds_nothing_of_one_refused() {
                 OpeningOf {
                     call: &call((1, "a")),
                     total,
+                    opening_bytes: placed,
                 },
             )
             .expect_err("refused");
@@ -206,6 +225,7 @@ fn gives_a_transfer_s_bytes_back_as_its_payload_goes_on_whole_and_all_it_holds_o
             OpeningOf {
                 call: &call((1, "a")),
                 total: 4,
+                opening_bytes: 2,
             },
         )
         .expect("opened")
@@ -607,6 +627,7 @@ async fn stalls_a_transfer_nothing_comes_for_its_timer_set_going_again_by_bytes_
                         OpeningOf {
                             call: &call((3, "a")),
                             total: 8,
+                            opening_bytes: 1,
                         },
                     )
                     .expect("no stall callback");

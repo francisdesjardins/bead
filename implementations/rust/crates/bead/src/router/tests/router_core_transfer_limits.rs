@@ -36,7 +36,7 @@ async fn connect(queue: Queue, (peer, to_server): (&Peer, bool)) {
 }
 
 #[tokio::test]
-async fn refuses_the_opening_of_a_sender_whose_chunk_bytes_is_larger_than_its_own_envelope_too_large_and_the_chunks_of_one_whose_chunk_bytes_is_smaller_chunk_invalid_both_ends_setting_their_limits_alike()
+async fn refuses_the_opening_of_a_sender_whose_chunk_bytes_is_larger_than_its_own_envelope_too_large_and_that_of_one_whose_chunk_bytes_is_smaller_chunk_invalid_both_ends_setting_their_limits_alike()
  {
     for dotnet in [false, true] {
         for (requester_size, receiver_size, code, detail) in [
@@ -46,11 +46,12 @@ async fn refuses_the_opening_of_a_sender_whose_chunk_bytes_is_larger_than_its_ow
                 ProtocolCode::ENVELOPE_TOO_LARGE,
                 "a request is 64 bytes at most, not 128",
             ),
+            // its opening of 44 bytes short of the 108 the receiver places in one, nothing credited
             (
                 64,
                 128,
                 ProtocolCode::CHUNK_INVALID,
-                "a chunk before the last carries 112 bytes, not 48",
+                "an opening carries 108 bytes of its payload, not 44",
             ),
         ] {
             let requester = Peer::new(RouterSide::Client, &limits(requester_size));
@@ -87,17 +88,11 @@ async fn refuses_the_opening_of_a_sender_whose_chunk_bytes_is_larger_than_its_ow
             assert_eq!(failure.code(), code.get());
             assert_eq!(failure.detail(), detail);
             assert_eq!(failure.origin(), FailureOrigin::Peer);
-            let mut expected = vec![(
+            let expected = [(
                 true,
                 EnvelopeKind::Request,
                 usize::try_from(requester_size).expect("an envelope size"),
             )];
-            if requester_size == 64 {
-                expected.push((false, EnvelopeKind::Credit, 16));
-                expected.extend(
-                    [48, 48, 48, 48, 48, 16].map(|size| (true, EnvelopeKind::Chunk, 16 + size)),
-                );
-            }
             assert_eq!(traffic[..traffic.len() - 1], expected);
             let (to_server, kind, _) = traffic.last().expect("the refusal sent");
             assert!(!to_server);

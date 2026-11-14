@@ -1004,8 +1004,18 @@ pub(crate) fn receive_answer<S: Side>(
             let opened = if total > maximum_payload_bytes {
                 Err(core.placement.too_large_of(total, maximum_payload_bytes))
             } else {
-                core.receivings
-                    .open(&payload, OpeningOf { call: &call, total })
+                let opening_bytes = core
+                    .placement
+                    .opening_bytes_of(&EnvelopeHeader::Result(result_header.clone()));
+
+                core.receivings.open(
+                    &payload,
+                    OpeningOf {
+                        call: &call,
+                        total,
+                        opening_bytes,
+                    },
+                )
             };
             let (transfer, admitted) = match opened {
                 Ok(opened) => (opened.id, opened.admitted),

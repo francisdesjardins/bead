@@ -89,6 +89,13 @@ async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_ke
             ProtocolCode::CAPACITY_EXCEEDED,
             "the transfers a connection receives at once are 1 at most",
         ),
+        (
+            5,
+            8,
+            1,
+            ProtocolCode::CHUNK_INVALID,
+            "an opening carries 44 bytes of its payload, not 1",
+        ),
         // a wait of 0 for the budget refuses at once an opening the budget left cannot hold
         (
             6,

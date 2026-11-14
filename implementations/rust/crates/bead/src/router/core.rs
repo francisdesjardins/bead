@@ -2088,10 +2088,11 @@ fn is_admission_code(failure: &Failure) -> bool {
 }
 
 // a request admitted on the call's session, then where it goes: refused, dispatched, or its
-// transfer opened, whose first credit goes only now
+// transfer opened, whose first credit goes only now; an opening is held to `opening_bytes`, what its
+// sender placed in it by the header it sent
 fn admit_routed<S: Side>(
     state: &mut S,
-    (dispatch, payload, handler): (Arc<Dispatch>, Bytes, Arc<Handler>),
+    (dispatch, (payload, opening_bytes), handler): (Arc<Dispatch>, (Bytes, u64), Arc<Handler>),
 ) {
     let handle = Arc::clone(&dispatch.connection_handle);
     let session = locked(&dispatch.session).clone();
@@ -2168,9 +2169,14 @@ fn admit_routed<S: Side>(
         connection_handle: Arc::clone(&handle),
         call_id: header.call_id,
     };
-    let opened = core
-        .receivings
-        .open(&payload, OpeningOf { call: &call, total });
+    let opened = core.receivings.open(
+        &payload,
+        OpeningOf {
+            call: &call,
+            total,
+            opening_bytes,
+        },
+    );
     let (transfer, admitted) = match opened {
         Ok(opened) => (opened.id, opened.admitted),
         Err(failure) => return refuse(state, (failure, &dispatch)),
@@ -2293,6 +2299,13 @@ fn resolve_session<S: Side>(
     let Some(signal) = signal_of(state, &dispatch) else {
         return;
     };
+    // ! counted by the header as it came: the one handed on holds no JWT's bytes (spec 12.3)
+    let opening_bytes = carried.header.total.map_or(0, |_| {
+        state
+            .core()
+            .placement
+            .opening_bytes_of(&EnvelopeHeader::Request(carried.header.clone()))
+    });
     let credential_scheme = carried.header.credential.as_ref().map(Credential::scheme);
     let has_credential = carried.header.credential.is_some();
     let is_later = matches!(
@@ -2332,7 +2345,7 @@ fn resolve_session<S: Side>(
     if is_later && is_forwarded {
         return state.core().later(move |state: &mut S| {
             if !signal.is_aborted() {
-                admit_routed(state, (dispatch, payload, handler));
+                admit_routed(state, (dispatch, (payload, opening_bytes), handler));
             }
         });
     }
@@ -2388,7 +2401,7 @@ fn resolve_session<S: Side>(
                 }
 
                 *locked(&dispatch.session) = session;
-                admit_routed(state, (dispatch, payload, handler));
+                admit_routed(state, (dispatch, (payload, opening_bytes), handler));
             }
             // a bound of the side's own refuses the call: nothing failed, so nothing is reported
             Err(Unresolved::Capacity(error)) => {

@@ -527,6 +527,47 @@ async fn credit_a_result_s_transfer_once_the_budget_admits_it_setting_its_call_s
 }
 
 // spec 12.3
+#[tokio::test]
+async fn reject_a_result_whose_opening_carries_other_than_its_sender_places_in_it_chunk_invalid_and_cancel_its_call()
+ {
+    for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {
+        let peer = Peer::new(side, &limits());
+        let asked = peer.request((Bytes::new(), request_of("a")));
+        peer.receive((opening(call_id, (pattern(27), 300)), Arc::from("a")));
+        let CallError::Failure(failure) = completed(asked).await.expect_err("refused") else {
+            panic!("a failure expected");
+        };
+        assert_eq!(
+            (
+                failure.code(),
+                failure.detail(),
+                failure.origin(),
+                failure.side(),
+                matches!(
+                    failure.header(),
+                    Some(crate::envelope::EnvelopeHeader::Result(_))
+                )
+            ),
+            (
+                ProtocolCode::CHUNK_INVALID.get(),
+                "an opening carries 28 bytes of its payload, not 27",
+                FailureOrigin::Local,
+                Some(side),
+                true
+            )
+        );
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer).await,
+            [
+                (EnvelopeKind::Request, call_id, None, 0),
+                (EnvelopeKind::Cancel, call_id, None, 0)
+            ]
+        );
+        quiet(&peer).await;
+    }
+}
+
 // spec 9.1
 #[tokio::test]
 async fn fails_before_it_goes_a_call_past_the_calls_its_peer_answers_at_once_and_sends_one_once_a_call_is_answered()

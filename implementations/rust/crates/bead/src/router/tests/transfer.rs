@@ -13,7 +13,7 @@ use crate::envelope::{
     ChunkHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, RequestHeader, ResultHeader,
     header_bytes_of, write_envelope,
 };
-use crate::router::parts::{Placed, Placement};
+use crate::router::parts::{Placed, Placement, with_total};
 use crate::router::transfer::{ChunkOutcome, IncomingBounds, IncomingTransfer, OutgoingTransfer};
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
@@ -576,6 +576,59 @@ fn grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_th
         incoming.place(&pattern_of(2), (true, 20)).expect("whole"),
         ChunkOutcome::Complete
     );
+}
+
+#[test]
+fn places_in_an_opening_the_bytes_its_receiver_holds_it_to_a_result_s_counted_with_an_announcement_s_20_bytes()
+ {
+    let placement = Placement::new(
+        RouterSide::Server,
+        crate::router::types::RouterLimits {
+            chunk_bytes: 64,
+            maximum_envelope_bytes: 64,
+            ..LIMIT_DEFAULTS
+        },
+    );
+    let payload = pattern_of(300);
+    let opening_of = |header: &EnvelopeHeader| {
+        let Placed::Transfer(outgoing) = placement
+            .transfer_of(&payload, (header, u64::MAX))
+            .expect("a transfer")
+        else {
+            panic!("the payload goes in parts")
+        };
+        outgoing.opening().len()
+    };
+    let request = EnvelopeHeader::Request(super::request_header_of(1));
+    let elsewhere = EnvelopeHeader::Request(RequestHeader {
+        credential: Some(Credential::Elsewhere),
+        ..super::request_header_of(1)
+    });
+    let result = EnvelopeHeader::Result(ResultHeader {
+        call_id: 2,
+        credential: None,
+        total: None,
+    });
+    // the sender's placement and its receiver's check count alike: a request's header, its
+    // credential with it; a result's, with an announcement's 20 bytes in place of any it carries
+    for (header, bytes) in [(&request, 44), (&elsewhere, 40), (&result, 28)] {
+        let opening = with_total(header, 300);
+
+        assert_eq!(opening_of(header), bytes);
+        assert_eq!(
+            placement.opening_bytes_of(&opening),
+            u64::try_from(bytes).expect("a count")
+        );
+    }
+    for credential in [Credential::Opaque(super::token()), Credential::None] {
+        let announced = EnvelopeHeader::Result(ResultHeader {
+            call_id: 2,
+            credential: Some(credential),
+            total: Some(300),
+        });
+
+        assert_eq!(placement.opening_bytes_of(&announced), 28);
+    }
 }
 
 #[test]

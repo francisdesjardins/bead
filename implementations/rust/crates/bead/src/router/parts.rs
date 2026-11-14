@@ -111,8 +111,8 @@ impl Placement {
 
     /// The bytes of its payload a transfer's opening carries after `opening`, its header with its
     /// total: `chunkBytes` less that header, a result's counted with the 20 bytes of an
-    /// announcement in place of any it carries; 0 when none fits. Its sender places that many
-    /// (spec 12.3).
+    /// announcement in place of any it carries; 0 when none fits. Its sender places that many, and
+    /// its receiver holds it to as many (spec 12.3).
     pub(crate) fn opening_bytes_of(&self, opening: &EnvelopeHeader) -> u64 {
         // ! the sender places before any announcement, which goes on as the answer goes out: a
         // result's header is counted without the credential it may carry, its 20 bytes in its place
@@ -399,11 +399,13 @@ pub(crate) struct Receiving {
     pub(crate) timer: HeldTimer,
 }
 
-/// What opens a transfer: the call it is on, and its total.
+/// What opens a transfer: the call it is on, its total, and the bytes of its payload its sender
+/// places in its opening.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OpeningOf<'a> {
     pub(crate) call: &'a CallAddress,
     pub(crate) total: u64,
+    pub(crate) opening_bytes: u64,
 }
 
 /// A transfer opened: its id, and whether the budget admitted it, or it waits for it.
@@ -498,10 +500,14 @@ impl ReceivingTransfers {
     }
 
     /// Opens a transfer from its opening, checked in spec 12.3's order: its total, its places, its
-    /// opening; then admitted to the budget by its total, or waiting for it behind every
+    /// opening's bytes; then admitted to the budget by its total, or waiting for it behind every
     /// opening before it. It gives the failure that refuses it, at once only for a wait of 0.
     pub(crate) fn open(&mut self, opening: &Bytes, of: OpeningOf<'_>) -> Result<Opened, Failure> {
-        let OpeningOf { call, total } = of;
+        let OpeningOf {
+            call,
+            total,
+            opening_bytes,
+        } = of;
         let side = self.bounds.side;
         let transfers = self
             .connections
@@ -549,6 +555,15 @@ impl ReceivingTransfers {
 
         let incoming = IncomingTransfer::new(opening, (total, self.bounds))?;
         let carried = length_of(opening);
+
+        // an opening carries what its sender places in it, no byte more or less (spec 12.3)
+        if carried != opening_bytes {
+            return Err(
+                Failure::protocol(ProtocolCode::CHUNK_INVALID, side).saying(format!(
+                    "an opening carries {opening_bytes} bytes of its payload, not {carried}"
+                )),
+            );
+        }
 
         // * admitted at once only when no opening waits before it: none is passed (spec 12.4)
         let admitted = self.waiting == 0 && total <= self.available();
