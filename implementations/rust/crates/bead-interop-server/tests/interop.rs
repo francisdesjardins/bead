@@ -2,12 +2,14 @@
 //! C# one and the Rust one, over WebSocket, over HTTP and over MQTT 5: the same procedures, failures
 //! and cancel, a command the server asks, subscriptions, sessions and credentials, and what a
 //! broker alone has. A trial a case, a transport and a server, named by the TypeScript side's
-//! sentence in snake case; HTTP carries no transfer, so the case of a transfer is WebSocket's and
-//! MQTT 5's. Over MQTT 5, where `BEAD_MQTT_URL` names a broker (`node tools/mqtt-broker.mjs start`),
-//! its participant `rs-client`, through a relay of its own, calls each side's name, `interop-ts`,
-//! `interop-cs` or `interop-rs`, and the name every side serves in a group, `interop-both`; each
-//! server links as its own participant, given that broker; skipped, saying so, where none is given,
-//! and failed where `BEAD_MQTT_REQUIRED=1` asks for one.
+//! sentence in snake case; beside them, its HTTP caller against the TypeScript and the C# servers'
+//! HTTP/JSON gateways, through the `TranscodingHttpClient` beadc writes, a trial a case and a
+//! gateway, `<side>::gateway::<sentence>`. HTTP carries no transfer, so the case of a transfer is
+//! WebSocket's and MQTT 5's. Over MQTT 5, where `BEAD_MQTT_URL` names a broker (`node
+//! tools/mqtt-broker.mjs start`), its participant `rs-client`, through a relay of its own, calls
+//! each side's name, `interop-ts`, `interop-cs` or `interop-rs`, and the name every side serves in
+//! a group, `interop-both`; each server links as its own participant, given that broker; skipped,
+//! saying so, where none is given, and failed where `BEAD_MQTT_REQUIRED=1` asks for one.
 //!
 //! The trials run where `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, a trial saying so: the
 //! TypeScript server starts by `node interop/serve.ts`, which its installed side bundles, the C#
@@ -45,19 +47,29 @@ use bead::{
     BrokerPublished, BrokerStart, BrokerSubscription, BrokerTransportClient,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, CallError, Client,
     ClientListener, ClientOptions, CodecRefusal, Failure, FailureOrigin, FailureScope,
-    HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions, JsonCodec,
-    MqttBrokerAdapter, MqttBrokerAdapterOptions, NotificationCallback, NotificationDependencies,
-    PayloadCodec, Procedure, ProtocolCode, RawCodec, ReadyState, RegistrationOptions,
-    RequestCredential, RequestDependencies, RequestOptions, RouterClientTransport, RouterError,
-    RouterSide, Sent, SharedClock, TransportMessage, WebSocketClient, WebSocketClientOptions,
+    HttpCallOptions, HttpCallerOptions, HttpEvent, HttpSubscription, HttpTransportClient,
+    HttpTransportClientConnectOptions, HttpTransportClientOptions, JsonCodec, MqttBrokerAdapter,
+    MqttBrokerAdapterOptions, NotificationCallback, NotificationDependencies, PayloadCodec,
+    Procedure, ProtocolCode, RawCodec, ReadyState, RegistrationOptions, RequestCredential,
+    RequestDependencies, RequestOptions, RouterClientTransport, RouterError, RouterSide, Sent,
+    SharedClock, TransportMessage, WebSocketClient, WebSocketClientOptions,
     WebSocketTransportClientConnectOptions,
 };
+use bead_interop::transcoding::generated::bead_http::TranscodingHttpClient;
+use bead_interop::transcoding::generated::messages::bead::transcoding::v1::{
+    FailRequest, GetBookRequest, TicksRequest,
+};
+use bead_interop::transcoding::{TranscodingFixture, TranscodingFixtureOptions, gateway_options};
 use bead_interop::{INTEROP_SERVICE, InteropDescriptor, InteropProcedures, offer_interop_client};
+use buffa_types::google::protobuf::Empty;
 use bytes::Bytes;
+use futures_util::StreamExt;
 use hmac::{Hmac, KeyInit, Mac};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::{Value, json};
 use sha2::Sha256;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -186,11 +198,12 @@ impl Side {
     }
 }
 
-// where a server listens, over WebSocket and over HTTP
+// where a server listens, over WebSocket and over HTTP, and its gateway, where it serves one
 #[derive(Debug, Clone, Copy)]
 struct Ports {
     port: u16,
     http_port: u16,
+    gateway_port: Option<u16>,
 }
 
 // each server, once its first trial started it, and the processes to stop at the end
@@ -222,8 +235,8 @@ fn root() -> Result<PathBuf, String> {
         })
 }
 
-// the ports a line of a server says it listens on, `{"port":n,"httpPort":m,…}`; none for any
-// other line, a build's among them
+// the ports a line of a server says it listens on, `{"port":n,"httpPort":m,"gatewayPort":g,…}`;
+// none for any other line, a build's among them
 fn ports_of_line(line: &str) -> Option<Ports> {
     let said: Value = serde_json::from_str(line).ok()?;
     let port_of = |name: &str| {
@@ -235,6 +248,7 @@ fn ports_of_line(line: &str) -> Option<Ports> {
     Some(Ports {
         port: port_of("port")?,
         http_port: port_of("httpPort")?,
+        gateway_port: port_of("gatewayPort"),
     })
 }
 
@@ -1997,6 +2011,440 @@ async fn lost(case: &Case) -> Result<(), String> {
     equal(&answer_of(outcome?)?, &json!("after"))
 }
 
+// ── The gateways ─────────────────────────────────────────────────────────────────────────────────
+
+// the sides whose gateway the Rust caller calls: the Rust gateway is its own caller's, in the core's
+// `tests/caller.rs`
+const GATEWAY_SIDES: [Side; 2] = [Side::TypeScript, Side::CSharp];
+
+// how long a trial rests before it asks its place again
+const ADMISSION_REST: Duration = Duration::from_millis(50);
+
+// a case of the other side's HTTP/JSON gateway, through the `TranscodingHttpClient` beadc writes, as
+// the other sides' callers play it
+#[derive(Debug, Clone, Copy)]
+enum GatewayCase {
+    Encodings,
+    Problems,
+    Stream,
+    Refusals,
+    Document,
+}
+
+impl GatewayCase {
+    const ALL: [Self; 5] = [
+        Self::Encodings,
+        Self::Problems,
+        Self::Stream,
+        Self::Refusals,
+        Self::Document,
+    ];
+
+    // the TypeScript side's sentence, in snake case
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Encodings => {
+                "calls_the_other_gateway_with_protobuf_json_and_every_native_encoding"
+            }
+            Self::Problems => "reads_the_other_gateway_problems_and_presents_its_authorization",
+            Self::Stream => "reads_the_other_gateway_result_notifications_and_ending_failure",
+            Self::Refusals => "reads_the_other_gateway_own_route_size_and_busy_refusals",
+            Self::Document => "compares_the_gateways_openapi_documents_byte_for_byte",
+        }
+    }
+
+    async fn play(self, port: u16) -> Result<(), String> {
+        let url = format!("http://{HOST}:{port}");
+
+        match self {
+            Self::Encodings => gateway_encodings(&client_of(&url)?).await,
+            Self::Problems => gateway_problems(&client_of(&url)?).await,
+            Self::Stream => gateway_stream(&client_of(&url)?).await,
+            Self::Refusals => gateway_refusals(&url).await,
+            Self::Document => gateway_document(port).await,
+        }
+    }
+}
+
+fn client_of(url: &str) -> Result<TranscodingHttpClient, String> {
+    TranscodingHttpClient::new(url, &HttpCallerOptions::default())
+        .map_err(|error| format!("no client of {url}: {error}"))
+}
+
+// what a call ends with, within the patience
+async fn settled<T>(call: BoxFuture<Result<T, CallError>>) -> Result<Result<T, CallError>, String> {
+    patience(PATIENCE, call)
+        .await
+        .map_err(|_elapsed| "no answer in time".to_owned())
+}
+
+// the gateway keeps one stream an address: a refusal of its place
+fn is_busy(failure: &Failure) -> bool {
+    failure.code() == ProtocolCode::CAPACITY_EXCEEDED.get()
+}
+
+// a stream's events and the failure that ends it
+struct Ended<R, N> {
+    events: Vec<HttpEvent<R, N>>,
+    failure: Failure,
+}
+
+// * a stream's end, once the gateway frees the place the trial before held: busy before any entry,
+// it goes again
+async fn ended_once_admitted<R, N>(
+    open: impl Fn() -> HttpSubscription<R, N>,
+) -> Result<Ended<R, N>, String> {
+    let since = Instant::now();
+
+    loop {
+        let mut stream = open();
+        let mut events = Vec::new();
+        let ended = patience(PATIENCE, async {
+            while let Some(entry) = stream.next().await {
+                match entry {
+                    Ok(event) => events.push(event),
+                    Err(error) => return Some(error),
+                }
+            }
+
+            None
+        })
+        .await
+        .map_err(|_elapsed| "the stream did not end in time".to_owned())?;
+        let failure = match ended {
+            Some(CallError::Failure(failure)) => failure,
+            Some(error) => return Err(format!("expected a failure, found {error}")),
+            None => return Err("the stream ended with no failure".to_owned()),
+        };
+
+        if !is_busy(&failure) || since.elapsed() > PATIENCE {
+            return Ok(Ended { events, failure });
+        }
+
+        rest(ADMISSION_REST).await;
+    }
+}
+
+// a stream's first entry, once the gateway has its place, as `ended_once_admitted` waits for it,
+// and the stream, held
+async fn opened_once_admitted<R, N>(
+    open: impl Fn() -> HttpSubscription<R, N>,
+) -> Result<(HttpEvent<R, N>, HttpSubscription<R, N>), String> {
+    let since = Instant::now();
+
+    loop {
+        let mut stream = open();
+        let first = patience(PATIENCE, stream.next())
+            .await
+            .map_err(|_elapsed| "no first entry in time".to_owned())?;
+
+        match first {
+            Some(Ok(event)) => return Ok((event, stream)),
+            Some(Err(CallError::Failure(failure)))
+                if is_busy(&failure) && since.elapsed() <= PATIENCE =>
+            {
+                drop(stream);
+                rest(ADMISSION_REST).await;
+            }
+            Some(Err(error)) => return Err(format!("expected its first entry, found {error}")),
+            None => return Err("the stream ended before its first entry".to_owned()),
+        }
+    }
+}
+
+async fn gateway_encodings(client: &TranscodingHttpClient) -> Result<(), String> {
+    let options = HttpCallOptions::default();
+    let book = answer_of(
+        settled(client.get_book(
+            &GetBookRequest {
+                name: "shelves/a/books/b".to_owned(),
+                revision: 7,
+                ..GetBookRequest::default()
+            },
+            &options,
+        ))
+        .await?,
+    )?;
+
+    equal(
+        &(book.name.as_str(), book.pages, book.title.as_str()),
+        &("shelves/a/books/b", 7, "A tale"),
+    )?;
+
+    let text = answer_of(settled(client.text(&"Ada\r\nJosé".to_owned(), &options)).await?)?;
+
+    equal(&text.as_str(), &"Ada\r\nJosé")?;
+
+    let raw = answer_of(settled(client.raw(&Bytes::from_static(&[0, 127, 255]), &options)).await?)?;
+
+    equal(&raw.as_ref(), &[0_u8, 127, 255].as_slice())?;
+
+    let value = answer_of(
+        settled(client.json(&json!({ "z": [true, null], "a": "José" }), &options)).await?,
+    )?;
+
+    equal(
+        &value.to_string().as_str(),
+        &r#"{"a":"José","z":[true,null]}"#,
+    )
+}
+
+async fn gateway_problems(client: &TranscodingHttpClient) -> Result<(), String> {
+    let options = HttpCallOptions::default();
+    let application = failure_of(
+        settled(client.fail(
+            &FailRequest {
+                detail: "by choice".to_owned(),
+                ..FailRequest::default()
+            },
+            &options,
+        ))
+        .await?,
+    )?;
+
+    equal(
+        &(
+            application.code().get(),
+            application.scope(),
+            application.detail(),
+        ),
+        &(1, FailureScope::Application, "by choice"),
+    )?;
+
+    let protocol = failure_of(settled(client.who_am_i(&Empty::default(), &options)).await?)?;
+
+    is_code(&protocol, ProtocolCode::SESSION_REQUIRED)?;
+    equal(&protocol.scope(), &FailureScope::Protocol)?;
+
+    let mut presenting = HttpCallOptions::default();
+
+    presenting.authorization = Some("Bearer good".to_owned());
+
+    let session = answer_of(settled(client.who_am_i(&Empty::default(), &presenting)).await?)?;
+
+    equal(&session.session.as_str(), &"ada")
+}
+
+async fn gateway_stream(client: &TranscodingHttpClient) -> Result<(), String> {
+    let ended = ended_once_admitted(|| {
+        client.subscribe_ticks(
+            &TicksRequest {
+                from: 2,
+                ..TicksRequest::default()
+            },
+            &HttpCallOptions::default(),
+        )
+    })
+    .await?;
+    let received: Vec<(bool, i32)> = ended
+        .events
+        .iter()
+        .map(|event| match event {
+            HttpEvent::Result(result) => (true, result.ticks),
+            HttpEvent::Notification(tick) => (false, tick.remaining),
+        })
+        .collect();
+
+    equal(
+        &(ended.failure.code().get(), ended.failure.scope()),
+        &(2, FailureScope::Application),
+    )?;
+    equal(
+        &received.as_slice(),
+        &[(true, 2), (false, 1), (false, 0)].as_slice(),
+    )
+}
+
+async fn gateway_refusals(url: &str) -> Result<(), String> {
+    let options = HttpCallOptions::default();
+    let missing = client_of(&format!("{url}/missing"))?;
+    let route = failure_of(settled(missing.json(&Value::Null, &options)).await?)?;
+
+    is_failure(
+        &route,
+        (ProtocolCode::DESTINATION_UNREACHABLE, FailureOrigin::Peer),
+    )?;
+    equal(
+        &route.detail(),
+        &"the HTTP call answers 404; a path no route matches",
+    )?;
+
+    let client = client_of(url)?;
+    let size = failure_of(settled(client.text(&"x".repeat(1025), &options)).await?)?;
+
+    is_failure(
+        &size,
+        (ProtocolCode::PAYLOAD_TOO_LARGE, FailureOrigin::Peer),
+    )?;
+
+    let (first, held) =
+        opened_once_admitted(|| client.subscribe_watch(&Empty::default(), &options)).await?;
+
+    hold(matches!(first, HttpEvent::Result(_)), || {
+        "a stream's first entry is its result".to_owned()
+    })?;
+
+    // * the address's second stream, while the first holds its place
+    let mut second = client.subscribe_watch(&Empty::default(), &options);
+    let busy = patience(PATIENCE, async {
+        while let Some(entry) = second.next().await {
+            if let Err(error) = entry {
+                return Some(error);
+            }
+        }
+
+        None
+    })
+    .await
+    .map_err(|_elapsed| "the second stream did not end in time".to_owned())?
+    .ok_or_else(|| "the second stream ended with no failure".to_owned())?;
+    let busy = failure_of::<()>(Err(busy))?;
+
+    drop(held);
+    is_failure(
+        &busy,
+        (ProtocolCode::CAPACITY_EXCEEDED, FailureOrigin::Peer),
+    )?;
+    hold(
+        busy.detail()
+            .starts_with("the HTTP call answers 503; Retry-After: 1;"),
+        || {
+            format!(
+                "a busy refusal tells its 503 and its Retry-After, not {:?}",
+                busy.detail()
+            )
+        },
+    )
+}
+
+// a response's status and its content, its chunks joined
+struct Fetched {
+    status: u16,
+    content: Vec<u8>,
+}
+
+// `GET path` of the gateway on `port`, its connection closed after it, its response read whole
+async fn fetched(port: u16, path: &str) -> Result<Fetched, String> {
+    let mut socket = TcpStream::connect((HOST, port))
+        .await
+        .map_err(|error| format!("no connection to {port}: {error}"))?;
+    let request =
+        format!("GET {path} HTTP/1.1\r\nhost: {HOST}:{port}\r\nconnection: close\r\n\r\n");
+
+    socket
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|error| format!("its request not written: {error}"))?;
+
+    let mut read = Vec::new();
+
+    patience(PATIENCE, socket.read_to_end(&mut read))
+        .await
+        .map_err(|_elapsed| "no response in time".to_owned())?
+        .map_err(|error| format!("its response not read: {error}"))?;
+
+    let end = read
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or("a response with no head")?;
+    let head = String::from_utf8_lossy(read.get(..end).unwrap_or_default()).to_lowercase();
+    let after = read.get(end.saturating_add(4)..).unwrap_or_default();
+    let status = head
+        .split(' ')
+        .nth(1)
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| format!("no status in {head:?}"))?;
+    let is_chunked = head
+        .lines()
+        .any(|line| line.starts_with("transfer-encoding:") && line.contains("chunked"));
+    let content = if is_chunked {
+        dechunked(after)?
+    } else {
+        after.to_vec()
+    };
+
+    Ok(Fetched { status, content })
+}
+
+// a chunked content, its chunks joined (RFC 9112 §7.1)
+fn dechunked(mut chunked: &[u8]) -> Result<Vec<u8>, String> {
+    let mut content = Vec::new();
+
+    loop {
+        let line_end = chunked
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or("a chunk with no size line")?;
+        let line = String::from_utf8_lossy(chunked.get(..line_end).unwrap_or_default());
+        let size = usize::from_str_radix(line.split(';').next().unwrap_or_default().trim(), 16)
+            .map_err(|error| format!("a chunk's size {line:?} that does not read: {error}"))?;
+
+        if size == 0 {
+            return Ok(content);
+        }
+
+        let start = line_end.saturating_add(2);
+        let end = start.saturating_add(size);
+
+        content.extend_from_slice(chunked.get(start..end).ok_or("a chunk cut short")?);
+        chunked = chunked
+            .get(end.saturating_add(2)..)
+            .ok_or("a chunk cut short")?;
+    }
+}
+
+// the other gateway's document, and the one beadc wrote as a gateway of this side serves it
+async fn gateway_document(port: u16) -> Result<(), String> {
+    let local =
+        TranscodingFixture::start(&TranscodingFixtureOptions::new(&gateway_options()?)).await?;
+    let remote = fetched(port, "/openapi.json").await;
+    let own = fetched(local.port, "/openapi.json").await;
+
+    local
+        .dispose()
+        .await
+        .map_err(|error| format!("its own gateway not disposed: {error}"))?;
+
+    let remote = remote?;
+    let own = own?;
+
+    equal(&(remote.status, own.status), &(200, 200))?;
+    hold(remote.content == own.content, || {
+        format!(
+            "the other gateway's document differs from beadc's: {} bytes against {}",
+            remote.content.len(),
+            own.content.len()
+        )
+    })
+}
+
+// a trial of the other side's gateway
+#[derive(Debug, Clone, Copy)]
+struct GatewayPlayed {
+    side: Side,
+    case: GatewayCase,
+}
+
+impl GatewayPlayed {
+    fn name(self) -> String {
+        format!("{}::gateway::{}", self.side.name(), self.case.name())
+    }
+
+    // its server's gateway port, then the case, on a runtime of its own
+    fn run(self) -> Result<(), String> {
+        let port = ports_of(self.side)?
+            .gateway_port
+            .ok_or_else(|| format!("{} said no gatewayPort", self.side.label()))?;
+
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?
+            .block_on(self.case.play(port))
+    }
+}
+
 // ── The trials ───────────────────────────────────────────────────────────────────────────────────
 
 // a trial a case, a transport and a server
@@ -2084,6 +2532,18 @@ fn main() -> ExitCode {
                         .with_ignored_flag(is_skipped),
                 );
             }
+        }
+    }
+
+    // * the Rust caller against each other side's gateway
+    for side in GATEWAY_SIDES {
+        for case in GatewayCase::ALL {
+            let played = GatewayPlayed { side, case };
+
+            trials.push(
+                Trial::test(played.name(), move || played.run().map_err(Failed::from))
+                    .with_ignored_flag(!is_asked),
+            );
         }
     }
 

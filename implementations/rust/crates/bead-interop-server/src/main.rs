@@ -2,14 +2,17 @@
 //! and over HTTP, each a server of its own, and over MQTT 5 where `BEAD_MQTT_URL` names a broker,
 //! its participant `rs-server`, linked with the password `BEAD_MQTT_PASSWORD` gives, serving
 //! `interop-rs` alone and `interop-both` in a group with the other sides'; each given the service's
-//! credentials on the system's clock, which is theirs: its first line on the standard output says
-//! their ports and those names, as `{"port":n,"httpPort":m,"mqtt":[…]}`; it serves until its
-//! standard input closes. A port given as its one argument is the WebSocket server's; none, any
-//! free one. The HTTP server takes any free one. Each names the origins `BEAD_INTEROP_ORIGINS`
+//! credentials on the system's clock, which is theirs. Beside them, the HTTP/JSON gateway of the
+//! `Transcoding` service of `spec/transcoding.proto`, beadc's table and document, in front of a
+//! server of its own, on a port of its own: a body past 1024 bytes refused, one stream an address
+//! (decision 0052). Its first line on the standard output says their ports and those names, as
+//! `{"port":n,"httpPort":m,"gatewayPort":g,"mqtt":[…]}`; it serves until its standard input
+//! closes. A port given as its one argument is the WebSocket server's; none, any free one. The
+//! HTTP server and the gateway take any free one. Each names the origins `BEAD_INTEROP_ORIGINS`
 //! lists, separated by spaces, none when it is not set: a page of another origin calls them so. A
 //! router's error goes to its standard error. The TypeScript and C# sides' interop servers do the
-//! same, so each side's client calls the others' server; AMQP 1.0 and the HTTP/JSON gateway they
-//! serve beside are ahead on this side.
+//! same, so each side's client calls the others' server and gateway; AMQP 1.0, which they serve
+//! beside, is ahead on this side.
 //!
 //! `cargo run --locked -p francisdesjardins-bead-interop-server -- [port]`
 
@@ -25,20 +28,28 @@ use bead::{
     TransportServerStartOptions, WebSocketServer, WebSocketServerOptions,
     WebSocketTransportServerOptions,
 };
+use bead_interop::transcoding::{TranscodingFixture, TranscodingFixtureOptions, gateway_options};
 use bead_interop::{interop_credentials_of, offer_interop};
 
 // the address both servers listen on
 const HOST: &str = "127.0.0.1";
+
+// the gateway's bounds, as the other sides' interop servers set theirs: a body past 1024 bytes
+// refused 413, and one stream an address, a second answered 503
+const GATEWAY_MAXIMUM_BODY_BYTES: u64 = 1024;
+const GATEWAY_MAXIMUM_CONNECTIONS_PER_ADDRESS: u64 = 1;
 
 // its participant's id over a broker, and the names it serves there: its own alone, and the one
 // every side serves in a group
 const BROKER_ID: &str = "rs-server";
 const BROKER_NAMES: [&str; 2] = ["interop-rs", "interop-both"];
 
-// the servers, started, and the ports they listen on; over MQTT 5, its participant and its servers
+// the servers, started, and the ports they listen on; the gateway in front of a server of its own;
+// over MQTT 5, its participant and its servers
 struct Served {
     server: WebSocketServer,
     http_server: HttpServer,
+    transcoding: TranscodingFixture,
     port: u16,
     http_port: u16,
     mqtt: Option<Brokered>,
@@ -121,8 +132,20 @@ fn origins_of_environment() -> Vec<String> {
         .collect()
 }
 
+// the gateway of the `Transcoding` service, beadc's table and document, naming `origins`, on any free
+// port of the loopback, in front of a server of its own
+async fn transcoding_of(origins: Vec<String>) -> Result<TranscodingFixture, String> {
+    let mut gateway = gateway_options()?;
+
+    gateway.origins = Some(origins);
+    gateway.maximum_body_bytes = Some(GATEWAY_MAXIMUM_BODY_BYTES);
+    gateway.maximum_connections_per_address = Some(GATEWAY_MAXIMUM_CONNECTIONS_PER_ADDRESS);
+
+    TranscodingFixture::start(&TranscodingFixtureOptions::new(&gateway)).await
+}
+
 // both servers, the interop service offered on each, started on the loopback: the WebSocket one on
-// `port`, any free one where it is 0, the HTTP one on any free one
+// `port`, any free one where it is 0, the HTTP one on any free one; then the gateway
 async fn served(port: u16) -> Result<Served, String> {
     let origins = origins_of_environment();
     // the interop service's credentials, on the clock both servers run on, the platform's
@@ -145,7 +168,7 @@ async fn served(port: u16) -> Result<Served, String> {
     let server = WebSocketServer::new(&options).map_err(|error| error.to_string())?;
     let mut http_transport = HttpTransportServerOptions::default();
 
-    http_transport.origins = Some(origins);
+    http_transport.origins = Some(origins.clone());
 
     let mut http_options = HttpServerOptions::default();
 
@@ -181,18 +204,20 @@ async fn served(port: u16) -> Result<Served, String> {
         .await
         .map_err(|error| error.to_string())?;
 
+    let transcoding = transcoding_of(origins).await?;
     let mqtt = brokered(&server_options).await?;
 
     Ok(Served {
         server,
         http_server,
+        transcoding,
         port: address.port,
         http_port: http_address.port,
         mqtt,
     })
 }
 
-// serves until whoever started it lets go of its input, then lets both servers go
+// serves until whoever started it lets go of its input, then lets its servers and its gateway go
 fn serve() -> Result<(), String> {
     let port = port_of_arguments()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -211,8 +236,8 @@ fn serve() -> Result<(), String> {
 
     writeln!(
         said,
-        r#"{{"port":{},"httpPort":{}{mqtt}}}"#,
-        served.port, served.http_port
+        r#"{{"port":{},"httpPort":{},"gatewayPort":{}{mqtt}}}"#,
+        served.port, served.http_port, served.transcoding.port
     )
     .and_then(|()| said.flush())
     .map_err(|error| format!("its ports not said: {error}"))?;
@@ -231,6 +256,7 @@ fn serve() -> Result<(), String> {
         let http_disposed = served.http_server.dispose();
         let outcome = disposed.await;
         let http_outcome = http_disposed.await;
+        let gateway_outcome = served.transcoding.dispose().await;
         let mut broker_outcome = Ok(());
 
         // * over MQTT 5, each server let go, then its participant, so that its broker publishes no
@@ -246,6 +272,7 @@ fn serve() -> Result<(), String> {
 
         outcome
             .and(http_outcome)
+            .and(gateway_outcome)
             .and(broker_outcome)
             .map_err(|error| format!("not stopped: {error}"))
     })

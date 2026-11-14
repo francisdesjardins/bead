@@ -624,9 +624,11 @@ dependencies = [
 name = "francisdesjardins-bead-interop-server"
 version = "0.13.0"
 dependencies = [
+ "buffa-types",
  "bytes",
  "francisdesjardins-bead",
  "francisdesjardins-bead-interop",
+ "futures-util",
  "hmac",
  "libtest-mimic",
  "serde_json",

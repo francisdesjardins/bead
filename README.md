@@ -473,12 +473,14 @@ other's over AMQP 1.0 too
   it, they are ignored, saying so. A trial is a case, a transport and a server, named by the
   TypeScript side's sentence in snake case.
 
-In the same runs, each side's generated HTTP client calls the gateway the other side's interop
+In the same runs, each side's generated HTTP client calls the gateway each other side's interop
 server serves beside it, of `spec/transcoding.proto`'s service: protobuf's JSON and every native
 encoding, its problems and the authorization it presents, a stream's result, notifications and
-ending failure, and the gateway's own refusals of a route, a size and a busy stream; and both
-served OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under
-`the C# server of the interop service`; `HttpInteropTests.cs`).
+ending failure, and the gateway's own refusals of a route, a size and a busy stream; and the served
+OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under `the C#
+server of the interop service` and the Rust server's; `HttpInteropTests.cs`, under `server=Rust`
+too; the Rust client's gateway trials of `bead-interop-server`)
+([0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 Where the other runtime is missing, each skips its interop, saying so. `BEAD_INTEROP_REQUIRED=1`
 turns that skip into a failure, as the CI sets it: there, a skip could only be a path to the other
