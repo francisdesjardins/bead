@@ -1,4 +1,4 @@
-# alone: typescript 273, csharp 54, rust 77
+# alone: typescript 271, csharp 50, rust 77
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -86,7 +86,7 @@ DisconnectError	DisconnectError [record]	DisconnectException [record]	CallError:
 DroppedListener	-	-	DroppedListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 DurationRefusal	-	-	DurationRefusal [choice]	own: a Result's error, where the other sides throw (0044)
 ElsewhereSession	IElsewhereSession [record]	ElsewhereSession [record]	ElsewhereSession [record]	same
-EnvelopeFlag	-	EnvelopeFlags [choice]	EnvelopeFlag [choice]	rendered: flags (0007)
+EnvelopeFlag	-	EnvelopeFlags [choice]	EnvelopeFlag [choice]	rendered: flags (0007, 0044)
 EnvelopeHeader	EnvelopeHeader [choice]	IEnvelopeHeader [record]	EnvelopeHeader [choice]	same
 EnvelopeKind	EnvelopeKind [choice]	EnvelopeKind [choice]	EnvelopeKind [choice]	same
 EnvelopeLayout	-	EnvelopeLayout [choice]	EnvelopeLayout [choice]	same
@@ -106,10 +106,10 @@ GATEWAY_TIMEOUT	-	-	GATEWAY_TIMEOUT [constant]	own: a gateway's call timeout, 5 
 GATEWAY_WINDOW	-	-	GATEWAY_WINDOW [constant]	own: a gateway's stream window, 16, which the TypeScript side exports as its module's WINDOW; the root's names it apart (0052)
 GatewayErrorListener	-	-	GatewayErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
-GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	same
-GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of a contract older than the Rust runtime's generated code, kept while its code is served (0018, 0022)
-GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	same
-GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	same
+GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	GeneratedCode.SupportsVersion5 [constant]	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	rendered: constant (0007)
+GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	GeneratedCode.SupportsVersion6 [constant]	-	rendered: constant (0007)
+GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	GeneratedCode.SupportsVersion7 [constant]	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	rendered: constant (0007)
+GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	GeneratedCode.SupportsVersion8 [constant]	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	rendered: constant (0007)
 HEAD_DELAY_MILLISECONDS	HEAD_DELAY_MILLISECONDS [constant]	-	-	own: the delay of a request's head, a constant of spec 15.7 its tests import as they import BURIAL_MILLISECONDS, which the other sides keep private and write as the spec states it (0020)
 HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	HEADERS_TIMEOUT [constant]	same
 Health	IHealth [record]	Health [record]	Health [record]	same
@@ -121,8 +121,8 @@ HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [rec
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	HttpCaller [record]	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	HttpCallerOptions [record]	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	HttpCallOptions [record]	same
-HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	HttpClient [record]	rendered: platform (0049)
-HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	HttpClientOptions [record]	rendered: platform (0049)
+HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	HttpClient [record]	rendered: platform (0007, 0049)
+HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	HttpClientOptions [record]	rendered: platform (0007, 0049)
 HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	HttpEvent [choice]	same
 HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	HttpGateway [record]	same
 HttpGatewayBody	-	-	HttpGatewayBody [record]	own: the body a mounted gateway answers with, where the other sides write the response they are handed (0052)
@@ -160,7 +160,7 @@ KEEP_ALIVE	KEEP_ALIVE [constant]	-	KEEP_ALIVE [constant]	same
 LayerGauges	ILayerGauges [record]	LayerGauges [record]	LayerGauges [record]	same
 LIMIT_DEFAULTS	LIMIT_DEFAULTS [constant]	LimitDefaults [constant]	LIMIT_DEFAULTS [constant]	same
 ListedFailure	IListedFailure [record]	-	ListedFailure [record]	same
-LONGEST_TIMER	LONGEST_TIMER [constant]	-	LONGEST_TIMER [constant]	same
+LONGEST_TIMER	LONGEST_TIMER [constant]	Clocks.LongestTimer [constant]	LONGEST_TIMER [constant]	rendered: constant (0007)
 MapEntry	-	-	MapEntry [record]	own: an entry of a map by its named fields, where TypeScript gives a pair and C# a KeyValuePair, no tuple on Rust's public surface (0044, 0051)
 MapKey	-	-	MapKey [choice]	own: a map entry's key borrowed, where C#'s sink takes an overload a key type (0051)
 MAXIMUM_CONNECTIONS	MAXIMUM_CONNECTIONS [constant]	-	MAXIMUM_CONNECTIONS [constant]	same
@@ -387,10 +387,9 @@ CallId	CallId [scalar]	-	-	alone
 CapacityError	-	-	CapacityError [record]	alone
 check_records	-	-	check_records [function]	alone
 check_required	-	-	check_required [function]	alone
-checkProtoRecords	checkProtoRecords [function]	-	-	alone
+checkProtoRecords	checkProtoRecords [function]	ProtoRecords.Check [function]	-	rendered: verb (0007, 0044)
 CLIENT_FAILURES	CLIENT_FAILURES [constant]	-	-	alone
 ClientTransportLike	IClientTransportLike [record]	-	-	alone
-Clocks	-	Clocks [constant]	-	alone
 CLOSE_EVENT	CLOSE_EVENT [constant]	-	-	alone
 CloseConnection	-	-	CloseConnection [function type]	alone
 CloseEventLike	ICloseEventLike [record]	-	-	alone
@@ -463,7 +462,6 @@ FetchResponseLike	IFetchResponseLike [record]	-	-	alone
 FilterGiven	-	-	FilterGiven [record]	alone
 FilterKeeper	-	-	FilterKeeper [record]	alone
 GatewayAuthorization	-	GatewayAuthorization [choice]	GatewayAuthorization [choice]	same
-GeneratedCode	-	GeneratedCode [constant]	-	alone
 generateHandle	generateHandle [function]	-	-	alone
 GenericError	GenericError [record]	-	-	alone
 getReadyState	getReadyState [function]	-	-	alone
@@ -591,9 +589,8 @@ parseTemplate	parseTemplate [function]	-	-	alone
 PARTICIPANT_PORT	PARTICIPANT_PORT [constant]	-	-	alone
 PATHNAME	PATHNAME [constant]	-	PATHNAME [constant]	same
 PAYLOAD_CODECS	PAYLOAD_CODECS [constant]	-	-	alone
-payloadCodecOf	payloadCodecOf [function]	-	-	alone
+payloadCodecOf	payloadCodecOf [function]	PayloadCodecs.Of [function]	-	rendered: of (0007, 0044)
 PayloadCodecs.Json	-	PayloadCodecs.Json [constant]	-	alone
-PayloadCodecs.Of	-	PayloadCodecs.Of [function]	-	alone
 PayloadCodecs.Raw	-	PayloadCodecs.Raw [constant]	-	alone
 PayloadCodecs.Text	-	PayloadCodecs.Text [constant]	-	alone
 PLATFORM_CLOCK	PLATFORM_CLOCK [constant]	-	-	alone
@@ -614,7 +611,6 @@ protoCodecOf	protoCodecOf [function]	ProtoCodecs.Of [function]	ProtoCodec [recor
 ProtoCodecs.Read	-	ProtoCodecs.Read [function]	-	alone
 PROTOCOL_TYPES	PROTOCOL_TYPES [constant]	-	-	alone
 ProtocolFailure	IProtocolFailure [record]	-	-	alone
-ProtoRecords.Check	-	ProtoRecords.Check [function]	-	alone
 ProtoRequired.Check	-	ProtoRequired.Check [function]	-	alone
 ProtoSchema	-	-	ProtoSchema [record]	alone
 RawCodec	-	-	RawCodec [record]	alone

@@ -137,6 +137,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
   client's `client_config`, the gateway caller's among them, and its MQTT 5 adapter takes none
   (decision 0053).
+- `tools/check-names.mjs` holds a rendering to the records its rule names, each of which writes the
+  rule's tag. It reads a C# static class of constants as one name and as its members, placed by one
+  or the other. It keys a Rust module's item with its module, and a C# static member's bare member
+  only where it has two words or more (decision 0047).
 
 ### Removed
 
