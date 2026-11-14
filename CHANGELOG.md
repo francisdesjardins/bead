@@ -154,6 +154,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it
+  counted another run's copy of its options, and failed on a file that run removed as it read.
 - beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal
   with EPERM or EBUSY, as it does while another run removes or holds that folder, where it failed
   the run.
