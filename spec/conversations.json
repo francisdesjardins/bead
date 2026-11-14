@@ -6754,7 +6754,7 @@
       ]
     },
     {
-      "name": "an opening past the budget left is answered CAPACITY_EXCEEDED, and a transfer it starves is credited once it frees",
+      "name": "an opening the budget left cannot hold waits, one after it waits behind it though it fits, and both are admitted in their turn once the budget frees",
       "clauses": [
         "12.3.3",
         "12.4"
@@ -6781,18 +6781,7 @@
           "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
         },
         {
-          "send": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
-        },
-        {
-          "expect": {
-            "kind": 18,
-            "callId": 5,
-            "failure": {
-              "code": 35,
-              "scope": 0,
-              "relays": 0
-            }
-          }
+          "send": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 38 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
         },
         {
           "send": "A1 16 00 02  00 00 00 01"
@@ -6804,11 +6793,269 @@
             "paced": false,
             "creditEnd": 172
           }
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 5,
+            "paced": false,
+            "creditEnd": 56
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 05"
         }
       ]
     },
     {
-      "name": "a connection that closes ends its transfers, and the budget they held credits a transfer another connection's opening starved",
+      "name": "an opening still waiting for the budget at half the transfer's inactivity is answered CAPACITY_EXCEEDED, and the one behind it is admitted",
+      "clauses": [
+        "12.2.8",
+        "12.4"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256,
+        "transferInactivityTimeout": 20000
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 38 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 5,
+            "paced": false,
+            "creditEnd": 56
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 05"
+        }
+      ]
+    },
+    {
+      "name": "two transfers whose totals pass the budget together both complete: the second waits, holding none of it, and is admitted as the first's payload is whole, its credit setting its inactivity going",
+      "clauses": [
+        "12.4",
+        "12.8"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 280,
+        "maximumPayloadBytes": 176
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 B0 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 B0 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 176
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 5C | 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69"
+        },
+        {
+          "send": "A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 8C | 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 3,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "until": {
+            "timer": 30000
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "total": 176
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 B0"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 28,
+            "isLast": false,
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 76,
+            "isLast": false,
+            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 124,
+            "isLast": false,
+            "payload": "74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 172,
+            "isLast": true,
+            "payload": "70 71 72 22"
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 03  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 3,
+            "paced": false,
+            "creditEnd": 176
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 03  00 00 00 00 00 00 00 5C | 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69"
+        },
+        {
+          "send": "A1 14 00 04  00 00 00 03  00 00 00 00 00 00 00 8C | 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "total": 176
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 03  00 00 00 00 00 00 00 B0"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 3,
+            "offset": 28,
+            "isLast": false,
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 3,
+            "offset": 76,
+            "isLast": false,
+            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 3,
+            "offset": 124,
+            "isLast": false,
+            "payload": "74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 3,
+            "offset": 172,
+            "isLast": true,
+            "payload": "70 71 72 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a connection that closes ends its transfers, and the budget they reserved admits another connection's opening that waited for it",
       "clauses": [
         "12.4",
         "12.10"
@@ -6855,6 +7102,179 @@
             "creditEnd": 172
           },
           "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a result's opening that waits for the budget past half its call's inactivity ends the command CAPACITY_EXCEEDED, and cancels it",
+      "clauses": [
+        "8.2",
+        "12.4"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+        },
+        {
+          "until": {
+            "timer": 15000
+          }
+        },
+        {
+          "advance": 15000
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": 35
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "a result's opening that waits for the budget is credited once it frees, the credit setting its call's inactivity going again",
+      "clauses": [
+        "12.4",
+        "12.8"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+        },
+        {
+          "until": {
+            "timer": 15000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 2,
+            "paced": false,
+            "creditEnd": 100
+          }
+        },
+        {
+          "until": {
+            "timer": 30000
+          }
+        },
+        {
+          "advance": 27000
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 1C | 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+        },
+        {
+          "until": {
+            "timer": 30000
+          }
+        },
+        {
+          "advance": 30000
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": "exception"
         }
       ]
     },
@@ -8181,6 +8601,123 @@
         },
         {
           "report": "exception",
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a result leg B brings that the relay's budget does not admit within its wait ends leg B, cancelled, and leg A is answered DESTINATION_LOST",
+      "clauses": [
+        "12.4",
+        "14.5.5"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256,
+        "transferInactivityTimeout": 20000
+      },
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 3,
+            "paced": false,
+            "creditEnd": 172
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+          "on": "device"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 65,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "report": 35,
+          "on": "client"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03",
           "on": "client"
         }
       ]
