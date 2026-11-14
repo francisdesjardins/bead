@@ -53,6 +53,7 @@ import { dispose } from '../transport-client';
 import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, type IFakeCall, responseOf } from './fake-fetch';
+import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
 
 // helpers
 
@@ -3287,6 +3288,171 @@ test.describe('createHTTPTransportClient, by a name', () => {
       } finally {
         await server.stop();
       }
+    }
+  });
+});
+
+// spec 15.39: a client's TLS, against a front over the spec's test PKI that pipes to a plain server
+test.describe('createHTTPTransportClient, a client certificate', () => {
+  const TLS = Object.freeze({
+    authorities: PKI.root,
+    certificate: PKI.clientChain,
+    key: PKI.clientKey,
+  });
+
+  /** Connects `client` to `port`, sends an envelope each way, and disconnects. */
+  const exchangeOver = async (
+    client: HTTPTransportClient,
+    { port, secured, server }: { port: number; secured: boolean; server: HTTPTransportServer }
+  ) => {
+    const heard = nextEvent(client, 'message');
+
+    await client.connect({ host, port, secured });
+    await client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }) },
+      handleOf(server)
+    );
+
+    const [{ data }] = (await heard) as [ITransportMessage];
+
+    expect([...new Uint8Array(data as ArrayBuffer)]).toEqual([
+      ...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }),
+    ]);
+    await client.disconnect();
+  };
+
+  /** What a connect through `port` under TLS rejected with. */
+  const refusedOf = async (client: HTTPTransportClient, port: number) => {
+    return client.connect({ host, port, secured: true }).then(
+      () => {
+        return 'connected';
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+  };
+
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  // spec 15.39
+  test('connects presenting a client certificate under an intermediate to a server that requires one, trusting the server by the authorities it is given, over TLS 1.2 and TLS 1.3', async () => {
+    await using started = await startServer();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(started.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+      await using client = createHTTPTransportClient({ isListening: false, tls: TLS });
+
+      await exchangeOver(client, { port: front.port, secured: true, server: started.server });
+      expect(client.isSecure).toBe(true);
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect presenting a client certificate its server does not trust, or none, over TLS 1.2 and TLS 1.3', async () => {
+    await using started = await startServer();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(started.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+
+      for (const tls of [
+        { ...TLS, certificate: PKI.strangerClient, key: PKI.strangerClientKey },
+        { authorities: PKI.root },
+      ]) {
+        await using client = createHTTPTransportClient({ isListening: false, tls });
+
+        expect(await refusedOf(client, front.port)).toBeInstanceOf(ConnectError);
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect to a server under no authority it trusts, given or of its platform', async () => {
+    await using started = await startServer();
+
+    for (const [serves, tls] of [
+      ['stranger', TLS],
+      ['server', { certificate: PKI.clientChain, key: PKI.clientKey }],
+    ] as const) {
+      await using front = await createTlsFront(started.port, { serves });
+      await using client = createHTTPTransportClient({ isListening: false, tls });
+
+      expect(await refusedOf(client, front.port)).toBeInstanceOf(ConnectError);
+    }
+  });
+
+  // spec 15.39
+  test('connects in the clear with tls given, which a secured connect alone uses', async () => {
+    await using started = await startServer();
+    await using client = createHTTPTransportClient({ isListening: false, tls: TLS });
+
+    await exchangeOver(client, { port: started.port, secured: false, server: started.server });
+  });
+
+  // spec 15.39
+  test('refuses tls beside what it is given that keeps a TLS of its own', () => {
+    expect(() => {
+      return createHTTPTransportClient({ fetch: globalThis.fetch as FetchLike, tls: TLS });
+    }).toThrow(new ProgrammerError('tls is refused beside a fetch, which keeps a TLS of its own'));
+
+    // a tls of no member is none, and stands beside it
+    expect(() => {
+      return createHTTPTransportClient({ fetch: globalThis.fetch as FetchLike, tls: {} });
+    }).not.toThrow();
+  });
+
+  test('closes its agent as it is dropped, its DELETE sent, and draws another at its next connect', async () => {
+    await using started = await startServer();
+    await using front = await createTlsFront(started.port, { requiresCertificate: true });
+    await using client = createHTTPTransportClient({ isListening: false, tls: TLS });
+
+    await client.connect({ host, port: front.port, secured: true });
+    // * dropped while open: its DELETE goes through the agent before the agent closes
+    (client as ITransportClientInternal<object, never>)[dispose]();
+    await expect
+      .poll(() => {
+        return started.closes.length;
+      })
+      .toBe(1);
+    await exchangeOver(client, { port: front.port, secured: true, server: started.server });
+  });
+
+  test('refuses tls where undici does not resolve, naming the package', () => {
+    const { getBuiltinModule } = process;
+
+    // * a Node whose module resolution finds no undici
+    process.getBuiltinModule = (id: string) => {
+      return id === 'node:module'
+        ? {
+            createRequire: () => {
+              return {
+                resolve: () => {
+                  throw new Error('Cannot find module undici');
+                },
+              };
+            },
+          }
+        : getBuiltinModule(id);
+    };
+
+    try {
+      expect(() => {
+        return createHTTPTransportClient({ tls: TLS });
+      }).toThrow(
+        new ProgrammerError("tls over HTTP in Node takes undici's fetch: add the package undici")
+      );
+    } finally {
+      process.getBuiltinModule = getBuiltinModule;
     }
   });
 });

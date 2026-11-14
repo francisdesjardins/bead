@@ -38,6 +38,10 @@ const ID = 'ada';
 const INBOX = Object.freeze(['bead', 'i', ID]);
 const NAME = Object.freeze(['bead', 's', 'interop']);
 const PASSWORD = 'secret';
+
+// the fixture's certificate as a client's, under its key
+const CERTIFIED = Object.freeze({ certificate: TLS_FIXTURE.cert, key: TLS_FIXTURE.key });
+
 // how long a case waits on what its adapter does, as the script waits on a packet
 const PATIENCE = 5_000;
 
@@ -411,7 +415,7 @@ test.describe('createMqttBrokerAdapter', () => {
     try {
       const certified = createMqttBrokerAdapter({
         id: ID,
-        tls: { ca: TLS_FIXTURE.cert, cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key },
+        tls: { ...CERTIFIED, authorities: TLS_FIXTURE.cert },
         url: secured.url,
       });
       const { connect: bare } = await linkUp({ adapter: certified, script: secured });
@@ -421,13 +425,26 @@ test.describe('createMqttBrokerAdapter', () => {
       expect((bare as { password?: Buffer }).password).toBeUndefined();
       expect(certified.isSecure).toBe(true);
       await certified.stop();
+
+      // * under the authorities alone, its broker judged by them: its User Name and its Password
+      const trusting = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: TLS_FIXTURE.cert },
+        url: secured.url,
+      });
+      const { connect: named } = await linkUp({ adapter: trusting, script: secured });
+
+      expect((named as { username?: string }).username).toBe(ID);
+      expect(String((named as { password?: Buffer }).password)).toBe(PASSWORD);
+      await trusting.stop();
     } finally {
       await secured[Symbol.asyncDispose]();
     }
 
     // a certificate in the clear is refused as it is built
     expect(() => {
-      return createMqttBrokerAdapter({ id: ID, tls: TLS_FIXTURE, url: script.url });
+      return createMqttBrokerAdapter({ id: ID, tls: CERTIFIED, url: script.url });
     }).toThrow('a TLS client certificate is carried over mqtts or wss');
   });
 
@@ -550,7 +567,7 @@ test.describe('createMqttBrokerAdapter', () => {
     try {
       const untrusting = createMqttBrokerAdapter({
         id: ID,
-        tls: { cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key },
+        tls: CERTIFIED,
         url: secured.url,
       });
 
@@ -2976,11 +2993,11 @@ test.describe('createMqttBrokerAdapter', () => {
       return PASSWORD;
     };
     const refusals = [
-      { password: PASSWORD, tls: TLS_FIXTURE },
-      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, tls: CERTIFIED },
+      { passwordProvider: provider, tls: CERTIFIED },
       { password: PASSWORD, passwordProvider: provider },
       // * both, and a certificate: the first refusal, in one order on every side
-      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider, tls: CERTIFIED },
     ].map((given) => {
       const refusal = refusalOf(() => {
         return createMqttBrokerAdapter({ id: ID, url: secured, ...given });
@@ -3007,6 +3024,24 @@ test.describe('createMqttBrokerAdapter', () => {
     await bare.stop();
   });
 
+  // spec 15.39
+  test('takes a password beside tls that names authorities alone', () => {
+    const provider = (): string => {
+      return PASSWORD;
+    };
+
+    for (const given of [{ password: PASSWORD }, { passwordProvider: provider }]) {
+      expect(() => {
+        return createMqttBrokerAdapter({
+          id: ID,
+          tls: { authorities: TLS_FIXTURE.cert },
+          url: 'mqtts://127.0.0.1:8883',
+          ...given,
+        });
+      }).not.toThrow();
+    }
+  });
+
   test('refuses a TLS client certificate in a page, whose browser chooses it', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'process');
 
@@ -3016,7 +3051,7 @@ test.describe('createMqttBrokerAdapter', () => {
       expect(() => {
         return createMqttBrokerAdapter({
           id: ID,
-          tls: TLS_FIXTURE,
+          tls: CERTIFIED,
           url: 'wss://broker.example/mqtt',
         });
       }).toThrow(

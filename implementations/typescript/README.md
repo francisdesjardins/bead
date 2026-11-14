@@ -37,6 +37,18 @@ on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite 
 server has no global to fall back on, so it always takes `ws`'s `WebSocketServer`, and its suite
 talks to it through the client, on both.
 
+In Node, the client takes its TLS as `tls: { authorities, certificate, key }`, each PEM text (spec
+15.39). The authorities are the roots it judges its server by, in place of the platform's. The
+certificate, its intermediates after it, is presented with its key when the server asks for one.
+Only `ws`'s `WebSocket` takes `tls`, on a connect under `wss`; under `ws`, the client holds it
+unused. The client is refused as it is built, with a `ProgrammerError`, given `tls` in a page or
+beside a `WebSocket` without `ws`'s shape, Node's global among them. It is refused too given a
+certificate without its key or a key without its certificate, a key of another certificate, an
+encrypted key, or authorities or a certificate that read as none. A handshake the server refuses
+fails the connect, the platform's error its cause. The certificate authenticates the client to what
+terminates TLS, and the credential authenticates its calls to the router: the client takes both, and
+binds neither to the other.
+
 Each WebSocket end beats: every `heartbeat` milliseconds — 30,000 by default, `Infinity` for none —
 it sends WebSocket's own PING control frame (RFC 6455 §5.5.2), and drops a connection that left the
 one before unanswered, whose `close` then says it was not clean. A peer gone without a word — a
@@ -1013,6 +1025,14 @@ preflight failing. A `fetch` given follows no redirect; one that follows all the
 answer's `redirected`, and is caught there: the connect fails, "the server drew no connection: a
 redirect followed", and a send or a listen loses its connection, nothing of the answer read.
 
+In Node, the HTTP client takes the same `tls`. It goes through undici's own `fetch` and an `Agent` of
+the client's, on each exchange under `https`; under `http`, the global `fetch` goes and `tls` is
+held unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
+loaded on the first connect under `https`, and never enters a page's bundle. The agent closes as the
+client drops its connection, and a new one is drawn at the next. The client is refused as it is
+built as the WebSocket client is, and also beside a `fetch` given or where undici does not resolve.
+A handshake the server refuses fails the connect, never a connection drawn and then lost.
+
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |
@@ -1387,11 +1407,14 @@ await transport.start();
 Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry Interval
 of 0 — its Client Identifier the participant's id, authenticated by a Password under its id as User
 Name, `password` as given or what `passwordProvider` hands at each link's start, or by a TLS client
-certificate, `tls: { cert, key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the
-adapter refuses one there; with neither, its CONNECT carries its User Name alone. A password is
-UTF-8 text, never empty and holding no NUL; the adapter is refused as it is built given one that is
-not, a password and a provider both, or either beside a certificate, and its start fails on an
-answer that is not. Its provider is asked with a signal its start's own signal, its stop and its
+certificate, `tls: { certificate, key }`, over `mqtts` or `wss` in Node alone: a page chooses none,
+and the adapter refuses one there; with neither, its CONNECT carries its User Name alone. The
+`authorities` of `tls` judge the broker in place of the platform's roots, beside a password or a
+certificate. A password is UTF-8 text, never empty and holding no NUL. The adapter is refused as it
+is built given one that is not, a password and a provider both, or either beside a certificate; a
+password beside the authorities alone is taken. It is refused too given a `tls` over `mqtt` or
+`ws`, or one the WebSocket client would refuse. Its start fails on an answer that is not a password.
+Its provider is asked with a signal its start's own signal, its stop and its
 `connectTimeout` abort, and that is aborted once its start ends, linked or not: an ask that outlives
 the `connectTimeout`, or that a stop meets, fails that start whether or not it hears its signal, a
 later answer serving nothing; what it throws fails it, its cause. Its CONNECT says a Receive Maximum
@@ -1468,8 +1491,9 @@ Each link is one fresh network connection, its OPEN's container-id the participa
 `hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`,
 30 s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its
 id, `password` as given or what `passwordProvider` hands at each link's start, or by SASL EXTERNAL
-under a TLS client certificate, `tls: { cert, key }`, over `amqps`, never ANONYMOUS: the adapter is
-refused as it is built given neither, and its password is given, asked and refused as an MQTT 5
+under a TLS client certificate, `tls: { certificate, key }`, over `amqps`, never ANONYMOUS: the
+adapter is refused as it is built given neither, the authorities alone counting as neither. Its
+password is given, asked and refused as an MQTT 5
 link's is. Its start waits `connectTimeout`, 30 s by default, for its password, where it asks its
 provider, its broker's OPEN and its sessions, and its inbox's subscription as long for its
 declaration, its binding and its receiver. On it a session holds its inbox's receiver, one each name

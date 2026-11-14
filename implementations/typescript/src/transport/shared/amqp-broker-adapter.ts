@@ -35,6 +35,7 @@ import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
 import { isSecureUrl } from './secure';
+import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -44,11 +45,18 @@ import type {
   IBrokerMessage,
   IBrokerPublication,
   IBrokerSubscription,
+  ITlsOptions,
 } from './types';
 
 export { MAXIMUM_MESSAGE_SIZE } from './amqp-messages';
 export { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
-export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } from './types';
+export type {
+  BrokerDelivery,
+  BrokerPublished,
+  BrokerTopic,
+  IBrokerAdapter,
+  ITlsOptions,
+} from './types';
 
 // interfaces
 
@@ -84,8 +92,9 @@ export interface IAmqpBrokerAdapterOptions {
   /**
    * Its password, SASL PLAIN's under its id, as given: UTF-8 text, never empty and holding no NUL
    * (spec 15.33, RFC 4616 §2). Refused with a {@link ProgrammerError} as it is built when it is not,
-   * beside a `passwordProvider`, and beside `tls`; and so is its adapter given neither it, its
-   * provider nor `tls`, since its link never authenticates as ANONYMOUS.
+   * beside a `passwordProvider`, and beside a `tls` that names a `certificate`, taken beside one
+   * that names `authorities` alone; and so is its adapter given neither it, its provider nor a
+   * client certificate, since its link never authenticates as ANONYMOUS.
    */
   password?: string | undefined;
   /**
@@ -99,16 +108,12 @@ export interface IAmqpBrokerAdapterOptions {
    */
   passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
-   * Its TLS client certificate and key, which its broker maps to its id by SASL EXTERNAL, over
-   * `amqps`; and the authority its broker's own certificate is trusted by, where not the platform's.
+   * Its TLS, over `amqps` (spec 15.39): its client certificate and key, which its broker maps to its
+   * id by SASL EXTERNAL; and the authorities its broker's own certificate is judged by, in place of
+   * the platform's roots. Refused with a {@link ProgrammerError} as it is built over `amqp`, and as
+   * {@link ITlsOptions} says.
    */
-  tls?:
-    | {
-        ca?: string | Uint8Array | undefined;
-        cert: string | Uint8Array;
-        key: string | Uint8Array;
-      }
-    | undefined;
+  tls?: ITlsOptions | undefined;
   /** Its broker: `amqp://` or `amqps://`. */
   url: string;
   /** The virtual host its OPEN's hostname names, `vhost:` and it; its broker's default where none. */
@@ -226,13 +231,6 @@ const SECTION = Object.getPrototypeOf(rhea.message.data_section(Buffer.alloc(0))
 
 // helpers
 
-const isNode = (): boolean => {
-  return (
-    typeof (globalThis as { process?: { versions?: { node?: unknown } } }).process?.versions
-      ?.node === 'string'
-  );
-};
-
 // the condition and description an ended endpoint carries, as a refusal names it
 const conditionOf = (error: unknown): string => {
   const { condition, description, message } = (error ?? {}) as {
@@ -323,24 +321,29 @@ const isPassword = (password: unknown): password is string => {
   return typeof password === 'string' && password.length > 0 && !password.includes('\0');
 };
 
-/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+/**
+ * What its link authenticates by, held as it is built: a password, its provider, or a client
+ * certificate alone, the authorities its broker is judged by beside any of them.
+ */
 const assertAuthentication = ({
   password,
   passwordProvider,
   tls,
 }: Pick<IAmqpBrokerAdapterOptions, 'password' | 'passwordProvider' | 'tls'>): void => {
+  const certificate = tls?.certificate;
+
   if (password !== undefined && passwordProvider !== undefined) {
     throw new ProgrammerError('a link takes a password or a password provider, not both');
   }
 
-  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
+  if ((password !== undefined || passwordProvider !== undefined) && certificate !== undefined) {
     throw new ProgrammerError(
       'a link authenticates by its client certificate or by a password, not both'
     );
   }
 
   // * PLAIN's password is one octet at least, and ANONYMOUS no mechanism of its link (spec 15.33)
-  if (password === undefined && passwordProvider === undefined && tls === undefined) {
+  if (password === undefined && passwordProvider === undefined && certificate === undefined) {
     throw new ProgrammerError(
       'an AMQP link authenticates by a password or by its client certificate'
     );
@@ -388,10 +391,11 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     id,
     password,
     passwordProvider,
-    tls,
     url,
     virtualHost,
   } = options;
+  // * a tls of no member is none
+  const tls = tlsOf(options.tls);
   const idleTimeout = assertHeldWithin('idleTimeout', options.idleTimeout ?? IDLE_TIMEOUT, {
     ceiling: LONGEST_IDLE_TIMEOUT,
   });
@@ -441,6 +445,10 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
   if (tls !== undefined && parsed.protocol !== 'amqps:') {
     throw new ProgrammerError(`a TLS client certificate is carried over amqps, not ${url}`);
+  }
+
+  if (tls !== undefined) {
+    assertTls(tls);
   }
 
   assertAuthentication({ password, passwordProvider, tls });
@@ -1461,17 +1469,12 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         ? {
             servername: host,
             transport: 'tls' as const,
-            ...(tls === undefined
-              ? {}
-              : {
-                  cert: tls.cert as never,
-                  enable_sasl_external: true,
-                  key: tls.key as never,
-                  ...(tls.ca === undefined ? {} : { ca: tls.ca as never }),
-                }),
+            ...nodeTlsOf(tls),
+            ...(tls?.certificate === undefined ? {} : { enable_sasl_external: true }),
           }
         : {}),
-      ...(tls === undefined
+      // * SASL PLAIN under its id, unless its client certificate authenticates it by EXTERNAL
+      ...(tls?.certificate === undefined
         ? { username: id, ...(secret === undefined ? {} : { password: secret }) }
         : {}),
     };

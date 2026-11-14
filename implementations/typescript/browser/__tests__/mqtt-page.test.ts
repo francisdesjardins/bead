@@ -6,7 +6,8 @@
 // `BEAD_MQTT_REQUIRED=1`. The C# server is built and started by .NET: where .NET is not installed,
 // its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`. Its adapter alone,
 // through a relay that records its frames, sending each message as one. And what no page does: a TLS
-// client certificate, which its browser chooses, refused as the adapter is built.
+// client certificate, which its browser chooses, refused as the adapter is built, and as the
+// WebSocket and HTTP clients are.
 
 // dependencies
 
@@ -251,6 +252,27 @@ test.describe('a page over MQTT 5, its own', () => {
       expect(refusal).toBe(
         'a page chooses no TLS client certificate, its browser does: authenticate it by a password'
       );
+    } finally {
+      served.close();
+    }
+  });
+  // spec 15.39
+  test('refuses tls in a page, naming why', async ({ page }) => {
+    const served = await servePage();
+
+    try {
+      await loaded(page, served.port);
+
+      const refusals = await page.evaluate(() => {
+        const { refuseTls } = globalThis as unknown as { refuseTls: () => string[] };
+
+        return refuseTls();
+      });
+
+      expect(refusals).toEqual([
+        'a page chooses no TLS client certificate, its browser does',
+        'a page chooses no TLS client certificate, its browser does',
+      ]);
     } finally {
       served.close();
     }

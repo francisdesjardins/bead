@@ -32,6 +32,15 @@ import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
 import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
 import {
+  assertTls,
+  builtinOf,
+  type INodeTlsOptions,
+  isNode,
+  NO_TLS_IN_A_PAGE,
+  nodeTlsOf,
+  tlsOf,
+} from '../shared/tls';
+import {
   getReadyState,
   ReadyState,
   setReadyStateClosed,
@@ -39,7 +48,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
-import type { ITransportMessage } from '../shared/types';
+import type { ITlsOptions, ITransportMessage } from '../shared/types';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -68,6 +77,7 @@ export {
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../shared/constants';
+export type { ITlsOptions } from '../shared/types';
 export type {
   FetchLike,
   HTTPTransportClient,
@@ -89,6 +99,19 @@ interface IDrawn {
   readonly url: string;
 }
 
+// the part of undici a client of `tls` reaches: its own `fetch`, and an `Agent` of the client's
+interface IUndici {
+  Agent: new (options: { connect: INodeTlsOptions }) => IUndiciAgent;
+  fetch: (
+    url: string,
+    init: IFetchInit & { dispatcher: IUndiciAgent }
+  ) => Promise<IFetchResponseLike>;
+}
+
+interface IUndiciAgent {
+  close(): Promise<void>;
+}
+
 /** A batch as a listen reads it: the length being read, then the envelope it announced, filling. */
 interface IReading {
   envelope: Uint8Array<ArrayBuffer> | undefined;
@@ -105,6 +128,9 @@ export const CONNECT_DEFAULTS = Object.freeze({
   secured: false,
   timeout: 30_000,
 } satisfies Omit<IHTTPTransportClientConnectOptions, 'host' | 'port'>);
+
+// ! a specifier no bundler reads, so that no page's bundle carries undici, which a page never loads
+const UNDICI = 'undici';
 
 /** How long a disconnect waits on the server before it lets the connection go all the same. */
 export const DISCONNECT_TIMEOUT = 5_000;
@@ -288,6 +314,50 @@ export const retryAfterOf = (value: string | null, now: number): number => {
   return Number.isNaN(date) ? RETRY_AFTER_DEFAULT : Math.max(0, date - now);
 };
 
+// whether the package undici resolves from here, as Node's `import` of it would
+const resolvesUndici = (): boolean => {
+  try {
+    const nodeModule = builtinOf('node:module') as {
+      createRequire(from: string): { resolve(id: string): string };
+    };
+
+    nodeModule.createRequire(import.meta.url).resolve(UNDICI);
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// undici's own module: CommonJS, its exports the namespace's default
+const undiciOf = async (): Promise<IUndici> => {
+  const namespace = (await import(/* @vite-ignore */ UNDICI)) as IUndici & {
+    default?: IUndici | undefined;
+  };
+
+  return namespace.default ?? namespace;
+};
+
+/**
+ * Holds `tls` as its client is built (spec 15.39), in the order every side holds it: in a page;
+ * beside a `fetch` given; then as {@link assertTls} does; and where undici does not resolve.
+ */
+const assertHttpTls = (fetch: FetchLike | undefined, tls: ITlsOptions): void => {
+  if (!isNode()) {
+    throw new ProgrammerError(NO_TLS_IN_A_PAGE);
+  }
+
+  if (fetch !== undefined) {
+    throw new ProgrammerError('tls is refused beside a fetch, which keeps a TLS of its own');
+  }
+
+  assertTls(tls);
+
+  if (!resolvesUndici()) {
+    throw new ProgrammerError("tls over HTTP in Node takes undici's fetch: add the package undici");
+  }
+};
+
 // how long to wait before listening again after `losses` listens lost in a row, drawn apart so the
 // clients one restart dropped together come back apart, as EventSource's do; in whole
 // milliseconds, as every wait of Bead's
@@ -367,7 +437,7 @@ export const createHTTPTransportClient = (
   const {
     clock,
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
-    fetch: fetchImpl = globalThis.fetch as FetchLike,
+    fetch: givenFetch,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isListening = true,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
@@ -382,6 +452,48 @@ export const createHTTPTransportClient = (
   // 0 is at once: a listen again at once, and a listen the server answers at once, which polls
   const pause = assertHeldDelay('pause', givenPause);
   const wait = assertHeldDelay('wait', givenWait);
+  const tls = tlsOf(options?.tls);
+
+  if (tls !== undefined) {
+    assertHttpTls(givenFetch, tls);
+  }
+
+  const platformFetch = givenFetch ?? (globalThis.fetch as FetchLike);
+  // undici, once a connect under `https` loaded it, and the client's agent, drawn again after a
+  // dispose closed it
+  let undici: IUndici | undefined;
+  let agent: IUndiciAgent | undefined;
+
+  // * `tls` on an exchange under `https` alone, through undici's own fetch: Node's global one
+  // takes no dispatcher of another undici's
+  const fetchImpl: FetchLike =
+    tls === undefined
+      ? platformFetch
+      : async (url, init) => {
+          if (!url.startsWith('https:')) {
+            return platformFetch(url, init);
+          }
+
+          undici ??= await undiciOf();
+          agent ??= new undici.Agent({ connect: nodeTlsOf(tls) });
+
+          return undici.fetch(url, { ...init, dispatcher: agent });
+        };
+
+  // its agent closed once what it carries settled, the DELETE a dispose sends among it
+  const closeAgent = (after: Promise<void>): void => {
+    const closing = agent;
+
+    agent = undefined;
+
+    if (closing !== undefined) {
+      void after
+        .then(() => {
+          return closing.close();
+        })
+        .catch(noop);
+    }
+  };
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
     (client, { report, tell }) => {
@@ -436,8 +548,8 @@ export const createHTTPTransportClient = (
       };
 
       // a DELETE nobody waits on, which outlives a page that is closing
-      const release = ({ connectionToken, url }: IDrawn): void => {
-        void execute(url, {
+      const release = ({ connectionToken, url }: IDrawn): Promise<void> => {
+        return execute(url, {
           headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
           keepalive: true,
           method: 'DELETE',
@@ -475,7 +587,7 @@ export const createHTTPTransportClient = (
         connection.controller.abort();
 
         if (isReleased) {
-          release(connection);
+          void release(connection);
         }
 
         if (!client.isReconnecting()) {
@@ -847,7 +959,7 @@ export const createHTTPTransportClient = (
                     };
 
                     if (attempt.controller.signal.aborted || attempt.isDisposed) {
-                      release(connection);
+                      void release(connection);
                       connection = undefined;
                       return undefined;
                     }
@@ -871,7 +983,7 @@ export const createHTTPTransportClient = (
             attempt.controller.abort();
 
             if (connection !== undefined) {
-              release(connection);
+              void release(connection);
             }
 
             if (!client.isReconnecting()) {
@@ -908,7 +1020,7 @@ export const createHTTPTransportClient = (
 
           if (isQuick) {
             connection.controller.abort();
-            release(connection);
+            void release(connection);
           } else {
             // the server ends it first, so what waits there learns it; then what waits here goes. Its
             // bound is the platform's, on the real clock, as a close handshake's: it bounds the
@@ -1098,10 +1210,13 @@ export const createHTTPTransportClient = (
           client.socket = null;
           hold.drop();
 
-          if (connection !== undefined) {
-            connection.controller.abort();
-            release(connection);
+          if (connection === undefined) {
+            closeAgent(Promise.resolve());
+            return;
           }
+
+          connection.controller.abort();
+          closeAgent(release(connection));
         },
       };
     }

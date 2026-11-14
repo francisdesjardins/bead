@@ -3,8 +3,8 @@
 // The script of a page a browser loads: a broker's client transport over MQTT.js's browser build,
 // its link a WebSocket of subprotocol `mqtt` to a Mosquitto (spec 15.25), calling the interop
 // service through a server's name; its adapter alone, through a burst of publications that a
-// Chromium would fragment as one message; and what the adapter refuses there, a TLS client
-// certificate, which no page chooses (spec 15.26).
+// Chromium would fragment as one message; and what the adapter and the WebSocket and HTTP clients
+// refuse there, a TLS client certificate, which no page chooses (spec 15.26, 15.39).
 
 // dependencies
 
@@ -14,6 +14,8 @@ import { CredentialScheme } from '../src/router/shared/constants';
 import { createBrokerParticipant } from '../src/transport/shared/broker-participant';
 import { BROKER_PUBLISHED } from '../src/transport/shared/constants';
 import { createMqttBrokerAdapter } from '../src/transport/shared/mqtt-broker-adapter';
+import { createHTTPTransportClient } from '../src/transport/client/http-transport-client';
+import { createWebSocketTransportClient } from '../src/transport/client/websocket-transport-client';
 
 // interfaces
 
@@ -117,7 +119,7 @@ const refuseCertificate = (): string => {
   try {
     createMqttBrokerAdapter({
       id: 'page',
-      tls: { cert: 'certificate', key: 'key' },
+      tls: { certificate: 'certificate', key: 'key' },
       url: 'wss://broker.example/mqtt',
     });
   } catch (error) {
@@ -127,4 +129,26 @@ const refuseCertificate = (): string => {
   return 'taken';
 };
 
-Object.assign(globalThis, { burstOverMqtt, callOverMqtt, refuseCertificate });
+/** The refusals the WebSocket and HTTP clients meet in a page given `tls`, their messages. */
+const refuseTls = (): string[] => {
+  const tls = { certificate: 'certificate', key: 'key' };
+
+  return [
+    () => {
+      return createWebSocketTransportClient({ tls });
+    },
+    () => {
+      return createHTTPTransportClient({ tls });
+    },
+  ].map((build) => {
+    try {
+      build();
+    } catch (error) {
+      return (error as Error).message;
+    }
+
+    return 'taken';
+  });
+};
+
+Object.assign(globalThis, { burstOverMqtt, callOverMqtt, refuseCertificate, refuseTls });

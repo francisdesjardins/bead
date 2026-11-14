@@ -339,12 +339,14 @@ __metadata:
     oxlint-tsgolint: "npm:7.0.2005"
     rhea: "npm:3.0.5"
     typescript-7: "npm:typescript@7.0.2"
+    undici: "npm:8.12.4"
     ws: "npm:^8.22.1"
     yaml: "npm:2.9.1"
   peerDependencies:
     "@bufbuild/protobuf": ^2.13.0
     mqtt: ^5.16.1
     rhea: ^3.0.5
+    undici: ^8
   dependenciesMeta:
     "@bufbuild/buf":
       built: true
@@ -356,6 +358,8 @@ __metadata:
     mqtt:
       optional: true
     rhea:
+      optional: true
+    undici:
       optional: true
   languageName: unknown
   linkType: soft
@@ -2005,6 +2009,13 @@ __metadata:
   version: 8.9.0
   resolution: "undici-types@npm:8.9.0"
   checksum: 10c0/51c712c20c087368f62c6fc0f2bc49fa76bfe5dec28ff01584bb677ff29b0622569783c02d43e151143808c48c0503f804093bd2c491b10f2a830138034cb451
+  languageName: node
+  linkType: hard
+
+"undici@npm:8.12.4":
+  version: 8.12.4
+  resolution: "undici@npm:8.12.4"
+  checksum: 10c0/2a83590ce3347ca4e8fb83917bd7ad1d0bcb72ecb6d1a5066f01a89b4941becac569412aa27d7318119ea1a20d217018cce535f8eeed3c1b307d87426f96cfe3
   languageName: node
   linkType: hard
 

@@ -28,6 +28,7 @@ import {
 import { guardPackets } from './mqtt-packet-guard';
 import { isSecureUrl } from './secure';
 import { withSlicedSends } from './sliced-sends';
+import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -37,11 +38,18 @@ import type {
   IBrokerPublication,
   IBrokerStart,
   IBrokerSubscription,
+  ITlsOptions,
 } from './types';
 
 export { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 export { MAXIMUM_PACKET_SIZE } from './mqtt-packets';
-export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } from './types';
+export type {
+  BrokerDelivery,
+  BrokerPublished,
+  BrokerTopic,
+  IBrokerAdapter,
+  ITlsOptions,
+} from './types';
 
 // interfaces
 
@@ -74,7 +82,8 @@ export interface IMqttBrokerAdapterOptions {
   /**
    * Its Password, under its id as User Name, as given: UTF-8 text, never empty and holding no NUL
    * (spec 15.26). Refused with a {@link ProgrammerError} as it is built when it is not, beside a
-   * `passwordProvider`, and beside `tls`. With neither, its CONNECT carries its User Name alone.
+   * `passwordProvider`, and beside a `tls` that names a `certificate`; taken beside one that names
+   * `authorities` alone. With neither, its CONNECT carries its User Name alone.
    */
   password?: string | undefined;
   /**
@@ -88,17 +97,13 @@ export interface IMqttBrokerAdapterOptions {
    */
   passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
-   * Its TLS client certificate and key, which its broker ties to its id, over `mqtts` or `wss` in
-   * Node, never in a page; and the authority its broker's own certificate is trusted by, where not
-   * the platform's.
+   * Its TLS, over `mqtts` or `wss` in Node, never in a page (spec 15.39): its client certificate
+   * and key, which its broker ties to its id, its CONNECT then carrying no User Name; and the
+   * authorities its broker's own certificate is judged by, in place of the platform's roots. Refused
+   * with a {@link ProgrammerError} as it is built over any other URL, and as {@link ITlsOptions}
+   * says.
    */
-  tls?:
-    | {
-        ca?: string | Uint8Array | undefined;
-        cert: string | Uint8Array;
-        key: string | Uint8Array;
-      }
-    | undefined;
+  tls?: ITlsOptions | undefined;
   /** Its broker: `mqtt://`, `mqtts://`, or a WebSocket, `ws://` or `wss://`, of subprotocol `mqtt`. */
   url: string;
 }
@@ -207,13 +212,6 @@ const isUnreadable = (client: MqttClient, error: Error): boolean => {
   return !client.stream.destroyed && !UNANSWERED_ACK.test(error.message);
 };
 
-const isNode = (): boolean => {
-  return (
-    typeof (globalThis as { process?: { versions?: { node?: unknown } } }).process?.versions
-      ?.node === 'string'
-  );
-};
-
 // ! a new object for each link, never frozen, which MQTT.js writes a `wss` link's TLS options into:
 // what `ws` takes in Node, a message bound no packet within its Maximum Packet Size passes and no
 // permessage-deflate offered (spec 15.25)
@@ -246,7 +244,10 @@ const isPassword = (password: unknown): password is string => {
   return typeof password === 'string' && password.length > 0 && !password.includes('\0');
 };
 
-/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+/**
+ * What its link authenticates by, held as it is built: a password, its provider, or a client
+ * certificate alone, the authorities its broker is judged by beside any of them.
+ */
 const assertAuthentication = ({
   password,
   passwordProvider,
@@ -256,7 +257,10 @@ const assertAuthentication = ({
     throw new ProgrammerError('a link takes a password or a password provider, not both');
   }
 
-  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
+  if (
+    (password !== undefined || passwordProvider !== undefined) &&
+    tls?.certificate !== undefined
+  ) {
     throw new ProgrammerError(
       'a link authenticates by its client certificate or by a password, not both'
     );
@@ -311,9 +315,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     maximumPacketSize = MAXIMUM_PACKET_SIZE,
     password,
     passwordProvider,
-    tls,
     url,
   } = options;
+  // * a tls of no member is none
+  const tls = tlsOf(options.tls);
   const keepAlive = assertHeldWithin('keepAlive', options.keepAlive ?? KEEP_ALIVE, {
     ceiling: LONGEST_KEEP_ALIVE,
   });
@@ -358,6 +363,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
   if (tls !== undefined && protocol !== 'mqtts:' && protocol !== 'wss:') {
     throw new ProgrammerError(`a TLS client certificate is carried over mqtts or wss, not ${url}`);
+  }
+
+  if (tls !== undefined) {
+    assertTls(tls);
   }
 
   assertAuthentication({ password, passwordProvider, tls });
@@ -810,13 +819,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       reconnectOnConnackError: false,
       reconnectPeriod: 0,
       resubscribe: false,
-      ...(tls === undefined
-        ? { username: id }
-        : {
-            cert: tls.cert as never,
-            key: tls.key as never,
-            ...(tls.ca === undefined ? {} : { ca: tls.ca as never }),
-          }),
+      // * its User Name its id, unless its client certificate authenticates it (spec 15.26)
+      ...(tls?.certificate === undefined ? { username: id } : {}),
+      ...nodeTlsOf(tls),
       ...(secret === undefined ? {} : { password: secret }),
       ...(will === undefined
         ? {}

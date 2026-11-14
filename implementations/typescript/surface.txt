@@ -9,6 +9,7 @@
   IAmqpBrokerAdapterOptions	src/transport/shared/amqp-broker-adapter.ts
   IBrokerAdapter	src/transport/shared/types.ts
   IDLE_TIMEOUT	src/transport/shared/amqp-broker-adapter.ts
+  ITlsOptions	src/transport/shared/types.ts
   LINK_CREDIT	src/transport/shared/amqp-broker-adapter.ts
   MAXIMUM_MESSAGE_SIZE	src/transport/shared/amqp-messages.ts
   TRANSPORT_AMQP	src/transport/shared/constants.ts
@@ -261,6 +262,7 @@
   IHTTPTransportClientConnectOptions	src/transport/client/types.ts
   IHTTPTransportClientOptions	src/transport/client/types.ts
   INACTIVITY_TIMEOUT	src/transport/client/http-transport-client.ts
+  ITlsOptions	src/transport/shared/types.ts
   LISTEN_HEADER	src/transport/shared/constants.ts
   MAXIMUM_BODY_BYTES	src/transport/client/http-transport-client.ts
   REFUSAL_HEADER	src/transport/shared/constants.ts
@@ -375,6 +377,7 @@
   IBrokerAdapter	src/transport/shared/types.ts
   IMqttBrokerAdapter	src/transport/shared/mqtt-broker-adapter.ts
   IMqttBrokerAdapterOptions	src/transport/shared/mqtt-broker-adapter.ts
+  ITlsOptions	src/transport/shared/types.ts
   KEEP_ALIVE	src/transport/shared/mqtt-broker-adapter.ts
   MAXIMUM_PACKET_SIZE	src/transport/shared/mqtt-packets.ts
   TRANSPORT_MQTT	src/transport/shared/constants.ts
@@ -1181,6 +1184,7 @@
   HEARTBEAT	src/transport/shared/heartbeat.ts
   ICloseEventLike	src/transport/client/types.ts
   IMessageEventLike	src/transport/client/types.ts
+  ITlsOptions	src/transport/shared/types.ts
   IUpgradeResponseLike	src/transport/client/types.ts
   IWebSocketConstructor	src/transport/client/types.ts
   IWebSocketLike	src/transport/client/types.ts
@@ -3100,6 +3104,7 @@ src/transport/client/types.ts IHTTPTransportClientOptions
     isListening?: boolean | undefined
     maximumBodyBytes?: number | undefined
     pause?: number | undefined
+    tls?: ITlsOptions | undefined
     wait?: number | undefined
     clock?: IClock | undefined
 src/transport/client/types.ts IMemoryTransportClientConnectOptions
@@ -3212,7 +3217,7 @@ src/transport/client/types.ts IUpgradeResponseLike
     resume?(): unknown
 src/transport/client/types.ts IWebSocketConstructor
   interface IWebSocketConstructor
-    new (url: string, protocols?: string | string[], options?: {closeTimeout?: number; headers?: Record<string, string>; maxPayload?: number; perMessageDeflate?: false}): IWebSocketLike
+    new (url: string, protocols?: string | string[], options?: {ca?: string; cert?: string; closeTimeout?: number; headers?: Record<string, string>; key?: string; maxPayload?: number; perMessageDeflate?: false}): IWebSocketLike
     readonly CONNECTING: number
     readonly OPEN: number
 src/transport/client/types.ts IWebSocketLike
@@ -3248,6 +3253,7 @@ src/transport/client/types.ts IWebSocketTransportClientOptions
     closeTimeout?: number | undefined
     heartbeat?: number | undefined
     maxPayload?: number | undefined
+    tls?: ITlsOptions | undefined
     WebSocket?: IWebSocketConstructor | undefined
     clock?: IClock | undefined
 src/transport/client/types.ts IWorkerChannelLike
@@ -3790,7 +3796,7 @@ src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapterOptions
     maximumMessageSize?: number | undefined
     password?: string | undefined
     passwordProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
-    tls?: | {ca?: string | Uint8Array | undefined; cert: string | Uint8Array; key: string | Uint8Array} | undefined
+    tls?: ITlsOptions | undefined
     url: string
     virtualHost?: string | undefined
 src/transport/shared/amqp-broker-adapter.ts IDLE_TIMEOUT
@@ -4077,7 +4083,7 @@ src/transport/shared/mqtt-broker-adapter.ts IMqttBrokerAdapterOptions
     maximumPacketSize?: number | undefined
     password?: string | undefined
     passwordProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
-    tls?: | {ca?: string | Uint8Array | undefined; cert: string | Uint8Array; key: string | Uint8Array} | undefined
+    tls?: ITlsOptions | undefined
     url: string
 src/transport/shared/mqtt-broker-adapter.ts KEEP_ALIVE
   const KEEP_ALIVE: 30000
@@ -4237,6 +4243,11 @@ src/transport/shared/types.ts IMemoryPeerLike
 src/transport/shared/types.ts IMemoryTransportServerLike
   interface IMemoryTransportServerLike
     accept(peer: IMemoryPeerLike, options?: IMemoryAcceptOptions): Promise<IMemoryEndLike>
+src/transport/shared/types.ts ITlsOptions
+  interface ITlsOptions
+    authorities?: string | undefined
+    certificate?: string | undefined
+    key?: string | undefined
 src/transport/shared/types.ts ITransportMessage
   interface ITransportMessage
     readonly address?: string | undefined

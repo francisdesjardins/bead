@@ -97,6 +97,35 @@ export interface IGauges<Handle extends string = string> {
 }
 
 /**
+ * A client's TLS outside a page, as its application names it (spec 15.39): the authorities it
+ * judges its server by, and the certificate it presents with its key. Each is PEM text (RFC 7468),
+ * a file read as UTF-8. One with no member given is none. A client refuses with a
+ * {@link ProgrammerError}, as it is built, a certificate without its key, a key without its
+ * certificate, a key of another certificate, an encrypted key, and a member that reads as none. A
+ * direct transport's client uses it on a connect over TLS alone, and holds it in the clear. A
+ * broker's adapter refuses it over a URL that is not TLS.
+ */
+export interface ITlsOptions {
+  /**
+   * One or more `CERTIFICATE` blocks: the trust anchors its server's certificate chains to (RFC
+   * 5280 §6.1.1), in place of the platform's roots, never added to them. Given none, the
+   * platform's roots judge its server.
+   */
+  authorities?: string | undefined;
+  /**
+   * Its certificate first, then the intermediates that certify it, each certifying the one before
+   * (RFC 8446 §4.4.2): presented when its server asks for one at the handshake. Given with its
+   * `key` alone.
+   */
+  certificate?: string | undefined;
+  /**
+   * Its certificate's private key, unencrypted: PKCS #8 (`PRIVATE KEY`), SEC1 (`EC PRIVATE KEY`) or
+   * PKCS #1 (`RSA PRIVATE KEY`). An encrypted one is refused, and no passphrase is taken.
+   */
+  key?: string | undefined;
+}
+
+/**
  * What a transport carries, both ways: an envelope, and the credential it carried beside it (spec
  * 15.1). Over HTTP, it is the `Authorization` field of the `POST /bead` that carries a request, as it
  * came, its surrounding whitespace removed; in memory, what its client handed with a request; a

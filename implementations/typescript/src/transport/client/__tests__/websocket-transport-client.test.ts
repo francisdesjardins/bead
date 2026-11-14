@@ -56,12 +56,15 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type IWebSocketTransportClientConnectOptions,
+  type IWebSocketTransportClientOptions,
   type WebSocketTransportClient,
 } from '../websocket-transport-client';
+import type { TransportServerConnectionHandle } from '../../server/types';
 import { createWebSocketTransportServer } from '../../server/websocket-transport-server';
 import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
+import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
@@ -3470,4 +3473,161 @@ test('rejects with a ready state error on a closed connection', async () => {
     await stopServer(server);
     await allClosed();
   }
+});
+
+// spec 15.39: a client's TLS over ws's WebSocket, against a front over the spec's test PKI that pipes
+// to a plain transport server
+test.describe('createWebSocketTransportClient, a client certificate', () => {
+  const TLS = Object.freeze({
+    authorities: PKI.root,
+    certificate: PKI.clientChain,
+    key: PKI.clientKey,
+  });
+  // ws's WebSocket, its sockets tracked so that each test ends with them closed
+  const [, [, TRACKED_WS]] = IMPLEMENTATIONS;
+
+  /** A plain transport server on the loopback, and what closes it. */
+  const startPlain = async () => {
+    const server = createWebSocketTransportServer({ WebSocketServer });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+
+    return {
+      port,
+      server,
+      [Symbol.asyncDispose]: async () => {
+        await server.stop();
+        await allClosed();
+      },
+    };
+  };
+
+  /** A client over ws's WebSocket, given `tls`. */
+  const clientOf = (tls: IWebSocketTransportClientOptions['tls']) => {
+    return createWebSocketTransportClient({
+      tls,
+      WebSocket: TRACKED_WS as unknown as IWebSocketConstructor,
+    });
+  };
+
+  /** Connects `client` to `port`, sends a message each way, and disconnects. */
+  const exchangeOver = async (
+    client: WebSocketTransportClient,
+    {
+      port,
+      secured,
+      server,
+    }: { port: number; secured: boolean; server: Awaited<ReturnType<typeof startPlain>>['server'] }
+  ) => {
+    const received = new Promise<Data>((resolve) => {
+      server.once('message', ({ data }) => {
+        resolve(data);
+      });
+    });
+
+    await client.connect({ host, port, secured });
+    await client.send({ data: Buffer.from('hello') });
+    expect(Buffer.from((await received) as Uint8Array)).toEqual(Buffer.from('hello'));
+
+    const heard = nextEvent(client, 'message');
+    const handle = server.clients[0]?.connectionHandle as TransportServerConnectionHandle;
+
+    expect(handle).toBeDefined();
+    await server.send({ data: Buffer.from('again') }, handle);
+    expect(Buffer.from((await heard)[0].data as ArrayBuffer)).toEqual(Buffer.from('again'));
+    await client.disconnect();
+  };
+
+  /** What a connect through `port` under TLS rejected with. */
+  const refusedOf = async (client: WebSocketTransportClient, port: number) => {
+    return client.connect({ host, port, secured: true }).then(
+      () => {
+        return 'connected';
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+  };
+
+  // spec 15.39
+  test('connects presenting a client certificate under an intermediate to a server that requires one, trusting the server by the authorities it is given, over TLS 1.2 and TLS 1.3', async () => {
+    await using plain = await startPlain();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(plain.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+      const client = clientOf(TLS);
+
+      await exchangeOver(client, { port: front.port, secured: true, server: plain.server });
+      expect(client.isSecure).toBe(true);
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect presenting a client certificate its server does not trust, or none, over TLS 1.2 and TLS 1.3', async () => {
+    await using plain = await startPlain();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(plain.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+
+      for (const tls of [
+        { ...TLS, certificate: PKI.strangerClient, key: PKI.strangerClientKey },
+        { authorities: PKI.root },
+      ]) {
+        const client = clientOf(tls);
+
+        expect(await refusedOf(client, front.port)).toBeInstanceOf(ConnectError);
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect to a server under no authority it trusts, given or of its platform', async () => {
+    await using plain = await startPlain();
+
+    for (const [serves, tls] of [
+      ['stranger', TLS],
+      ['server', { certificate: PKI.clientChain, key: PKI.clientKey }],
+    ] as const) {
+      await using front = await createTlsFront(plain.port, { serves });
+
+      expect(await refusedOf(clientOf(tls), front.port)).toBeInstanceOf(ConnectError);
+    }
+  });
+
+  // spec 15.39
+  test('connects in the clear with tls given, which a secured connect alone uses', async () => {
+    await using plain = await startPlain();
+
+    await exchangeOver(clientOf(TLS), { port: plain.port, secured: false, server: plain.server });
+  });
+
+  // spec 15.39
+  test('refuses tls beside what it is given that keeps a TLS of its own', () => {
+    const refusal = new ProgrammerError(
+      "tls is refused beside a WebSocket without ws's shape, which keeps a TLS of its own"
+    );
+
+    // Node's global WebSocket, the default, and one shaped as a page's
+    expect(() => {
+      return createWebSocketTransportClient({ tls: TLS });
+    }).toThrow(refusal);
+    expect(() => {
+      return createWebSocketTransportClient({
+        tls: TLS,
+        WebSocket: createFakeWebSocket().FakeWebSocket,
+      });
+    }).toThrow(refusal);
+
+    // a tls of no member is none, and stands beside it
+    expect(() => {
+      return createWebSocketTransportClient({ tls: {} });
+    }).not.toThrow();
+  });
 });
