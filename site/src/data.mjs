@@ -849,6 +849,8 @@ export const PARTS = Object.freeze([
 // and tells of its refusals, its policy, beadc's outputs and each side's public surface
 export const OFF_THE_PAGE = Object.freeze([
   'A `Retry-After` on a refused upgrade or exchange, which a client may wait for',
+  'A client certificate and the authorities trusted over WebSocket (`tls`)',
+  'A client certificate and the authorities trusted over HTTP (`tls`)',
   "A server's tell of each refusal it judges of its own, and a client naming the one it reads",
   "An access a server refuses, told: its stage, its code, its reason, what was called, the connection and the request's address and port, never the credential",
   "A request's field values in visible ASCII, spaces and tabs, none at either end of a value, 400 unmarked or a stream reset otherwise",

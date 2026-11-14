@@ -40,6 +40,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   glance".
 - The fuzz target `mqtt-websocket-frames` and its seeded mutations, over the Rust side's reader of
   an MQTT 5 WebSocket's frames (decision 0050).
+- A TLS client certificate and the authorities a client trusts, `tls`, on every side's WebSocket
+  and HTTP transport clients, outside a page; the C# WebSocket client's `Handler`; `spec/pki`, one
+  PKI every side's tests read, its keys held to `spec/` and the tests by `spec/check.py`; undici,
+  an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
+  a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
+  0053).
 
 ### Changed
 
@@ -53,11 +59,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
   Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway (decision 0044); three more rows of the matrix's differences name where the sides
-  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
-  its connection open, and a password beside TLS that trusts an authority with no client
-  certificate; and an MQTT 5 acknowledgement no request awaits is named in the cells of its two
-  rows (decisions 0041, 0050).
+  with its gateway (decision 0044); two more rows of the matrix's differences name where the sides
+  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, and a DISCONNECT from a broker that
+  keeps its connection open; and an MQTT 5 acknowledgement no request awaits is named in the cells
+  of its two rows (decisions 0041, 0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
   by its build: each row of the matrix's Features and Transports in one part of the table or listed
   as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
@@ -115,6 +120,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side keeps its own under a longer one; the C# side loses its link once a PINGREQ
   under a shorter one has no PINGRESP. The matrix's row of a Server Keep Alive of 0, or longer
   than a side's own, closes (decision 0041).
+- **Breaking:** the broker adapters' `tls` is the same type on every side, `ITlsOptions` and
+  `TlsOptions`, its members `authorities`, `certificate` and `key`, PEM text: the TypeScript
+  side's `ca` and `cert` are renamed, and its members take a `string` alone; a password is taken
+  beside a `tls` that names authorities alone, on every side, and a `tls` over a URL that is not
+  TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
+  client's `client_config`, and its MQTT 5 adapter takes none (decision 0053).
+
+### Removed
+
+- **Breaking:** C#'s `MqttBrokerTlsOptions` and `AmqpBrokerTlsOptions`, whose adapters take
+  `TlsOptions` (decision 0053).
 
 ### Fixed
 

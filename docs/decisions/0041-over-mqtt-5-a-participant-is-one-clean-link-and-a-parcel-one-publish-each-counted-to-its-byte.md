@@ -95,7 +95,8 @@ by one participant alone. Its handles' type is `MQTT`.
 Expiry 0, the participant's id its Client Identifier, authenticated by a User Name and a Password,
 given or asked of its provider anew at each link's start
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
-or by a TLS client certificate its broker ties to the id, never both, a User Name alone where it is
+or by a TLS client certificate its broker ties to the id, its `tls` of
+[0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)'s type, never both, a User Name alone where it is
 given neither; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its
 `maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its `keepAlive`,
 30 s by default and never 0, so that, where its CONNACK names no Server Keep Alive, its will comes
@@ -276,8 +277,9 @@ and runs its loop on its own period all the same, so its own Keep Alive under 0 
 one is that loop's. A bump of MQTTnet that applies the value it works out fails the twin that holds
 the longer case.
 
-**A page chooses no TLS client certificate**, its browser does: the TypeScript adapter refuses one
-there, naming why, and a link from a page authenticates by a password, a row of "Differences" in
+**A page chooses no TLS client certificate**, its browser does: the TypeScript adapter refuses a
+`tls` there, naming why, as every client of the TypeScript side does
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), and a link from a page authenticates by a password, a row of "Differences" in
 [`docs/support.md`](../support.md).
 
 **A stop costs one UNSUBSCRIBE a subscription**, a departure a peer among them: its names' in its

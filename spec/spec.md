@@ -96,7 +96,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14;
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
-  router, sections 15.2 and 15.12.
+  router, sections 15.2 and 15.12;
+- [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
+  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
 
 **Version: 0.14.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -2498,6 +2500,30 @@ connection that held it: at once on a close or a reset, and after three of its h
 close for a connection gone silent, which is how long an inbox outlives a process that held it, a
 parcel to it taken meanwhile, and how long its id's next link is refused. A broker that writes what
 it holds to disk may keep at rest, for its life, a credential a DATA carries (section 15.22).
+
+### A client's TLS
+
+15.39. A client that connects over TLS — `wss`, `https`, a broker's link under TLS — takes from its
+application, outside a page, the authorities it judges its server by and a certificate with its key,
+each as PEM text ([RFC 7468](https://www.rfc-editor.org/rfc/rfc7468)). The authorities are its trust
+anchors, in place of its platform's roots and never added to them
+([RFC 5280 §6.1.1](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.1)); given none, its
+platform's roots and verifier judge its server. It presents its certificate when its server asks for
+one at the handshake ([RFC 8446 §4.3.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.3.2),
+[§4.4.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2)), the certificate first, then the
+intermediates that certify it, each certifying the one before. Its key is PKCS #8, SEC1 or PKCS #1,
+unencrypted. As it is built, a client refuses a certificate without its key, a key without its
+certificate or of another certificate, an encrypted key, and authorities, a certificate or a key that
+read as none. A handshake its server refuses fails the connect, under TLS 1.3 even once its first
+request was written ([RFC 8446 §4.4.2.4](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2.4)),
+and over HTTP never as a connection drawn and then lost; it names no status and no refusal, since a
+TLS alert is no answer of its server's (section 15.6). A certificate authenticates its client to what
+terminates TLS, never a request, whose credential its server's router alone reads (section 13.4),
+and it is no bearer credential: a client of a transport holds it in the clear and uses it on a
+connect over TLS alone, while a broker's adapter, whose URL and TLS are one, refuses it as it is
+built over a URL that is not TLS. A link's password is refused beside its certificate, and taken
+beside authorities alone (sections 15.26, 15.33). A page's TLS is its browser's, and its client
+takes none.
 
 ## 16. Services and procedures
 

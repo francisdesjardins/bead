@@ -189,13 +189,14 @@ adapter's password take, which the other sides write in place.
 
 `MqttBrokerAdapterOptions::new(url, id)` is `#[non_exhaustive]`, not `Copy`, with no `Default`, its
 two required settings its constructor's, every other field a public `Option`: `password`,
-`password_provider`, `tls` (an `Arc<rustls::ClientConfig>`), `maximum_packet_size`, `keep_alive`,
+`password_provider`, `tls` (a `TlsOptions`,
+[0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), `maximum_packet_size`, `keep_alive`,
 `connect_timeout`, `delivery`, `groups`, `clock` and `runtime`. `AmqpBrokerAdapterOptions::new(url,
 id)` takes `maximum_message_size`, `link_credit`, `idle_timeout` and `virtual_host` in place of the
 MQTT-only three, as the C# side's options hold them. `MqttBrokerAdapter::new(&options)` gives
 `Result<Self, ProgrammerError>`, refusing as built what the other sides refuse as built: a password
-and a provider both, either beside a client certificate, read as the TLS configuration's
-`client_auth_cert_resolver.has_certs()`, and the ranges. Each adapter implements `BrokerAdapter`,
+and a provider both, either beside a `tls` that names a `certificate`, and the ranges; it takes no
+`ClientConfig` of the application's. Each adapter implements `BrokerAdapter`,
 with `is_linked()` and `unsettled()` its own.
 
 ### MQTT 5: a client of Bead's own, over the core's sockets

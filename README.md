@@ -171,6 +171,7 @@ envelopes.
 spec/                         spec.md, debugging.md, transcoding.md, the conformance files every side reads, and check.py
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
+  pki/                        the test PKI every side's TLS tests read, and make.sh, which writes it
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
@@ -231,8 +232,9 @@ procedures, each under a version of its own. Beside them:
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
 | [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                                                                               |
 
-Every implementation reads these files from `spec/` in its tests; none keeps a copy. Eleven
-generators write them, and regenerating must give the same bytes:
+Every implementation reads these files from `spec/` in its tests; none keeps a copy, nor of
+`spec/pki/`, the test PKI its TLS tests read, whose keys `spec/check.py` holds to `spec/` and the
+tests. Eleven generators write the files, and regenerating must give the same bytes:
 
 ```sh
 python spec/generators/make_vectors.py
