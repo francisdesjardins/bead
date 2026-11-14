@@ -220,14 +220,6 @@ SIDES = {
 # the side plays fails, so the table only shrinks
 AHEAD = {
     'Rust': {
-        # the gateway's ways of 15.12's places, ahead with the gateway
-        "Rust's gateway": {
-            'files': ('transcoding',),
-            'documents': ('transcoding',),
-            'places': ('gateway',),
-            'ways': (('httpTransportServer.sendGracePeriod', 'gateway'), ('httpTransportServer.headersTimeout', 'gateway'),
-                     ('httpTransportServer.bodyGracePeriod', 'gateway')),
-        },
         "Rust's AMQP 1.0 binding": {
             'transports': ('amqp',),
             'groups': ('amqpMessages', 'amqpPublishBounds'),

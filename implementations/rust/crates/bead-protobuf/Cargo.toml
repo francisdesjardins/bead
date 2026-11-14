@@ -43,9 +43,14 @@ bead-protobuf-build = { workspace = true, optional = true }
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead_protobuf for the unit tests and the players
 bead-protobuf = { workspace = true, features = ["testing", "transcoding"] }
-bead = { workspace = true, features = ["testing", "transcoding"] }
+bead = { workspace = true, features = ["testing", "transcoding", "gateway"] }
+# beadc's table of spec/transcoding.proto's Transcoding service and its resolvers, which the
+# exchanges of spec/transcoding.json call through a gateway (decision 0052)
+bead-interop = { workspace = true, features = ["transcoding"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
+# a document's entity tag, as the exchanges expect it
+sha2 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 # spec/codecs.json's proto entries, a trial each, named by the entry's own name
@@ -55,6 +60,14 @@ harness = false
 
 [[test]]
 name = "service"
+
+# spec/transcoding.json, a trial each entry, named `<group>: <name>`: its readings, writings and
+# bindings through JsonForm, its templates, failures and events through the core's, and its
+# exchanges through a gateway on its own listener over beadc's table
+[[test]]
+name = "transcoding"
+harness = false
+required-features = ["transcoding"]
 
 # spec/validations.json's verdicts, a trial each, named by the verdict's own name, judged by the
 # validators beadc generates for spec/validations.proto into tests/generated

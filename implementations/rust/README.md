@@ -286,7 +286,10 @@ one the other sides hold by the same sentence, is named by it in snake case, the
 holds in a comment just above it, `// spec 15.13`, which `spec/check.py` reads. The conformance
 players are in `crates/bead/tests/`, one file a conformance file, a trial per entry named by the
 entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.json` are played in
-`crates/bead-protobuf/tests/codecs.rs`, the same way, through both codecs.
+`crates/bead-protobuf/tests/codecs.rs`, the same way, through both codecs, and
+`spec/transcoding.json` in `crates/bead-protobuf/tests/transcoding.rs`, its exchanges through a
+gateway on its own listener over a real socket, but the one its `differs` excuses the side from.
+The gateway's and the caller's twins are `crates/bead/tests/gateway.rs` and `tests/caller.rs`.
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory
@@ -336,8 +339,9 @@ generator every side shares; `mqtt_packets_fuzz.rs` feeds the MQTT 5 packets' re
 mutations of its own packets, and `mqtt_websocket_frames_fuzz.rs` the WebSocket's frame reader
 seeded mutations of its own frames. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
 processes, from its release build: the envelope's codec, a request written and read back, calls on
-one in-memory connection kept, and exchanges, each a client and its connection drawn, called once
-and closed; [`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on
-every push to a release or hotfix branch. `cargo run --release --locked --manifest-path
-benches/Cargo.toml -- --scale` measures instead a message's cost through a router alone and through
-a `Server`, each holding 1, 1,000 and 10,000 connections, and fails unless it holds flat.
+one in-memory connection kept, exchanges, each a client and its connection drawn, called once and
+closed, and protobuf's JSON read and written by Bead's mapping beside Buffa's own;
+[`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on every push
+to a release or hotfix branch. `cargo run --release --locked --manifest-path benches/Cargo.toml --
+--scale` measures instead a message's cost through a router alone and through a `Server`, each
+holding 1, 1,000 and 10,000 connections, and fails unless it holds flat.

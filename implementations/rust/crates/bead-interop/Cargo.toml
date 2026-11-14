@@ -14,12 +14,28 @@ publish.workspace = true
 [lib]
 name = "bead_interop"
 
+[features]
+# the Transcoding service of spec/transcoding.proto, beadc's Rust output of it with its gateway, and
+# its resolvers: what the core's gateway and caller tests and bead-protobuf's play of
+# spec/transcoding.json call (decision 0052)
+transcoding = [
+  "bead/gateway",
+  "bead-protobuf/transcoding",
+  "dep:buffa",
+  "dep:buffa-descriptor",
+  "dep:buffa-types",
+]
+
 [dependencies]
 bead = { workspace = true }
 # the validators' runtime `checked`'s rules judge through
 bead-protobuf = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 serde_json = { workspace = true }
+# the transcoding fixture's messages, Buffa's, at the version beadc's code is for
+buffa = { workspace = true, optional = true }
+buffa-descriptor = { workspace = true, optional = true }
+buffa-types = { workspace = true, optional = true }
 
 [dev-dependencies]
 bead = { workspace = true, features = ["testing"] }

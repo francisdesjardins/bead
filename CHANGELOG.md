@@ -21,6 +21,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
   generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
   `spec/validations.json`'s verdicts (decisions 0035, 0051).
+- The Rust side's HTTP/JSON gateway, the features `transcoding` and `gateway` of its core, and
+  protobuf's JSON mapping, the feature `transcoding` of `bead-protobuf`: `HttpGateway` on its own
+  listener or mounted by `answer`, `HttpCaller`, `JsonForm` and `HttpBinding`; beadc's Rust target
+  writes an output's `bead_http.rs`, its routes, its document and each service's HTTP client, and
+  `examples/hello`'s Rust half serves a gateway; it plays `spec/transcoding.json` but the exchange
+  of a `#`, its places of `spec/durations.json`, protobuf's conformance suite's JSON through Bead's
+  mapping, and the interop runs both ways over its gateway (decision 0052).
 - A gateway's `limits`, its exchanges' clients' router limits, on the C# side as on the TypeScript
   side (decision 0052).
 - Guides for teams that adopt Bead outside its repository, in `docs/guides/`: getting started, from

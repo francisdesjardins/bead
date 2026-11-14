@@ -1099,6 +1099,12 @@ public sealed class HttpGatewayTests
 
             Assert.Equal((400, "application/problem+json"), (untouched.Status, untouched.Fields.GetValueOrDefault("content-type")));
 
+            // * a chunked body that came empty, untouched, read as the empty body: only a body its
+            // server tells begun is taken
+            var chunked = await Exchanged(port, EchoOctetsOf(port, (["transfer-encoding: chunked", "connection: close"], "0\r\n\r\n")));
+
+            Assert.Equal((untouched.Status, null, untouched.Body), (chunked.Status, chunked.Fields.GetValueOrDefault("bead-refusal"), chunked.Body));
+
             foreach (var reader in new[] { "taken", "peek", "examine" })
             {
                 var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], "")));
