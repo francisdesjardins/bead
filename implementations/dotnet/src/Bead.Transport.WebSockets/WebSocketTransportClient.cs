@@ -42,10 +42,28 @@ public sealed record WebSocketTransportClientOptions
 
     /// <summary>
     /// What sends its opening handshakes, one of its own when none, which races the address families
-    /// of a name (RFC 8305): the tests' way to open a socket from an address and a port of their own,
-    /// as the TypeScript side's tests give their <c>WebSocket</c>.
+    /// of a name (RFC 8305) and follows no redirect. One given keeps its own behaviour, held by the
+    /// client and never disposed by it, and follows no redirect: an <see cref="HttpClientHandler"/>
+    /// or a <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s
+    /// given, whose <c>AllowAutoRedirect</c> is true is refused as the client is built, an
+    /// <see cref="ArgumentException"/>. The tests' way to open a socket from an address and a port
+    /// of their own, as the TypeScript side's tests give their <c>WebSocket</c>, and the way to the
+    /// platform's own TLS: one given keeps its own, and a <see cref="Tls"/> beside it is refused as
+    /// the client is built.
     /// </summary>
-    internal HttpMessageInvoker? Invoker { get; init; }
+    public HttpMessageHandler? Handler { get; init; }
+
+    /// <summary>
+    /// Its TLS (spec 15.39): the authorities it judges its server by, in place of the platform's
+    /// roots, and the certificate it presents with its key where its server asks for one at the
+    /// handshake. Held in the clear, and used on a connect over <c>wss</c> alone, through a handler
+    /// of its own, disposed with the client. Refused as the client is built, an
+    /// <see cref="ArgumentException"/>, beside a <see cref="Handler"/>, which keeps a TLS of its
+    /// own, and as <see cref="TlsOptions"/> says. A handshake its server refuses fails the connect,
+    /// the platform's error its cause, under TLS 1.3 even once its upgrade was written. None when
+    /// none.
+    /// </summary>
+    public TlsOptions? Tls { get; init; }
 }
 
 /// <summary>
@@ -123,10 +141,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 {
     // constants
 
-    // what sends every client's opening handshake: the platform's handler for a socket with no
-    // proxy, cookie, credential or certificate of its own, as a ClientWebSocket builds it, but for
-    // its connect, which races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows.
+    // what sends the opening handshake of every client given neither a handler nor a TLS: the
+    // platform's handler for a socket with no proxy, cookie, credential or certificate of its own,
+    // as a ClientWebSocket builds it, but for its connect, which races the address families of a
+    // name, as RFC 8305 asks, where the platform's tries each address in turn and waits out a
+    // family's refusal, two seconds on Windows. A client under its own TLS sends its handshakes
+    // through a handler of these settings, and of its TLS.
     // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
     // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
     // credential and its security were never judged
@@ -140,6 +160,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     private readonly WebSocketTransportClientOptions _options;
     private readonly TimeProvider _clock;
+    // what sends its handshakes through the handler it was given, which it never disposes
+    private readonly HttpMessageInvoker? _handed;
+    // what sends them under its own TLS, built as a connect needs it and let go of at its dispose,
+    // with what that TLS holds, its key among it
+    private HttpMessageInvoker? _own;
+    private TlsCredentials? _ownTls;
     // what every move from one state to another decides by
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
@@ -166,18 +192,30 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     /// <summary>
     /// A transport client, not yet connected, its heartbeat and close timeout held: one no timer
-    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>. A handler given that would follow a
+    /// redirect is an <see cref="ArgumentException"/> naming <c>AllowAutoRedirect</c>; a
+    /// <see cref="WebSocketTransportClientOptions.Tls"/> beside a handler, or one its rules refuse,
+    /// an <see cref="ArgumentException"/> too (spec 15.39).
     /// </summary>
     public WebSocketTransportClient(WebSocketTransportClientOptions? options = null)
     {
         var given = options ?? new WebSocketTransportClientOptions();
 
+        HttpRedirects.AssertHandler(given.Handler, nameof(options));
+
+        if (given.Handler is not null && Bead.Tls.IsGiven(given.Tls))
+        {
+            throw new ArgumentException("tls is refused beside a Handler, which keeps a TLS of its own", nameof(options));
+        }
+
         _options = given with
         {
+            Tls = Bead.Tls.Assert(given.Tls, nameof(options)),
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportClientOptions.Heartbeat)),
             CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportClientOptions.CloseTimeout)),
         };
         _clock = _options.Clock ?? TimeProvider.System;
+        _handed = _options.Handler is { } handler ? new HttpMessageInvoker(handler, disposeHandler: false) : null;
         _listeners = new ListenerGuard((reason, _) =>
         {
             ListenerGuard.TellError(Error, reason);
@@ -593,12 +631,59 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         Drop();
 
-        if (wasOpen)
+        HttpMessageInvoker? own;
+        TlsCredentials? tls;
+
+        lock (_gate)
         {
-            lock (_gate)
+            if (wasOpen)
             {
                 _readyState = ReadyState.Closed;
             }
+
+            // * its own TLS let go of, which a next connect builds anew, but under a reconnection
+            // that goes on, as the HTTP client keeps its own
+            own = _readyState == ReadyState.Reconnecting ? null : _own;
+            tls = own is null ? null : _ownTls;
+            _own = own is null ? _own : null;
+            _ownTls = own is null ? _ownTls : null;
+        }
+
+        own?.Dispose();
+        tls?.Dispose();
+    }
+
+    // what sends a handshake: the handler given, its own under its TLS, or what every client shares
+    // ! ClientWebSocket's ClientCertificates and RemoteCertificateValidationCallback are never set:
+    // each throws beside an invoker
+    private HttpMessageInvoker InvokerOf()
+    {
+        if (_handed is not null)
+        {
+            return _handed;
+        }
+
+        if (_options.Tls is not { } given)
+        {
+            return Racing;
+        }
+
+        lock (_gate)
+        {
+            if (_own is null)
+            {
+                _ownTls = Bead.Tls.CredentialsOf(given);
+                _own = new HttpMessageInvoker(new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    ConnectCallback = HappyEyeballs.ConnectCallback,
+                    PooledConnectionLifetime = TimeSpan.Zero,
+                    SslOptions = _ownTls.SslOptions(),
+                    UseCookies = false,
+                });
+            }
+
+            return _own;
         }
     }
 
@@ -850,7 +935,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 linked.Token.ThrowIfCancellationRequested();
-                var opening = socket.ConnectAsync(UriOf(options), _options.Invoker ?? Racing, linked.Token);
+                var opening = socket.ConnectAsync(UriOf(options), InvokerOf(), linked.Token);
                 _ = opening.ContinueWith((completed) => { _ = completed.Exception; }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 await opening.WaitAsync(linked.Token);
             }

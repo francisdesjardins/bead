@@ -3,7 +3,8 @@
 //! result read by Bead's JSON mapping or its native encoding, a problem read as the failure it
 //! stands for, and a stream read as its result, then its notifications, then the failure that ends
 //! it. Over the HTTP transport client's own connector (decision 0049): its addresses raced (RFC
-//! 8305), its TLS the platform's verifier's; no redirect followed, no cookie kept.
+//! 8305), its TLS its `client_config`, or the platform's verifier's when it is given none; no
+//! redirect followed, no cookie kept.
 
 use core::fmt;
 use core::num::NonZeroU16;
@@ -38,6 +39,7 @@ use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::listening::unless_cancelled;
 use crate::net::racing::RacingOptions;
+use crate::net::tls::ClientTls;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::platform::{self, Handle};
 use crate::router::types::BoxFuture;
@@ -73,9 +75,10 @@ pub struct HttpCallerOptions {
     /// The bytes a result's body, a problem's or one event of a stream holds at most, past which
     /// its call fails `PAYLOAD_TOO_LARGE`: a gateway's own bound, 16,778,240, when none.
     pub maximum_body_bytes: Option<u64>,
-    /// The TLS an `https` gateway is called over, a copy of which offers HTTP/1.1 alone by ALPN:
-    /// rustls's over aws-lc-rs, the platform's verifier judging its gateway, when none.
-    pub tls: Option<Arc<ClientConfig>>,
+    /// The TLS an `https` gateway is called over, the application's own, a copy of which offers
+    /// HTTP/1.1 alone by ALPN: rustls's over aws-lc-rs, the platform's verifier judging its gateway,
+    /// when none.
+    pub client_config: Option<Arc<ClientConfig>>,
     /// The tokio runtime its calls run on, its time and IO drivers enabled: the current one when
     /// none.
     pub runtime: Option<Handle>,
@@ -294,7 +297,13 @@ impl HttpCaller {
         )?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP caller")?;
         let clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
-        let connector = Connector::new(options.tls.clone(), &RacingOptions::on(clock));
+        let tls = options
+            .client_config
+            .as_ref()
+            .map_or_else(ClientTls::default, |config| {
+                ClientTls::Given(Arc::clone(config))
+            });
+        let connector = Connector::new(tls, &RacingOptions::on(clock));
         // * HTTP/1.1, a pooled connection let go once idle on Bead's timer, its executor Bead's;
         // hyper follows no redirect and keeps no cookie
         let client = Client::builder(Spawner::on(runtime.clone()))

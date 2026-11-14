@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Authentication;
 using System.Text;
 using System.Threading.Channels;
 using Bead.Tests;
@@ -4151,5 +4152,128 @@ public sealed class HttpTransportClientTests
 
         Assert.IsType<HttpRequestException>(thrown.InnerException);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
+    }
+
+    // a client under the TLS given, to `port`, the front's or the plain server's, which hears one
+    // envelope each way with that server: a request, and its result in the answer to its POST
+    private static async Task OneEachWay((HttpTransportClient Client, Started Started) connected, (int Port, bool IsSecured) target)
+    {
+        var (client, started) = connected;
+        var requests = Channel.CreateUnbounded<TransportMessage>();
+        var results = Channel.CreateUnbounded<TransportMessage>();
+
+        started.Server.Message += (message, connectionHandle) =>
+        {
+            requests.Writer.TryWrite(message);
+            _ = started.Server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, (1, 0)), false), connectionHandle);
+        };
+        client.Message += (message) =>
+        {
+            results.Writer.TryWrite(message);
+        };
+
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = target.Port, Secured = target.IsSecured, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(EnvelopeOf(EnvelopeKind.Request, (1, 0)), (await Next(requests)).Bytes.ToArray());
+        Assert.Equal(EnvelopeOf(EnvelopeKind.Result, (1, 0)), (await Next(results)).Bytes.ToArray());
+        Assert.True(client.IsSecure);
+        await client.CloseConnection().WaitAsync(Patience, Cancelled);
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Connects_presenting_a_client_certificate_under_an_intermediate_to_a_server_that_requires_one_trusting_the_server_by_the_authorities_it_is_given_over_TLS_1_2_and_TLS_1_3()
+    {
+        foreach (var protocol in new[] { SslProtocols.Tls12, SslProtocols.Tls13 })
+        {
+            await using var started = await Started.Start();
+            await using var front = TlsFront.Start(started.Port, new TlsFrontOptions { Protocol = protocol });
+            await using var client = new HttpTransportClient(NotListening with { Tls = Pki.Client() });
+
+            await OneEachWay((client, started), (front.Port, true));
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Fails_its_connect_presenting_a_client_certificate_its_server_does_not_trust_or_none_over_TLS_1_2_and_TLS_1_3()
+    {
+        await using var started = await Started.Start();
+        var stranger = Pki.Client() with { Certificate = Pki.Read("stranger-client.pem"), Key = Pki.Read("stranger-client.key") };
+        var none = new TlsOptions { Authorities = Pki.Read("root.pem") };
+
+        foreach (var protocol in new[] { SslProtocols.Tls12, SslProtocols.Tls13 })
+        {
+            await using var front = TlsFront.Start(started.Port, new TlsFrontOptions { Protocol = protocol });
+
+            foreach (var tls in new[] { stranger, none })
+            {
+                await using var client = new HttpTransportClient(NotListening with { Tls = tls });
+
+                // * under TLS 1.3 its POST may already be written as its server's refusal comes, and
+                // its connect fails as a connect all the same
+                await Assert.ThrowsAnyAsync<Exception>(() =>
+                {
+                    return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+            }
+        }
+
+        // * no connection drawn, then lost: none reached its server
+        Assert.False(started.Connections.Reader.TryRead(out _));
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Fails_its_connect_to_a_server_under_no_authority_it_trusts_given_or_of_its_platform()
+    {
+        await using var started = await Started.Start();
+
+        foreach (var (serving, tls) in new[]
+        {
+            ("stranger-server", Pki.Client()),
+            ("server", Pki.Client() with { Authorities = null }),
+        })
+        {
+            await using var front = TlsFront.Start(started.Port, new TlsFrontOptions { Serving = serving });
+            await using var client = new HttpTransportClient(NotListening with { Tls = tls });
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+            {
+                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Connects_in_the_clear_with_tls_given_which_a_secured_connect_alone_uses()
+    {
+        await using var started = await Started.Start();
+        await using var client = new HttpTransportClient(NotListening with { Tls = Pki.Client() });
+
+        // * to a host on the loopback, which is secure in the clear (spec 13.4)
+        await OneEachWay((client, started), (started.Port, false));
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Refuses_tls_beside_what_it_is_given_that_keeps_a_TLS_of_its_own()
+    {
+        using var handler = new SocketsHttpHandler { AllowAutoRedirect = false };
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportClient(new HttpTransportClientOptions { Handler = handler, Tls = Pki.Client() });
+        });
+
+        Assert.Equal(("options", "tls is refused beside a Handler, which keeps a TLS of its own"), (refusal.ParamName, refusal.Message.Split(" (Parameter", 2)[0]));
+
+        // * a tls of no member is none, taken beside it
+        await using var taken = new HttpTransportClient(new HttpTransportClientOptions { Handler = handler, Tls = new TlsOptions() });
+
+        Assert.Equal(ReadyState.Uninitialized, taken.ReadyState);
     }
 }

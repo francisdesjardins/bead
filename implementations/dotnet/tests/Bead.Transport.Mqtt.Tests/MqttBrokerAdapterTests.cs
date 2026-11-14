@@ -42,7 +42,11 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     // the peers whose departures a stop lets go of
     private static readonly string[] Departed = ["amy", "bea", "cyd", "dot", "eve"];
 
-    // a self-signed certificate for 127.0.0.1, its server's and its client's alike
+    // a self-signed certificate for 127.0.0.1, its server's and its client's alike, as PEM text with
+    // its key's
+    private static readonly Lazy<(string Pem, string Key)> SelfSigned = new(SelfSignedOf);
+
+    // and as its server serves it
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
 
     private MqttScript _script = null!;
@@ -69,7 +73,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await _script.DisposeAsync();
     }
 
-    private static X509Certificate2 CertificateOf()
+    private static (string Pem, string Key) SelfSignedOf()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256);
@@ -82,8 +86,21 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
+        return (made.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem());
+    }
+
+    private static X509Certificate2 CertificateOf()
+    {
+        using var made = X509Certificate2.CreateFromPem(SelfSigned.Value.Pem, SelfSigned.Value.Key);
+
         // imported again, so SslStream can use its key on Windows
         return X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+    }
+
+    // the self-signed certificate as its client presents it, with its key, trusting it where told
+    private static TlsOptions CertifiedOf(bool isTrusting)
+    {
+        return new TlsOptions { Authorities = isTrusting ? SelfSigned.Value.Pem : null, Certificate = SelfSigned.Value.Pem, Key = SelfSigned.Value.Key };
     }
 
     // an adapter of the id to the script, its password unless told
@@ -344,7 +361,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             await using var certified = new MqttBrokerAdapter(new MqttBrokerAdapterOptions
             {
                 Id = Id,
-                Tls = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value], TrustChain = [Certificate.Value] },
+                Tls = CertifiedOf(true),
                 Uri = secured.Uri,
             });
             var bare = (await LinkUp((certified, secured))).Connect;
@@ -353,11 +370,33 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             await certified.Stop();
         }
 
-        // a certificate in the clear is refused as it is built
-        Assert.StartsWith("a TLS client certificate is carried over mqtts or wss", Assert.Throws<ArgumentException>(() =>
+        // * under the authorities alone, its broker judged by them: its User Name and its Password
+        await using (var secured = MqttScript.Start(Certificate.Value))
         {
-            return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Tls = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value] }, Uri = _script.Uri });
-        }).Message, StringComparison.Ordinal);
+            secured.IsTakingNoCertificate = true;
+
+            await using var trusting = new MqttBrokerAdapter(new MqttBrokerAdapterOptions
+            {
+                Id = Id,
+                Password = Password,
+                Tls = new TlsOptions { Authorities = SelfSigned.Value.Pem },
+                Uri = secured.Uri,
+            });
+            var named = (await LinkUp((trusting, secured))).Connect;
+
+            Assert.Equal((Id, Password, true), (named.Username, Encoding.UTF8.GetString(named.Password), trusting.IsSecure));
+            await trusting.Stop();
+        }
+
+        // a certificate in the clear is refused as it is built, and so are authorities alone: its URL
+        // and its TLS are one record (spec 15.39)
+        foreach (var tls in new[] { CertifiedOf(false), new TlsOptions { Authorities = SelfSigned.Value.Pem } })
+        {
+            Assert.StartsWith($"a TLS client certificate is carried over mqtts or wss, not {_script.Uri.OriginalString}", Assert.Throws<ArgumentException>(() =>
+            {
+                return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Tls = tls, Uri = _script.Uri });
+            }).Message, StringComparison.Ordinal);
+        }
     }
 
 
@@ -500,7 +539,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await using var untrusting = new MqttBrokerAdapter(new MqttBrokerAdapterOptions
         {
             Id = Id,
-            Tls = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value] },
+            Tls = CertifiedOf(false),
             Uri = secured.Uri,
         });
 
@@ -2674,7 +2713,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     public async Task Refuses_a_password_beside_a_client_certificate_and_both_a_password_and_its_provider()
     {
         var secured = new Uri("mqtts://127.0.0.1:8883");
-        var certificate = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value] };
+        var certificate = CertifiedOf(false);
         Func<CancellationToken, ValueTask<string>> provider = (_) =>
         {
             return ValueTask.FromResult(Password);
@@ -2714,6 +2753,28 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal((Id, (byte[]?)null), (connect.Username, connect.Password));
         await bare.Stop();
+    }
+
+    // spec 15.39: built over mqtts, never started, so no broker is needed
+    [Fact]
+    public async Task Takes_a_password_beside_tls_that_names_authorities_alone()
+    {
+        Func<CancellationToken, ValueTask<string>> provider = (_) =>
+        {
+            return ValueTask.FromResult(Password);
+        };
+        var authorities = new TlsOptions { Authorities = SelfSigned.Value.Pem };
+
+        foreach (var options in new[]
+        {
+            new MqttBrokerAdapterOptions { Id = Id, Password = Password, Tls = authorities, Uri = new Uri("mqtts://127.0.0.1:8883") },
+            new MqttBrokerAdapterOptions { Id = Id, PasswordProvider = provider, Tls = authorities, Uri = new Uri("mqtts://127.0.0.1:8883") },
+        })
+        {
+            await using var adapter = new MqttBrokerAdapter(options);
+
+            Assert.True(adapter.IsSecure);
+        }
     }
 
     [Fact]

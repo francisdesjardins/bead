@@ -32,7 +32,7 @@ use crate::net::bounds::hold_count;
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
 use crate::net::dial::{ClientSocket, dial};
 use crate::net::racing::{RacingOptions, host_of};
-use crate::net::tls::http1_config_of;
+use crate::net::tls::{ClientTls, NO_TLS, TlsOptions, client_tls_of, http1_config_of};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
@@ -93,9 +93,14 @@ pub struct WebSocketTransportClientOptions {
     /// The largest message it reads, past which it fails its connection with 1009 (spec 15.3):
     /// [`MAXIMUM_MESSAGE_BYTES`] when none.
     pub maximum_message_bytes: Option<u64>,
-    /// The TLS a secured connect speaks, which a copy of offers HTTP/1.1 alone by ALPN: rustls's
-    /// over aws-lc-rs, the platform's verifier judging its server, when none.
-    pub tls: Option<Arc<ClientConfig>>,
+    /// The TLS a secured connect speaks, the application's own, which a copy of offers HTTP/1.1
+    /// alone by ALPN: of `tls` when none. Refused beside `tls`.
+    pub client_config: Option<Arc<ClientConfig>>,
+    /// The authorities a secured connect judges its server by and the certificate it presents when
+    /// its server asks for one (spec 15.39), read as it is built: rustls's over aws-lc-rs, the
+    /// platform's verifier judging its server, when none. Held in the clear, which a secured
+    /// connect alone uses.
+    pub tls: Option<TlsOptions>,
 }
 
 /// Where a client connects — `ws://host:port/pathname`, or `wss://` when secured — what it offers
@@ -187,7 +192,7 @@ struct Settings {
     close_timeout: Duration,
     heartbeat: Duration,
     maximum_message_bytes: u64,
-    tls: Option<Arc<ClientConfig>>,
+    tls: ClientTls,
 }
 
 // a timer armed, and its wait
@@ -266,7 +271,8 @@ struct Opened {
 /// It goes from [`ReadyState::Uninitialized`] through connecting and open to closing and closed,
 /// and connects again once closed. Its connect races the addresses of its host, its families
 /// interleaved, an attempt every 250 ms on the platform's clock (RFC 8305); under `wss`, speaks TLS
-/// on rustls, the platform's verifier judging its server; writes no `Origin`, offers no extension,
+/// on rustls, its server judged by the platform's verifier or by the authorities its `tls` names,
+/// its certificate presented where its server asks; writes no `Origin`, offers no extension,
 /// and writes its credential, or what its provider hands at each attempt, in its upgrade's
 /// `Authorization`, which it carries beside every envelope of that connection. It follows no
 /// redirect: an upgrade answered with anything but 101 fails its connect, named by its status and
@@ -426,7 +432,7 @@ impl ClientInner {
         }
     }
 
-    // the TLS a secured connect speaks: the one given, or the platform's, built once
+    // the TLS a secured connect speaks: the one given, of its `tls`, or the platform's, built once
     fn upgrade_tls(&self) -> Result<Arc<ClientConfig>, TransportError> {
         let mut held = locked(&self.upgrade_tls);
 
@@ -434,7 +440,7 @@ impl ClientInner {
             return Ok(Arc::clone(config));
         }
 
-        let config = http1_config_of(self.settings.tls.as_ref()).map_err(|refused| {
+        let config = http1_config_of(&self.settings.tls).map_err(|refused| {
             let message = refused.to_string();
 
             TransportError::Connect(ConnectError::caused(message, Arc::new(refused)))
@@ -868,7 +874,8 @@ impl WebSocketTransportClient {
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
-    /// IO driver; for a close timeout or a heartbeat spec 1.4 does not hold; a bound of 0.
+    /// IO driver; for a close timeout or a heartbeat spec 1.4 does not hold; a bound of 0; for a
+    /// `tls` beside a `client_config`, or one that does not read (spec 15.39).
     pub fn new(options: &WebSocketTransportClientOptions) -> Result<Self, ProgrammerError> {
         let runtime =
             platform::socket_runtime_of(options.runtime.as_ref(), "a WebSocket transport client")?;
@@ -899,6 +906,10 @@ impl WebSocketTransportClient {
             .clone()
             .unwrap_or_else(|| Arc::clone(&platform));
         let racing = RacingOptions::on(Arc::clone(&platform));
+        let tls = client_tls_of(
+            options.client_config.as_ref(),
+            options.tls.as_ref().unwrap_or(&NO_TLS),
+        )?;
 
         Ok(Self {
             inner: Arc::new_cyclic(|me| ClientInner {
@@ -911,7 +922,7 @@ impl WebSocketTransportClient {
                     close_timeout,
                     heartbeat,
                     maximum_message_bytes,
-                    tls: options.tls.clone(),
+                    tls,
                 },
                 racing,
                 upgrade_tls: Mutex::new(None),

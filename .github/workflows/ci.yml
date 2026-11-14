@@ -1209,7 +1209,10 @@ jobs:
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
       # job. ! The rules are the registry's, fetched at the run: a rule added there may fail a
-      # commit that changed nothing, which is read as a finding, never as a flake.
+      # commit that changed nothing, which is read as a finding, never as a flake. ! The six private
+      # keys of the test PKI are left out by name, each one alone, never their folder: they are
+      # published test keys, and spec/check.py's TEST_PKI_KEYS holds each file to its own key, so a
+      # key added there or changed fails that gate rather than passing this one unseen.
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
@@ -1217,6 +1220,9 @@ jobs:
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
+          --exclude spec/pki/root.key --exclude spec/pki/intermediate.key --exclude spec/pki/client.key
+          --exclude spec/pki/server.key --exclude spec/pki/stranger-client.key
+          --exclude spec/pki/stranger-server.key
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,

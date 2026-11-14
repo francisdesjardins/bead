@@ -1,4 +1,4 @@
-# alone: typescript 273, csharp 56, rust 77
+# alone: typescript 273, csharp 54, rust 77
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -313,6 +313,7 @@ SystemClockOptions	-	-	SystemClockOptions [record]	own: the platform's clock and
 TimeoutError	TimeoutError [record]	-	CallError::TimedOut [variant]	rendered: error (0007, 0044)
 Timer	-	-	Timer [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 TimerCallback	-	-	TimerCallback [function type]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+TlsOptions	ITlsOptions [record]	TlsOptions [record]	TlsOptions [record]	same
 TracedEnvelope	-	TracedEnvelope [record]	TracedEnvelope [record]	same
 TRANSPORT_BROKER	TRANSPORT_BROKER [constant]	-	TRANSPORT_BROKER [constant]	same
 TRANSPORT_MEMORY	TRANSPORT_MEMORY [constant]	-	TRANSPORT_MEMORY [constant]	same
@@ -354,7 +355,6 @@ wordsOf	wordsOf [function]	Violations.WordsOf [function]	words_of [function]	ren
 AdmissionRefusal	-	-	AdmissionRefusal [record]	alone
 AdmitFn	-	-	AdmitFn [function type]	alone
 AFTER_HEADER	AFTER_HEADER [constant]	-	-	alone
-AmqpBrokerTlsOptions	-	AmqpBrokerTlsOptions [record]	-	alone
 Announcement	Announcement [choice]	-	-	alone
 AnsweredName	AnsweredName [record]	-	-	alone
 Answerer	-	-	Answerer [record]	alone
@@ -571,7 +571,6 @@ MessageEventLike	IMessageEventLike [record]	-	-	alone
 MessageForm	-	-	MessageForm [record]	own: the seam where the core meets bead-protobuf's JSON form, as PayloadCodec joins them, where the other sides hold the form in one package (0052)
 MessageFormError	-	-	MessageFormError [choice]	own: a Result's error, where the other sides throw (0044)
 MessageRules	MessageRules [function type]	-	MessageRules [function type]	same
-MqttBrokerTlsOptions	-	MqttBrokerTlsOptions [record]	-	alone
 NoFailure	-	NoFailure [record]	-	alone
 NotificationCallback	-	-	NotificationCallback [function type]	alone
 NotificationCandidates	NotificationCandidates [record]	-	-	alone

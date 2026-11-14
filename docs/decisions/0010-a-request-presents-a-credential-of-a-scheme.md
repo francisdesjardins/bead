@@ -338,6 +338,13 @@ serves the network in the clear, believed whatever it listens on. A host is on t
 WHATWG URL Standard's host parser reads it, the one by which Secure Contexts judges an origin, on
 every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not.
 
+**A client certificate authenticates the TLS peer, and a credential the call.** A client's
+certificate authenticates it to whatever terminates TLS (RFC 8446 §4.3.2, §4.4.2), and the
+transport's credential authenticates the call to the router: two layers, which Bead binds neither
+to the other. A server judges no client certificate; what terminates TLS does. A server that takes
+its peer's certificate as an identity at admission is ahead, by a decision of its own
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)).
+
 ### Through a relay
 
 **A relay forwards a credential, and its destination verifies it** (spec 14.3, 14.7; the relay is

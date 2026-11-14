@@ -33,7 +33,7 @@ alone reads the file; tools/durations.tsv holds a place or a way ahead for a sid
 does, under its row, and the Rust harness's ahead_of AHEAD's ways of the places it plays; what a side does not play yet, AHEAD, each part a row of docs/support.md's
 differences, open, which its steps and stages delete as they land, never a part the side plays, each
 row of those differences holding as many cells as their header; and no file git lists outside spec/, the tests and the interop service names a
-published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
+published test key, nor a key of the test PKI, each of spec/pki/'s keys holding its own; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
 none and what it notifies where it notifies, and each code it names a failure of the blueprint's
@@ -264,6 +264,21 @@ TEST_KEYS = {
                                                'd': '870MB6gfuTJ4HtUnUvYMyJpr5eUZNP4Bk43bVdj3eAE'},
     "RFC 7520's 3.5, an HMAC key": {'kty': 'oct', 'k': 'hJtXIZ2uSN5kbQfbtTNWbpdmhkV8FJG-Onbc6mxCcYg'},
 }
+
+# the private keys of the test PKI every side's TLS tests read, spec/pki/, which spec/pki/make.sh
+# writes and anyone can read, as the JWT verdicts' keys (0053): each found by the first full line of
+# its PEM's base64 body, which holds the start of its own key, so that a renewed PKI moves its line here
+TEST_PKI_KEYS = {
+    'root': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYhJg/M9/jPZqaieY',
+    'intermediate': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbMbijo7CM1zkl3E2',
+    'client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYF7UZJYTe+M8KL0v',
+    'server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7cfM5+GqATyBpIPj',
+    'stranger-client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg36+eu9q4iP4r1DPb',
+    'stranger-server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZFytPd6/YcWSm3dy',
+}
+
+# the folder of the test PKI, its keys spec/pki/<name>.key
+PKI = os.path.join(SPEC, 'pki')
 
 # the files that may name a test key, by their path from the root: the conformance files, each side's
 # tests, and the interop service, whose credentials hold them
@@ -1554,6 +1569,35 @@ for path in tracked:
 for name in sorted(set(TEST_KEYS) - used):
     problems.append(f'neither {" nor ".join(KEYS_USED)} uses {name}: the test keys\' gate would match nothing of it')
 
+# the test PKI's keys stay in spec/ and the tests as the JWT verdicts' do, each key's file holding its
+# own line, read from the folder, so that a gate matching nothing fails before the key is committed
+pki_keys = sorted(name[:-len('.key')] for name in os.listdir(PKI) if name.endswith('.key')) if os.path.isdir(PKI) else []
+
+for name in sorted(set(pki_keys) ^ set(TEST_PKI_KEYS)):
+    problems.append(f'spec/pki/{name}.key is a key TEST_PKI_KEYS does not name: the gate holds every key of the test PKI'
+                    if name in pki_keys else f'TEST_PKI_KEYS names {name}, and spec/pki/{name}.key is missing')
+
+for name, line in TEST_PKI_KEYS.items():
+    if name not in pki_keys:
+        continue
+
+    with open(os.path.join(PKI, f'{name}.key'), 'rb') as file:
+        if line.encode('ascii') not in file.read().splitlines():
+            problems.append(f'spec/pki/{name}.key does not hold its line of TEST_PKI_KEYS: the test PKI\'s gate would '
+                            'match nothing of it; a renewed PKI moves its line')
+
+for path in tracked:
+    if TESTS.match(path) or not os.path.isfile(os.path.join(ROOT, path)):
+        continue
+
+    with open(os.path.join(ROOT, path), 'rb') as file:
+        content = file.read()
+
+    for name, line in TEST_PKI_KEYS.items():
+        if line.encode('ascii') in content:
+            problems.append(f'{path}: names spec/pki/{name}.key, a key of the test PKI: only spec/, the tests and the '
+                            'interop service name one')
+
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 
 # ── What each side does not play yet ────────────────────────────────────────────────────────────
@@ -2191,7 +2235,8 @@ print(f'spec: {version}, its companion {companion_version}, its transcoding {tra
       f'{len(citing["transcoding"])} cited and {reasons_of("transcoding")}, in transcoding-units.txt; '
       f'{", ".join(f"{len(named[group])} {group.split(chr(47))[1]}" for group in TRANSCODING_GROUPS)} of the '
       f'transcoding; {counted} counts of the tables of files of '
-      f'docs/support.md and the README, each as its files hold it; {len(TEST_KEYS)} published test keys, which none of '
+      f'docs/support.md and the README, each as its files hold it; {len(TEST_KEYS)} published test keys and '
+      f'{len(TEST_PKI_KEYS)} of the test PKI, which none of '
       f'the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())

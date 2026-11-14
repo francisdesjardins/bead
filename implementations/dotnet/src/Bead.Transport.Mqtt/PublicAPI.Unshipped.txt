@@ -1,1 +1,16 @@
 #nullable enable
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.Transport.Mqtt.MqttBrokerTlsOptions?
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.<Clone>$() -> Bead.Transport.Mqtt.MqttBrokerTlsOptions!
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.init -> void
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(Bead.Transport.Mqtt.MqttBrokerTlsOptions? other) -> bool
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.MqttBrokerTlsOptions() -> void
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+*REMOVED*Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.init -> void
+*REMOVED*override Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.Transport.Mqtt.MqttBrokerTlsOptions.GetHashCode() -> int
+*REMOVED*override Bead.Transport.Mqtt.MqttBrokerTlsOptions.ToString() -> string!
+*REMOVED*static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator !=(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool
+*REMOVED*static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator ==(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.TlsOptions?

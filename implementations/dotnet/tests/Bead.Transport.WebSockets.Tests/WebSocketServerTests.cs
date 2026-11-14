@@ -1253,8 +1253,8 @@ public sealed class WebSocketServerTests
         var localPort = new StrongBox<int>(0);
         using var aliceHandshakes = new SamePort(localPort);
         using var otherHandshakes = new SamePort(localPort);
-        var alice = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = aliceHandshakes.Invoker } });
-        var other = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = otherHandshakes.Invoker } });
+        var alice = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Handler = aliceHandshakes.Handler } });
+        var other = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Handler = otherHandshakes.Handler } });
 
         // who opened a session on each connection, as its handle names it
         var names = new ConcurrentDictionary<string, string>();
