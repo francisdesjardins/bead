@@ -126,7 +126,7 @@ export interface IRustOutput {
   readonly server?: IServerSide;
   /** As a TypeScript output's: its client. */
   readonly client?: ISide;
-  /** Read so that `generate` refuses it, HTTP_UNGENERATED: the Rust target writes no route table. */
+  /** As a TypeScript output's: its route table, its document and its HTTP client, for a gateway. */
   readonly gateway?: ISide;
 }
 

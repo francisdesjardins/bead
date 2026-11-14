@@ -7,10 +7,11 @@ import { expect, test } from '@playwright/test';
 import { hasPinnedBuffa } from '../../../__tests__/pinned.ts';
 import { checkRoots } from '../../../check.ts';
 import { parseConfig } from '../../../config.ts';
-import { InputError } from '../../../diagnostics.ts';
+import { hasError, InputError } from '../../../diagnostics.ts';
 import { checkValue, type IBlueprint } from '../../../model/blueprint.ts';
 import { applyPatch } from '../../../model/__tests__/patch.ts';
 import { cutOf, type ISides } from '../../../model/selection.ts';
+import { documentOf } from '../../../openapi/document.ts';
 import { beadcVersion } from '../../../version.ts';
 import { SUBSETS_GOLDEN, subsetsOf } from '../../__tests__/subsets.ts';
 import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
@@ -34,6 +35,14 @@ const WORKSPACE = new URL('../../../../../implementations/rust/Cargo.toml', impo
 const COMMENTS_PROTO = 'bead/comments/v1/comments.proto';
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 const RULES_PROTO = 'bead/messages/v1/rules.proto';
+// spec/transcoding.proto's output with a gateway, a golden folder of its own, its document the one
+// the other targets embed
+const SPEC = fileURLToPath(new URL('../../../../../spec/', import.meta.url));
+const TRANSCODING_PROTO = 'transcoding.proto';
+const HTTP_GOLDEN = 'transcoding/';
+const DOCUMENT_GOLDEN = fileURLToPath(
+  new URL('../../../../test/golden/transcoding.openapi.json', import.meta.url)
+);
 // the set a golden of a proto fixture holds beside it, never an output's file
 const SET_FILE = 'messages.binpb';
 
@@ -284,9 +293,86 @@ test('writes the deprecations and the keywords fixtures, the interop patched, as
   });
 });
 
-test("writes the split output of the subsets' blueprint as its goldens byte for byte: each class over its pick and each transport's procedures", () => {
-  const { input } = subsetsOf();
-  const written = rustTarget.generate(input, DEFAULTS);
+test("writes spec/transcoding.proto's output with a gateway as its goldens byte for byte: its route table, the document a string literal of beadc's own bytes", () => {
+  const checked = checkRoots([SPEC], { files: [TRANSCODING_PROTO] });
+
+  expect(hasError(checked.diagnostics)).toBe(false);
+
+  if (checked.blueprint === undefined || checked.set === undefined) {
+    throw new Error('spec/transcoding.proto: no blueprint');
+  }
+
+  const document = readFileSync(DOCUMENT_GOLDEN, 'utf8');
+  const input: ITargetInput = {
+    blueprint: checked.blueprint,
+    set: checked.set,
+    sources: { proto: new Map([[TRANSCODING_PROTO, '../spec/transcoding.proto']]) },
+  };
+  // * the plugin's files where the pinned plugin runs; beadc's header names the pin, so its own
+  // files need none
+  const plugin = hasPinnedBuffa();
+
+  if (!plugin) {
+    test.info().annotations.push({
+      type: 'protoc-gen-buffa',
+      description: `no protoc-gen-buffa ${buffaPin().version}: the transcoding output's messages/ left uncompared`,
+    });
+  }
+
+  const request = buffaRequestOf(checked.set, { blueprint: checked.blueprint });
+  const written = [
+    ...(plugin ? generateRustMessages(checked.set, { blueprint: checked.blueprint }) : []),
+    ...rustTarget.generate(input, {
+      ...DEFAULTS,
+      http: { prefix: '/api', document, problemTypes: 'https://example.com/problems/' },
+    }),
+  ];
+
+  expect(documentOf(checked.blueprint, { prefix: '/api' })).toBe(document);
+
+  if (plugin) {
+    holdGolden({
+      folder: HTTP_GOLDEN,
+      written,
+      specVersion: checked.blueprint.specVersion,
+      ...(request === undefined ? {} : { set: request.set }),
+    });
+  } else {
+    // beadc's own files alone, held to the golden
+    for (const file of written) {
+      expect(file.content, file.name).toBe(
+        today(
+          readFileSync(join(GOLDEN, HTTP_GOLDEN, file.name), 'utf8').replaceAll('\r\n', '\n'),
+          checked.blueprint.specVersion
+        )
+      );
+    }
+  }
+
+  // * the document a literal whose escapes are Rust's: read back, it is beadc's bytes; its messages
+  // read and written by one JSON form over the pool they embed
+  const table = contentOf(written, 'bead_http.rs');
+  const literal = /^pub const OPENAPI_DOCUMENT: &str = (".*");$/mu.exec(table)?.[1] ?? '""';
+
+  expect(
+    JSON.parse(
+      literal.replaceAll(/\\u\{([0-9A-F]+)\}/gu, (_, hex: string) => {
+        return `\\u${hex.padStart(4, '0')}`;
+      })
+    )
+  ).toBe(document);
+  expect(table).toContain('        let form = ::bead_protobuf::JsonForm::new(');
+  expect(table).toContain(
+    '            request: ::bead::HttpPayload::Message(form.form_of(::bead_protobuf::ProtoSchema::of::<super::messages::bead::transcoding::v1::Everything>())),'
+  );
+  expect(table).toContain(
+    'pub const HTTP_PROBLEM_TYPES: ::core::option::Option<&str> = ::core::option::Option::Some("https://example.com/problems/");'
+  );
+});
+
+test("writes the split output of the subsets' blueprint as its goldens byte for byte: each class over its pick, the gateway's routes and each transport's procedures", () => {
+  const { input, http } = subsetsOf();
+  const written = rustTarget.generate(input, { ...DEFAULTS, http });
 
   expect(
     written
@@ -294,7 +380,7 @@ test("writes the split output of the subsets' blueprint as its goldens byte for 
         return file.name;
       })
       .toSorted()
-  ).toEqual(['bead_served.rs', 'mod.rs', 'services/__buffa.rs']);
+  ).toEqual(['bead_http.rs', 'bead_served.rs', 'mod.rs', 'services/__buffa.rs']);
 
   holdGolden({ folder: SUBSETS_GOLDEN, written, specVersion: input.blueprint.specVersion });
 

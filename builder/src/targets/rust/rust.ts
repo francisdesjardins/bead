@@ -1,6 +1,6 @@
 // ── Rust ──────────────────────────────────────────────────────────────────────
 
-// The Rust target (decision 0051): one module tree under three roots of beadc's own, mounted by the
+// The Rust target (decision 0051): one module tree under four roots of beadc's own, mounted by the
 // output's `mod.rs`. `messages`, Buffa's tree as Buffa writes it, never declared again by beadc:
 // under `generate`, `messages/mod.rs` and the files `protoc-gen-buffa` writes (`messages.ts`); under
 // `external`, the include file the application's build script writes into `OUT_DIR` by
@@ -8,15 +8,16 @@
 // names a package's, its file `services/<package>.rs` holding every service of every `.proto` file
 // of that package, and one with no `proto` member, or of the unnamed package, in `services` itself,
 // from `services/__buffa.rs`. And `bead_served`, the procedures each transport of the server takes,
-// where it names them (`served.ts`). Every file of `services` and `bead_served` is `include!`d,
+// where it names them (`served.ts`). And `bead_http`, for an output with a `gateway`: its route
+// table, its document and each service's HTTP client (`http.ts`, decision 0052). Every file of
+// `services`, `bead_served` and `bead_http` is `include!`d,
 // which rustfmt never follows, and every item of `mod.rs` is `#[rustfmt::skip]`, so an application's
 // formatter changes nothing beadc writes. Each package's file is beadc's header, then each service
 // (`templates.ts`), the rules of each message its requests' rules reach (`validators.ts`), and once
 // the contract with the runtime. A message is named by its path from the service's module to
 // `messages`, as Buffa names its module and its nested types' module. An output holds the
 // procedures its sides select, each side printed over its own (decision 0048), and a service none
-// selects is not written. The target writes no route table: an output with a `gateway` is refused
-// before (HTTP_UNGENERATED).
+// selects is not written.
 
 // dependencies
 
@@ -60,6 +61,7 @@ import {
   toSnakeCase,
 } from './names.ts';
 import { EXTERNAL_INCLUDE_FILE, type IRustOptions } from './options.ts';
+import { HTTP_CLIENT_METHODS, HTTP_FILE, HTTP_MODULE, printRustHttp } from './http.ts';
 import { printRustServed, SERVED_FILE, SERVED_MODULE } from './served.ts';
 import { INDENT, printService } from './templates.ts';
 import { printRustValidators } from './validators.ts';
@@ -119,6 +121,18 @@ const SERVICES_ALLOW = [
   `${INDENT}clippy::struct_field_names,`,
   `${INDENT}clippy::type_complexity,`,
   `${INDENT}reason = "an application uses the classes of its own side alone and mounts them where it will, beadc's code names what it marks deprecated, a record's fields are its procedures' names, and a descriptor's type names each of its codecs by its whole path"`,
+  ')]',
+];
+const HTTP_ALLOW = [
+  '#[rustfmt::skip]',
+  '#[allow(',
+  `${INDENT}dead_code,`,
+  `${INDENT}deprecated,`,
+  `${INDENT}unreachable_pub,`,
+  `${INDENT}clippy::allow_attributes,`,
+  `${INDENT}clippy::struct_field_names,`,
+  `${INDENT}clippy::type_complexity,`,
+  `${INDENT}reason = "an application serves its routes or calls them, and mounts the tree where it will, beadc's code names what it marks deprecated, a client's fields are its procedures' names, and a requester's type names each of its codecs by its whole path"`,
   ')]',
 ];
 const SERVED_ALLOW = [
@@ -227,7 +241,7 @@ const fromDepth = (path: string, depth: number): string => {
 export const rustTarget: ITarget<IRustOptions> = Object.freeze({
   name: 'rust',
   features: new Set([LEGACY_REQUIRED_FEATURE, VALIDATE_FEATURE]),
-  http: false,
+  http: true,
   generate: (input: ITargetInput, options: IRustOptions): readonly IGeneratedFile[] => {
     // * what the output holds: every procedure, both sides whole, where no cut is given
     const cut = input.cut ?? cutOf(input.blueprint, {});
@@ -376,6 +390,53 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
     });
     const [first] = blueprint.services;
     const source = sourceNameOf(input.sources, first?.proto?.file);
+    // * an output with a gateway: its route table, its document and its clients, of what it selects
+    const gateway = cut.gateway ?? blueprint;
+
+    if (options.http !== undefined) {
+      // ! a procedure a client calls whose method would be one its HTTP client holds already, its
+      // constructor's or a trait's it implements: two methods of one name, refused for this output
+      for (const service of gateway.services) {
+        for (const procedure of service.procedures) {
+          const method = toSnakeCase(procedure.procedureName);
+
+          if (procedure.procedureKind !== 'command' && HTTP_CLIENT_METHODS.has(method)) {
+            throw new InputError(
+              `the procedure ${service.serviceName}/${procedure.procedureName} is the method ${method} of ${service.serviceName}HttpClient in Rust, which the client holds already: rename the procedure, or take it out of the output's gateway`
+            );
+          }
+        }
+      }
+    }
+
+    const httpFiles =
+      options.http === undefined
+        ? []
+        : [
+            {
+              name: HTTP_FILE,
+              content: `${headerOf(blueprint, {
+                source: sourceNameOf(input.sources, gateway.services[0]?.proto?.file),
+              })}${printRustHttp({
+                blueprint: gateway,
+                http: options.http,
+                messageOf: (fullName) => {
+                  const path = paths.get(fullName);
+
+                  if (path === undefined) {
+                    throw new Error(`${fullName}: no message of buf's set`);
+                  }
+
+                  return fromDepth(path, 1);
+                },
+                moduleOf: (service) => {
+                  const packageName = packageOf(service, packages);
+
+                  return `super::${[SERVICES_FOLDER, ...(packageName === '' ? [] : packageName.split('.').map(identifierOf))].join('::')}::`;
+                },
+              }).join('\n')}`,
+            },
+          ];
     const served =
       cut.transports === undefined
         ? []
@@ -468,6 +529,11 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
       ...(messagesLines.length === 0 ? [] : ["Buffa's messages under `messages`"]),
       "each package's services under `services`",
       ...(served.length === 0 ? [] : ['the procedures each transport of its server takes']),
+      ...(httpFiles.length === 0
+        ? []
+        : [
+            "its gateway's routes, the document it serves at `/openapi.json` and each service's HTTP client",
+          ]),
     ];
     const said =
       parts.length === 1
@@ -493,6 +559,17 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
             `${INDENT}include!("${SERVED_FILE}");`,
             '}',
           ]),
+      ...(httpFiles.length === 0
+        ? []
+        : [
+            '',
+            ...HTTP_ALLOW,
+            `pub mod ${HTTP_MODULE} {`,
+            `${INDENT}//! Its gateway's routes, the document it serves at \`/openapi.json\` and each service's HTTP client.`,
+            '',
+            `${INDENT}include!("${HTTP_FILE}");`,
+            '}',
+          ]),
       '',
     ];
 
@@ -508,6 +585,7 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
       },
       ...written,
       ...served,
+      ...httpFiles,
     ];
   },
 });
