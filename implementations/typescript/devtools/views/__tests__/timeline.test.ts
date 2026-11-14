@@ -55,3 +55,37 @@ test('keeps the Timeline control focused with its current callback and releases 
   await expect(svg.locator('.brush')).toHaveAttribute('visibility', 'hidden');
   await page.mouse.up();
 });
+
+test('draws the Timeline at the width it is given, a unit a pixel, and never under 560', async ({
+  page,
+}) => {
+  await loadView(page, 'timeline');
+  const viewBoxes = await page.evaluate((calls) => {
+    const { view } = globalThis as unknown as {
+      view: { timelineViewOf: typeof timelineViewOf; replaceKeeping: typeof replaceKeeping };
+    };
+    const root = document.getElementById('root') as HTMLElement;
+
+    return [1_600, 300, undefined].map((width) => {
+      view.replaceKeeping(
+        root,
+        view.timelineViewOf({
+          calls,
+          isAllClients: false,
+          nameOf: (call) => {
+            return call.procedureName ?? '';
+          },
+          now: Date.now(),
+          onRange: () => {},
+          range: undefined,
+          span: { from: 0, to: Date.now() },
+          ...(width === undefined ? {} : { width }),
+        })
+      );
+
+      return root.querySelector('svg')?.getAttribute('viewBox')?.split(' ')[2];
+    });
+  }, trafficBook().calls);
+
+  expect(viewBoxes).toEqual(['1600', '560', '1000']);
+});

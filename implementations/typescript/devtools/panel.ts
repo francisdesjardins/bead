@@ -856,6 +856,7 @@ export const startPanel = (host: IPanelHost): void => {
             },
             range: state.range,
             span: spanOfCalls(calls),
+            width: shown.timeline.clientWidth,
           }),
         ]);
       } else if (state.view === 'broker') {
@@ -1428,6 +1429,16 @@ export const startPanel = (host: IPanelHost): void => {
     layOut();
   });
   window.addEventListener('resize', layOut);
+  // the Timeline is drawn at its view's width: a panel resized redraws it at the new one
+  let resized = 0;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(resized);
+    resized = requestAnimationFrame(() => {
+      if (state.view === 'timeline') {
+        draw();
+      }
+    });
+  }).observe(shown.timeline);
 
   // * the splitter is WAI-ARIA APG's Window Splitter, the list its primary pane: a separator
   // whose value is the list's share, moved by its arrows, sent to its limits by Home and End.

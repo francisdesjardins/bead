@@ -47,7 +47,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
   ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
   Bead's mark, Baily's beads at the Moon's edge, is the page's and the demo's icon and the mark
-  beside the name in their top bars, and the DevTools extension's, its panel's tab `⦿ Bead`; the
+  beside the name in their top bars, and the DevTools extension's, its panel's tab `Bead ⦿`; the
   page's footer names its author.
 - **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
@@ -118,6 +118,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The DevTools panel's Timeline is drawn at its view's own width, a unit a pixel, and redrawn as
+  the panel is resized, where a drawing 1,000 wide stretched to the view zoomed its text and rows.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
 - A gateway mounted behind what reads a request's body, a framework's body parser or a
