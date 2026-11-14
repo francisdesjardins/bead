@@ -563,9 +563,10 @@ public sealed partial class RouterCoreTests
                 [opening, new Envelope { Header = RequestOf(3) with { Total = 8 }, Payload = new byte[] { 1 } }],
                 [(1, EnvelopeKind.Credit, null, null), (3, EnvelopeKind.Failure, ProtocolCode.CapacityExceeded, "the transfers a connection receives at once are 1 at most")]),
             (
-                given with { BufferedBytesBudget = 128, MaximumPayloadBytes = 128 },
-                [opening, new Envelope { Header = RequestOf(3) with { Total = 8 }, Payload = new byte[] { 1 } }],
-                [(1, EnvelopeKind.Credit, null, null), (3, EnvelopeKind.Failure, ProtocolCode.CapacityExceeded, "the transfers received hold the budget but 0 bytes")]),
+                // a wait of 0 for the budget refuses at once an opening the budget left cannot hold
+                given with { BufferedBytesBudget = 128, MaximumPayloadBytes = 128, TransferInactivityTimeout = TimeSpan.FromMilliseconds(1) },
+                [opening, new Envelope { Header = RequestOf(3) with { Total = 100 }, Payload = new byte[40] }],
+                [(1, EnvelopeKind.Credit, null, null), (3, EnvelopeKind.Failure, ProtocolCode.CapacityExceeded, "a total of 100 bytes waited 0 milliseconds for the budget")]),
         })
         {
             var server = new Peer(RouterSide.Server, limits);
@@ -776,51 +777,67 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Gives_the_budget_back_once_a_payload_is_whole_and_grants_the_transfer_it_starved()
+    public async Task Gives_the_budget_back_once_a_payload_is_whole_and_admits_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
     {
-        var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256 });
+        var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, TransferInactivityTimeout = TimeSpan.FromSeconds(30) });
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var first = RequesterBytesOf(100);
 
-        server.Resolve();
+        await server.Deliver(RequestOpeningOf(1, (first, 44)));
+
+        // past the 100 bytes left: it waits, granted nothing
+        await server.Deliver(RequestOpeningOf(3, (RequesterBytesOf(150), 44)), "b");
+
+        // within the 100 bytes left, it waits behind it all the same
+        await server.Deliver(RequestOpeningOf(5, (RequesterBytesOf(60), 44)));
+        await server.Advance(TimeSpan.FromSeconds(10));
+        await server.Deliver(ChunkOf(1, (first, 44, 48)));
+        await server.Deliver(ChunkOf(1, (first, 92, 8)));
+
+        // whole, its call not answered yet: its budget admits the first that waits, and the 50 bytes
+        // left not the second, refused once its wait passed half the inactivity allowed
+        Assert.Single(resolver.Requests);
+        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 100 }, new CreditHeader { CallId = 3, CreditEnd = 150 } }, server.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Equal([Handle, "b"], server.SentOn);
+        await server.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(
+            (5u, (ushort)ProtocolCode.CapacityExceeded, "a total of 60 bytes waited 15000 milliseconds for the budget"),
+            (server.Sent[^1].Header.CallId, server.Sent[^1].Failure!.Code, server.Sent[^1].Failure!.Detail));
+
+        // its inactivity counted from the credit that admitted it, not from its opening
+        await server.Advance(TimeSpan.FromMilliseconds(24_999));
+        Assert.Equal(3, server.Sent.Count);
+        await server.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal((3u, (ushort)ProtocolCode.TransferStalled, "b"), (server.Sent[^1].Header.CallId, server.Sent[^1].Failure!.Code, server.SentOn[^1]));
+
+        var same = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256 });
+        using var sameCore = same.Core;
+
+        same.Resolve();
 
         var payload = RequesterBytesOf(200);
 
-        await server.Deliver(RequestOpeningOf(1, (payload, 44)));
-        await server.Deliver(RequestOpeningOf(3, (payload, 44)));
-        Assert.Equal([172L], CreditsOf(server.Sent));
+        await same.Deliver(RequestOpeningOf(1, (payload, 44)));
+        await same.Deliver(RequestOpeningOf(3, (payload, 44)));
+        Assert.Equal([172L], CreditsOf(same.Sent));
 
         foreach (var offset in new[] { 44, 92 })
         {
-            await server.Deliver(ChunkOf(1, (payload, offset, 48)));
+            await same.Deliver(ChunkOf(1, (payload, offset, 48)));
         }
 
-        // the budget left grants the first the rest of its window, then none to the second
-        Assert.Equal([172L, 200L], CreditsOf(server.Sent));
-        await server.Deliver(ChunkOf(1, (payload, 140, 48)));
-        await server.Deliver(ChunkOf(1, (payload, 188, 12)));
-        Assert.Equal([172L, 200L, 172L], CreditsOf(server.Sent));
-        Assert.Equal(3u, server.Sent[^1].Header.CallId);
-
-        var cross = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, MaximumEnvelopeBytes = 64 });
-        using var crossCore = cross.Core;
-        var resolver = cross.Resolve();
-        var first = RequesterBytesOf(168);
-
-        await cross.Deliver(RequestOpeningOf(1, (first, 40)), "a");
-        await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 100 }, Payload = new byte[32] }, "b");
-        await cross.Deliver(new Envelope { Header = RequestOf(5) with { Total = 8 }, Payload = new byte[] { 1 } }, "a");
-        foreach (var offset in new[] { 40, 88, 136 })
-        {
-            await cross.Deliver(ChunkOf(1, (first, offset, Math.Min(48, first.Length - offset))), "a");
-        }
-        Assert.Single(resolver.Requests);
-        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 168 }, new FailureHeader { CallId = 5 }, new CreditHeader { CallId = 3, CreditEnd = 100 } }, cross.Sent.Select((envelope) => { return envelope.Header; }));
-        Assert.Equal((ushort)ProtocolCode.CapacityExceeded, cross.Sent[1].Failure!.Code);
-        Assert.Equal(["a", "a", "b"], cross.SentOn);
+        // the first is credited the rest of its window, the second nothing
+        Assert.Equal([172L, 200L], CreditsOf(same.Sent));
+        await same.Deliver(ChunkOf(1, (payload, 140, 48)));
+        await same.Deliver(ChunkOf(1, (payload, 188, 12)));
+        Assert.Equal([172L, 200L, 172L], CreditsOf(same.Sent));
+        Assert.Equal(3u, same.Sent[^1].Header.CallId);
     }
 
     // spec 12.10
     [Fact]
-    public async Task Ends_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_sends_nothing_once_disposed()
+    public async Task Ends_the_transfers_of_a_connection_that_goes_waiting_or_admitted_before_their_budget_admits_any_opening_and_sends_nothing_once_disposed()
     {
         var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256 });
 
@@ -828,6 +845,7 @@ public sealed partial class RouterCoreTests
 
         var payload = RequesterBytesOf(200);
 
+        // the second waits for the budget the first holds: both end with their connection
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(RequestOpeningOf(3, (payload, 44)));
         server.Core.RejectPending("the connection closed", Handle);
@@ -840,11 +858,16 @@ public sealed partial class RouterCoreTests
 
         var cross = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, MaximumEnvelopeBytes = 64 });
         cross.Resolve();
+
+        // 'a' 3 waits, and 'b' 1 behind it: what 'a' gives back admits 'b' 1 alone, never 'a' 3,
+        // which goes with its connection
         await cross.Deliver(new Envelope { Header = RequestOf(1) with { Total = 168 }, Payload = new byte[40] }, "a");
         await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 100 }, Payload = new byte[16] }, "a");
         await cross.Deliver(new Envelope { Header = RequestOf(1) with { Total = 100 }, Payload = new byte[16] }, "b");
         cross.Core.RejectPending("gone", "a");
         await cross.Settle();
+
+        // 'b' 3 waits, and the dispose that ends it sends nothing
         await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 200 }, Payload = new byte[44] }, "b");
         cross.Core.Dispose();
         await cross.Settle();

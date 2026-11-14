@@ -357,6 +357,78 @@ public sealed partial class RouterCoreTests
         Assert.Equal(new IEnvelopeHeader[] { RequestOf(2), new CancelHeader { CallId = 2 } }, server.Sent.Select((envelope) => { return envelope.Header; }));
     }
 
+    // spec 8.2, 12.4
+    [Fact]
+    public async Task Ends_a_call_whose_result_s_transfer_waits_for_the_budget_past_half_its_inactivity_CAPACITY_EXCEEDED_and_cancels_it()
+    {
+        var client = new Peer(RouterSide.Client, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256, TransferInactivityTimeout = TimeSpan.FromSeconds(20) });
+        var holding = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(60));
+
+        // the first result's total holds the budget but 56 bytes
+        await client.Settle();
+        await client.Deliver(ResultOpeningOf(1, (PatternOf(200), 28)));
+
+        // the second's waits for it, its call held by its wait alone: its own 5 s end nothing
+        var waiting = client.Request(new byte[] { 2 }, TimeSpan.FromSeconds(5));
+
+        await client.Settle();
+        await client.Deliver(ResultOpeningOf(3, (PatternOf(100), 28)));
+        await client.Advance(TimeSpan.FromMilliseconds(9_999));
+        Assert.False(waiting.IsCompleted);
+        await client.Advance(TimeSpan.FromMilliseconds(1));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return waiting.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.CapacityExceeded, FailureOrigin.Local, (RouterSide?)RouterSide.Client, "a total of 100 bytes waited 10000 milliseconds for the budget"),
+            (refused.Code, refused.Origin, refused.Side, refused.Detail));
+        Assert.Equal(EnvelopeKind.Result, refused.Header?.Kind);
+        Assert.Equal([156L], CreditsOf(client.Sent));
+        Assert.Equal(new CancelHeader { CallId = 3 }, client.Sent[^1].Header);
+        Assert.False(holding.IsCompleted);
+    }
+
+    // spec 12.4, 12.8
+    [Fact]
+    public async Task Credits_a_result_s_transfer_once_the_budget_admits_it_setting_its_call_s_inactivity_going_again()
+    {
+        var client = new Peer(RouterSide.Client, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256, TransferInactivityTimeout = TimeSpan.FromSeconds(20) });
+        using var cancelling = new CancellationTokenSource();
+        var holding = client.Request(new byte[] { 1 }, (TimeSpan.FromSeconds(60), cancelling.Token));
+
+        await client.Settle();
+        await client.Deliver(ResultOpeningOf(1, (PatternOf(200), 28)));
+
+        var waiting = client.Request(new byte[] { 2 }, TimeSpan.FromSeconds(60));
+
+        await client.Settle();
+        await client.Deliver(ResultOpeningOf(3, (PatternOf(100), 28)));
+        await client.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal([156L], CreditsOf(client.Sent));
+
+        // the first call cancelled, its budget admits the second's transfer, credited as it is
+        await cancelling.CancelAsync();
+        await client.Settle();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return holding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        Assert.Equal([156L, 100L], CreditsOf(client.Sent));
+        Assert.Contains(client.Sent, (envelope) => { return new CreditHeader { CallId = 3, CreditEnd = 100 }.Equals(envelope.Header); });
+
+        // its inactivity counted from that credit, past the 20 s from its opening
+        await client.Advance(TimeSpan.FromMilliseconds(19_999));
+        Assert.False(waiting.IsCompleted);
+        await client.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal("no answer came in 20000 milliseconds", (await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return waiting.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        })).Message);
+    }
+
     [Fact]
     public async Task Rejects_with_a_DisconnectException_what_waits_on_one_connection_or_on_every_one()
     {

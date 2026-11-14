@@ -1275,11 +1275,14 @@ internal sealed partial class RouterCore : IDisposable
         }
 
         // a transfer's opening is not its payload: refused once routed, before any credit goes;
-        // opened, its call waits on the rest, which one silent too long ends
+        // opened, its call waits on the rest, which one silent too long ends, and one that waits for
+        // the budget past its bound is refused, as any refusal of an opening is
         var call = new CallAddress(header.CallId, connectionHandle);
-        var (receiving, refused) = _receivings.Open(payload, (
-            call,
-            () =>
+        var (receiving, refused) = _receivings.Open(payload, new TransferOpening
+        {
+            Call = call,
+            Total = total,
+            OnStall = () =>
             {
                 Refuse(
                     ProtocolFailureOf(
@@ -1287,7 +1290,11 @@ internal sealed partial class RouterCore : IDisposable
                         string.Create(CultureInfo.InvariantCulture, $"nothing came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds")),
                     dispatched);
             },
-            total));
+            OnRefused = (failure) =>
+            {
+                Refuse(failure, dispatched);
+            },
+        });
 
         if (receiving is null)
         {
@@ -1296,7 +1303,8 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
-        // kept before its first credit goes, so a chunk that credit brings at once finds it
+        // kept before its first credit goes, so a chunk that credit brings at once finds it; one that
+        // waits for the budget is kept too, and granted nothing until it is admitted
         _answeringCalls.Attach(call, new RequestReceiving(target, answering, resolver, receiving));
         _receivings.Grant(receiving);
     }

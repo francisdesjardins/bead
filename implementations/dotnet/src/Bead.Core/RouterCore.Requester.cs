@@ -740,27 +740,45 @@ internal sealed partial class RouterCore
             }
 
             // a transfer's opening is not its result: one refused — past its procedure's limit, say — ends
-            // the call, and the peer, which holds the result still, is told to cancel it; opened, the call
-            // waits on the rest, which one silent too long ends — its own timer, rather than the transfer's
+            // the call, and the peer, which holds the result still, is told to cancel it, as one that
+            // waits for the budget past its bound does; admitted, the call waits on the rest, which one
+            // silent too long ends — its own timer, rather than the transfer's
+            FailureException RefusedOf(Failure failure)
+            {
+                return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
+                {
+                    DestinationId = pendingRequest.DestinationId,
+                    Header = Redact(header),
+                    ProcedureAddress = pendingRequest.ProcedureAddress,
+                };
+            }
+
             var (receiving, refusal) = total > pendingRequest.MaximumPayloadBytes
                 ? (null, PayloadPlacement.TooLargeOf(total, pendingRequest.MaximumPayloadBytes))
-                : _receivings.Open(envelope.Payload, (call, null, total));
+                : _receivings.Open(envelope.Payload, new TransferOpening
+                {
+                    Call = call,
+                    Total = total,
+                    OnRefused = (failure) =>
+                    {
+                        EndPending(RefusedOf(failure), (call, pendingRequest));
+                    },
+                    OnAdmitted = () =>
+                    {
+                        Wait(_limits.TransferInactivityTimeout, (call, pendingRequest));
+                    },
+                });
 
             if (receiving is null)
             {
-                EndPending(
-                    new FailureException(refusal!, new FailureException.Raised(FailureOrigin.Local, _side))
-                    {
-                        DestinationId = pendingRequest.DestinationId,
-                        Header = Redact(header),
-                        ProcedureAddress = pendingRequest.ProcedureAddress,
-                    },
-                    (call, pendingRequest));
+                EndPending(RefusedOf(refusal!), (call, pendingRequest));
 
                 return;
             }
 
-            Wait(_limits.TransferInactivityTimeout, (call, pendingRequest));
+            // * one that waits for the budget holds its call by its wait alone, and its admission sets
+            // the call's inactivity going (spec 12.8)
+            Wait(_receivings.IsWaiting(receiving) ? Timeout.InfiniteTimeSpan : _limits.TransferInactivityTimeout, (call, pendingRequest));
 
             // kept before its first credit goes, so a chunk that credit brings at once finds it
             pendingRequest.Receiving = new ResultReceiving(result, receiving);
