@@ -6,8 +6,8 @@ behavioural parity, and a Rust one in `implementations/rust`, its core, its tran
 WebSocket and HTTP, its broker binding over MQTT 5 and its HTTP/JSON gateway, each part it lacks a
 row of `docs/support.md` ahead (decisions 0044, 0049, 0050, 0052), the builder, `beadc`, in
 `builder/`, an example in `examples/hello`, the demo, the DevTools extension, and the page
-francisdesjardins.ca serves at `/bead/`, in `site/`. `README.md` says how each part builds and
-tests.
+beadproto.dev serves, the demo at its `/playground/`, in `site/`. `README.md` says how each part
+builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
@@ -29,9 +29,10 @@ number never given to another.
 ## Language
 
 - Replies to the user are in French.
-- Public pages are in English: what francisdesjardins.ca serves, the demo included, its messages and
-  refusals. The Bead page at `/bead/` is also in French, the language chosen as the site chooses it:
-  `?lng=`, then the choice the site stored, then the browser's languages, then English.
+- Public pages are in English: what beadproto.dev serves, the demo included, its messages and
+  refusals. The Bead page is also in French, the language chosen as the page chooses it: `?lng=`,
+  then the choice the page stored under `language` on its own origin, then the browser's languages,
+  then English.
 - The repository's files are in English, but the Bead page's French. What `.claude/local/` keeps
   may be in French: the plans.
 
@@ -180,10 +181,11 @@ titles that hold one write it `’`, and the citation does the same.
 
 ## The Bead page
 
-The page francisdesjardins.ca serves at `/bead/`, in English and in French, is built from `site/`:
-its content in both languages, its diagrams' Mermaid sources, rendered into SVGs by
-`site/render.mjs`, and `site/build.mjs`, which writes `site/dist/index.html`; `site/check.mjs` holds
-both in CI. After any change to the wire or to what the page states, change both languages alike,
+The page beadproto.dev serves, in English and in French, is built from `site/`: its content in both
+languages, its diagrams' Mermaid sources, rendered into SVGs by `site/render.mjs`, Bead's mark,
+`site/src/favicon.svg`, rasterized into its icons by `site/icons.mjs`, and `site/build.mjs`, which
+writes `site/dist/index.html`; `site/check.mjs` holds all three in CI, and `site/deploy.mjs` ships
+the page and the demo to the Worker `site/wrangler.jsonc` names. After any change to the wire or to what the page states, change both languages alike,
 render the diagrams that moved, rebuild it, and look at it in both themes, on a desktop and a phone:
 see the README's "The page".
 

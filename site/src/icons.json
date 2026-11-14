@@ -1,0 +1,11 @@
+{
+  "mark": "6485e57587363c89a730a328c5eb529a04b2e3dc5a96299f4d646a1e98ac97d9",
+  "files": {
+    "site/src/favicon.ico": "71918203f9c59237eccbbba189cc4e1d7fb595d7abd62f91b68d0b5de334ac1f",
+    "site/src/apple-touch-icon.png": "de8cee851bda55da3830d4f0d6757957e15495c5a9cfd407b622ae8d627e432f",
+    "implementations/typescript/devtools/chrome/icons/icon-16.png": "0abd2fa4d0590e816a61dec6d33e326f1684852d599a5372e099fa688d08c9a4",
+    "implementations/typescript/devtools/chrome/icons/icon-32.png": "05f0bff55bdf4171dccf781829101dfe5217d0f2e1cec11263b6f65f78a8a05e",
+    "implementations/typescript/devtools/chrome/icons/icon-48.png": "c2336e589b01c4a7d8d09bcf9e62aae87df6be22e04538f19e7014d600cd1fb8",
+    "implementations/typescript/devtools/chrome/icons/icon-128.png": "e1d6d97cf7b9c143cd78087eebea3087529de31d42b2fa56bf397e994f5fad60"
+  }
+}
