@@ -125,8 +125,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side's `ca` and `cert` are renamed, and its members take a `string` alone; a password is taken
   beside a `tls` that names authorities alone, on every side, and a `tls` over a URL that is not
   TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
-  client's `client_config`, and its MQTT 5 adapter takes none. The Rust gateway's caller takes
-  `client_config` and `tls` alike, refused together (decision 0053).
+  client's `client_config`, the gateway caller's among them, and its MQTT 5 adapter takes none
+  (decision 0053).
 
 ### Removed
 

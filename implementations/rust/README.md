@@ -166,7 +166,7 @@ round of its own, ahead.
 `<Service>HttpClient` over it: `say_hello(&request, &options)` on a procedure's default route, and
 `subscribe_count_down(&request, &options)`, a `Stream` of its result, then each notification, then
 the failure that ends it, never reconnecting. It follows no redirect and keeps no cookie, and sends
-no credential in the clear. Its `tls` and its `client_config` are a client's, refused together.
+no credential in the clear. Its TLS is its `client_config`, an application's own rustls config.
 
 ## Listening and proxies
 

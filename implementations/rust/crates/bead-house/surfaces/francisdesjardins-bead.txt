@@ -1097,7 +1097,6 @@ crate::gateway::caller
     pub authorization: Option<String> #[cfg(feature = "gateway")]
     pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
     pub client_config: Option<Arc<ClientConfig>> #[cfg(feature = "gateway")]
-    pub tls: Option<TlsOptions> #[cfg(feature = "gateway")]
     pub runtime: Option<Handle> #[cfg(feature = "gateway")]
     derives Clone, Debug, Default #[cfg(feature = "gateway")]
   struct HttpCallOptions #[non_exhaustive] #[cfg(feature = "gateway")]

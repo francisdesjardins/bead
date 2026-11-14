@@ -227,9 +227,8 @@ decision of its own.
   `authorities` are given and on webpki over them where they are, the certificate by
   `with_client_auth_cert`, so a certificate with the platform's roots works; an application's own
   `ClientConfig` is a client's `client_config`. The MQTT 5 adapter takes `tls: Option<TlsOptions>`
-  alone. The gateway's caller, `HttpCaller`, takes `tls` and `client_config` as the clients do,
-  refused together. The TypeScript and C# callers take their `fetch` and their `Handler` alone,
-  and a row of the matrix holds that difference.
+  alone. The gateway's caller, `HttpCaller`, takes a `client_config` alone, as the TypeScript
+  caller takes its `fetch` and the C# caller its `Handler`.
 
 ### The test PKI and the TLS front
 
@@ -285,7 +284,8 @@ it proves Bead's client and Bead's server through TLS.
   [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md) believes
   `X-Forwarded-For`, and RFC 8705 §3's binding between a `JWT` and the certificate; a platform's
   TLS object for the brokers, on every side at once; the interop over TLS, each side's client
-  presenting `spec/pki`'s certificate to the others' servers through a TLS front.
+  presenting `spec/pki`'s certificate to the others' servers through a TLS front; a gateway
+  caller's `tls`, on every side at once.
 
 **Its gates**: the twins on every side, the TLS fronts under `spec/pki/`; `spec/check.py`'s test
 PKI's keys; and `tools/names.tsv`'s one `same` row of the type.
