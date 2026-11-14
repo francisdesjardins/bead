@@ -317,10 +317,11 @@ public sealed partial class RouterCoreTests
         // whole, then as a transfer: admitted, then refused
         await server.Deliver(new Envelope { Header = RequestOf(1) });
         await server.Deliver(new Envelope { Header = RequestOf(3) });
-        await server.Deliver(RequestOpeningOf(5, (payload, 40)));
-        await server.Deliver(ChunkOf(5, (payload, 40, 48)));
-        await server.Deliver(ChunkOf(5, (payload, 88, 12)));
-        await server.Deliver(RequestOpeningOf(7, (payload, 40)));
+        await server.Deliver(RequestOpeningOf(5, (payload, 44)));
+        await server.Deliver(ChunkOf(5, (payload, 44, 48)));
+        await server.Deliver(ChunkOf(5, (payload, 92, 8)));
+        await server.Deliver(RequestOpeningOf(7, (payload, 44)));
+
 
         // no route: never asked
         await server.Deliver(new Envelope { Header = RequestOf(9) with { ServiceId = 8 } });

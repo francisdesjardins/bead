@@ -1282,6 +1282,9 @@ internal sealed partial class RouterCore : IDisposable
         {
             Call = call,
             Total = total,
+
+            // * counted on its header as it came, the credential it carries among it
+            OpeningBytes = _placement.OpeningBytesOf(arrival.Arrived),
             OnStall = () =>
             {
                 Refuse(

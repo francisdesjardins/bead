@@ -759,6 +759,7 @@ internal sealed partial class RouterCore
                 {
                     Call = call,
                     Total = total,
+                    OpeningBytes = _placement.OpeningBytesOf(result),
                     OnRefused = (failure) =>
                     {
                         EndPending(RefusedOf(failure), (call, pendingRequest));

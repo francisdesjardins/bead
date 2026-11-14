@@ -77,6 +77,7 @@ public sealed class ReceivingTransfersTests
         Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, "a transfer declares its total, not 0"), RefusalOf(receiving.Open(new byte[1], OpeningOf(call, 0))));
         Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, "a payload is 50 bytes at most, not 51"), RefusalOf(receiving.Open(new byte[1], OpeningOf(call, 51))));
         Assert.Equal(((ushort)ProtocolCode.ChunkInvalid, "an opening of 4 bytes holds its whole total of 4"), RefusalOf(receiving.Open(new byte[4], OpeningOf(call, 4))));
+        Assert.Equal(((ushort)ProtocolCode.ChunkInvalid, "an opening carries 3 bytes of its payload, not 2"), RefusalOf(receiving.Open(new byte[2], OpeningOf(call, 8) with { OpeningBytes = 3 })));
         Assert.Equal(64, receiving.Available);
 
         var (_, none, _) = ReceivingOf(LimitsOf() with { MaximumTransfers = 0 });

@@ -357,6 +357,29 @@ public sealed partial class RouterCoreTests
         Assert.Equal(new IEnvelopeHeader[] { RequestOf(2), new CancelHeader { CallId = 2 } }, server.Sent.Select((envelope) => { return envelope.Header; }));
     }
 
+    // spec 12.3, 12.7
+    [Fact]
+    public async Task Rejects_a_result_whose_opening_carries_other_than_its_sender_places_in_it_CHUNK_INVALID_and_cancels_its_call()
+    {
+        var client = new Peer(RouterSide.Client);
+        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
+
+        await client.Settle();
+        await client.Deliver(ResultOpeningOf(1, (PatternOf(300), 27)));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.ChunkInvalid, FailureOrigin.Local, (RouterSide?)RouterSide.Client, "an opening carries 28 bytes of its payload, not 27"),
+            (refused.Code, refused.Origin, refused.Side, refused.Detail));
+        Assert.Equal(EnvelopeKind.Result, refused.Header?.Kind);
+        Assert.Empty(CreditsOf(client.Sent));
+        Assert.Equal(new IEnvelopeHeader[] { RequestOf(1), new CancelHeader { CallId = 1 } }, client.Sent.Select((envelope) => { return envelope.Header; }));
+    }
+
     // spec 8.2, 12.4
     [Fact]
     public async Task Ends_a_call_whose_result_s_transfer_waits_for_the_budget_past_half_its_inactivity_CAPACITY_EXCEEDED_and_cancels_it()
@@ -929,20 +952,20 @@ public sealed partial class RouterCoreTests
             var asked = peer.Request(side == RouterSide.Client ? new byte[] { 1 } : ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(5));
 
             await peer.Settle();
-            await peer.Deliver(ResultOpeningOf(callId, (payload, 32)));
-            Assert.Equal([160L], CreditsOf(peer.Sent));
+            await peer.Deliver(ResultOpeningOf(callId, (payload, 28)));
+            Assert.Equal([156L], CreditsOf(peer.Sent));
 
             // in any order; a credit once half a window can go
-            foreach (var offset in new[] { 80, 32, 128, 176, 224 })
+            foreach (var offset in new[] { 76, 28, 124, 172, 220 })
             {
                 await peer.Deliver(ChunkOf(callId, (payload, offset, 48)));
-                if (offset == 80) { await peer.Deliver(ChunkOf(callId, (payload, offset, 48))); }
+                if (offset == 76) { await peer.Deliver(ChunkOf(callId, (payload, offset, 48))); }
             }
 
-            Assert.Equal([160L, 256L, 300L], CreditsOf(peer.Sent));
+            Assert.Equal([156L, 252L, 300L], CreditsOf(peer.Sent));
             Assert.False(asked.IsCompleted);
-            await peer.Deliver(ChunkOf(callId, (payload, 272, 28)));
-            await peer.Deliver(ChunkOf(callId, (payload, 272, 28)));
+            await peer.Deliver(ChunkOf(callId, (payload, 268, 32)));
+            await peer.Deliver(ChunkOf(callId, (payload, 268, 32)));
 
             var result = await asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
 
@@ -951,10 +974,10 @@ public sealed partial class RouterCoreTests
             Assert.Equal([RouterActivity.Request, RouterActivity.Response], peer.Activities);
 
             // what its credit let come, a copy, is late, and dropped in silence
-            await peer.Deliver(ChunkOf(callId, (payload, 224, 48)));
+            await peer.Deliver(ChunkOf(callId, (payload, 220, 48)));
             Assert.Empty(peer.Reports);
             Assert.Equal(1, peer.Core.Gauges().Counts["reservedCallIds"]);
-            Assert.Equal(new IEnvelopeHeader[] { RequestOf(callId), new CreditHeader { CallId = callId, CreditEnd = 160 }, new CreditHeader { CallId = callId, CreditEnd = 256 }, new CreditHeader { CallId = callId, CreditEnd = 300 } }, peer.Sent.Select((envelope) => { return envelope.Header; }));
+            Assert.Equal(new IEnvelopeHeader[] { RequestOf(callId), new CreditHeader { CallId = callId, CreditEnd = 156 }, new CreditHeader { CallId = callId, CreditEnd = 252 }, new CreditHeader { CallId = callId, CreditEnd = 300 } }, peer.Sent.Select((envelope) => { return envelope.Header; }));
         }
     }
 
@@ -970,8 +993,8 @@ public sealed partial class RouterCoreTests
             var asked = peer.Request(total == 150 ? ReadOnlyMemory<byte>.Empty : new byte[] { 1 }, TimeSpan.FromSeconds(total == 150 ? 1 : 5));
 
             await peer.Settle();
-            await peer.Deliver(ResultOpeningOf(callId, (payload, 32)));
-            await peer.Deliver(new Envelope { Header = new ChunkHeader { CallId = callId, Offset = 32, IsLast = total == 150 }, Payload = payload.AsMemory(32, total == 150 ? 48 : 20) });
+            await peer.Deliver(ResultOpeningOf(callId, (payload, 28)));
+            await peer.Deliver(new Envelope { Header = new ChunkHeader { CallId = callId, Offset = 28, IsLast = total == 150 }, Payload = payload.AsMemory(28, total == 150 ? 48 : 20) });
 
             var invalid = await Assert.ThrowsAsync<FailureException>(() =>
             {
@@ -983,9 +1006,9 @@ public sealed partial class RouterCoreTests
             Assert.Equal(Echo.Address, invalid.ProcedureAddress);
             Assert.Equal(side, invalid.Side);
             Assert.IsType<CancelHeader>(peer.Sent[^1].Header);
-            await peer.Deliver(ChunkOf(callId, (payload, total == 150 ? 80 : 32, 48)));
+            await peer.Deliver(ChunkOf(callId, (payload, total == 150 ? 76 : 28, 48)));
             Assert.Empty(peer.Reports);
-            Assert.Equal(new IEnvelopeHeader[] { RequestOf(callId), new CreditHeader { CallId = callId, CreditEnd = total == 150 ? 150 : 160 }, new CancelHeader { CallId = callId } }, peer.Sent.Select((envelope) => { return envelope.Header; }));
+            Assert.Equal(new IEnvelopeHeader[] { RequestOf(callId), new CreditHeader { CallId = callId, CreditEnd = total == 150 ? 150 : 156 }, new CancelHeader { CallId = callId } }, peer.Sent.Select((envelope) => { return envelope.Header; }));
         }
     }
 
@@ -998,7 +1021,7 @@ public sealed partial class RouterCoreTests
         var asked = peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await peer.Settle();
-        await peer.Deliver(ResultOpeningOf(1, (payload, 32)));
+        await peer.Deliver(ResultOpeningOf(1, (payload, 28)));
         await peer.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfProtocol(ProtocolCode.TransferStalled) });
 
         var stalled = await Assert.ThrowsAsync<FailureException>(() =>
@@ -1009,20 +1032,20 @@ public sealed partial class RouterCoreTests
         Assert.Equal(((ushort)ProtocolCode.TransferStalled, FailureOrigin.Peer), (stalled.Code, stalled.Origin));
 
         // the peer ended it: no cancel, and what its credit let come is dropped in silence
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
+        await peer.Deliver(ChunkOf(1, (payload, 28, 48)));
 
         // what the first held of the budget, the second is granted
         var second = peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await peer.Settle();
-        await peer.Deliver(ResultOpeningOf(3, (payload, 32)));
+        await peer.Deliver(ResultOpeningOf(3, (payload, 28)));
         Assert.Equal(
             new IEnvelopeHeader[]
             {
                 RequestOf(1),
-                new CreditHeader { CallId = 1, CreditEnd = 160 },
+                new CreditHeader { CallId = 1, CreditEnd = 156 },
                 RequestOf(3),
-                new CreditHeader { CallId = 3, CreditEnd = 160 },
+                new CreditHeader { CallId = 3, CreditEnd = 156 },
             },
             peer.Sent.Select((envelope) =>
             {
@@ -1049,13 +1072,13 @@ public sealed partial class RouterCoreTests
                 var asked = peer.Request(side == RouterSide.Client ? new byte[] { 1 } : Array.Empty<byte>(), TimeSpan.FromSeconds(side == RouterSide.Client ? 5 : 1));
 
                 await peer.Settle();
-                await peer.Deliver(ResultOpeningOf(callId, (payload, 32)));
+                await peer.Deliver(ResultOpeningOf(callId, (payload, 28)));
                 await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId }, Payload = new byte[] { 9 } });
                 var reported = Assert.IsType<FailureException>(Assert.Single(peer.Reports));
                 Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, reported.Code);
                 Assert.Contains($"call {callId} is answered already, by a transfer", reported.Message, StringComparison.Ordinal);
                 Assert.Equal([Handle], peer.ReportedOn);
-                for (var offset = 32; offset < total; offset += 48)
+                for (var offset = 28; offset < total; offset += 48)
                 {
                     await peer.Deliver(ChunkOf(callId, (payload, offset, Math.Min(48, total - offset))));
                 }
@@ -1088,7 +1111,7 @@ public sealed partial class RouterCoreTests
                 Timeout = timeout is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : Timeout.InfiniteTimeSpan,
             });
 
-            await recorded.Deliver(ResultOpeningOf(2, (RequesterBytesOf(40), 32)));
+            await recorded.Deliver(ResultOpeningOf(2, (RequesterBytesOf(40), 28)));
 
             var before = recorded.Clock.Armed.Count;
 
@@ -1096,8 +1119,8 @@ public sealed partial class RouterCoreTests
             {
                 await recorded.Deliver(new Envelope
                 {
-                    Header = new ChunkHeader { CallId = 2, IsLast = true, Offset = 32 },
-                    Payload = RequesterBytesOf(8),
+                    Header = new ChunkHeader { CallId = 2, IsLast = true, Offset = 28 },
+                    Payload = RequesterBytesOf(12),
                 });
             }
             else if (ending == "failure")
@@ -1108,8 +1131,8 @@ public sealed partial class RouterCoreTests
             {
                 await recorded.Deliver(new Envelope
                 {
-                    Header = new ChunkHeader { CallId = 2, IsLast = true, Offset = 32 },
-                    Payload = RequesterBytesOf(9),
+                    Header = new ChunkHeader { CallId = 2, IsLast = true, Offset = 28 },
+                    Payload = RequesterBytesOf(13),
                 });
             }
             else if (ending == "signal")
@@ -1126,7 +1149,7 @@ public sealed partial class RouterCoreTests
             {
                 var result = await asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
 
-                Assert.Equal(RequesterBytesOf(32).Concat(RequesterBytesOf(8)), result.Payload.ToArray());
+                Assert.Equal(RequesterBytesOf(28).Concat(RequesterBytesOf(12)), result.Payload.ToArray());
             }
             else if (ending is "failure" or "invalid")
             {
@@ -1162,7 +1185,7 @@ public sealed partial class RouterCoreTests
         var asked = peer.Request(new byte[] { 1 }, (TimeSpan.FromSeconds(1), source.Token));
 
         await peer.Settle();
-        await peer.Deliver(ResultOpeningOf(1, (payload, 32)));
+        await peer.Deliver(ResultOpeningOf(1, (payload, 28)));
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
@@ -1171,11 +1194,11 @@ public sealed partial class RouterCoreTests
 
         // its timeout of 1 s is shorter than the 2 s the peer keeps its call abandoned
         await peer.Advance(TimeSpan.FromSeconds(1.5));
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
+        await peer.Deliver(ChunkOf(1, (payload, 28, 48)));
         Assert.Empty(peer.Reports);
         Assert.Equal(3u, await peer.CallIdOf(peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5))));
         await peer.Advance(TimeSpan.FromSeconds(0.5));
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
+        await peer.Deliver(ChunkOf(1, (payload, 28, 48)));
         Assert.Equal((ushort)ProtocolCode.CallUnknown, Assert.IsType<FailureException>(Assert.Single(peer.Reports)).Code);
     }
 
@@ -1391,9 +1414,9 @@ public sealed partial class RouterCoreTests
         var waiting = recorded.Request([], new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) });
         var bytes = new byte[150];
 
-        await recorded.Deliver(ResultOpeningOf(2, (bytes, 32)));
-        await recorded.Deliver(ChunkOf(2, (bytes, 32, 48)));
-        await recorded.Deliver(ChunkOf(2, (bytes, 32, 48)));
+        await recorded.Deliver(ResultOpeningOf(2, (bytes, 28)));
+        await recorded.Deliver(ChunkOf(2, (bytes, 28, 48)));
+        await recorded.Deliver(ChunkOf(2, (bytes, 28, 48)));
         Assert.Equal(
             [TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250)],
             recorded.Clock.Armed.Select((timer) =>
@@ -1420,13 +1443,13 @@ public sealed partial class RouterCoreTests
         var asked = peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await peer.Settle();
-        await peer.Deliver(ResultOpeningOf(1, (payload, 32)));
+        await peer.Deliver(ResultOpeningOf(1, (payload, 28)));
         await peer.Advance(TimeSpan.FromSeconds(1.5));
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
+        await peer.Deliver(ChunkOf(1, (payload, 28, 48)));
         await peer.Advance(TimeSpan.FromSeconds(1.5));
 
         // a copy is no progress
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
+        await peer.Deliver(ChunkOf(1, (payload, 28, 48)));
         Assert.False(asked.IsCompleted);
         await peer.Advance(TimeSpan.FromSeconds(0.5));
         Assert.True(asked.IsCompleted);
@@ -1456,7 +1479,7 @@ public sealed partial class RouterCoreTests
                 if (envelope.Header is ChunkHeader { IsLast: true })
                 {
                     opened += 1;
-                    core.Receive(EnvelopeCodec.WriteEnvelope(ResultOpeningOf(2, (RequesterBytesOf(100), 32))), Handle);
+                    core.Receive(EnvelopeCodec.WriteEnvelope(ResultOpeningOf(2, (RequesterBytesOf(100), 28))), Handle);
 
                     return holdLastSend ? handed.Task : Task.CompletedTask;
                 }
@@ -1500,7 +1523,7 @@ public sealed partial class RouterCoreTests
 
         await peer.Settle();
         await peer.Deliver(CreditOf(1, 172));
-        await peer.Deliver(ResultOpeningOf(1, (RequesterBytesOf(300), 32)));
+        await peer.Deliver(ResultOpeningOf(1, (RequesterBytesOf(300), 28)));
         await peer.Deliver(CreditOf(1, 300));
         Assert.True(ChunksOf(peer.Sent)[^1].IsLast);
 
@@ -2140,7 +2163,7 @@ public sealed partial class RouterCoreTests
             using var source = new CancellationTokenSource();
             var asking = recorded.Request([], new ResolvedRequestOptions { CancellationToken = source.Token, Timeout = TimeSpan.FromSeconds(1) });
 
-            await recorded.Deliver(ResultOpeningOf(2, (new byte[200], 32)));
+            await recorded.Deliver(ResultOpeningOf(2, (new byte[200], 28)));
             if (ending == "cancel")
             {
                 core.Cancel(new CallAddress(2, Handle));
@@ -2179,7 +2202,7 @@ public sealed partial class RouterCoreTests
             // its budget and its place back: another result is granted a whole window
             var next = recorded.Request([], new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) });
 
-            await recorded.Deliver(ResultOpeningOf(4, (new byte[200], 32)));
+            await recorded.Deliver(ResultOpeningOf(4, (new byte[200], 28)));
             core.Cancel(new CallAddress(4, Handle));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             {
@@ -2189,10 +2212,10 @@ public sealed partial class RouterCoreTests
                 new IEnvelopeHeader[]
                 {
                     RequestOf(2),
-                    new CreditHeader { CallId = 2, CreditEnd = 160 },
+                    new CreditHeader { CallId = 2, CreditEnd = 156 },
                     new CancelHeader { CallId = 2 },
                     RequestOf(4),
-                    new CreditHeader { CallId = 4, CreditEnd = 160 },
+                    new CreditHeader { CallId = 4, CreditEnd = 156 },
                     new CancelHeader { CallId = 4 },
                 },
                 recorded.Sent.Select((envelope) =>

@@ -40,6 +40,12 @@ internal sealed record TransferOpening
     /// <summary>The whole payload's length, as the opening declares it.</summary>
     public required long Total { get; init; }
 
+    /// <summary>
+    /// The bytes of its payload its sender places in its opening, which it carries exactly; none, for
+    /// an opening held to no count.
+    /// </summary>
+    public int? OpeningBytes { get; init; }
+
     /// <summary>What hears it stall once admitted; none, for a transfer no timer of its own governs.</summary>
     public Action? OnStall { get; init; }
 
@@ -216,7 +222,8 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     /// order: <c>PAYLOAD_TOO_LARGE</c> when this side takes no transfer, for a total of 0 or past the
     /// payload's limit; <c>CAPACITY_EXCEEDED</c> when the connection holds twice its transfers with
     /// those its resolvers outlive, or its transfers already; <c>CHUNK_INVALID</c> for an opening that
-    /// carries no byte of its payload, or holds its whole total. Then the budget: admitted when no
+    /// carries no byte of its payload, holds its whole total, or carries other than its
+    /// <c>OpeningBytes</c>, when given. Then the budget: admitted when no
     /// opening waits and the budget left holds its total, or waiting, its <c>OnRefused</c> told past
     /// half the inactivity allowed and its <c>OnAdmitted</c> once admitted — or refused
     /// <c>CAPACITY_EXCEEDED</c> at once, when that half is 0. Given <c>OnStall</c>, a timer hears the
@@ -265,6 +272,13 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         if (incoming is null)
         {
             return (null, refusal);
+        }
+
+        // ! an opening carries exactly what its sender places in it, so what it holds outside the
+        // budget is bounded as a chunk is (spec 12.3)
+        if (opened.OpeningBytes is { } openingBytes && opening.Length != openingBytes)
+        {
+            return Refused(ProtocolCode.ChunkInvalid, $"an opening carries {openingBytes} bytes of its payload, not {opening.Length}");
         }
 
         // * admitted at once only when no opening waits, on any connection, and the budget left holds

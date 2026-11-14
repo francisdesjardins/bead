@@ -190,6 +190,34 @@ public sealed partial class RouterCoreTests
 
     // spec 12.3
     [Fact]
+    public void Places_in_an_opening_the_bytes_its_receiver_holds_it_to_a_result_s_counted_with_an_announcement_s_20_bytes()
+    {
+        var placement = new RouterCore.PayloadPlacement(Chunked);
+        IEnvelopeHeader[] requests = [RequestOf(1), RequestOf(1) with { Credential = Credential.Jwt("a.b.c"), DestinationId = 9 }];
+        var result = new ResultHeader { CallId = 1 };
+
+        // a request's: its chunk less its header, the credential it presents among it
+        foreach (var header in requests)
+        {
+            var (outgoing, _) = placement.TransferOf(PatternOf(300), (header, 1_024));
+            var opening = ((RequestHeader)header) with { Total = 300 };
+
+            Assert.Equal(64 - EnvelopeCodec.HeaderBytesOf(opening), outgoing!.Opening.Length);
+            Assert.Equal(64 - EnvelopeCodec.HeaderBytesOf(opening), placement.OpeningBytesOf(opening));
+        }
+
+        // a result's: less the 20 bytes of an announcement too, whichever it carries as it goes, if any
+        Assert.Equal(28, placement.TransferOf(PatternOf(300), (result, 1_024)).Transfer!.Opening.Length);
+        Assert.Equal(
+            [28, 28, 28],
+            new Credential?[] { null, Credential.None, Credential.Opaque(SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray())) }.Select((credential) =>
+            {
+                return placement.OpeningBytesOf(result with { Credential = credential, Total = 300 });
+            }));
+    }
+
+    // spec 12.3
+    [Fact]
     public void Opens_every_transfer_with_one_byte_of_its_payload_at_least_and_leaves_one_at_least_past_its_opening()
     {
         IEnvelopeHeader[] headers = [RequestOf(1), RequestOf(1) with { DestinationId = 0x1_0000 }, new ResultHeader { CallId = 1 }];

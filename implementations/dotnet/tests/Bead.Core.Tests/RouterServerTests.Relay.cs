@@ -746,8 +746,12 @@ public sealed partial class RouterServerTests
         Router.RegisterDestination(new ConnectionTarget(Second), new DestinationOptions { DestinationId = 9 });
         Router.RegisterDestination(new ConnectionTarget(Third), new DestinationOptions { DestinationId = 11 });
 
-        // a transfer's opening past the default, credited; nothing goes on before it is whole
-        Deliver(First, To(9, new Envelope { Header = new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1, Total = past }, Payload = new byte[16] }));
+        // a transfer's opening past the default, as full as its sender places it, credited; nothing
+        // goes on before it is whole
+        var opening = new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1, DestinationId = 9, Total = past };
+
+        Deliver(First, new Envelope { Header = opening, Payload = new byte[new RouterCore.PayloadPlacement(RouterLimits.Default).OpeningBytesOf(opening)] });
+
         Deliver(First, To(11, RequestOf(3)));
         await Settle();
 
