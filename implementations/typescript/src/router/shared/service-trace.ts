@@ -52,6 +52,11 @@ export interface ITracedCall<Handle extends string> {
   /** What its router's `request` is handed, to hear the id it draws. */
   readonly onCallId: (callId: CallId) => void;
   readonly step: Omit<ITraceStep<Handle>, 'direction'>;
+  /**
+   * Settles once its id is drawn, or once `requested` settles, whichever comes first: a router
+   * that takes the call in a later turn draws its id there.
+   */
+  readonly whenDrawn: (requested: Promise<unknown>) => Promise<void>;
 }
 
 /** What the trace tells: whether anyone listens to `debug`, and how an event reaches them. */
@@ -100,12 +105,24 @@ export const tracedCallOf = <Handle extends string>(
 ): ITracedCall<Handle> => {
   // ! apart from `callOf`, and called only while someone listens: a closure made in that async
   // body would hold its locals in a context V8 makes at every call, listened to or not
+  let drawn: (() => void) | undefined;
   const traced: ITracedCall<Handle> = {
     callId: undefined,
     onCallId: (callId) => {
       traced.callId = callId;
+      drawn?.();
     },
     step,
+    whenDrawn: (requested) => {
+      const settled = (): void => {
+        drawn?.();
+      };
+
+      return new Promise<void>((resolve) => {
+        drawn = resolve;
+        requested.then(settled, settled);
+      });
+    },
   };
 
   return traced;
