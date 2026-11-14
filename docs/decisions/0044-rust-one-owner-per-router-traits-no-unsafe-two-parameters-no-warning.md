@@ -772,12 +772,15 @@ floor, and the fuzz targets built on the dated nightly, never run; on Windows, `
 target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
 each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
 Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its ten targets: eight the twins of the other sides' eight,
-`envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
-and `proto-codecs`, each reading what no socket or broker feature holds, through a crate's surface,
-`bead::internal` or a test kit; and `mqtt-packets`, its MQTT 5 client's reader of a broker's
-packets, and `mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, the Rust
-side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
+([0006](0006-a-rule-has-its-gate.md)), its eleven targets: nine the twins of the other sides' nine,
+`envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`,
+`proto-codecs` and `json-form`, each reading what no socket or broker feature holds, through a
+crate's surface, `bead::internal` or a test kit, `json-form` through `bead-protobuf`'s `JsonForm`
+under its feature `transcoding`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
+and `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and `mqtt-websocket-frames`,
+its MQTT 5 client's reader of a WebSocket's frames, the Rust side's alone, through `bead::internal`
+under the feature `mqtt`, which the fuzz
 project's manifest turns on beside `testing`
 ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 Its suite holds the envelope readers' and the parcel reader's seeded mutations, the same inputs as

@@ -817,7 +817,7 @@ machine.
 
 ## Fuzzing
 
-Every side fuzzes the same eight parsers, guided by coverage, each fed raw bytes:
+Every side fuzzes the same nine parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -832,7 +832,12 @@ written again, its writer refusing exactly what it documents, and what it writes
 same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s
 `Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
-it back. The Rust side fuzzes all eight, over its core's judgement and codecs, with cargo-fuzz on
+it back; `json-form`, protobuf's JSON read by Bead's mapping over `spec/transcoding.proto`'s
+`Everything` and `Edges` (transcoding 5.2), the first byte picking the message, where what reads is
+written, what was written reads, and it writes again to the same text, byte for byte, never a
+message's bytes compared, since a map's entries are written in 17.7.6's order and a `-0` as `0` or
+left out (5.6). The Rust side fuzzes all nine, over its core's judgement and codecs and
+`bead-protobuf`'s JSON form, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
 and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
 `mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, which the other sides

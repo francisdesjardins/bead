@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
-// pull request's gate (decision 0006). Eight targets, the same on each side and named alike, one
+// pull request's gate (decision 0006). Nine targets, the same on each side and named alike, one
 // of beadc's and two of the Rust side's own, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
@@ -17,6 +17,10 @@
 // - `proto-codecs`: the `proto` codecs over `spec/codecs.proto`'s `Probe`, spec 17.9, the first
 //   three bytes drawing a path, a depth and a number of unknown groups to wrap what reads in,
 //   before it is written;
+// - `json-form`: protobuf's JSON read by Bead's mapping, transcoding 5.2, over
+//   `spec/transcoding.proto`'s `Everything`, the first byte even, or its `Edges`, odd, the rest
+//   its body: what reads is written, what was written reads, and it writes again to the same
+//   text, byte for byte (decision 0052);
 // - `blueprint`, the TypeScript side's alone, as beadc has no other: beadc's blueprint reader, its
 //   JSON, its schema and its rules, and its form written back;
 // - `mqtt-packets`, the Rust side's alone: its MQTT 5 client's reader of a broker's packets, which
@@ -46,11 +50,12 @@
 //   compiler's warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
-//   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf and Google.Protobuf in a copy
-//   of its build. `fuzz/fuzzer.json` pins both: the fuzzer's release and its SHA-256, checked
-//   before a byte of it is written, and the instrumenter's version, which is the SharpFuzz
-//   library's in implementations/dotnet/Directory.Packages.props. Both land in `.fuzzer/` beside
-//   the project, which git ignores. The child's runtime holds its managed heap to 256 MiB.
+//   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf, Google.Protobuf and
+//   Bead.Transcoding in a copy of its build. `fuzz/fuzzer.json` pins both: the fuzzer's release and
+//   its SHA-256, checked before a byte of it is written, and the instrumenter's version, which is
+//   the SharpFuzz library's in implementations/dotnet/Directory.Packages.props. Both land in
+//   `.fuzzer/` beside the project, which git ignores. The child's runtime holds its managed heap to
+//   256 MiB.
 //
 //   node tools/fuzz.mjs seed                     every target's corpora, from the conformance files
 //   node tools/fuzz.mjs fetch                    the C# side's fuzzer and instrumenter, by the pin
@@ -95,6 +100,7 @@ export const TWINS = Object.freeze([
   'ws-handshake',
   'broker-parcel',
   'proto-codecs',
+  'json-form',
 ]);
 
 /**
@@ -353,6 +359,13 @@ const MQTT_PACKETS = Object.freeze([
   'E0 07 8E 05 1F 00 02 6E 6F',
 ]);
 
+// the messages of `spec/transcoding.proto` the `json-form` target reads, by its first byte, even
+// or odd: a seed's is its message's index here
+const JSON_FORM_MESSAGES = Object.freeze([
+  'bead.transcoding.v1.Everything',
+  'bead.transcoding.v1.Edges',
+]);
+
 // the frames a server sends a client of MQTT 5 over a WebSocket, as the Rust side's frame mutation
 // test, `tests/mqtt_websocket_frames_fuzz.rs`, seeds from them: a binary frame whole, its CONNACK;
 // one fragmented with a ping between; a pong; a close; a head of a 64-bit length
@@ -390,12 +403,14 @@ const entryBytesOf = (entry, key) => {
  * `vectors.json`; the WebSocket cases' upgrades, whole and part by part; the parcels of
  * `vectors.json`, read and refused, no byte at all among them, the seeds of every side's parcel
  * mutation tests; the `proto` payloads of `codecs.json` and the bytes its `proto` values are
- * written as, each after three zero bytes, the plain path; `blueprints`, the repository's
- * blueprints as bytes; the packets a broker sends, the Rust side's packet mutation seeds; and the
- * frames a server sends, the Rust side's frame mutation seeds.
+ * written as, each after three zero bytes, the plain path; the bodies of `transcoding.json`'s
+ * readings of `Everything` and of `Edges`, each after its message's byte, its text in UTF-8 or its
+ * bytes; `blueprints`, the repository's blueprints as bytes; the packets a broker sends, the Rust
+ * side's packet mutation seeds; and the frames a server sends, the Rust side's frame mutation seeds.
  */
 export const seedsOf = (files) => {
-  const { blueprints, codecs, conversations, debugFilters, transports, vectors } = files;
+  const { blueprints, codecs, conversations, debugFilters, transcoding, transports, vectors } =
+    files;
   const isTextual = (entry) => {
     return entry.encoding === 'json' || entry.encoding === 'text';
   };
@@ -442,6 +457,20 @@ export const seedsOf = (files) => {
       }),
     ].map((bytes) => {
       return Buffer.concat([PLAIN, bytes]);
+    }),
+    'json-form': transcoding.readings.flatMap((entry) => {
+      const index = JSON_FORM_MESSAGES.indexOf(entry.message);
+
+      if (index === -1) {
+        return [];
+      }
+
+      const body =
+        entry.bodyBytes === undefined
+          ? Buffer.from(entry.body, 'utf8')
+          : entryBytesOf(entry, 'bodyBytes');
+
+      return [Buffer.concat([Buffer.of(index), body])];
     }),
     blueprint: blueprints,
     'mqtt-packets': MQTT_PACKETS.map((packet) => {
@@ -512,6 +541,7 @@ const seed = () => {
     codecs: readSpec('codecs.json'),
     conversations: readSpec('conversations.json'),
     debugFilters: readSpec('debug-filters.json'),
+    transcoding: readSpec('transcoding.json'),
     transports: readSpec('transports.json'),
     vectors: readSpec('vectors.json'),
   });
@@ -776,13 +806,15 @@ const buildCSharp = () => {
       cwd: SIDES.csharp,
     }
   );
-  // the assemblies whose parsers the targets read: Bead.Core's, the WebSocket judgement's, and the
-  // proto codecs', Bead.Protobuf's and the library it reads through
+  // the assemblies whose parsers the targets read: Bead.Core's, the WebSocket judgement's, the
+  // proto codecs', Bead.Protobuf's and the library it reads through, and the JSON form's,
+  // Bead.Transcoding's
   for (const assembly of [
     'Bead.Core.dll',
     'Bead.Transport.WebSockets.dll',
     'Bead.Protobuf.dll',
     'Google.Protobuf.dll',
+    'Bead.Transcoding.dll',
   ]) {
     runOrThrow(sharpfuzz, [join(BUILD, assembly)]);
   }

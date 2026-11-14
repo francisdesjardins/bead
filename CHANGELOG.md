@@ -30,6 +30,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mapping, and the interop runs both ways over its gateway (decision 0052).
 - A gateway's `limits`, its exchanges' clients' router limits, on the C# side as on the TypeScript
   side (decision 0052).
+- A ninth fuzz twin on every side, `json-form`: protobuf's JSON read by Bead's mapping over the
+  `Transcoding` service's messages; what reads is written, what was written reads, and it writes
+  again to the same text, byte for byte (decision 0052).
 - Guides for teams that adopt Bead outside its repository, in `docs/guides/`: getting started, from
   an empty folder to a C# server and a TypeScript client in Node and in a page; real-time recipes,
   a `JWT` and admission hooks, reconnection, Prometheus in .NET and Chrome's DevTools; and how Bead

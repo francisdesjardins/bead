@@ -140,7 +140,7 @@ that meets the Tenth Man:
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the eight every side shares
+  the parsers the sides fuzz, the nine every side shares
   ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
   beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
   judges alone; and the `envelope` target's writer held to the refusals it documents, as

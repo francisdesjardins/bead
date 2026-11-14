@@ -326,13 +326,14 @@ crate's list of its public items anew, its diff the change's to review.
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|mqtt-packets|mqtt-websocket-frames`,
-fuzzes the side's ten targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
-WSL: the eight every side shares, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets,
-and `mqtt-websocket-frames`, its reader of an MQTT 5 WebSocket's frames, the Rust side's alone, since
-the other sides read a broker's bytes through MQTT.js and MQTTnet.
-[`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the ten every week, each ten minutes, its corpus
-kept between runs ([the root README](../../README.md#fuzzing)).
+envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|json-form|mqtt-packets|mqtt-websocket-frames`,
+fuzzes the side's eleven targets with cargo-fuzz on the nightly the tool pins by its date, on Linux
+or WSL: the nine every side shares, `json-form` among them, protobuf's JSON through `JsonForm`,
+`mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and `mqtt-websocket-frames`, its
+reader of an MQTT 5 WebSocket's frames, the Rust side's alone, since the other sides read a
+broker's bytes through MQTT.js and MQTTnet.
+[`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the eleven every week, each ten minutes, its
+corpus kept between runs ([the root README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
 generator every side shares; `mqtt_packets_fuzz.rs` feeds the MQTT 5 packets' reader seeded
