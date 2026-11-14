@@ -34,6 +34,10 @@ const LARGEST_FINDINGS = 64 * 1024 * 1024;
 // buf's exit on findings, its lint's and its breaking's alike
 const BUF_FINDINGS = 100;
 
+// what a parent's removal answers when another run removes it, works in it or holds it open:
+// Windows answers EPERM to a folder another process is removing, and EBUSY to one it holds
+const PARENT_KEPT = new Set(['ENOENT', 'ENOTEMPTY', 'EEXIST', 'EPERM', 'EBUSY']);
+
 // helpers
 
 const require = createRequire(import.meta.url);
@@ -45,9 +49,7 @@ const removeWorkspace = (folder: string): void => {
   try {
     rmdirSync(dirname(folder));
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-
-    if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'EEXIST') {
+    if (!PARENT_KEPT.has((error as NodeJS.ErrnoException).code ?? '')) {
       throw error;
     }
   }

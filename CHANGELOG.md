@@ -154,6 +154,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal
+  with EPERM or EBUSY, as it does while another run removes or holds that folder, where it failed
+  the run.
 - The TypeScript side tells the `tx` step of a call made within a notification's callback once
   its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
   told it with no id, and the DevTools panel showed that call twice, once never answered.
