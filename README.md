@@ -935,9 +935,11 @@ against each server.
   an entry of a conformance file a harness names at run time, a case's label or a row of the
   matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason.
   Given files, those alone.
-- `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
-  sites that report alone (spec 9.0), on every side, each marked where it stands by
-  `// ! a detail of the side's own words: <why>`. Given files, those alone.
+- `node tools/check-details.mjs`: on every side, no exception's message goes into a failure's detail
+  but at a site that reports alone (spec 9.0) or whose words are the side's own, a built-in codec's
+  reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
+  where it stands by `// ! a detail of the side's own words: <why>` and counted by the tool. What
+  another generator writes is left unread, what beadc writes read. Given files, those alone.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says

@@ -1812,6 +1812,8 @@ impl Inner {
                         arose: Arose::Gateway,
                         code: ProtocolCode::PAYLOAD_UNDECODABLE.get(),
                         scope: FailureScope::Protocol,
+                        // ! a detail of the side's own words: the mapping's own, fixed in
+                        // transcoding.json
                         detail: refused.reason().to_owned(),
                         credential: false,
                         encoding,
@@ -2460,6 +2462,7 @@ impl CallContext {
             Ended::Form(MessageFormError::Form(error)) => {
                 inner.report(&RouterError::Other(Arc::new(error.clone())));
 
+                // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
                 Some(inner.own_problem(OwnFailure::Unwritable, error.reason()))
             }
             // the stock library's refusal of a result, or a notification, the server answered:
