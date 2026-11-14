@@ -819,7 +819,7 @@ async fn rejects_with_a_cancel_error_closed_when_its_signal_aborts_during_the_ha
 }
 
 // spec 15.15
-async fn compares_disposal_during_a_handshake() {
+async fn compares_disposal_during_a_handshake(ending: ClientTeardown) {
     for timeout in [None, Some(NEVER)] {
         let mut held = holding().await;
         let client = client();
@@ -834,7 +834,7 @@ async fn compares_disposal_during_a_handshake() {
             "the whole unanswered upgrade"
         );
 
-        client.dispose();
+        ending.finish(&client).await;
 
         assert!(is_disposed(&settled(connecting).await), "disposed");
         assert!(is_state(&client, ReadyState::Closed), "closed");
@@ -2498,8 +2498,7 @@ async fn emits_close_with_was_clean_true_and_was_quick_false_when_the_client_dis
     assert_eq!(code, Some(1000), "1000");
 }
 
-#[tokio::test]
-async fn emits_close_with_was_clean_true_and_was_quick_true_when_the_client_quickly_disconnects() {
+async fn compares_a_quick_close() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2519,11 +2518,34 @@ async fn emits_close_with_was_clean_true_and_was_quick_true_when_the_client_quic
 
     assert_eq!(recorder.closes(), [(true, true)], "clean and quick");
     assert!(is_state(&client, ReadyState::Closed), "closed");
+
+    // This peer reads nothing until the quick close has settled: it cannot answer it.
+    let mut held = raw().await;
+    let client = self::client();
+    let recorder = recorded(&client);
+    settled(client.connect(&to(held.port))).await.unwrap();
+    let mut socket = held.next().await;
+    patience(
+        Duration::from_secs(2),
+        client
+            .disconnect(&TransportClientDisconnectOptions {
+                is_quick: Some(true),
+                ..TransportClientDisconnectOptions::default()
+            })
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(recorder.closes(), [(true, true)]);
+    assert_eq!(client.ready_state(), ReadyState::Closed);
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1001),
+        "going away reaches the unread peer"
+    );
 }
 
-#[tokio::test]
-async fn emits_close_with_was_clean_false_and_was_quick_false_when_the_server_disconnects_and_refuses_a_send_after_it()
- {
+async fn compares_a_server_close() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2541,22 +2563,54 @@ async fn emits_close_with_was_clean_false_and_was_quick_false_when_the_server_di
     );
     assert!(is_state(&client, ReadyState::Closed), "closed");
     assert!(client.send(binary(&[1])).is_err(), "refused");
+
+    // The source uses the transport server's normal close, not only a raw empty close.
+    let mut observed = transport_peers().await;
+    let client = self::client();
+    let recorder = recorded(&client);
+    settled(client.connect(&to(observed.port))).await.unwrap();
+    let handle = patience(PATIENCE, observed.connections.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        patience(PATIENCE, observed.server.close(&handle))
+            .await
+            .unwrap(),
+        "the held connection closes"
+    );
+    assert_eq!(closes_within(&recorder, 1).await, [(false, false)]);
+    assert_eq!(client.ready_state(), ReadyState::Closed);
+    assert!(
+        matches!(client.send(binary(&[1])), Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
+        "the exact refused send"
+    );
+    patience(PATIENCE, observed.server.stop())
+        .await
+        .unwrap()
+        .unwrap();
 }
 
-#[tokio::test]
-async fn dispose_during_a_disconnect_settles_it_without_a_close_and_the_client_can_connect_again() {
-    let server = hearing(None).await;
+async fn compares_disposal_during_a_close(ending: ClientTeardown) {
+    let mut server = raw().await;
     let client = client();
     let recorder = recorded(&client);
 
     settled(client.connect(&to(server.port))).await.unwrap();
 
+    let _socket = server.next().await;
     let disconnecting = client
         .disconnect(&TransportClientDisconnectOptions::default())
         .unwrap();
 
-    client.dispose();
-    patience(PATIENCE, disconnecting).await.unwrap();
+    assert!(
+        matches!(client.disconnect(&TransportClientDisconnectOptions::default()), Err(TransportError::ReadyState(error)) if error.got() == ReadyState::Closing),
+        "a second close is refused while Closing"
+    );
+    ending.finish(&client).await;
+    patience(Duration::from_secs(2), disconnecting)
+        .await
+        .unwrap();
 
     // dropped, not closed by a handshake
     assert!(recorder.closes().is_empty(), "no close");
@@ -2590,10 +2644,10 @@ async fn an_explicit_undefined_disconnect_option_falls_back_to_its_default() {
     assert_eq!(recorder.closes(), [(true, false)], "its defaults");
 }
 
-fn compares_disposal_before_connecting() {
+async fn compares_disposal_before_connecting(ending: ClientTeardown) {
     let client = client();
 
-    client.dispose();
+    ending.finish(&client).await;
 
     assert!(
         is_state(&client, ReadyState::Uninitialized),
@@ -2601,12 +2655,12 @@ fn compares_disposal_before_connecting() {
     );
 }
 
-async fn compares_disposal_while_open() {
+async fn compares_disposal_while_open(ending: ClientTeardown) {
     let server = hearing(None).await;
     let client = client();
 
     settled(client.connect(&to(server.port))).await.unwrap();
-    client.dispose();
+    ending.finish(&client).await;
 
     assert!(is_state(&client, ReadyState::Closed), "closed");
     for bytes in [&b"x"[..], &[1][..]] {
@@ -3997,22 +4051,22 @@ async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnectio
 
 #[tokio::test]
 async fn dispose_on_a_client_never_connected_does_nothing() {
-    compares_disposal_before_connecting();
+    compares_disposal_before_connecting(ClientTeardown::Drop).await;
 }
 
 #[tokio::test]
 async fn a_dispose_on_a_client_never_connected_does_nothing() {
-    compares_disposal_before_connecting();
+    compares_disposal_before_connecting(ClientTeardown::Close).await;
 }
 
 #[tokio::test]
 async fn dispose_on_an_open_client_leaves_it_closed_and_ready_to_connect_again() {
-    compares_disposal_while_open().await;
+    compares_disposal_while_open(ClientTeardown::Drop).await;
 }
 
 #[tokio::test]
 async fn a_dispose_on_an_open_client_leaves_it_closed_refusing_a_send_and_ready_to_connect_again() {
-    compares_disposal_while_open().await;
+    compares_disposal_while_open(ClientTeardown::Close).await;
 }
 
 #[tokio::test]
@@ -4076,12 +4130,12 @@ async fn throws_a_timeout_exception_past_its_timeout_ending_closed_and_drops_the
 
 #[tokio::test]
 async fn dispose_while_connecting_rejects_the_connect_with_a_connect_error() {
-    compares_disposal_during_a_handshake().await;
+    compares_disposal_during_a_handshake(ClientTeardown::Drop).await;
 }
 
 #[tokio::test]
 async fn dispose_async_while_connecting_fails_the_connect_ending_closed_and_closes_its_socket() {
-    compares_disposal_during_a_handshake().await;
+    compares_disposal_during_a_handshake(ClientTeardown::Close).await;
 }
 
 #[tokio::test]
@@ -4375,4 +4429,105 @@ async fn throws_a_reconnect_exception_from_what_its_socket_threw_when_the_server
         "closed after its one attempt"
     );
     client.dispose();
+}
+
+#[tokio::test]
+async fn emits_close_with_was_clean_true_and_was_quick_true_when_the_client_quickly_disconnects() {
+    compares_a_quick_close().await;
+}
+
+#[tokio::test]
+async fn says_a_quick_close_was_quick_and_settles_it_without_waiting_on_the_server() {
+    compares_a_quick_close().await;
+}
+
+#[tokio::test]
+async fn emits_close_with_was_clean_false_and_was_quick_false_when_the_server_disconnects_and_refuses_a_send_after_it()
+ {
+    compares_a_server_close().await;
+}
+
+#[tokio::test]
+async fn says_a_close_the_server_made_was_neither_clean_nor_quick_and_refuses_a_send_after_it() {
+    compares_a_server_close().await;
+}
+
+#[tokio::test]
+async fn dispose_during_a_disconnect_settles_it_without_a_close_and_the_client_can_connect_again() {
+    compares_disposal_during_a_close(ClientTeardown::Drop).await;
+}
+
+#[tokio::test]
+async fn a_dispose_during_a_close_settles_it_without_a_close_a_second_close_refused_meanwhile_and_it_can_connect_again()
+ {
+    compares_disposal_during_a_close(ClientTeardown::Close).await;
+}
+
+// `close` is the asynchronous clean-then-drop operation corresponding to DisposeAsync.
+// `dispose` is the separate silent drop; retain its existing source sentences too.
+#[derive(Clone, Copy)]
+enum ClientTeardown {
+    Drop,
+    Disconnect,
+    DefaultedDisconnect,
+    Close,
+}
+
+impl ClientTeardown {
+    async fn finish(self, client: &WebSocketTransportClient) {
+        let closing = match self {
+            Self::Drop => {
+                client.dispose();
+                return;
+            }
+            Self::Disconnect => client
+                .disconnect(&TransportClientDisconnectOptions::default())
+                .unwrap(),
+            Self::DefaultedDisconnect => client
+                .disconnect(&TransportClientDisconnectOptions {
+                    is_clean: Some(true),
+                    is_quick: Some(false),
+                })
+                .unwrap(),
+            Self::Close => client.close(),
+        };
+        patience(PATIENCE, closing).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn its_own_close_or_dispose_raises_a_clean_close_not_quick_on_both_ends() {
+    for ending in [
+        ClientTeardown::Disconnect,
+        ClientTeardown::DefaultedDisconnect,
+        ClientTeardown::Close,
+    ] {
+        let mut observed = transport_peers().await;
+        let client = client();
+        let recorder = recorded(&client);
+        settled(client.connect(&to(observed.port))).await.unwrap();
+        let handle = patience(PATIENCE, observed.connections.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        ending.finish(&client).await;
+        assert_eq!(
+            closes_within(&recorder, 1).await,
+            [(true, false)],
+            "the client's clean non-quick close"
+        );
+        assert_eq!(client.ready_state(), ReadyState::Closed);
+        assert_eq!(
+            patience(PATIENCE, observed.closes.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            (true, handle),
+            "the same handle closes cleanly at the server"
+        );
+        patience(PATIENCE, observed.server.stop())
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }
