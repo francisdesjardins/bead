@@ -302,3 +302,96 @@ async fn a_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_ste
     assert_eq!(scripted.codes(), Vec::<String>::new());
     registration.unregister().await.expect("unregistered");
 }
+
+// debugging 4.4; spec 9.0
+#[tokio::test]
+async fn a_request_made_inside_a_notification_callback_names_its_call_id_on_its_tx_step() {
+    let scripted = Scripted::new();
+    let services = services(&scripted);
+    let notification = services
+        .get_notification(
+            &super::notifying(),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
+        )
+        .expect("notification declared");
+    let asking = Arc::new(
+        services
+            .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
+            .expect("echo declared"),
+    );
+    let steps = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&steps);
+    services.on_debug(Arc::new(move |error, event| {
+        assert!(error.is_none());
+        let tx = event
+            .tx
+            .as_ref()
+            .and_then(|value| value.as_ref().as_any().downcast_ref::<String>().cloned());
+        let rx = event
+            .rx
+            .as_ref()
+            .and_then(|value| value.as_ref().as_any().downcast_ref::<String>().cloned());
+        if event.call_type == DebugType::Request
+            && (tx.as_deref() == Some("read") || rx.as_deref() == Some("counter at 1"))
+        {
+            locked(&hearing).push((event.direction, event.call_id));
+        }
+    }));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let requesting = Arc::clone(&requests);
+    scripted.router.on_debug(Arc::new(move |direction, event| {
+        if direction == DebugDirection::Tx
+            && let EnvelopeHeader::Request(header) = &event.header
+        {
+            locked(&requesting).push(header.call_id);
+        }
+    }));
+    let reading = Arc::new(Mutex::new(None));
+    let made = Arc::clone(&reading);
+    let mut registering = notification.register(
+        "subscribe".to_owned(),
+        Arc::new(move |_| {
+            // * made from within the notification's callback
+            *locked(&made) = Some(
+                asking
+                    .call("read".to_owned(), &RequestOptions::default())
+                    .expect("read made"),
+            );
+            Box::pin(async { Ok(()) })
+        }),
+        &RegistrationOptions::default(),
+    );
+    core::future::poll_fn(|context| {
+        assert!(registering.as_mut().poll(context).is_pending());
+        core::task::Poll::Ready(())
+    })
+    .await;
+    scripted.settle().await;
+    scripted.transport.deliver(&super::result_of(1, None));
+    let registration = crate::testing::patience(super::PATIENCE, registering)
+        .await
+        .expect("answered")
+        .expect("subscribed");
+    scripted.transport.deliver(&notification_of(1, b'c'));
+    scripted.settle().await;
+    scripted.transport.deliver(&result(3, "counter at 1"));
+    let read = locked(&reading).take().expect("read made");
+    assert_eq!(
+        crate::testing::patience(super::PATIENCE, read)
+            .await
+            .expect("answered")
+            .expect("a result"),
+        "counter at 1"
+    );
+    scripted.settle().await;
+    assert_eq!(*locked(&requests), [1, 3]);
+    assert_eq!(
+        *locked(&steps),
+        [(DebugDirection::Tx, Some(3)), (DebugDirection::Rx, Some(3)),]
+    );
+    assert_eq!(scripted.codes(), Vec::<String>::new());
+    registration.unregister().await.expect("unregistered");
+}
