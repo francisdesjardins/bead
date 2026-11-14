@@ -161,6 +161,11 @@ export interface IRouterClientTransportLike {
   /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
   readonly clock?: IClock | undefined;
   /**
+   * Disconnects it — its server has the router refuse its commands past what their resolvers
+   * outlive (spec 9.2, step 3). One without it stays connected.
+   */
+  disconnect?(): Promise<unknown>;
+  /**
    * Whether it is secure: under TLS, on the loopback, or never leaving the machine, as a worker;
    * none is without it. A call presenting a `JWT` or an `ELSEWHERE` over one that is not fails before
    * it goes, DESTINATION_UNREACHABLE (spec 13.4).

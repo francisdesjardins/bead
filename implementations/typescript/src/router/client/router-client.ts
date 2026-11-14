@@ -324,6 +324,11 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       activity: (activity) => {
         emitter.emit('activity', activity);
       },
+      // a server that has its client refuse its commands past what their resolvers outlive is
+      // left: the client disconnects its transport (spec 9.2, step 3)
+      close: () => {
+        return transport.disconnect?.();
+      },
       isCallIdInUse: (callId) => {
         return subscriptions.has(callId);
       },

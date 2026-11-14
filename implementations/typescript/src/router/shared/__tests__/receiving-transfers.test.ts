@@ -347,7 +347,11 @@ test.describe('createReceivingTransfers', () => {
       anomalies: [],
       ceilings: { bufferedBytes: 64 },
       connectionHandles: new Set(['a']),
-      counts: { bufferedBytes: 64 - receiving.available, receivingTransfers: 1 },
+      counts: {
+        bufferedBytes: 64 - receiving.available,
+        outlivingTransfers: 0,
+        receivingTransfers: 1,
+      },
     });
     expect(receiving.available).toBeLessThan(64);
 
@@ -355,7 +359,81 @@ test.describe('createReceivingTransfers', () => {
 
     expect(receiving.gauges()).toMatchObject({
       connectionHandles: new Set(),
-      counts: { bufferedBytes: 0, receivingTransfers: 0 },
+      counts: { bufferedBytes: 0, outlivingTransfers: 0, receivingTransfers: 0 },
     });
+  });
+
+  test('holds a received transfer’s place while its call’s resolver outlives the call, among twice maximumTransfers, and gives it back as that resolver settles', () => {
+    const { receiving } = createReceiving({ bufferedBytesBudget: 64, maximumTransfers: 1 });
+    const open = (callId: number, connectionHandle: Handle = 'a') => {
+      return receiving.open(new Uint8Array(1), { call: { callId, connectionHandle }, total: 2 });
+    };
+    const whole = (opened: IReceiving<Handle>): IReceiving<Handle> => {
+      receiving.grant(opened);
+      receiving.place(opened, { bytes: new Uint8Array(1), isLast: true, offset: 1 });
+      receiving.complete(opened);
+
+      return opened;
+    };
+    const first = whole(openedOf(open(1)));
+
+    // its call ends while its resolver runs on: its bytes go back, its place among the transfers
+    // the connection receives too, but not among those and the ones its resolvers outlive
+    receiving.outlive(first);
+
+    expect(receiving.gauges()).toMatchObject({
+      connectionHandles: new Set(['a']),
+      counts: { bufferedBytes: 0, outlivingTransfers: 1, receivingTransfers: 0 },
+    });
+
+    const second = openedOf(open(3));
+
+    // * past maximumTransfers first, then past twice as many with those its resolvers outlive,
+    // checked first, its detail its own; another connection's are its own
+    expect(open(5)).toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      detail: 'the transfers a connection receives and those its resolvers outlive are 2 at most',
+    });
+
+    receiving.outlive(whole(second));
+
+    expect(open(5)).toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      detail: 'the transfers a connection receives and those its resolvers outlive are 2 at most',
+    });
+    expect(receiving.gauges().counts).toMatchObject({ outlivingTransfers: 2 });
+    openedOf(open(1, 'b'));
+
+    // the resolver settles: its place goes back, once, and the next opening is taken
+    receiving.settle(first);
+    receiving.settle(first);
+
+    expect(receiving.gauges().counts).toMatchObject({ outlivingTransfers: 1 });
+
+    const third = openedOf(open(5));
+
+    expect(open(7)).toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      detail: 'the transfers a connection receives and those its resolvers outlive are 2 at most',
+    });
+
+    receiving.settle(second);
+
+    expect(open(7)).toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      detail: 'the transfers a connection receives at once are 1 at most',
+    });
+
+    // its connection closes: the places its resolvers outlive end with it, and settle to nothing
+    receiving.outlive(third);
+    receiving.closeAll('a');
+
+    expect(receiving.gauges()).toMatchObject({
+      connectionHandles: new Set(['b']),
+      counts: { outlivingTransfers: 0, receivingTransfers: 1 },
+    });
+
+    receiving.settle(third);
+    openedOf(open(9));
   });
 });

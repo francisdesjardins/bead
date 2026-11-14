@@ -304,6 +304,10 @@ fn checked_of(procedures: &InteropProcedures) -> Result<InteropDescriptor, Progr
 
 /// The interop service, offered on `server`.
 ///
+/// The calls to `slow` each connection cancelled are counted per connection, for `cancellations`
+/// to answer, but those of a `slow` deaf to its signal, `heeds: false`, or answered first,
+/// `answersFirst: true`.
+///
 /// # Errors
 ///
 /// A [`ProgrammerError`] its server refuses a resolver with.
@@ -361,7 +365,9 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
     )?;
 
     // cancelled first, it answers all the same, an answer its router must not send; it waits on its
-    // server's clock, which its router runs on
+    // server's clock, which its router runs on. Deaf, `heeds: false`, it waits on its timer alone and
+    // counts no cancellation; `answersFirst`, it answers at once, then waits before it settles, its
+    // resolver outliving its call (spec 9.2, step 3); any other member is ignored
     {
         let kept = Arc::clone(&kept);
         let clock = router.clock();
@@ -375,6 +381,9 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
                     .get("milliseconds")
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
+                let is_heeding = request.payload.get("heeds") != Some(&Value::Bool(false));
+                let is_answering_first =
+                    request.payload.get("answersFirst") == Some(&Value::Bool(true));
                 let (woken, wait) = oneshot::channel::<()>();
                 let mut woken = Some(woken);
                 let timer = clock.arm(
@@ -388,6 +397,13 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 
                 Box::pin(async move {
                     let timer = timer.map_err(ResolverError::other)?;
+
+                    // * its answer goes out through its router as it is made, and the handler runs
+                    // on after it
+                    if is_answering_first {
+                        response.result(json!(milliseconds)).await?;
+                    }
+
                     let signal = request.signal.token().clone();
                     let mut wait = core::pin::pin!(wait);
                     let mut cancelled = core::pin::pin!(signal.cancelled());
@@ -396,7 +412,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
                             return core::task::Poll::Ready(false);
                         }
 
-                        if cancelled.as_mut().poll(context).is_ready() {
+                        if is_heeding && cancelled.as_mut().poll(context).is_ready() {
                             return core::task::Poll::Ready(true);
                         }
 
@@ -406,7 +422,10 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 
                     if is_cancelled {
                         timer.cancel();
+                    }
 
+                    // answered first, its call ended before: nothing was cancelled
+                    if is_cancelled && !is_answering_first {
                         let mut cancellations = locked(&kept.cancellations);
                         let count = cancellations
                             .entry(Arc::clone(&request.connection_handle))
@@ -414,6 +433,10 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 
                         *count = count.saturating_add(1);
                         drop(cancellations);
+                    }
+
+                    if is_answering_first {
+                        return Ok(());
                     }
 
                     response.result(json!(milliseconds)).await

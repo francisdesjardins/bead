@@ -375,6 +375,12 @@ pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     /// transport holds while it tells a listener.
     fn pause(&self);
 
+    /// Closes its connection of its router's own accord, its server refused past the resolvers
+    /// that outlive its calls (spec 9.2, step 3): cleanly, as its own disconnect does by default,
+    /// telling its close as that does; nothing when it is not open. Its router calls it in its own
+    /// turn, so it never blocks, the close starting as it is called.
+    fn disconnect(&self);
+
     /// Resumes it: what it holds it hands on, in order, from a later step of its own, never within
     /// this call, asking before each hand whether it was paused again. As
     /// [`RouterClientTransport::pause`], idempotent, never blocking, telling no listener within it, and

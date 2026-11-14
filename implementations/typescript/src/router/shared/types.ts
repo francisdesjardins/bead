@@ -829,6 +829,12 @@ export interface IRouterCorePort<Handle extends string> {
   /** What the router did: sent a request, or took the response to one. */
   activity(activity: RouterActivity, connectionHandle: Handle): void;
   /**
+   * Closes `connectionHandle`, its peer refused past what its resolvers outlive (spec 9.2, step 3),
+   * in a later turn than the refusal that made the run: what it throws or rejects is reported.
+   * Without it, the connection stays open.
+   */
+  close?(connectionHandle: Handle): unknown;
+  /**
    * Whether the side holds `callId` for `connectionHandle` beyond what the core waits on — a
    * subscription, say: the core draws none of these, and refuses a request on one.
    */

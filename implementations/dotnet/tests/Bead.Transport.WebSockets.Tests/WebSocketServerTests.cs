@@ -674,12 +674,19 @@ public sealed class WebSocketServerTests
                 }
             }
         };
-        // taken whole, then held: its place on the connection stays until its call ends
-        ends.Server.Services.GetRequestResolver(held, BytesAnswered)((_, _) =>
+        // taken whole, then held: its place on the connection stays until its call ends, with its
+        // connection, which its resolver hears and settles at, so nothing outlives the test
+        ends.Server.Services.GetRequestResolver(held, BytesAnswered)((request, _) =>
         {
-            holding.TrySetResult();
+            var stopped = new TaskCompletionSource();
 
-            return new TaskCompletionSource().Task;
+            holding.TrySetResult();
+            request.Signal.Register(() =>
+            {
+                stopped.TrySetResult();
+            });
+
+            return stopped.Task;
         });
         ends.Server.Services.GetRequestResolver(refusing, BytesAnswered with
         {

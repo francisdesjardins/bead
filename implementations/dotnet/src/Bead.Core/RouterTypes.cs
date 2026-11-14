@@ -590,6 +590,18 @@ internal interface IRouterCorePort
         return null;
     }
 
+    /// <summary>
+    /// Closes a connection its peer had this side refuse past the calls it answers and those its
+    /// resolvers outlive, twice <see cref="RouterLimits.MaximumAnsweringCalls"/> requests in a row
+    /// (spec 9.2, step 3), in a later turn than the refusal that made the run: a server closes that
+    /// connection, a client its own. What it throws or faults with is reported. By default it closes
+    /// nothing, and the connection stays open.
+    /// </summary>
+    Task Close(string connectionHandle)
+    {
+        return Task.CompletedTask;
+    }
+
     /// <summary>A cancel from a connection, once the call it cancels is forgotten.</summary>
     void OnCancel(uint callId, string connectionHandle)
     {

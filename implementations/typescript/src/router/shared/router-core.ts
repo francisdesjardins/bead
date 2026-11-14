@@ -241,8 +241,16 @@ export const createRouterCore = <Handle extends string>(
   const answeringCalls = createAnsweringCalls<Handle, IRequestReceiving<Handle>>({
     clock,
     limits,
+    // a transfer whose call's resolver outlives the call keeps its place until that resolver
+    // settles (spec 12.3)
+    onOutlive: ({ transfer }) => {
+      receivings.outlive(transfer);
+    },
     onRemove: ({ transfer }) => {
       receivings.close(transfer);
+    },
+    onSettle: ({ transfer }) => {
+      receivings.settle(transfer);
     },
   });
   // * what each connection's transport handed within this task, paused past a bound and resumed in
@@ -340,6 +348,9 @@ export const createRouterCore = <Handle extends string>(
   // the failure the router answered each request dispatched with in its resolver's place, by the
   // very header dispatched, which its resolver's answer tells once settled (debugging 4.2)
   const failuresAnswered = new WeakMap<IHandedRequestHeader, IFailure>();
+  // the calls this side answered PROCEDURE_FAILED, its own failure, by the very header dispatched:
+  // what their resolver fails with is reported, whatever tells it after (spec 9.0)
+  const failedAnswered = new WeakSet<IHandedRequestHeader>();
   // the address and port each request came from, as its transport handed them, by the very header
   // dispatched, which a refusal told names (spec 13.12, 15.1)
   const origins = new WeakMap<
@@ -708,6 +719,16 @@ export const createRouterCore = <Handle extends string>(
       failuresAnswered.set(header, response.failure);
     }
 
+    // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+    // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+    if (
+      !isDisposed &&
+      response.failure?.code === failures.procedureFailed.code &&
+      response.failure.scope === failures.procedureFailed.scope
+    ) {
+      failedAnswered.add(header);
+    }
+
     // a whole answer ends its call as its transport has it
     const ending =
       metrics === undefined || response.failure === undefined
@@ -806,11 +827,12 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // a refusal answers a request of the peer's; the answer that cannot go out is reported
-  const refuse = (
+  // its promise settles once the refusal went out or was reported, and never rejects
+  const refusing = (
     failure: IFailure,
     { connectionHandle, controller, header }: IDispatched<Handle>
-  ): void => {
-    answerInPlace(failure, { connectionHandle, header }).catch((reason: unknown) => {
+  ): Promise<void> => {
+    return answerInPlace(failure, { connectionHandle, header }).catch((reason: unknown) => {
       // a refusal that never reached the transport — its failure unwritable, say — leaves no call
       // open behind it
       answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
@@ -820,16 +842,20 @@ export const createRouterCore = <Handle extends string>(
     });
   };
 
-  // hands a request to its resolver in a later turn, its call's signal aborted if it ended
-  // meanwhile: one that throws before it returns fails as one that rejects, reported unless its call
-  // was cancelled or went with its connection
+  const refuse = (failure: IFailure, dispatched: IDispatched<Handle>): void => {
+    void refusing(failure, dispatched);
+  };
+
+  // hands a request to its resolver in a later turn, none if its call ended meanwhile: one that
+  // throws before it returns fails as one that rejects, reported unless its signal was aborted first
+  // and this side did not answer its call PROCEDURE_FAILED
   const dispatch = (
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
     const { connectionHandle, controller, header, payload, session } = dispatched;
     const fail = (reason: unknown): void => {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted || failedAnswered.has(header)) {
         heard(() => {
           port.report(toError(reason), connectionHandle);
         });
@@ -846,6 +872,12 @@ export const createRouterCore = <Handle extends string>(
     // ! a later turn, whether the resolver waits or not, so a later request's refusal goes before an
     // answer given at once, as on every side (decision 0010, spec 9.0)
     queueMicrotask(() => {
+      // * a call that ended before this turn came hands its resolver nothing; one handed runs until
+      // it settles, outliving its call if it ends first (spec 9.2, steps 3 and 9)
+      if (!answeringCalls.run(controller)) {
+        return;
+      }
+
       try {
         resolver({
           connectionHandle,
@@ -855,8 +887,17 @@ export const createRouterCore = <Handle extends string>(
           payload,
           session,
           signal: controller.signal,
-        }).catch(fail);
+        }).then(
+          () => {
+            answeringCalls.settle(controller);
+          },
+          (reason: unknown) => {
+            answeringCalls.settle(controller);
+            fail(reason);
+          }
+        );
       } catch (reason) {
+        answeringCalls.settle(controller);
         fail(reason);
       }
     });
@@ -1182,6 +1223,12 @@ export const createRouterCore = <Handle extends string>(
 
     let resolution: ReturnType<SessionOf<Handle>>;
 
+    // * the verifier of a credential that resolves later runs as a resolver does, in its call's
+    // place until it settles; in the turn its request came, its call is open
+    if (isLater) {
+      answeringCalls.run(controller);
+    }
+
     try {
       resolution = port.sessionOf?.(request, signal);
     } catch (reason) {
@@ -1194,15 +1241,19 @@ export const createRouterCore = <Handle extends string>(
 
     if (isLater) {
       // ! a later turn, whether it waits, throws or not, so the order of answers never turns on a
-      // verifier
+      // verifier; one its call ended before outlives it until it settles (spec 9.2, step 3)
       return (
         void Promise.resolve(resolution).then(
           (session) => {
+            answeringCalls.settle(controller);
+
             if (!signal.aborted) {
               settle(session);
             }
           },
           (reason: unknown) => {
+            answeringCalls.settle(controller);
+
             if (!signal.aborted) {
               fail(reason);
             }
@@ -1228,6 +1279,53 @@ export const createRouterCore = <Handle extends string>(
     }
 
     settle(resolution);
+  };
+
+  // closes a connection its peer has this side refuse past what its resolvers outlive: what the
+  // port throws or rejects is reported
+  const closeOf = (connectionHandle: Handle): void => {
+    const reportClose = (reason: unknown): void => {
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
+    };
+
+    try {
+      Promise.resolve(port.close?.(connectionHandle)).catch(reportClose);
+    } catch (reason) {
+      reportClose(reason);
+    }
+  };
+
+  // the refusal that makes twice maximumAnsweringCalls in a row closes the connection behind it, as
+  // HTTP/2 may answer a flood of resets ENHANCE_YOUR_CALM (RFC 9113 §10.5; spec 9.2, step 3)
+  const refusePastTracked = (dispatched: IDispatched<Handle>, envelope: Envelope): void => {
+    const { connectionHandle } = dispatched;
+    const tracked = 2 * limits.maximumAnsweringCalls;
+
+    const refused = refusing(
+      {
+        ...failures.capacityExceeded,
+        detail: `the calls a connection answers and those its resolvers outlive are ${String(tracked)} at most`,
+      },
+      dispatched
+    );
+
+    // ! once, as the run reaches it: a refusal after it, before the close lands, closes nothing
+    // more
+    if (answeringCalls.refusedPast(connectionHandle) !== tracked) {
+      return;
+    }
+
+    report(failures.capacityExceeded, {
+      connectionHandle,
+      detail: `the calls a connection answers and those its resolvers outlive stayed at ${String(tracked)} for ${String(tracked)} requests: the connection is closed`,
+      envelope,
+    });
+    // a later turn, once its transport settled that last refusal, whether it went out or not
+    void refused.then(() => {
+      closeOf(connectionHandle);
+    });
   };
 
   const receiveRequest = (
@@ -1267,8 +1365,11 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
-    // past the calls its connection has this side answer at once, it is refused before anything
-    // else of it is read — its route, its credential, its transfer — and counted all the same
+    // past the calls its connection has this side answer at once, or past twice as many with those
+    // whose resolvers outlive them, it is refused before anything else of it is read — its route,
+    // its credential, its transfer — and counted all the same; read before its own call opens
+    const isPastTracked =
+      answeringCalls.trackedOn(connectionHandle) >= 2 * limits.maximumAnsweringCalls;
     const isPastBound = answeringCalls.countOn(connectionHandle) >= limits.maximumAnsweringCalls;
     // the resolver it is routed to, whose series it counts into: _OTHER's for any other
     const registered = destinationId === undefined ? resolvers.get(header) : undefined;
@@ -1301,6 +1402,13 @@ export const createRouterCore = <Handle extends string>(
 
     // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer
     // open (spec 9.2, step 3)
+    if (isPastTracked) {
+      return (refusePastTracked(dispatched, envelope), undefined);
+    }
+
+    // * any other request that reaches this step ends the run of refusals past the second count
+    answeringCalls.admitted(connectionHandle);
+
     if (isPastBound) {
       const detail = `the calls a connection has answered at once are ${String(limits.maximumAnsweringCalls)} at most`;
 

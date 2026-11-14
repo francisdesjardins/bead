@@ -141,6 +141,16 @@ public interface IRouterServerTransport
     {
         return true;
     }
+
+    /// <summary>
+    /// Closes a connection — one whose client has the router refuse its requests past the calls it
+    /// answers and those its resolvers outlive (spec 9.2, step 3): false when it held none by that
+    /// handle. One that closes none leaves that connection open, as this default.
+    /// </summary>
+    Task<bool> CloseConnection(string connectionHandle)
+    {
+        return Task.FromResult(false);
+    }
 }
 
 /// <summary>How a server's router is built.</summary>
@@ -1417,6 +1427,13 @@ public sealed class RouterServer : IRouterLike, IDisposable
         public Task Send(TransportMessage message, string connectionHandle)
         {
             return server.Transport.Send(message, connectionHandle);
+        }
+
+        // a connection its client has refused past what its resolvers outlive is closed by its
+        // transport, as a command's timeout closes one (spec 9.2, step 3)
+        public Task Close(string connectionHandle)
+        {
+            return server.Transport.CloseConnection(connectionHandle);
         }
 
         // each listener within a guard: what one throws is reported with its connection, and changes

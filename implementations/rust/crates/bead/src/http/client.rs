@@ -1660,6 +1660,10 @@ impl HttpTransportClient {
     ///
     /// A [`TransportError::ReadyState`] when it is not open, refused as it is called, nothing
     /// changed.
+    #[expect(
+        clippy::same_name_method,
+        reason = "the router's disconnect, of its own accord, is this one with its default options, named as on the other sides"
+    )]
     pub fn disconnect(
         &self,
         options: &TransportClientDisconnectOptions,
@@ -1955,6 +1959,14 @@ impl RouterClientTransport for HttpTransportClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // * its close starts as it is called, the future only waiting for its end; not open, nothing
+    fn disconnect(&self) {
+        drop(Self::disconnect(
+            self,
+            &TransportClientDisconnectOptions::default(),
+        ));
     }
 
     // ! no listen asked while paused: what an answer or a batch already read brought is held, in

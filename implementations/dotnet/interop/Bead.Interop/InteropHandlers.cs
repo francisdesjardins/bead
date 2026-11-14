@@ -229,7 +229,8 @@ public static class InteropHandlers
     /// The interop service, served whole on <paramref name="server"/> by one service server,
     /// <c>checked</c> with its rules among its procedures, its resolvers registered and offered
     /// there. The calls to <c>slow</c> each connection cancelled are counted per
-    /// connection, for <c>cancellations</c> to answer; a session holds the name its <c>login</c>
+    /// connection, for <c>cancellations</c> to answer, but those of a <c>slow</c> deaf to its signal,
+    /// <c>heeds: false</c>, or answered first, <c>answersFirst: true</c>; a session holds the name its <c>login</c>
     /// gave, which <c>whoami</c> answers from its call's session, as it answers a credential's
     /// <c>sub</c>; the ticks of <c>ticks</c> and <c>tick</c> are held per connection and per
     /// session, its call's. A connection registers itself as a destination of the server's relay by
@@ -286,27 +287,43 @@ public static class InteropHandlers
         });
 
         // cancelled first, it answers all the same, an answer its router must not send; it waits on
-        // its server's clock
+        // its server's clock. Deaf, heeds false, it waits on its timer alone and counts no
+        // cancellation; answersFirst, it answers at once, then waits before it settles, its resolver
+        // outliving its call (spec 9.2, step 3); any other member is ignored
         interop.On(InteropProcedures.Slow, async (request, response) =>
         {
             var milliseconds = request.Payload.GetProperty("milliseconds").GetInt64();
+            var isHeeding = !(request.Payload.TryGetProperty("heeds", out var heeds) && heeds.ValueKind == JsonValueKind.False);
+            var isAnsweringFirst = request.Payload.TryGetProperty("answersFirst", out var answersFirst) && answersFirst.ValueKind == JsonValueKind.True;
+
+            if (isAnsweringFirst)
+            {
+                await response.Answer(JsonSerializer.SerializeToElement(milliseconds));
+            }
 
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), router.Clock, request.Signal);
+                await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), router.Clock, isHeeding ? request.Signal : CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
-                cancellations.AddOrUpdate(
-                    request.ConnectionHandle,
-                    1,
-                    (_, count) =>
-                    {
-                        return count + 1;
-                    });
+                // answered first, its call ended before: nothing was cancelled
+                if (!isAnsweringFirst)
+                {
+                    cancellations.AddOrUpdate(
+                        request.ConnectionHandle,
+                        1,
+                        (_, count) =>
+                        {
+                            return count + 1;
+                        });
+                }
             }
 
-            await response.Answer(JsonSerializer.SerializeToElement(milliseconds));
+            if (!isAnsweringFirst)
+            {
+                await response.Answer(JsonSerializer.SerializeToElement(milliseconds));
+            }
         });
 
         interop.On(InteropProcedures.Cancellations, (request, response) =>

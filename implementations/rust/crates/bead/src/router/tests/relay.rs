@@ -2003,3 +2003,187 @@ async fn holds_a_payload_to_what_one_envelope_holds_behind_leg_bs_header_with_it
     assert_eq!(served.reported(), Vec::<String>::new());
     served.router.dispose().await;
 }
+
+// spec 9.2, 14.3
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a destination behind leg B and two requesters on leg A, as the other sides' twins hold them"
+)]
+async fn passes_on_to_every_requester_the_capacity_exceeded_a_destination_answers_once_the_resolvers_one_requester_s_cancels_leave_running_fill_twice_its_maximum_answering_calls_on_leg_b()
+ {
+    use crate::clock::SharedClock;
+    use crate::server::ServerOptions;
+    use crate::testing::pair::{Pair, PairOptions, echo};
+
+    // behind leg B, a destination's own server, whose resolver is deaf to its signal
+    let destination = Pair::connected(
+        super::january_first(),
+        &PairOptions {
+            server: Some(ServerOptions {
+                limits: Some(RouterLimitsOptions {
+                    maximum_answering_calls: Some(2),
+                    ..RouterLimitsOptions::default()
+                }),
+                ..ServerOptions::default()
+            }),
+            client: None,
+        },
+    )
+    .await
+    .expect("a destination behind leg B");
+    let handed: Arc<Mutex<u32>> = Arc::default();
+    let handing = Arc::clone(&handed);
+
+    destination
+        .server
+        .router()
+        .register_resolver((
+            &echo(),
+            Handler {
+                resolve: Arc::new(move |_props| {
+                    let mut handed = locked(&handing);
+
+                    *handed = handed.saturating_add(1);
+                    drop(handed);
+
+                    Box::pin(core::future::pending())
+                }),
+                admit: None,
+                maximum_payload_bytes: None,
+                forwards_credentials: false,
+                notifies: false,
+            },
+        ))
+        .expect("echo registered");
+
+    // leg A: two requesters of the relay's, each on its own connection, on the destination's clock
+    let shared: SharedClock = Arc::<crate::testing::SteppingClock>::clone(&destination.clock);
+    let relaying = Served::on(
+        (shared, Arc::clone(&destination.clock)),
+        &RouterServerOptions {
+            relay: Some(RelayOptions {
+                before_route: Some(BeforeRequest::new(|_| true, None)),
+                ..RelayOptions::default()
+            }),
+            ..RouterServerOptions::default()
+        },
+    );
+    let ask = |call_id: u32| Envelope::Request {
+        header: RequestHeader {
+            destination_id: Some(7),
+            ..super::request_header_of(call_id)
+        },
+        payload: Bytes::from_static(&[1]),
+    };
+
+    relaying.transport.open(&first(), true);
+    relaying.transport.open(&second(), true);
+    relaying
+        .router
+        .register_destination(
+            destination.client.router().as_relay_target(),
+            &DestinationOptions {
+                destination_id: Some(7),
+                ..DestinationOptions::default()
+            },
+        )
+        .expect("the destination registered");
+
+    // * one requester sends, then cancels once the destination's resolver was handed it: each
+    // resolver runs on, past its call, on leg B's one connection
+    for (round, call_id) in [1, 3, 5, 7].into_iter().enumerate() {
+        relaying.transport.deliver(&ask(call_id), &first());
+        destination.settle().await;
+
+        assert_eq!(
+            usize::try_from(*locked(&handed)).ok(),
+            Some(round.saturating_add(1)),
+            "{call_id} handed"
+        );
+
+        relaying
+            .transport
+            .deliver(&super::cancel_of(call_id), &first());
+        destination.settle().await;
+    }
+
+    let answering = destination
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .counts;
+
+    assert_eq!(
+        answering.get("answeringCalls"),
+        Some(&0),
+        "every call cancelled"
+    );
+
+    // every requester is refused alike, the destination's failure one relay more
+    relaying.transport.deliver(&ask(9), &first());
+    relaying.transport.deliver(&ask(1), &second());
+    destination.settle().await;
+
+    let refused: Vec<(String, u32, u16, String, u8)> = relaying
+        .transport
+        .take()
+        .into_iter()
+        .filter_map(|(handle, envelope)| match envelope {
+            Envelope::Failure { header, failure } => Some((
+                super::server::name_of(Some(&handle)),
+                header.call_id,
+                failure.code.get(),
+                failure.detail,
+                failure.relays,
+            )),
+            Envelope::Request { .. }
+            | Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => None,
+        })
+        .collect();
+    let past_both =
+        "the calls a connection answers and those its resolvers outlive are 4 at most".to_owned();
+
+    assert_eq!(
+        refused,
+        [
+            (
+                "first".to_owned(),
+                9,
+                ProtocolCode::CAPACITY_EXCEEDED.get().get(),
+                past_both.clone(),
+                1
+            ),
+            (
+                "second".to_owned(),
+                1,
+                ProtocolCode::CAPACITY_EXCEEDED.get().get(),
+                past_both,
+                1
+            )
+        ]
+    );
+    assert_eq!(*locked(&handed), 4);
+
+    let counts = destination
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .counts;
+
+    assert_eq!(
+        [
+            counts.get("largestTrackedCalls").copied(),
+            counts.get("outlivingResolvers").copied()
+        ],
+        [Some(4), Some(4)]
+    );
+}

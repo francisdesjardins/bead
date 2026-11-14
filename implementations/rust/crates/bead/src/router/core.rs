@@ -33,7 +33,7 @@ use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics}
 use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
     Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
-    RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
+    RequestReceiving, ResolverRun, SendingFor, SendingTransfers, cancel_timer,
 };
 use crate::router::transfer::{Chunk, ChunkOutcome};
 use crate::router::types::{
@@ -204,6 +204,11 @@ pub(crate) struct Dispatch {
     pub(crate) session: Mutex<Option<Arc<CallSession>>>,
     pub(crate) answered: Mutex<Option<FailureRecord>>,
     pub(crate) origin: (Option<String>, Option<u16>),
+    /// Where its resolver stands, which its call shares.
+    pub(crate) run: ResolverRun,
+    /// Whether this side answered its call `PROCEDURE_FAILED`, its own failure: what its resolver
+    /// fails with is then reported, whatever tells it after (spec 9.0).
+    pub(crate) is_failed_answered: AtomicBool,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -432,6 +437,10 @@ pub(crate) trait Side: Sized + Send + 'static {
 
     /// What went wrong that no call waits on.
     fn report(&mut self, error: RouterError, connection_handle: &ConnectionHandle);
+
+    /// Closes `connection_handle` of its own accord, its peer refused past the resolvers that
+    /// outlive its calls (spec 9.2, step 3): a server closes that connection, a client its own.
+    fn close(&mut self, connection_handle: &ConnectionHandle);
 
     /// Its owner ends on a job that panicked (decision 0044): each call it waits on fails now, with
     /// that panic for its reason, and it is marked disposed; a side lets go of the rest of what it
@@ -1414,14 +1423,31 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
 }
 
 // takes a call out — only while `only` dispatched it, when given — what it received leaving with it,
-// its call abandoned
+// its call abandoned; a resolver whose turn has not come never runs, and one that runs on outlives
+// its call, keeping its place, and its transfer's, until it settles (spec 9.2, steps 3 and 9)
 fn forget_answering<S: Side>(
     state: &mut S,
     (call, only): (&CallAddress, Option<u64>),
 ) -> Option<Answering> {
     let answering = state.core().answering.forget(call, only)?;
+    let outlives = answering.run.end();
+
+    if outlives {
+        state
+            .core()
+            .answering
+            .outlive((&call.connection_handle, &answering));
+    }
 
     if let Some(receiving) = &answering.receiving {
+        // a transfer it still receives keeps its place, one that ended keeps none
+        if outlives && state.core().receivings.get(receiving.transfer).is_some() {
+            state
+                .core()
+                .receivings
+                .outlive((&call.connection_handle, answering.dispatched));
+        }
+
         let core = state.core();
         let credit_end = core
             .receivings
@@ -1632,6 +1658,17 @@ fn answer_call<S: Side>(state: &mut S, (made, is_in_place): (CallAnswer<S>, bool
     // its answer going out: a second goes nowhere, and this one closes the call once done
     let is_its = state.core().answering.answer((&call, dispatch.id));
 
+    // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+    // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+    if let RouterAnswer::Failure(failure) = &answer
+        && is_its
+        && !state.core().is_disposed()
+        && failure.scope == FailureScope::Protocol
+        && failure.code == ProtocolCode::PROCEDURE_FAILED.get()
+    {
+        dispatch.is_failed_answered.store(true, Ordering::Release);
+    }
+
     // ! held only for the router's own answer in its resolver's place, which its manager tells as
     // that resolver's answer settles: a failure the resolver answered is never held
     if let RouterAnswer::Failure(failure) = &answer
@@ -1723,6 +1760,58 @@ pub(crate) fn refuse<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc
             )),
         },
     );
+}
+
+// a request past the calls its connection has this side answer and those whose resolvers outlive
+// them, refused; once its connection was refused so `tracked_most` requests in a row, nothing
+// settling between, the close is reported and, once the last refusal is handed to its transport,
+// the connection closed in a later turn, as an HTTP/2 endpoint MAY treat suspicious activity as a
+// connection error of type ENHANCE_YOUR_CALM (RFC 9113 §10.5)
+fn refuse_past_tracked<S: Side>(state: &mut S, (dispatch, tracked_most): (&Arc<Dispatch>, u64)) {
+    let handle = Arc::clone(&dispatch.connection_handle);
+    let core = state.core();
+    let failure = core
+        .failure(ProtocolCode::CAPACITY_EXCEEDED)
+        .saying(format!(
+            "the calls a connection answers and those its resolvers outlive are {tracked_most} at most"
+        ));
+    let run = core.answering.refused_past(&handle);
+
+    if run != tracked_most {
+        return refuse(state, (failure, dispatch));
+    }
+
+    let closing = Arc::clone(dispatch);
+
+    answer_in_place(
+        state,
+        CallAnswer {
+            answer: RouterAnswer::Failure(failure.record()),
+            dispatch: Arc::clone(dispatch),
+            done: Some(Box::new(
+                move |state: &mut S, outcome: Result<(), CallError>| {
+                    if let Err(error) = outcome {
+                        // a refusal that never reached the transport leaves no call open behind it
+                        close_answering(state, &closing);
+                        state.report(reported_call(error), &closing.connection_handle);
+                    }
+
+                    state.core().later(move |state: &mut S| {
+                        state.close(&closing.connection_handle);
+                    });
+                },
+            )),
+        },
+    );
+
+    let failure = state
+        .core()
+        .failure(ProtocolCode::CAPACITY_EXCEEDED)
+        .saying(format!(
+            "the calls a connection answers and those its resolvers outlive stayed at {tracked_most} for {tracked_most} requests: the connection is closed"
+        ));
+
+    state.report(reported(failure), &handle);
 }
 
 // a result's transfer progressing sets its timer going again
@@ -1848,11 +1937,18 @@ fn dispatch_to<S: Side>(
         }),
         carried: None,
     };
+    let run = dispatch.run.clone();
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
-    let resolving = match caught(("a resolver", || (handler.resolve)(props))) {
-        Ok(resolving) => resolving,
-        Err(panicked) => {
-            return resolver_failed(state, (&dispatch, &signal, ResolverError::other(panicked)));
+    let resolving = async move {
+        // ! its turn and its call's end race: a call that ended before its turn hands it nothing,
+        // as Go's server starts no handler for a stream reset before its turn (spec 9.2, step 9)
+        if !run.start() {
+            return Ok(());
+        }
+
+        match caught(("a resolver", || (handler.resolve)(props))) {
+            Ok(resolving) => resolving.await,
+            Err(panicked) => Err(ResolverError::other(panicked)),
         }
     };
     let Some(running) = owner.spawn(resolving) else {
@@ -1868,6 +1964,15 @@ fn dispatch_to<S: Side>(
             )),
         };
 
+        // * one that outlived its call gives its place back as it settles, however it settles
+        if dispatch.run.settle() {
+            let settled = Arc::clone(&dispatch);
+
+            owner.offer(Box::new(move |state: &mut S| {
+                settle_resolver(state, &settled);
+            }));
+        }
+
         if let Err(error) = outcome {
             owner.offer(Box::new(move |state: &mut S| {
                 resolver_failed(state, (&dispatch, &signal, error));
@@ -1876,8 +1981,19 @@ fn dispatch_to<S: Side>(
     });
 }
 
-// a resolver that failed: reported unless its call was cancelled or went with its connection, then
-// answered PROCEDURE_FAILED while it still answers, as the other sides' order has it
+// gives back the place a resolver that outlived its call kept, and its transfer's, as it settles
+fn settle_resolver<S: Side>(state: &mut S, dispatch: &Dispatch) {
+    let core = state.core();
+    let handle = &dispatch.connection_handle;
+
+    core.answering.settle((handle, dispatch.id));
+    core.receivings.settle((handle, dispatch.id));
+}
+
+// a resolver that failed: reported unless its call was cancelled or went with its connection, or
+// it was told by its signal before its failure came, one whose call this side answered
+// PROCEDURE_FAILED reported all the same; then answered PROCEDURE_FAILED while it still answers, as
+// the other sides' order has it
 fn resolver_failed<S: Side>(
     state: &mut S,
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
@@ -1886,7 +2002,7 @@ fn resolver_failed<S: Side>(
     let ResolverError::Other(error) = error;
     let error = reported_error_of(error);
 
-    if !signal.is_aborted() {
+    if !signal.is_aborted() || dispatch.is_failed_answered.load(Ordering::Acquire) {
         state.report(error, &handle);
     }
 
@@ -2143,6 +2259,7 @@ fn resolve_session<S: Side>(
         }
         resolution @ (Resolution::Now(_) | Resolution::Later(_)) => resolution,
     };
+    let verifying = Arc::clone(&dispatch);
     let settle = move |state: &mut S, resolved: Result<Resolved, Unresolved>| {
         match resolved {
             Ok(resolved) => {
@@ -2212,18 +2329,37 @@ fn resolve_session<S: Side>(
             let owner = state.core().owner.clone();
             let token = signal.token().clone();
 
+            // * its verifier runs as a resolver does: a call that ends meanwhile leaves it
+            // outliving that call, its place kept until it settles (spec 10.2)
+            verifying.run.verify();
             state.core().owner.cover(async move {
                 // ! what a resolution panics is its throw, as a resolver's is: the call answered
                 // PROCEDURE_FAILED and the panic reported (decision 0044)
                 let mut resolving =
                     Box::pin(caught_future(("a credential's resolution", resolving)));
+                let settled = |owner: &WeakOwner<S>, verifying: Arc<Dispatch>| {
+                    owner.offer(Box::new(move |state: &mut S| {
+                        settle_resolver(state, &verifying);
+                    }));
+                };
                 let Some(resolved) = token.run_until_cancelled(resolving.as_mut()).await else {
                     // ! the verifier may ignore its signal: its task keeps no cancelled call's
                     // payload, which belongs to the settlement alone
                     drop(settle);
                     drop(resolving.await);
+
+                    if verifying.run.settle() {
+                        settled(&owner, verifying);
+                    }
+
                     return;
                 };
+
+                // its call ended as it settled: what it settled to is dropped, its place given back
+                if verifying.run.verified() {
+                    settled(&owner, verifying);
+                }
+
                 let resolved =
                     resolved.unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
@@ -2307,8 +2443,11 @@ fn receive_request<S: Side>(
     }
 
     let core = state.core();
-    // past the calls its connection has this side answer at once, it is refused before anything
-    // else of it is read, and counted all the same
+    // past the calls its connection has this side answer at once, or past twice as many with the
+    // calls whose resolvers outlive them, it is refused before anything else of it is read, and
+    // counted all the same
+    let tracked_most = core.limits.maximum_answering_calls.saturating_mul(2);
+    let is_past_tracked = core.answering.tracked_on(handle) >= tracked_most;
     let is_past_bound = core.answering.count_on(handle) >= core.limits.maximum_answering_calls;
     let registered = header
         .destination_id
@@ -2344,6 +2483,8 @@ fn receive_request<S: Side>(
         session: Mutex::new(None),
         answered: Mutex::new(None),
         origin,
+        run: ResolverRun::default(),
+        is_failed_answered: AtomicBool::new(false),
     });
 
     // * its call starts as its request opens it, timed from its arrival
@@ -2362,6 +2503,7 @@ fn receive_request<S: Side>(
         Answering {
             dispatched: id,
             signal: Signal::new(),
+            run: dispatch.run.clone(),
             is_answered: false,
             is_ended: false,
             receiving: None,
@@ -2379,7 +2521,16 @@ fn receive_request<S: Side>(
         header: header.clone(),
     };
 
-    // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer open
+    // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer open;
+    // the second ceiling first
+    if is_past_tracked {
+        return refuse_past_tracked(state, (&dispatch, tracked_most));
+    }
+
+    state.core().answering.admitted(handle);
+
+    let core = state.core();
+
     if is_past_bound {
         let failure = core
             .failure(ProtocolCode::CAPACITY_EXCEEDED)
@@ -2712,6 +2863,16 @@ pub(crate) fn reject_pending<S: Side>(
     // ! the calls it answers taken last, each counted closed once all are out
     let mut taken = core.answering.take_all(handle);
 
+    // * a resolver queued never runs; each still running, its call answered or not, is told by its
+    // call's signal, and counts side-wide until it settles (spec 9.10)
+    for (_, answering) in &taken {
+        if answering.run.end() {
+            core.answering.outlive_closed(answering.dispatched);
+        }
+    }
+
+    let outliving = core.answering.close_outliving(handle);
+
     // * read once, and only when a call it takes is counted (spec/debugging.md 3.1)
     let mut now = None;
 
@@ -2730,6 +2891,10 @@ pub(crate) fn reject_pending<S: Side>(
         answering
             .signal
             .abort(SignalReason::Disconnected(reason.to_owned()));
+    }
+
+    for signal in outliving {
+        signal.abort(SignalReason::Disconnected(reason.to_owned()));
     }
 }
 

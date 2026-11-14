@@ -539,6 +539,101 @@ public sealed class RelayTests
     }
 
     [Fact]
+    public async Task Passes_on_to_every_requester_the_CAPACITY_EXCEEDED_a_destination_answers_once_the_resolvers_one_requester_s_cancels_leave_running_fill_twice_its_maximumAnsweringCalls_on_leg_B()
+    {
+        var procedure = new Procedure { ProcedureId = 1, ProcedureName = "echo", ServiceId = 2, ServiceRevision = 1 };
+        var handed = 0;
+
+        // behind leg B, a destination's own server, whose resolver is deaf to its signal
+        await using var destinationServer = new MemoryTransportServer();
+        await using var toDestination = new MemoryTransportClient();
+        using var destination = new RouterServer(destinationServer, new RouterServerOptions { Limits = RouterLimits.Default with { MaximumAnsweringCalls = 2 } });
+        using var legB = new RouterClient(toDestination);
+
+        destination.RegisterResolver(new DeafResolver(procedure, () =>
+        {
+            Interlocked.Increment(ref handed);
+        }));
+
+        // leg A: two requesters of the relay's, each on its own connection
+        await using var server = new MemoryTransportServer();
+        await using var requesting = new MemoryTransportClient();
+        await using var other = new MemoryTransportClient();
+        using var relaying = new RouterServer(server, new RouterServerOptions { Relay = Admitting });
+        using var requester = new RouterClient(requesting);
+        using var another = new RouterClient(other);
+
+        Task<RouterResult> Ask(RouterClient router, CancellationToken token)
+        {
+            return router.Request(
+                new byte[] { 1 },
+                new RouterRequest(procedure, new ResolvedRequestOptions { CancellationToken = token, DestinationId = 7, Timeout = TimeSpan.FromSeconds(5) }));
+        }
+
+        async Task<long> CountOf(string name)
+        {
+            return (await destination.Gauges().WaitAsync(Patience, Cancelled)).Counts[name];
+        }
+
+        // within the patience, until `isTrue` holds
+        async Task Until(Func<Task<bool>> isTrue)
+        {
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+
+            while (!await isTrue())
+            {
+                Assert.True(waited.Elapsed < Patience, "what it waited for came");
+                await Task.Delay(1, Cancelled);
+            }
+        }
+
+        relaying.RegisterDestination(legB, Seven);
+        await destinationServer.Start();
+        await toDestination.Connect(new MemoryTransportClientConnectOptions { Server = destinationServer, CancellationToken = Cancelled });
+        await server.Start();
+        await requesting.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        await other.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+
+        // * one requester sends, then cancels once the destination's resolver was handed it: each
+        // resolver runs on, past its call, on leg B's one connection
+        for (var round = 1; round <= 4; round += 1)
+        {
+            using var cancelling = new CancellationTokenSource();
+            var asked = Ask(requester, cancelling.Token);
+
+            await Until(() =>
+            {
+                return Task.FromResult(Volatile.Read(ref handed) == round);
+            });
+            await cancelling.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return asked.WaitAsync(Patience, Cancelled);
+            });
+            await Until(async () =>
+            {
+                return await CountOf("answeringCalls") == 0;
+            });
+        }
+
+        // every requester is refused alike, the destination's failure one relay more
+        foreach (var router in new[] { requester, another })
+        {
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return Ask(router, Cancelled).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal(
+                ((ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 4 at most", FailureOrigin.Relayed, (byte)1),
+                (refused.Code, refused.Detail, refused.Origin, refused.Relays));
+        }
+
+        Assert.Equal(4, Volatile.Read(ref handed));
+        Assert.Equal((4L, 4L), (await CountOf("largestTrackedCalls"), await CountOf("outlivingResolvers")));
+    }
+
+    [Fact]
     public void Holds_a_payload_to_what_one_envelope_holds_behind_leg_B_s_header_with_its_credential_call_by_call_for_a_target_that_takes_no_transfer()
     {
         var relay = new TestRelay().Relay;
@@ -1253,6 +1348,38 @@ public sealed class RelayTests
 
     // a client's router a destination names, which records what it is asked and settles as told
     // a target whose carriage and security take the interface defaults
+    // a resolver of one procedure, deaf to its signal: each request it is handed it holds forever
+    private sealed class DeafResolver(Procedure procedure, Action handed) : IRequestResolver
+    {
+        public Procedure Procedure
+        {
+            get
+            {
+                return procedure;
+            }
+        }
+
+        public int? MaximumPayloadBytes
+        {
+            get
+            {
+                return null;
+            }
+        }
+
+        public Failure? Admit(AdmissionRequest request)
+        {
+            return null;
+        }
+
+        public Task Handle(RequestResolverProps props)
+        {
+            handed();
+
+            return new TaskCompletionSource().Task;
+        }
+    }
+
     private sealed class DefaultCarriageTarget(RecordingTarget target) : IRouterTarget
     {
         public RouterLimits Limits

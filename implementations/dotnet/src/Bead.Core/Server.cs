@@ -71,7 +71,13 @@ public interface IServerTransport : IRouterServerTransport
     }
 
     /// <summary>Closes a connection; false when the transport held none by that handle.</summary>
-    Task<bool> CloseConnection(string connectionHandle);
+    new Task<bool> CloseConnection(string connectionHandle);
+
+    // ! a router's close of a connection is its server's: the one its transport gives answers both
+    Task<bool> IRouterServerTransport.CloseConnection(string connectionHandle)
+    {
+        return CloseConnection(connectionHandle);
+    }
 
     /// <summary>Closes every connection, and stops listening: the TypeScript side's <c>stop</c>.</summary>
     Task Shutdown();

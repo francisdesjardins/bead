@@ -1,1 +1,3 @@
 #nullable enable
+Bead.IRouterClientTransport.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.IRouterServerTransport.CloseConnection(string! connectionHandle) -> System.Threading.Tasks.Task<bool>!

@@ -751,6 +751,11 @@ export interface IRouterServerTransportLike {
    */
   carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
   /**
+   * Closes one connection — one whose client has the router refuse its requests past what their
+   * resolvers outlive (spec 9.2, step 3). One without it leaves that connection open.
+   */
+  close?(connectionHandle: TransportServerConnectionHandle): Promise<unknown>;
+  /**
    * Whether a connection is secure: under TLS, from the loopback, or never leaving the machine, as
    * a Web Worker. None is without it. A command presenting a `JWT` or an `ELSEWHERE` over one that is
    * not fails before it goes, DESTINATION_UNREACHABLE, and a relay sends it neither (spec 13.4, 14.3).

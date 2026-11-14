@@ -281,6 +281,8 @@ async fn a_subscription_goes_only_to_a_request_this_router_dispatched_a_copy_of_
         session: Mutex::new(None),
         answered: Mutex::new(None),
         origin: (None, None),
+        run: crate::router::parts::ResolverRun::default(),
+        is_failed_answered: std::sync::atomic::AtomicBool::new(false),
     });
     served
         .router

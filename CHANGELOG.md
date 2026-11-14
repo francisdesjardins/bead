@@ -139,6 +139,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
   cancelled a request its peer never saw.
 
+### Security
+
+- A call whose resolver, or credential's verifier, outlives it — still running once the call was
+  answered or cancelled — keeps a place on its connection until it settles: a request that comes
+  while the calls a connection answers and those outlived number twice `maximumAnsweringCalls`
+  is answered `CAPACITY_EXCEEDED`, and a connection refused so that many times in a row, nothing
+  settling, is closed and the close reported, so a peer that sends a request then its cancel,
+  again and again, no longer runs as many resolvers on a connection as it likes, HTTP/2's Rapid
+  Reset (CVE-2023-44487) at the layer of calls. A received transfer whose resolver outlives its
+  call keeps a place among twice `maximumTransfers`; a resolver whose call ended before its turn
+  is handed nothing; a connection that closes tells every resolver still running on it. Each side
+  gauges `outlivingResolvers`, `largestTrackedCalls` and `outlivingTransfers`; the interop's
+  `slow` takes `heeds` and `answersFirst`; a conversation's step `closed` expects the server's
+  close (spec 8.2, 9.2, 9.10, 10.2, 12.2, 12.3; decision 0033).
+
 ## [0.13.0] - 2026-11-12
 
 ### Added

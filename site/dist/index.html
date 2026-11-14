@@ -1691,7 +1691,9 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
     refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything past
-    its prefix (§9.2).
+    its prefix (§9.2). A resolver still running once its call was answered or cancelled keeps a
+    place apart until it settles, as many again as the bound, so a peer that cancels all it sends
+    piles up no work.
   </p>
   <p>
     An answer goes once, and only while its call is open. One that arrives after a cancel or a
@@ -3243,7 +3245,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>The vectors</strong>: 463, in 17
         groups, each header’s bytes and what a reader refuses, a JWT’s verdicts and a broker’s
         parcels.</li>
-      <li><strong>The conversations</strong>: 190 exchanges between clients
+      <li><strong>The conversations</strong>: 196 exchanges between clients
         and the interop server, relays included.</li>
       <li><strong>The transports’ cases</strong>: 269 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
@@ -3804,7 +3806,9 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
     n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> avant d’en lire quoi
-    que ce soit au-delà du préfixe (§9.2).
+    que ce soit au-delà du préfixe (§9.2). Un résolveur qui tourne encore une fois son appel
+    répondu ou annulé garde une place à part jusqu’à ce qu’il se règle, autant encore que la
+    borne : un pair qui annule tout ce qu’il envoie n’empile pas de travail.
   </p>
   <p>
     Une réponse ne part qu’une fois, et seulement tant que son appel est ouvert. Celle qui arrive
@@ -5406,7 +5410,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Les vecteurs</strong> : 463, en 17
         groupes, les octets de chaque en-tête et ce qu’un lecteur refuse, les verdicts d’un JWT et
         les parcelles d’un courtier.</li>
-      <li><strong>Les conversations</strong> : 190 échanges entre des clients
+      <li><strong>Les conversations</strong> : 196 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
       <li><strong>Les cas des transports</strong> : 269 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>

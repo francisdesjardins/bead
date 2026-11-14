@@ -264,7 +264,9 @@
     <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
     refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything past
-    its prefix (§9.2).
+    its prefix (§9.2). A resolver still running once its call was answered or cancelled keeps a
+    place apart until it settles, as many again as the bound, so a peer that cancels all it sends
+    piles up no work.
   </p>
   <p>
     An answer goes once, and only while its call is open. One that arrives after a cancel or a

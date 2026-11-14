@@ -847,15 +847,22 @@ async fn refuse_a_transfer_at_its_opening_its_route_its_admission_its_size_its_c
                 locked(&crediting).insert(traced.header.call_id());
             }
         }));
-    // taken whole, then held: its place on the connection stays until its call ends
+    // taken whole, then held: its place on the connection stays until its call ends, its resolver
+    // settling as its signal tells it so, so none outlives its connection
     ends.server
         .services()
         .get_request_resolver(&held, bytes())
         .expect("a resolver")
-        .on(Arc::new(move |_, _| {
+        .on(Arc::new(move |request, _| {
             holding.send(()).ok();
 
-            Box::pin(core::future::pending())
+            let signal = request.signal.token().clone();
+
+            Box::pin(async move {
+                signal.cancelled().await;
+
+                Ok(())
+            })
         }))
         .expect("registered");
     ends.server

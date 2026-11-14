@@ -315,10 +315,78 @@ public sealed class ReceivingTransfersTests
         Assert.Empty(gauges.Anomalies);
         Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = 64 }, gauges.Ceilings);
         Assert.Equal(["a"], gauges.ConnectionHandles);
-        Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = 64 - receiving.Available, ["receivingTransfers"] = 1 }, gauges.Counts);
+        Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = 64 - receiving.Available, ["outlivingTransfers"] = 0, ["receivingTransfers"] = 1 }, gauges.Counts);
         Assert.True(receiving.Available < 64);
         receiving.CloseAll();
         Assert.Empty(receiving.Gauges().ConnectionHandles);
-        Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = 0, ["receivingTransfers"] = 0 }, receiving.Gauges().Counts);
+        Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = 0, ["outlivingTransfers"] = 0, ["receivingTransfers"] = 0 }, receiving.Gauges().Counts);
+    }
+
+    [Fact]
+    public void Holds_a_received_transfer_s_place_while_its_call_s_resolver_outlives_the_call_among_twice_maximumTransfers_and_gives_it_back_as_that_resolver_settles()
+    {
+        var (_, receiving, _) = ReceivingOf(LimitsOf() with { BufferedBytesBudget = 64, MaximumTransfers = 1 });
+        const string PastBoth = "the transfers a connection receives and those its resolvers outlive are 2 at most";
+
+        (Receiving? Receiving, Failure? Refusal) Open(uint callId, string connectionHandle = "a")
+        {
+            return receiving.Open(new byte[1], (CallOf(callId, connectionHandle), null, 2));
+        }
+
+        Receiving Whole(Receiving opened)
+        {
+            receiving.Grant(opened);
+            receiving.Place(opened, new Chunk(new byte[1], true, 1));
+            receiving.Complete(opened);
+
+            return opened;
+        }
+
+        // its call ends while its resolver runs on, as its router ends it: told it outlives the call,
+        // then closed
+        void Outlive(Receiving opened)
+        {
+            receiving.Outlive(opened);
+            receiving.Close(opened);
+        }
+
+        var first = Whole(OpenedOf(Open(1)));
+
+        // its bytes go back, its place among the transfers the connection receives too, but not
+        // among those and the ones its resolvers outlive
+        Outlive(first);
+        Assert.Equal(["a"], receiving.Gauges().ConnectionHandles);
+        Assert.Equal(
+            new Dictionary<string, long> { ["bufferedBytes"] = 0, ["outlivingTransfers"] = 1, ["receivingTransfers"] = 0 },
+            receiving.Gauges().Counts);
+
+        var second = OpenedOf(Open(3));
+
+        // * past maximumTransfers first, then past twice as many with those its resolvers outlive,
+        // checked first, its detail its own; another connection's are its own
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, PastBoth), RefusalOf(Open(5)));
+        Outlive(Whole(second));
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, PastBoth), RefusalOf(Open(5)));
+        Assert.Equal(2, receiving.Gauges().Counts["outlivingTransfers"]);
+        OpenedOf(Open(1, "b"));
+
+        // the resolver settles: its place goes back, once, and the next opening is taken
+        receiving.Settle(first);
+        receiving.Settle(first);
+        Assert.Equal(1, receiving.Gauges().Counts["outlivingTransfers"]);
+
+        var third = OpenedOf(Open(5));
+
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, PastBoth), RefusalOf(Open(7)));
+        receiving.Settle(second);
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, "the transfers a connection receives at once are 1 at most"), RefusalOf(Open(7)));
+
+        // its connection closes: the places its resolvers outlive end with it, and settle to nothing
+        Outlive(third);
+        receiving.CloseAll("a");
+        Assert.Equal(["b"], receiving.Gauges().ConnectionHandles);
+        Assert.Equal((0L, 1L), (receiving.Gauges().Counts["outlivingTransfers"], receiving.Gauges().Counts["receivingTransfers"]));
+        receiving.Settle(third);
+        OpenedOf(Open(9));
     }
 }

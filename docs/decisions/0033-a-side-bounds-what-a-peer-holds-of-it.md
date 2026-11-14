@@ -3,14 +3,15 @@
 - **Status**: accepted
 - **Scope**: the protocol, every implementation's routers and transports, server and client: in
   [`spec/spec.md`](../../spec/spec.md), 9.1's requester held to the calls its peer answers, 9.2's
-  step 3, 12.2's request held to `chunkBytes` and its `maximumAnsweringCalls`, 15.1's report on a
-  transport's `error`, a client's as a server's, 15.2's step 8, 15.3's 1009 and a side's close
+  step 3 and the resolvers that outlive their call, 9.2's step 9, 9.10, 10.2, 12.2's request held to
+  `chunkBytes`, its `maximumTransfers` and its `maximumAnsweringCalls`, 12.3's item 3, 15.1's report
+  on a transport's `error`, a client's as a server's, 15.2's step 8, 15.3's 1009 and a side's close
   timeout, the pace and the bound beside 15.3's heartbeat, 15.6's 408 and 503, 15.7's answer that
   could not be written, an HTTP exchange whose outcome is unknown, lost as 15.7 has an exchange
   lost, 15.9's outbox reported, and 15.12's bounds, the transports each holds on, its pace and its
   head and body, and what a client reads, by `maximumBodyBytes`; over a broker, 15.18's half-open
-  place, 15.20's parts and 15.23's bounds; in
-  [`spec/debugging.md`](../../spec/debugging.md), 9.4's call past those its connection has it answer
+  place, 15.20's parts and 15.23's bounds; in [`spec/debugging.md`](../../spec/debugging.md), 9.4's
+  call past those its connection has it answer and its transfer's opening past those it receives,
   and 9.6's requester; the conversations of 9.2's step 3, the transports' cases of a WebSocket
   server's connections, a body's rate and a head's time, and the durations of the bounds it adds.
   The heartbeat is 15.3's own; the client's address a bound per address reads,
@@ -105,6 +106,22 @@ client's subscriptions at 64 and block its calls behind them. The name is the se
 `answeringCalls`; "open" is not its word, since 9.2's step 2 calls a held subscription's call id
 open. Each side gauges `largestAnsweringCalls`, its busiest connection's, under its ceiling, beside
 the sum, as `largestOutboxBytes` stands beside `outboxBytes`.
+
+**A resolver that outlives its call keeps a place** until it settles, whether the call was answered
+or cancelled, a credential's verifier and a subscription's resolver among them. A request past the
+calls answered and those outlived together, twice `maximumAnsweringCalls`, is refused
+`CAPACITY_EXCEEDED` first. The first count still frees at the cancel, so a requester's count keeps
+mirroring it. This is Go's handler count for CVE-2023-39325 and Kestrel's `MaxTrackedStreams`,
+against CVE-2023-44487, a practice no standard states. A resolver whose call ended before its turn
+is handed nothing. A connection that closes tells every resolver still running on it, and one
+refused twice that many requests in a row at the second ceiling, nothing settling between, is closed
+and the close reported, as RFC 9113 §10.5 lets an endpoint treat suspicious activity as a connection
+error of type `ENHANCE_YOUR_CALM`. A received transfer whose call's resolver outlives the call keeps
+its place among twice `maximumTransfers` the same way. Beside `largestAnsweringCalls`, each side
+gauges `largestTrackedCalls`, its busiest connection's two counts together, under its ceiling, twice
+`maximumAnsweringCalls`; `outlivingResolvers`, the resolvers that outlive their call over the whole
+side, those of connections already closed included, with no ceiling; and `outlivingTransfers`, the
+transfers whose resolvers outlive their calls, with none either.
 
 **Its default is 64**, Bead's number for "so many at once from one peer", HTTP's
 `maximumWaitingExchanges` and 13.9's `maximumWaitingCalls`. An HTTP server's
@@ -248,12 +265,20 @@ server's (spec 15.12).
 
 ## Consequences
 
-**What a dispatched call holds is the application's**: 64 × `maximumPayloadBytes`, 1 GiB at the
-defaults, over every transport, as an HTTP/2 server's application holds what it read of its streams;
-a procedure that takes large payloads sets its own limit (spec 12.2).
+**What a connection's dispatched calls hold is the application's**, the resolvers that outlive their
+calls among them: 2 × `maximumAnsweringCalls` × `chunkBytes` in whole requests, plus 2 ×
+`maximumTransfers` × `maximumPayloadBytes` in transfers. Over a WebSocket, a Web Worker or a broker
+at the defaults, that is 128 MiB + 128 MiB = 256 MiB. Over HTTP, `chunkBytes` is
+`maximumEnvelopeBytes`, so a whole request reaches 16 MiB: 2 × 64 × 16 MiB = 2 GiB at the defaults,
+as an HTTP/2 server's application holds what it read of its streams. A procedure that takes large
+payloads sets its own limit (spec 12.2).
 
 **A relay deployment raises `maximumAnsweringCalls` at both ends of leg B**, its client's and its
-destination's, the destination's raise reaching every connection it takes.
+destination's, the destination's raise reaching every connection it takes. A destination whose
+resolvers outlive the calls one requester cancels refuses every requester on leg B once those
+resolvers fill twice its `maximumAnsweringCalls`, and one that refuses so `2 ×
+maximumAnsweringCalls` times in a row closes leg B, ending every requester's calls on it. A raise of
+`maximumAnsweringCalls` lifts neither.
 
 **A WebSocket server behind a proxy names it**, `trustedProxies` or `unnamedProxies`, as an HTTP
 server does: behind one it neither names nor counts, every client is the proxy's address, and the
@@ -269,20 +294,22 @@ bounds how many. A client's own queue toward a server that stops reading is its 
 HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and hyper's `h2` bound
 their own way, and no test holds.
 
-**A cancel frees its call's place before its resolver ends**, on every side: the call leaves the
-count as its cancel comes (spec 10.2), and its resolver, told by its signal, runs on until it
-settles. The bound counts the calls a peer has a side answer, not the work they started: a peer
-that sends a request and then its cancel, again and again, has as many resolvers run at once as it
-likes, each holding its payload, HTTP/2's Rapid Reset (CVE-2023-44487) at the layer of calls. A
-resolver that heeds its signal ends its work with it.
+**The bound holds on a connection.** A peer that closes and opens again leaves its outliving
+resolvers behind, counted side-wide by `outlivingResolvers` until they settle. A new connection
+costs a WebSocket's handshake, an HTTP `POST /bead` answered 201 (spec 15.4) or a broker's OPEN
+(spec 15.18), and `maximumConnectionsPerAddress` bounds the connections at once, not how fast they
+come. An answered resolver that never settles holds its place until its connection closes.
 
-**Ahead, each by a decision of its own that meets the Tenth Man**: what bounds the resolvers a
-cancel leaves running, as Go's fix of CVE-2023-39325 counts a handler still running against
-`MaxConcurrentStreams`; a bound on the payload bytes of the calls a connection has answered, as
-HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted connection; a
-requester's queue past it; a budget of what waits for every socket together, as `bodyBytesBudget`
-is for bodies; and 0030's fit of the bound per address, an IPv6 client keyed by its prefix and a
-value fit for a NAT, for both transports at once.
+**Ahead, each by a decision of its own that meets the Tenth Man**: a bound on the resolvers that
+outlive a closed connection, which neither Go, Kestrel nor a standard bounds, kept by the key 15.12
+bounds connections by, an address or a participant's id, in the round of 0030's fit; a relay's
+fairness among the requesters that share a leg B, so the resolvers one requester's cancels leave at
+a destination refuse no other; a close on a rate of refusals past the first count, as Kestrel's; a
+bound on the payload bytes of the calls a connection has answered, as HTTP/2's connection window; a
+raise of `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; a budget
+of what waits for every socket together, as `bodyBytesBudget` is for bodies; and 0030's fit of the
+bound per address, an IPv6 client keyed by its prefix and a value fit for a NAT, for both transports
+at once.
 
 **The gate.** `spec/conversations.json`, played by every side: a request past the calls its
 connection has its side answer refused while the others go on, and one taken once a call ends; a
@@ -291,40 +318,62 @@ until its last chunk, holding theirs; a subscription once answered holding none;
 the route, the credential and a transfer's credit; a request on a call id open reported first; the
 server's commands past the bound failing before they go, and going once one is answered; and a
 request past `chunkBytes` refused, nothing of it held, its generator holding every other
-conversation's requests within their `chunkBytes`. `spec/transports.json`: a WebSocket server's
-connections, in all and behind a proxy it names, refused 503 and told, its origin judged first; a
-body slower than its rate refused 408, its socket's end read and its Bead connection answering
-after; and a head that does not come whole answered 408 at either transport, on the real clock, its
-`after` 100 ms short of its time and its `within` 4 seconds past it. `spec/durations.json`:
-`sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`, each refused for never;
-`spec/metrics.json`, the exit of a request past the bound. Twins by the same sentence
-([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays: each router's `answers
-CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before its
-route, its credential or its transfer, and takes one once a call ends` and `answers
+conversation's requests within their `chunkBytes`; a call whose resolver outlives its cancel or its
+answer, and one cancelled while its `ELSEWHERE` verifier resolves, keeping a place until it settles,
+a request past the calls answered and those outlived refused; a peer that cancels each request it
+sends held to twice the bound; a connection refused twice the bound in a row past them closed, and
+the close reported; and a received transfer whose call's resolver outlives it keeping a place among
+twice `maximumTransfers`. `spec/transports.json`: a WebSocket server's connections, in all and
+behind a proxy it names, refused 503 and told, its origin judged first; a body slower than its rate
+refused 408, its socket's end read and its Bead connection answering after; and a head that does not
+come whole answered 408 at either transport, on the real clock, its `after` 100 ms short of its time
+and its `within` 4 seconds past it. `spec/durations.json`: `sendGracePeriod`, `headersTimeout` and
+`bodyGracePeriod`, each refused for never; `spec/metrics.json`, the exits of a request past the
+bound and of one past the calls answered and those their resolvers outlive. Twins by the same
+sentence ([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays: each router's
+`answers CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before
+its route, its credential or its transfer, and takes one once a call ends` and `answers
 ENVELOPE_TOO_LARGE a request that came whole past chunkBytes, and holds nothing of it`, its
 requester's `fails before it goes a call past the calls its peer answers at once, and sends one once
 a call is answered`, its client's `answers CAPACITY_EXCEEDED a command past the calls its server has
 it answer`, its limits' `refuses a maximumAnsweringCalls that is not a whole number above 0`, and
-`gauges largestAnsweringCalls under its ceiling maximumAnsweringCalls, which health warns at`; each
-WebSocket server's `bounds its connections, and those of one address, refusing an upgrade past them
-503 busy before its 101, with Retry-After, and takes one once a connection closes`, `takes no more
-upgrades than its places when they cross` and `refuses a maximumConnections or a
-maximumConnectionsPerAddress that is not a whole number above 0`; the pace and the bound, `keeps a
-client that reads through a burst of answers to the calls it has it answer, each of chunkBytes`,
-`drops a client that stops reading once its socket holds what waits for it past its deadline, and
-reports it`, `drops a client once what waits for it would pass maximumUnsentBytes, the bytes it
-holds never past them, its close unclean, and reports it`, each HTTP server's `loses an answer whose
-client reads slower than minimumSendBytesPerSecond, its connection closed at both ends, and reports
-it` and `reports an outbox that passes maximumOutboxBytes as it closes its connection`, and the
-relay's `answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped behind its socket`;
-the head and the body, `refuses 408 too-slow a body that comes slower than its rate once its grace
-passed, its client reading the 408 as it goes on sending, and keeps its connection; a body at its
-rate taken`, `closes in stages every answer written before its body is whole, so a client that sends
-at full speed reads it, and its connection then answers a POST`, `answers 408 a head that does not
-come whole within headersTimeout, at its address and its WebSocket’s, past it and within 2 seconds
-of it`, and the TypeScript side's `sets headersTimeout, no requestTimeout and a
-connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second
-of its time`, beside the C# side's
+`gauges largestAnsweringCalls under its ceiling maximumAnsweringCalls, which health warns at`; of
+the resolvers that outlive their call, each router core's `holds a call whose resolver outlives its
+cancel among the calls it counts until that resolver settles, and answers CAPACITY_EXCEEDED a
+request that comes while they and the calls it answers number twice maximumAnsweringCalls`, `holds a
+call whose resolver outlives its answer among the calls it counts until that resolver settles`,
+`gives a place back as the resolver that outlives its call settles, whether it resolves, rejects or
+throws`, `holds a peer that cancels each request it sends to twice maximumAnsweringCalls resolvers
+at once, however many it sends`, `holds a call cancelled while its credential resolves among the
+calls it counts until its verifier settles`, `hands nothing to the resolver of a request whose
+cancel came in the same read`, `closes a connection that it refused twice maximumAnsweringCalls
+requests in a row past the resolvers that outlive its calls, nothing settling between, and reports
+it`, which its client's router plays as well, and `tells every resolver still running on a
+connection as it closes, its call answered or not, and counts those that outlive it side-wide until
+they settle`, its answering calls' `gauges largestTrackedCalls under its ceiling, twice
+maximumAnsweringCalls, which health warns at, and outlivingResolvers`, its receiving transfers'
+`holds a received transfer’s place while its call’s resolver outlives the call, among twice
+maximumTransfers, and gives it back as that resolver settles` and its relay's `passes on to every
+requester the CAPACITY_EXCEEDED a destination answers once the resolvers one requester’s cancels
+leave running fill twice its maximumAnsweringCalls on leg B`; each WebSocket server's `bounds its
+connections, and those of one address, refusing an upgrade past them 503 busy before its 101, with
+Retry-After, and takes one once a connection closes`, `takes no more upgrades than its places when
+they cross` and `refuses a maximumConnections or a maximumConnectionsPerAddress that is not a whole
+number above 0`; the pace and the bound, `keeps a client that reads through a burst of answers to
+the calls it has it answer, each of chunkBytes`, `drops a client that stops reading once its socket
+holds what waits for it past its deadline, and reports it`, `drops a client once what waits for it
+would pass maximumUnsentBytes, the bytes it holds never past them, its close unclean, and reports
+it`, each HTTP server's `loses an answer whose client reads slower than minimumSendBytesPerSecond,
+its connection closed at both ends, and reports it` and `reports an outbox that passes
+maximumOutboxBytes as it closes its connection`, and the relay's `answers leg A DESTINATION_LOST
+when its leg B over WebSocket is dropped behind its socket`; the head and the body, `refuses 408
+too-slow a body that comes slower than its rate once its grace passed, its client reading the 408 as
+it goes on sending, and keeps its connection; a body at its rate taken`, `closes in stages every
+answer written before its body is whole, so a client that sends at full speed reads it, and its
+connection then answers a POST`, `answers 408 a head that does not come whole within headersTimeout,
+at its address and its WebSocket’s, past it and within 2 seconds of it`, and the TypeScript side's
+`sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every
+server createServer builds, its 408 within a second of its time`, beside the C# side's
 `Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, the Rust side holding
 hyper's timer by the 408's twin, so a change of the platform's fails a test. `docs/support.md` names
 them.
@@ -410,3 +459,53 @@ objections, all accepted.
 | A `TypeError` is what Fetch rejects with for a network error, and what JavaScript throws for a wrapper's commonest bug: no type tells the network from the application.                                                                                                                                        | Accepted. No line is drawn by type: whatever fails once the executor was called is of unknown outcome. The executor's own failure is told on `error`, once, `the HTTP executor failed: <its words>`, its cause beside it.                                                           |
 | The C# side's filter is four sibling types, `OperationCanceledException` and `ObjectDisposedException` among them, and the TypeScript side cannot tell an abort it did not make.                                                                                                                               | Accepted, and moot, since no line is drawn by type: a cancellation the client made is its own, decided by its attempt's token.                                                                                                                                                      |
 | The rule covered the send alone: on the C# side a failure outside its filter ends the listen loop in silence, the client Open and hearing nothing, loses an answer's read, and leaves `CloseConnection` in Closing.                                                                                            | Accepted. Every exchange ends its connection on a failure it cannot place, the listen, an answer's read and a close among them, as the TypeScript side does; a listen lost to the network resumes from its cursor within its inactivity timeout, as 15.9 has it, on both sides.     |
+
+### On the resolvers a call's end leaves running
+
+The resolvers a call's end leaves running met the Tenth Man at xhigh effort, in a round of their
+own, on a finding of a review of the Rust side: HTTP/2's Rapid Reset at the layer of calls, 200
+resolvers running under a bound of 2, probed on the TypeScript and Rust sides and read in the C#
+code. The draft kept the count of the calls answered and added a second one beside it: a cancelled
+call whose resolver runs on, counted until it settles, within twice `maximumAnsweringCalls`, as
+Kestrel tracks streams. The dissenter checked each claim against the code and against probes of its
+own. Of its eight objections, five were accepted, three in part and none refused: the second count
+became every resolver that outlives its call, answered or cancelled; a connection whose count stays
+full is closed and the close reported; a resolver whose call ended before its turn is handed
+nothing; a received transfer keeps its place the same way; and RFC 9113 is cited for the close
+alone. What no standard settles took the round's recommendation: the resolvers that outlive a closed
+connection stay ahead, for the round of 0030's fit of the bound per address, whose key, an address
+or a participant's id, carries both. Each objection, with the answer it got:
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                          | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A second count lets one requester lock every other requester out of a destination behind a relay. Leg B carries many requesters' calls; each leg-B call it cancels outlives its cancel at a destination whose resolver ignores its signal. Its loop fills leg B's second ceiling, and the destination then refuses every relayed call, however high its bound is raised. The draft's "covers the second count as well" is false.                   | Accepted in part. Read in the code, the relay passes leg A's signal to leg B and returns nothing once it aborts, in `relay.ts`, and no count of leg A's reaches the calls that outlive theirs at the destination: "covers the second count as well" is struck. The lockout is stated in the Consequences with its end: a destination refused `2 × maximumAnsweringCalls` times in a row closes leg B, ending every requester's calls on it, and leg B's resolvers then outlive it side-wide; raising the number lifts neither. Without the second count, the same loop exhausts the destination itself, for every requester, without bound; with it, the cost is bounded and seen. No conversation can show it, since the conversations play a destination as the test's own `device` connection, where no destination resolver runs; the relay's twin, `passes on to every requester the CAPACITY_EXCEEDED a destination answers once the resolvers one requester’s cancels leave running fill …`, shows it end to end on each side. Holding leg A's forwarding until leg B's reservation ends is refused: a reservation lasts as long as the call was given (spec 10.3), so an honest requester on leg A that cancels and sends again is refused, the flaw of one count again, at the relay, and a resolver that runs past the reservation is still bounded by nothing. A relay's fairness among the requesters that share a leg B is ahead, in plain words.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Per connection, the second count holds either forever or not at all. A resolver that never settles holds its place for good, and an honest client gets no signal to reconnect, where Go and Kestrel both close. A closed connection's outliving calls leave the count while they run on, and over HTTP or a broker a new connection costs one exchange or one parcel. So "no more than twice its bound" overclaims, and the gauge hides that work. | Accepted in part. The close is taken: a side refused `2 × maximumAnsweringCalls` requests in a row at the second ceiling, none admitted between them, closes the connection once the last refusal is handed to its transport, and reports `CAPACITY_EXCEEDED`, as RFC 9113 §10.5 lets an endpoint treat suspicious activity as a connection error of type `ENHANCE_YOUR_CALM`. The run counts the requests in a row refused at the second ceiling, any other request that reaches step 3 setting it back: only an admitted request raises the total and only a settle lowers it, so the rule reads no fall of a count, which the C# side's count after `Open` would blur. Its threshold is the ceiling's size rather than `maximumAnsweringCalls`: at a bound of 1, one refusal would close a connection, where Go waits for 4 × its limit and Kestrel for 100. The core's port has no close, but every side's server and transport closes one connection, so the close is one optional member of the port, a client's wired to its own disconnect, and a conversation's step, `closed`, expects it. Step 3 says "on a connection", and so does the changelog; the Consequences name what a new connection costs on each transport: a WebSocket's handshake, a `POST /bead` answered 201, a broker's OPEN. `outlivingResolvers` counts side-wide, closed connections' included, until each settles; health does not watch it, since it has no ceiling and a side-wide ceiling would be the budget refused below, and warns on `largestTrackedCalls` at 80% of its ceiling. A connection that closes tells every resolver still running on it, as Go cancels a request's context with its connection. The close opens no churn of its own: a peer can close and reconnect by itself. Neither of the objection's two bounds across connections is taken: a side-wide budget would refuse every connection for one peer's churn, and a key of 15.12's is a change to the transports, for 0030's round, which stays ahead. |
+| A resolver that answers and then works on is the same flaw with no cancel at all, and Go and Kestrel count it until the handler returns. A peer chooses the rate in both cases, and nothing in Bead ever reaches that work.                                                                                                                                                                                                                        | Accepted in part. Verified: a probe of its own ran 200 resolvers on past their answer with `answeringCalls` at most 0; Go's `defer sc.sendServeMsg(handlerDoneMsg)` counts a handler until it returns; and Kestrel's `Http2OutputProducer` completes a stream only once its processing and its response have both ended, which settles the draft's unverified point. One rule covers both cases: a resolver, or a credential's verifier, counts from its call's end until it settles, however the call ended. The library's own resolvers settle with their answer, the typed resolver, the relay's `forward` and `ticks`, so no honest path through the library fills the count. What "nothing reaches that work" showed is fixed: a connection that closes tells every resolver still running on it. An exception for a held subscription is refused: subscriptions end behind each side's port, so it would need a hook on three sides, for a shape of resolver the library does not offer, notifications going by `notify` (spec 11.2); a resolver parked for a subscription's life is work, which the count exists to bound. 9.2 keeps "a subscription once answered takes no place" of the first count.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Every side calls the resolver of a call already cancelled, and the draft does not say whether that call counts. A request and its cancel in one read, as Rapid Reset writes HEADERS and RST_STREAM together, would not be held at all.                                                                                                                                                                                                             | Accepted. Verified: the TypeScript side's `dispatch` checks nothing before it calls the resolver, nor does the C# side's `StartNew` body; the Rust side's `signal_of` skips a call already gone when `dispatch_to` runs, but a cancel in the same job of the owner lands after the spawn. A resolver whose call ended before its turn is handed nothing: the later turn checks the call and marks its resolver running in one step, at the head of the microtask, at the head of the `StartNew` body by compare-and-swap, and inside the spawned future before `resolve` is called, as Go's `handlerDone` starts no handler for a stream reset before its turn. 9.2's step 9 and 10.2 say so. Its twin, `hands nothing to the resolver of a request whose cancel came in the same read`, fails without the change on every side. The interop's `cancellations` case waits for an `echo` before it cancels, so its resolver's turn has come.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Holding a received transfer's place until its resolver settles repeats the flaw of one count at the transfers: an honest sender with 4 uploads under way, which cancels one and opens the next, is refused. Dropping it lets 2 × 64 calls hold up to 16 MiB each, twice the bound this record states.                                                                                                                                              | Accepted. Transfers take the calls' shape: a received transfer frees its place at its call's end, and while its call's resolver outlives the call, it counts with the transfers received against twice `maximumTransfers`, at 12.3's item 3. The honest sender passes, at 3 received and 1 outlived, under 8. What a connection's dispatched calls hold is then 2 × `maximumAnsweringCalls` × `chunkBytes` in whole requests, plus 2 × `maximumTransfers` × `maximumPayloadBytes` in transfers: 256 MiB at the defaults over a WebSocket, a Web Worker or a broker. Over HTTP, whose `chunkBytes` is its `maximumEnvelopeBytes`, whole requests reach 2 × 64 × 16 MiB = 2 GiB. The Consequences state both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| The drafted step 3 cites RFC 9113 §10.5 for what it does not say, and presents Kestrel's ceiling as plain 2×.                                                                                                                                                                                                                                                                                                                                      | Accepted. Verified in the RFC's text: §10.5 names RST_STREAM only as a frame an invalid request causes a peer to send, and it predates CVE-2023-44487. No RFC is cited for the second count: Go x/net v0.17.0's handler count (CVE-2023-39325) and Kestrel's tracked streams are named against CVE-2023-44487, a practice no standard states, and §10.5 is cited for the close's MAY alone. Kestrel's ceiling, `Math.Max(MaxConcurrentStreams * 2, 100)`, is quoted whole. Bead takes no floor: Kestrel's serves a burst before SETTINGS arrive, and Bead announces nothing, its requester holding itself to 9.1 from its first call.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Both new names mean something else already: "linger" is a transport's lingering close, in this very record; "held" is a subscription's call id.                                                                                                                                                                                                                                                                                                    | Accepted. Verified: 0011, 0041 and this record use "linger" of a lingering close, and the spec's 9.1, 9.2's step 2, 9.6's item 2 and 11.5 "held" of a subscription's call id. A resolver _outlives_ its call, as the spec already says in its plain sense. With the third objection taken, the gauges name what they count: `outlivingResolvers`; `largestTrackedCalls`, Kestrel's word, for the busiest connection's two counts together; and `outlivingTransfers` beside them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| The units miss 8.2, 10.2 needs a sentence more, and the draft read an older tree.                                                                                                                                                                                                                                                                                                                                                                  | Accepted. Every line was read again on the tree the change is made on. The units are 8.2, 9.2.3, 9.2.9, 9.10, 10.2, 12.2.6, 12.2.10 and 12.3.3, and the companion's 9.4.2 and 9.4.9. 8.2 names the second count of calls and of transfers, and 10.2 says that a resolver whose turn had not come is handed nothing. 9.11 was read again and stays: a request to a procedure its transport does not take has no resolver, so nothing outlives it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+### On the report a close owes a resolver it tells
+
+A close tells each resolver whose call ended before (9.10), and a resolver told by its signal
+before its failure comes is not reported (0013). A call its side answers `PROCEDURE_FAILED`, a
+service's callback that failed, still has its resolver running as that answer goes, and a peer
+that closes on that answer, as a gateway closes each exchange's connection, can tell the resolver
+before its failure reaches its router: the report 9.0 owes then rests on a mark, never on the order
+of the turns, which the Rust side's resolvers, run off its owner, leave open. The draft reported
+every failure whose call ended before its signal was aborted. It met the Tenth Man at xhigh effort.
+Of six objections, three were accepted, two in part and one refused: the router marks a call as it
+hands its transport a `PROCEDURE_FAILED` answer, never once disposed, and reports its resolver's
+failure whatever tells it after; any other resolver told before its failure came stays silent. Each
+objection, with the answer it got:
+
+| Objection                                                                                                                                                                                                                             | Answer                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reporting every failure whose call ended answered reports what the tell itself causes: a resolver that answers, then heeds its signal, throws as it is told, once a gateway exchange, up to twice `maximumAnsweringCalls` at a close. | Accepted. The gate reads what was answered, not how the signal was aborted: a call answered `PROCEDURE_FAILED` owes its report (9.0), and a resolver answers no such failure itself. Any other resolver told before its failure came stays silent.                                                   |
+| This is no restoration but a new shared behaviour, which needs a spec sentence and a conversation.                                                                                                                                    | In part. Marked on `PROCEDURE_FAILED`, it adds nothing to the spec: 9.0 owes that report already, and the transcoding's exchange waits on it. A conversation cannot force the order, the players' resolvers failing before their router answers; the twins force it on each side.                    |
+| Decide by what was answered, the mark set in the turn its answer goes, before any close it brings about; and read the signal as a resolver's task settles, for a result answered then a failure of its own that a close overtakes.    | In part. The mark is set on every side. The signal is read as the failure reaches the router, as on every side: nothing answered owes that failure's report, and no read off the router's own turn orders it against a close.                                                                        |
+| A dispose takes the same path as a close: a mark set then reports what a disposed router keeps silent.                                                                                                                                | Accepted: no mark is set once disposed.                                                                                                                                                                                                                                                              |
+| The manager's own gate on its failure step reads the signal after its answer, and loses the failure a router answered in its place when a close overtakes it.                                                                         | Refused here: the step is the trace's, which 0013 bounds, and it reads alike on every side; no report rides on it.                                                                                                                                                                                   |
+| A twin that does not force the order passes without the fix.                                                                                                                                                                          | Accepted: each twin answers `PROCEDURE_FAILED`, a result, and a cancel, closes, then rejects all three, and fails without the fix on every side: `reports the failure of a resolver its side answered PROCEDURE_FAILED once its connection closed, and none of one answered otherwise or cancelled`. |

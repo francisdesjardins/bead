@@ -1199,6 +1199,10 @@ impl MemoryTransportClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
+    #[expect(
+        clippy::same_name_method,
+        reason = "the router's disconnect, of its own accord, is this one with its default options, named as on the other sides"
+    )]
     pub fn disconnect(
         &self,
         options: &TransportClientDisconnectOptions,
@@ -1439,6 +1443,14 @@ impl RouterClientTransport for MemoryTransportClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // not open, nothing
+    fn disconnect(&self) {
+        drop(Self::disconnect(
+            self,
+            &TransportClientDisconnectOptions::default(),
+        ));
     }
 
     // ! its state's lock alone, which it never holds as it tells a listener: what comes from now on

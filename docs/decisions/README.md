@@ -132,9 +132,12 @@ that meets the Tenth Man:
   EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
   the matrix holds its row of MQTT 5 over TLS "not tested";
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
-  keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
-  of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the
-  payload bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
+  keeps against a peer that holds it: a bound on the resolvers that outlive a closed connection,
+  which neither Go, Kestrel nor a standard bounds, kept by the key 15.12 bounds connections by, an
+  address or a participant's id, in the round of 0030's fit; a relay's fairness among the requesters
+  that share a leg B, so the resolvers one requester's cancels leave at a destination refuse no
+  other; a close on a rate of refusals past the first count, as Kestrel's; a bound on the payload
+  bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
 - what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a budget that
