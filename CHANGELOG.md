@@ -118,6 +118,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript side tells the `tx` step of a call made within a notification's callback once
+  its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
+  told it with no id, and the DevTools panel showed that call twice, once never answered.
 - The DevTools panel's Timeline is drawn at its view's own width, a unit a pixel, and redrawn as
   the panel is resized, where a drawing 1,000 wide stretched to the view zoomed its text and rows.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as

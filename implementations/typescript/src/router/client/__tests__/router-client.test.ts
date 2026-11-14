@@ -3140,6 +3140,50 @@ test.describe('createRouterClient', () => {
       expect(heard).toEqual(['first news']);
       expect(errors).toEqual([]);
     });
+
+    // debugging 4.4; spec 9.0
+    test('a request made inside a notification callback names its call id on its tx step', async () => {
+      const { deliver, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const errors = recordErrors(router);
+      const services = createServiceManager(router);
+      const notification = services.getNotification(service, { serializer: text });
+      const asking = services.getRequest(service, { serializer: text });
+      const steps: [direction: string, callId: CallId | undefined][] = [];
+      const requests: CallId[] = [];
+      let reading: Promise<string> | undefined;
+
+      services.on('debug', (_error, { callId, direction, rx, tx, type }) => {
+        if (type === 'request' && (tx === 'read' || rx === 'counter at 1')) {
+          steps.push([direction, callId]);
+        }
+      });
+      router.on('debug', ({ direction, header }) => {
+        if (direction === 'tx' && header.kind === EnvelopeKind.REQUEST) {
+          requests.push(header.callId);
+        }
+      });
+
+      const registering = notification('subscribe', () => {
+        // * made within the router's telling: its router takes it, and draws its id, a turn later
+        reading = asking('read')(options);
+      })(options);
+
+      await sleep(0);
+      deliver(resultOf(1));
+      await registering;
+      deliver(notificationEnvelopeOf(1, text.encode('changed')));
+      await sleep(0);
+      deliver(resultOf(3, { payload: text.encode('counter at 1') }));
+
+      await expect(reading).resolves.toBe('counter at 1');
+      expect(requests).toEqual([1, 3]);
+      expect(steps).toEqual([
+        ['tx', 3],
+        ['rx', 3],
+      ]);
+      expect(errors).toEqual([]);
+    });
   });
 
   test.describe('metrics', () => {
