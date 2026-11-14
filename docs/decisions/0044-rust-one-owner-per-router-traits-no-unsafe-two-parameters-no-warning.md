@@ -582,11 +582,15 @@ C-CASE gives Rust its cases, and the words are the other sides': `RouterClient::
 acronym a word, `Jwt`, `Http`, an overload a second name, `notify` and `notify_unwritten`. A name
 that drifts from the other sides' exports is a parity defect, renamed on every side. A constructor
 is `new` (C-CTOR), and a conversion is `From` or `TryFrom` (C-CONV-TRAITS), never a static `of`. A
-function that derives a value from what it is given is `…_of`, the other sides' `…Of`. A method
-keeps the TypeScript side's word, as `ListedFailure::of` keeps `catalogue.of`. An event the other
-sides emit is a `…Listener` or an `on_…` the Rust side registers. A TypeScript `type` member is
-`…_type` here, since `type` is Rust's keyword; a generated name keeps its raw form, `r#type`, since
-it keeps its key
+function that derives a value from what it is given is `…_of`, the other sides' `…Of`,
+`rendered: of`; one that makes a value of a type this side holds is that type's `new`,
+`ProtoCodec::new` for `protoCodecOf` and `ProtoCodecs.Of`, `rendered: new`; a function `verb_noun`
+is the other sides' `verbNoun` and `Noun.Verb`, `check_proto_records` for `checkProtoRecords` and
+`ProtoRecords.Check`, `rendered: verb`. A method keeps the TypeScript side's word, as
+`ListedFailure::of` keeps `catalogue.of`. An event the other sides emit is a `…Listener` or an
+`on_…` the Rust side registers, `rendered: listener`. A TypeScript `type` member is `…_type`
+here, since `type` is Rust's keyword, `rendered: keyword`; a generated name keeps its raw form,
+`r#type`, since it keeps its key
 ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 A variant of an error enum names the end the
 operation met, as std's `io::ErrorKind::TimedOut` does, where the TypeScript side names the error

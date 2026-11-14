@@ -1331,8 +1331,11 @@ for `bead-protobuf`'s calls too
 ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)):
 one number a contract, every side's, moved together, as gRPC-Go's is its package's; and, for a
 route table, `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`)
-and `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
-`void GENERATED_CODE_SUPPORTS_VERSION_7;`, in C# a private constant of its runtime's, and in Rust
+and `GeneratedCode.SupportsVersion5` beside it, and `bead::GENERATED_CODE_SUPPORTS_VERSION_5` under
+the Rust core's feature `gateway`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
+A generated file names the highest it needs, `void GENERATED_CODE_SUPPORTS_VERSION_7;`, in C# a
+private constant of its runtime's, and in Rust
 `const _: bool = ::bead::GENERATED_CODE_SUPPORTS_VERSION_7;`, which fails with E0425 where the
 runtime lacks it. The
 counter moves only when generated code needs something the runtime did not have: 2 for the layer's

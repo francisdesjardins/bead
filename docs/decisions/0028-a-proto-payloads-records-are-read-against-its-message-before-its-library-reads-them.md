@@ -201,8 +201,10 @@ and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descri
 transports take ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
-type-check and its build until it is regenerated. The Rust runtime holds 7 and 8 alone, since no
-Rust code ever named an older one ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+type-check and its build until it is regenerated. The Rust runtime holds 7 and 8, and 5 under its
+core's feature `gateway`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)),
+since no Rust code names another ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the

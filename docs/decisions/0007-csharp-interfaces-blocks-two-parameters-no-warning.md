@@ -144,18 +144,30 @@ each arm is a factory named after it, the guidelines' "individually named Factor
 conversion. A record of `init` properties is built by its initializer, as an object is on the
 TypeScript side, `new Gauges { Counts = …, ConnectionHandles = … }`; a helper that freezes or merges
 what it is given stays internal. A TypeScript function `nounOf` is C#'s `Noun.Of`, or `NounOf`
-on a static class that holds several, and Rust's `noun_of`: `Violations.Of`, `PayloadCodecs.Of`,
-`HttpPath.Of`. A name is one name on every side, in each language's case, but where .NET names
-otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as
-.NET's own is `HttpClient`. A set of flags an implementer declares, which the wire does not carry,
-is a `[Flags]` enum, its name plural, on the C# side, an object of optional booleans on the
-TypeScript side, the Web's dictionary of supported features, as W3C Media Capture's
-`MediaTrackSupportedConstraints` is, and a bit set of associated constants on the Rust side, as
-`BrokerCapabilities` is; a set the wire carries is a frozen object of its bits on the TypeScript
-side, as `EnvelopeFlag` is. A TypeScript `…Error` is C#'s `…Exception`. A TypeScript constant
-`HOLDER_NAME` is C#'s `Holder.Name`, a constant in PascalCase. A TypeScript interface that an object
-meets by its shape, which the other sides hold as a type of their own, is named `I…Like`:
-`IServerTransportLike` is C#'s `IServerTransport`. Where every side writes the word, as
+on a static class that holds several, and Rust's `noun_of`: `Violations.Of`, `HttpPath.Of`,
+`rendered: of`; on the static class of its nouns it is `Nouns.Of`, `PayloadCodecs.Of` and
+`Validators.Of`. Where it makes a `Noun` the Rust side holds as a type of its own, it is that
+type's `new`, as `protoCodecOf` and `ProtoCodecs.Of` are `ProtoCodec::new`, `rendered: new`. A
+TypeScript function `verbNoun` is C#'s `Noun.Verb`, the static class of the noun holding the verb,
+and Rust's `verb_noun`: `matchesPattern`, `Pattern.Matches` and `matches_pattern`;
+`checkProtoRecords`, `ProtoRecords.Check` and `check_proto_records`, `rendered: verb`. A name is
+one name on every side, in each language's case, but where .NET names otherwise: a `[Flags]` enum
+is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as .NET's own is
+`HttpClient`, `rendered: platform`: a C# name takes `Bead` before the name of the .NET type it
+would otherwise repeat, each such type listed in `tools/check-names.mjs`. A set of flags an
+implementer declares, which the wire does not carry, is a `[Flags]` enum, its name plural, on the
+C# side, an object of optional booleans on the TypeScript side, the Web's dictionary of supported
+features, as W3C Media Capture's `MediaTrackSupportedConstraints` is, and a bit set of associated
+constants on the Rust side, as `BrokerCapabilities` is; a set the wire carries is a frozen object
+of its bits on the TypeScript side, as `EnvelopeFlag` is, `rendered: flags`. A TypeScript `…Error`
+is C#'s `…Exception`, `rendered: error`. A TypeScript constant `HOLDER_NAME` is C#'s
+`Holder.Name`, a constant in PascalCase, `rendered: constant`. A static class of constants alone is
+one table where the other sides hold one, a frozen object or a Rust constant, as `LimitDefaults` is
+`LIMIT_DEFAULTS`. Where they hold its members apart, the members are their constants, as
+`GeneratedCode.SupportsVersion7` is `GENERATED_CODE_SUPPORTS_VERSION_7`. A table is one or the
+other, never both. A TypeScript interface that an object meets by its shape, which the other sides
+hold as a type of their own, is named `I…Like`: `IServerTransportLike` is C#'s `IServerTransport`,
+`rendered: like`. Where every side writes the word, as
 `INotificationLike`, `NotificationLike`, it is the concept's own. `tools/names.tsv` holds each
 public name's rendering ([0047](0047-every-side-shows-one-public-surface.md)). A time in milliseconds is a
 `TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a

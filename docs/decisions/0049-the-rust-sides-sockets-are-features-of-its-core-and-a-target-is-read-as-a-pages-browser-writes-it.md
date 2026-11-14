@@ -256,7 +256,7 @@ The transports' surface takes one name a concept on every side, in its language'
 `TransportServerStartOptions`, whatever its transport, the C# side's in `Bead.Core`; a WebSocket or
 HTTP client's connect names its `host` and its `port`, required on every side; and a WebSocket
 client's `pathname` is `/` by default. The HTTP client's facade keeps its three names, one row of
-`tools/names.tsv` rendered by its platform: `HTTPClient`, `BeadHttpClient` beside .NET's own
+`tools/names.tsv`, `rendered: platform`: `HTTPClient`, `BeadHttpClient` beside .NET's own
 `System.Net.Http.HttpClient`, and `HttpClient`.
 
 ### A text message reaches its router
