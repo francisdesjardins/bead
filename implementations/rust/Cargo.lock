@@ -539,6 +539,7 @@ dependencies = [
  "h2",
  "hmac",
  "http",
+ "http-body",
  "httparse",
  "httpdate",
  "hyper",

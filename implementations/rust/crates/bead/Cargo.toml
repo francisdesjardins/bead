@@ -54,6 +54,9 @@ http = [
 # HTTP/JSON transcoding's parts that hold no socket: http.proto's templates, a route table, a
 # gateway's problems and events, and the seam a message's JSON form fills (decision 0052)
 transcoding = []
+# the HTTP/JSON gateway, on its own listener or mounted, and its caller, over the HTTP transport
+# (decisions 0037 and 0052)
+gateway = ["transcoding", "http", "dep:http-body"]
 # the MQTT 5 binding, a broker adapter of Bead's own over tokio's sockets, its TCP, its TLS and its
 # WebSocket of subprotocol mqtt (decision 0050)
 mqtt = [
@@ -104,6 +107,8 @@ hyper = { workspace = true, optional = true, features = ["server", "client", "ht
 hyper-util = { workspace = true, optional = true, features = ["tokio", "client-legacy", "http1"] }
 h2 = { workspace = true, optional = true }
 tower-service = { workspace = true, optional = true }
+# the gateway's alone
+http-body = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players

@@ -121,6 +121,17 @@ impl Failure {
         failure
     }
 
+    // A failure a gateway answered as an HTTP problem, which no envelope carried: the peer's, of no
+    // side it names (transcoding 12.4).
+    #[cfg(feature = "gateway")]
+    pub(crate) fn answered_over_http(code: NonZeroU16, scope: FailureScope) -> Self {
+        let mut failure = Self::local(code, (scope, None));
+
+        failure.origin = FailureOrigin::Peer;
+
+        failure
+    }
+
     /// The same failure, saying `detail`.
     #[must_use]
     pub fn saying<D: Into<String>>(mut self, detail: D) -> Self {

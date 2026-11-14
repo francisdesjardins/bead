@@ -18,6 +18,8 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+#[cfg(feature = "gateway")]
+mod gateway;
 mod generated_code;
 #[cfg(feature = "http")]
 mod http;
@@ -109,6 +111,21 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+#[cfg(feature = "gateway")]
+pub use gateway::body::HttpGatewayBody;
+#[cfg(feature = "gateway")]
+pub use gateway::caller::{
+    HttpCallOptions, HttpCaller, HttpCallerOptions, HttpEvent, HttpRequester, HttpSubscriber,
+    HttpSubscription,
+};
+#[cfg(feature = "gateway")]
+pub use gateway::host::{
+    DOCUMENT_PATH, GATEWAY_TIMEOUT, GATEWAY_WINDOW, GatewayAuthorization, GatewayErrorListener,
+    HttpGateway, HttpGatewayOptions, HttpGatewayStartOptions, MAXIMUM_EXCHANGES,
+    MAXIMUM_EXCHANGES_PER_ADDRESS,
+};
+#[cfg(feature = "gateway")]
+pub use generated_code::GENERATED_CODE_SUPPORTS_VERSION_5;
 pub use generated_code::{GENERATED_CODE_SUPPORTS_VERSION_7, GENERATED_CODE_SUPPORTS_VERSION_8};
 #[cfg(feature = "http")]
 pub use http::client::{

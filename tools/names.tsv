@@ -1,4 +1,4 @@
-# alone: typescript 280, csharp 57, rust 77
+# alone: typescript 273, csharp 56, rust 77
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -102,8 +102,11 @@ failuresOf	failuresOf [function]	-	failures_of [function]	same
 filterDebug	filterDebug [function]	DebugFilters.FilterDebug [function]	filter_debug [function]	rendered: of (0007, 0044)
 filterEnvelopeDebug	filterEnvelopeDebug [function]	DebugFilters.FilterEnvelopeDebug [function]	-	rendered: of (0007, 0044)
 FilterRefusal	-	-	FilterRefusal [choice]	own: a Result's error, where the other sides throw (0044)
+GATEWAY_TIMEOUT	-	-	GATEWAY_TIMEOUT [constant]	own: a gateway's call timeout, 5 s, which the TypeScript side exports as its module's TIMEOUT; the root's names it apart (0052)
+GATEWAY_WINDOW	-	-	GATEWAY_WINDOW [constant]	own: a gateway's stream window, 16, which the TypeScript side exports as its module's WINDOW; the root's names it apart (0052)
+GatewayErrorListener	-	-	GatewayErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
-GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	-	own: the TypeScript runtime's counter of a contract older than the Rust runtime's generated code, kept while its code is served (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	same
 GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of a contract older than the Rust runtime's generated code, kept while its code is served (0018, 0022)
 GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	same
 GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	-	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	same
@@ -115,15 +118,16 @@ HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	s
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
 HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	HTTP_REFUSALS [constant]	same
 HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	HttpBinding [record]	same
-HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
-HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
-HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
+HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	HttpCaller [record]	same
+HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	HttpCallerOptions [record]	same
+HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	HttpCallOptions [record]	same
 HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	HttpClient [record]	rendered: platform (0049)
 HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	HttpClientOptions [record]	rendered: platform (0049)
-HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
-HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
-HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
-HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
+HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	HttpEvent [choice]	same
+HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	HttpGateway [record]	same
+HttpGatewayBody	-	-	HttpGatewayBody [record]	own: the body a mounted gateway answers with, where the other sides write the response they are handed (0052)
+HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	HttpGatewayOptions [record]	same
+HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	HttpGatewayStartOptions [record]	same
 HttpPayload	HttpPayload [choice]	HttpPayload [record]	HttpPayload [choice]	same
 HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
 HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
@@ -432,7 +436,7 @@ DISCONNECT_DEFAULTS	DISCONNECT_DEFAULTS [constant]	-	-	alone
 DISCONNECT_TIMEOUT	DISCONNECT_TIMEOUT [constant]	-	-	alone
 dispose	dispose [constant]	-	-	alone
 Disposed	-	-	Disposed [record]	alone
-DOCUMENT_PATH	DOCUMENT_PATH [constant]	-	-	alone
+DOCUMENT_PATH	DOCUMENT_PATH [constant]	-	DOCUMENT_PATH [constant]	same
 DrawingRequest	IDrawingRequest [record]	-	-	alone
 DrawnConnection	IDrawnConnection [record]	-	-	alone
 DROPPED_EVENT	DROPPED_EVENT [constant]	-	-	alone
@@ -458,7 +462,7 @@ FetchLike	FetchLike [function type]	-	-	alone
 FetchResponseLike	IFetchResponseLike [record]	-	-	alone
 FilterGiven	-	-	FilterGiven [record]	alone
 FilterKeeper	-	-	FilterKeeper [record]	alone
-GatewayAuthorization	-	GatewayAuthorization [choice]	-	alone
+GatewayAuthorization	-	GatewayAuthorization [choice]	GatewayAuthorization [choice]	same
 GeneratedCode	-	GeneratedCode [constant]	-	alone
 generateHandle	generateHandle [function]	-	-	alone
 GenericError	GenericError [record]	-	-	alone
@@ -487,8 +491,7 @@ HttpProblems.PhraseOf	-	HttpProblems.PhraseOf [function]	-	alone
 HttpProblems.Refusal	-	HttpProblems.Refusal [function]	-	alone
 HttpProblems.StatusOf	-	HttpProblems.StatusOf [function]	-	alone
 HttpProblems.Tag	-	HttpProblems.Tag [constant]	-	alone
-HTTPRequester	IHTTPRequester [function type]	-	-	alone
-httpRequesterOf	httpRequesterOf [function]	-	-	alone
+HTTPRequester	IHTTPRequester [function type], httpRequesterOf [function]	-	HttpRequester [record]	rendered: callable (0044)
 HTTPRequestLike	IHTTPRequestLike [record]	-	-	alone
 HTTPRequestListener	HTTPRequestListener [function type]	-	-	alone
 HTTPResponseLike	IHTTPResponseLike [record]	-	-	alone
@@ -497,8 +500,8 @@ HttpRouteInit	IHttpRouteInit [record]	-	HttpRouteInit [record]	same
 HttpSegment	-	HttpSegment [record]	-	alone
 HttpSegmentKind	-	HttpSegmentKind [choice]	-	alone
 HTTPServerLike	IHTTPServerLike [record]	-	-	alone
-HTTPSubscriber	IHTTPSubscriber [function type]	-	-	alone
-httpSubscriberOf	httpSubscriberOf [function]	-	-	alone
+HTTPSubscriber	IHTTPSubscriber [function type], httpSubscriberOf [function]	-	HttpSubscriber [record]	rendered: callable (0044)
+HttpSubscription	-	-	HttpSubscription [record]	own: a stream's events as its subscriber reads them, where the other sides give an async iterable (0044)
 HttpTemplate	-	HttpTemplate [record]	-	alone
 HttpTransport	-	HttpTransport [constant]	-	alone
 HttpVariable	-	HttpVariable [record]	-	alone
@@ -551,8 +554,8 @@ matchesPattern	matchesPattern [function]	Pattern.Matches [function]	matches_patt
 matchesTemplate	matchesTemplate [function]	-	-	alone
 MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	MAXIMUM_BODY_BYTES [constant]	same
 MAXIMUM_DEPTH	MAXIMUM_DEPTH [constant]	-	-	alone
-MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
-MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
+MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	MAXIMUM_EXCHANGES [constant]	same
+MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	same
 MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
 MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	MAXIMUM_OUTBOX_BYTES [constant]	same
 MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	MAXIMUM_WAIT [constant]	same

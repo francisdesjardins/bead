@@ -111,6 +111,25 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use gateway::body::HttpGatewayBody #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCallOptions #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCaller #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCallerOptions #[cfg(feature = "gateway")]
+  use gateway::caller::HttpEvent #[cfg(feature = "gateway")]
+  use gateway::caller::HttpRequester #[cfg(feature = "gateway")]
+  use gateway::caller::HttpSubscriber #[cfg(feature = "gateway")]
+  use gateway::caller::HttpSubscription #[cfg(feature = "gateway")]
+  use gateway::host::DOCUMENT_PATH #[cfg(feature = "gateway")]
+  use gateway::host::GATEWAY_TIMEOUT #[cfg(feature = "gateway")]
+  use gateway::host::GATEWAY_WINDOW #[cfg(feature = "gateway")]
+  use gateway::host::GatewayAuthorization #[cfg(feature = "gateway")]
+  use gateway::host::GatewayErrorListener #[cfg(feature = "gateway")]
+  use gateway::host::HttpGateway #[cfg(feature = "gateway")]
+  use gateway::host::HttpGatewayOptions #[cfg(feature = "gateway")]
+  use gateway::host::HttpGatewayStartOptions #[cfg(feature = "gateway")]
+  use gateway::host::MAXIMUM_EXCHANGES #[cfg(feature = "gateway")]
+  use gateway::host::MAXIMUM_EXCHANGES_PER_ADDRESS #[cfg(feature = "gateway")]
+  use generated_code::GENERATED_CODE_SUPPORTS_VERSION_5 #[cfg(feature = "gateway")]
   use generated_code::GENERATED_CODE_SUPPORTS_VERSION_7
   use generated_code::GENERATED_CODE_SUPPORTS_VERSION_8
   use http::client::HttpTransportClient #[cfg(feature = "http")]
@@ -1069,7 +1088,102 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::gateway::body
+  struct HttpGatewayBody #[cfg(feature = "gateway")]
+    implements Body, Debug, Drop
+crate::gateway::caller
+  struct HttpCallerOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub authorization: Option<String> #[cfg(feature = "gateway")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "gateway")]
+    pub runtime: Option<Handle> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  struct HttpCallOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub authorization: Option<String> #[cfg(feature = "gateway")]
+    pub without_authorization: Option<bool> #[cfg(feature = "gateway")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  enum HttpEvent<R, N> #[cfg(feature = "gateway")]
+    Result(R) #[cfg(feature = "gateway")]
+    Notification(N) #[cfg(feature = "gateway")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "gateway")]
+  struct HttpCaller #[cfg(feature = "gateway")]
+    fn new(url: &str, options: &HttpCallerOptions) -> Result<Self, ProgrammerError>
+    fn requester_of<Req: PayloadCodec, Res: PayloadCodec>(&self, route: &HttpRoute, descriptor: &Descriptor<Req, Res>) -> Result<HttpRequester<Req, Res>, ProgrammerError>
+    fn subscriber_of<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>(&self, route: &HttpRoute, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<HttpSubscriber<Req, Res, Not>, ProgrammerError>
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
+  struct HttpRequester<Req: PayloadCodec, Res: PayloadCodec> #[cfg(feature = "gateway")]
+    fn call(&self, request: &Req::Value, options: &HttpCallOptions) -> BoxFuture<Result<Res::Value, CallError>>
+    implements Clone, Debug
+  struct HttpSubscriber<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> #[cfg(feature = "gateway")]
+    fn call(&self, request: &Req::Value, options: &HttpCallOptions) -> HttpSubscription<Res::Value, Not::Value>
+    implements Clone, Debug
+  struct HttpSubscription<R, N> #[cfg(feature = "gateway")]
+    implements Debug, Drop, Stream
+crate::gateway::host
+  const DOCUMENT_PATH: &str #[cfg(feature = "gateway")]
+  const GATEWAY_TIMEOUT: Duration #[cfg(feature = "gateway")]
+  const GATEWAY_WINDOW: u64 #[cfg(feature = "gateway")]
+  const MAXIMUM_EXCHANGES: u64 #[cfg(feature = "gateway")]
+  const MAXIMUM_EXCHANGES_PER_ADDRESS: u64 #[cfg(feature = "gateway")]
+  enum GatewayAuthorization #[non_exhaustive] #[cfg(feature = "gateway")]
+    Elsewhere #[cfg(feature = "gateway")]
+    BearerJwt #[cfg(feature = "gateway")]
+    derives Clone, Copy, Debug, Default, Eq, PartialEq #[cfg(feature = "gateway")]
+  type GatewayErrorListener = Arc<dyn Fn(&RouterError) + Send + Sync> #[cfg(feature = "gateway")]
+  struct HttpGatewayOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub transport: MemoryTransportServer #[cfg(feature = "gateway")]
+    pub routes: Vec<HttpRoute> #[cfg(feature = "gateway")]
+    pub authorization: Option<GatewayAuthorization> #[cfg(feature = "gateway")]
+    pub challenge: Option<String> #[cfg(feature = "gateway")]
+    pub clock: Option<SharedClock> #[cfg(feature = "gateway")]
+    pub runtime: Option<Handle> #[cfg(feature = "gateway")]
+    pub document: Option<Bytes> #[cfg(feature = "gateway")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "gateway")]
+    pub limits: Option<RouterLimitsOptions> #[cfg(feature = "gateway")]
+    pub maximum_exchanges: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_exchanges_per_address: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_unsent_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub problem_types: Option<String> #[cfg(feature = "gateway")]
+    pub timeout: Option<Duration> #[cfg(feature = "gateway")]
+    pub window: Option<u64> #[cfg(feature = "gateway")]
+    pub policy: Option<HttpPolicy> #[cfg(feature = "gateway")]
+    pub body_bytes_budget: Option<u64> #[cfg(feature = "gateway")]
+    pub body_grace_period: Option<Duration> #[cfg(feature = "gateway")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "gateway")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "gateway")]
+    pub minimum_body_bytes_per_second: Option<u64> #[cfg(feature = "gateway")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "gateway")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "gateway")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "gateway")]
+    pub tls: Option<Arc<rustls::ServerConfig>> #[cfg(feature = "gateway")]
+    const fn new(transport: MemoryTransportServer, routes: Vec<HttpRoute>) -> Self
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
+  struct HttpGatewayStartOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub address: Option<String> #[cfg(feature = "gateway")]
+    pub port: Option<u16> #[cfg(feature = "gateway")]
+    pub find_open_port: Option<bool> #[cfg(feature = "gateway")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  struct HttpGateway #[cfg(feature = "gateway")]
+    fn new(options: &HttpGatewayOptions) -> Result<Self, ProgrammerError>
+    fn start(&self, options: &HttpGatewayStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn answer<B>(&self, request: ::http::Request<B>, peer: Option<SocketAddr>) -> BoxFuture<::http::Response<HttpGatewayBody>> where B: Body<Data = Bytes> + Send + 'static, B::Error: Into<Box<dyn Error + Send + Sync>>,
+    fn on_error(&self, listener: GatewayErrorListener) -> ListenerId
+    fn off(&self, id: ListenerId)
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
 crate::generated_code
+  const GENERATED_CODE_SUPPORTS_VERSION_5: bool
   const GENERATED_CODE_SUPPORTS_VERSION_7: bool
   const GENERATED_CODE_SUPPORTS_VERSION_8: bool
 crate::http::client
