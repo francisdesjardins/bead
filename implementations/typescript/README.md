@@ -252,7 +252,8 @@ what it adds, and the failures it raises: each router carries its own table, `CL
 ### The Bead envelope
 
 The router's protocol is called Bead, after Baily's beads — the points of light that break through
-along the edge of the Moon at an eclipse. Its unit is the envelope: a fixed 8-byte prefix, in network
+along the edge of the Moon at an eclipse. It reads another way too: each envelope a bead, strung on
+its connection, in order, at the pace of the one who receives. Its unit is the envelope: a fixed 8-byte prefix, in network
 byte order, then a part of the kind's own, then optional blocks, then the payload. There is no
 length field: each transport delimits the envelope, as WebSocket does with its messages.
 
@@ -2073,8 +2074,8 @@ Prometheus text format 0.0.4. With `?transport=worker`, the Bead
 server and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
-`demo/dist/playground/`, every path relative and nothing started — the site publishes it at
-`/bead/playground/`, where the page, served as files alone, is its worker's and hides what needs a
+`demo/dist/playground/`, every path relative and nothing started — beadproto.dev publishes it at
+`/playground/`, where the page, served as files alone, is its worker's and hides what needs a
 server. In the console, `localStorage.setItem('bead:debug', 'd(rx), read')` sends the calls that filter
 keeps to the console — and the envelopes, when it asks for them by `e(…)` — with no reload, and
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the
@@ -2142,7 +2143,9 @@ first.
 `devtools/` is Bead's DevTools extension, Chrome's first
 ([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
-`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
+`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools,
+its tab `⦿ Bead`, Bead's mark before its name, as a character, since Chrome draws no image on a
+panel's tab; the extension's icons are the mark's, which `site/icons.mjs` rasterizes:
 
 - **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
   tell them, its steps and its envelopes met by its call id on its connection — its status by an

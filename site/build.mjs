@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds the page francisdesjardins.ca serves at /bead/, `dist/index.html`: one document, both
+// Builds the page beadproto.dev serves, `dist/index.html`: one document, both
 // languages in it, English in the page and French in a template the page swaps in. Each language's
 // content is `src/content.<language>.html`, its placeholders filled from the repository: the
 // versions and the conformance files' counts, the byte examples and tables of `src/data.mjs`, the
@@ -49,7 +49,7 @@ const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
 
 export const LANGUAGES = ['en', 'fr'];
-const ADDRESS = 'https://francisdesjardins.ca/bead/';
+const ADDRESS = 'https://beadproto.dev/';
 const SOURCE = 'https://github.com/francisdesjardins/bead';
 const BLOB = `${SOURCE}/blob/main/`;
 const TREE = `${SOURCE}/tree/main/`;
@@ -726,7 +726,8 @@ const STRINGS = Object.freeze({
     contents: 'Contents',
     menu: 'Open the contents',
     menuClose: 'Close the contents',
-    home: 'Back to francisdesjardins.ca',
+    top: 'Bead, to the top of the page',
+    demo: 'Demo',
     other: 'Français',
     otherShort: 'FR',
     otherLabel: 'Lire cette page en français',
@@ -741,7 +742,8 @@ const STRINGS = Object.freeze({
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',
     menuClose: 'Fermer le sommaire',
-    home: 'Retour à francisdesjardins.ca',
+    top: 'Bead, en haut de la page',
+    demo: 'Démo',
     other: 'English',
     otherShort: 'EN',
     otherLabel: 'Read this page in English',

@@ -5,8 +5,8 @@
 
 ## Context
 
-Bead is published to no registry, yet its name is public already: the demo francisdesjardins.ca
-serves carries it. Three things change at different speeds: the bytes of an envelope, which every
+Bead is published to no registry, yet its name is public already: the demo beadproto.dev serves
+carries it. Three things change at different speeds: the bytes of an envelope, which every
 peer must agree on; the spec that states them, whose text and conformance files grow faster than the
 bytes; and each implementation, which ships fixes the wire never sees.
 
