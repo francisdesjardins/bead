@@ -2313,8 +2313,7 @@ async fn delivers_a_fragmented_message_whole_then_the_next_message_separately() 
 // ── Its "message" event ──────────────────────────────────────────────────────────────────────
 
 // spec 15.2
-#[tokio::test]
-async fn emits_what_the_server_sends_text_as_text_binary_as_bytes() {
+async fn compares_incoming_text_and_binary() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2713,8 +2712,7 @@ async fn reconnects_though_a_reconnect_listener_throws_the_throw_reported_the_ne
     client.dispose();
 }
 
-#[tokio::test]
-async fn reconnects_an_open_transport_without_emitting_close() {
+async fn compares_replacing_an_open_connection() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2742,6 +2740,60 @@ async fn reconnects_an_open_transport_without_emitting_close() {
         "its replacement opened"
     );
     client.dispose();
+
+    // The source server observes each concrete handle, not only a closed raw socket.
+    let mut observed = transport_peers().await;
+    let client = client_of(&WebSocketTransportClientOptions::default());
+    let recorder = recorded(&client);
+    settled(client.connect(&to(observed.port))).await.unwrap();
+    let first_handle = patience(PATIENCE, observed.connections.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    reconnected(
+        &client,
+        &TransportClientReconnectOptions {
+            delay: Some(crate::TransportClientReconnectDelay::Fixed(
+                Duration::from_millis(10),
+            )),
+            ..TransportClientReconnectOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let replacement = patience(PATIENCE, observed.connections.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let ended = patience(PATIENCE, observed.closes.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+    assert_ne!(first_handle, replacement, "a distinct connection");
+    assert_eq!(
+        ended.1, first_handle,
+        "the exact replaced connection closes at the server"
+    );
+    assert_eq!(
+        observed
+            .server
+            .clients()
+            .into_iter()
+            .map(|peer| peer.connection_handle)
+            .collect::<Vec<_>>(),
+        [replacement],
+        "only the replacement is held"
+    );
+    assert!(
+        recorder.closes().is_empty(),
+        "no client close event during replacement"
+    );
+    client.dispose();
+    patience(PATIENCE, observed.server.stop())
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -4181,4 +4233,146 @@ async fn beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_w
     );
     assert_eq!(transport.ready_state(), ReadyState::Closed);
     assert!(ends(&mut socket).await, "the unanswered socket closes");
+}
+
+#[tokio::test]
+async fn reconnects_an_open_transport_without_emitting_close() {
+    compares_replacing_an_open_connection().await;
+}
+
+#[tokio::test]
+async fn reconnects_an_open_client_without_raising_a_close_its_replaced_connection_closed_at_the_server()
+ {
+    compares_replacing_an_open_connection().await;
+}
+
+#[tokio::test]
+async fn emits_what_the_server_sends_text_as_text_binary_as_bytes() {
+    compares_incoming_text_and_binary().await;
+}
+
+#[tokio::test]
+async fn emits_what_the_server_sends_text_as_a_string_binary_as_an_array_buffer() {
+    compares_incoming_text_and_binary().await;
+}
+
+struct TransportPeerEvents {
+    connections: mpsc::UnboundedSender<crate::router::types::ConnectionHandle>,
+    closes: mpsc::UnboundedSender<(bool, crate::router::types::ConnectionHandle)>,
+}
+
+impl crate::transport::ServerListener for TransportPeerEvents {
+    fn on_connection(&self, connection_handle: &crate::router::types::ConnectionHandle) {
+        self.connections.send(Arc::clone(connection_handle)).ok();
+    }
+
+    fn on_close(
+        &self,
+        was_clean: bool,
+        connection_handle: &crate::router::types::ConnectionHandle,
+    ) {
+        self.closes
+            .send((was_clean, Arc::clone(connection_handle)))
+            .ok();
+    }
+}
+
+struct TransportPeers {
+    server: WebSocketTransportServer,
+    port: u16,
+    connections: mpsc::UnboundedReceiver<crate::router::types::ConnectionHandle>,
+    closes: mpsc::UnboundedReceiver<(bool, crate::router::types::ConnectionHandle)>,
+}
+
+async fn transport_peers() -> TransportPeers {
+    let (connections, accepted) = mpsc::unbounded_channel();
+    let (closes, ended) = mpsc::unbounded_channel();
+    let server = WebSocketTransportServer::new(&WebSocketTransportServerOptions {
+        close_timeout: Some(Duration::from_millis(100)),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .unwrap();
+    server.listen(Arc::new(TransportPeerEvents {
+        connections,
+        closes,
+    }));
+    let bound = patience(
+        PATIENCE,
+        server.start(&TransportServerStartOptions {
+            address: Some(LOOPBACK.to_owned()),
+            find_open_port: Some(true),
+            ..TransportServerStartOptions::default()
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    TransportPeers {
+        server,
+        port: bound.port,
+        connections: accepted,
+        closes: ended,
+    }
+}
+
+struct UponClientClose<F>(F);
+
+impl<F: Fn() + Send + Sync> ClientListener for UponClientClose<F> {
+    fn on_close(&self, _was_clean: bool, _is_quick: bool) {
+        (self.0)();
+    }
+}
+
+#[tokio::test]
+async fn throws_a_reconnect_exception_from_what_its_socket_threw_when_the_server_is_gone() {
+    let mut observed = transport_peers().await;
+    let client = client();
+    let (offered, mut pending) = mpsc::unbounded_channel();
+    let within = client.clone();
+    let listener: Arc<dyn ClientListener> = Arc::new(UponClientClose(move || {
+        offered
+            .send(within.reconnect(&TransportClientReconnectOptions {
+                maximum_attempts: Some(1),
+                ..TransportClientReconnectOptions::default()
+            }))
+            .ok();
+    }));
+    client.listen(Arc::clone(&listener));
+    settled(client.connect(&to(observed.port))).await.unwrap();
+    drop(
+        patience(PATIENCE, observed.connections.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    patience(PATIENCE, observed.server.stop())
+        .await
+        .unwrap()
+        .unwrap();
+    let triggered = patience(PATIENCE, pending.recv()).await;
+    // The listener holds a client clone: take it off before unwrapping any failure.
+    client.unlisten(&listener);
+    let reconnecting = triggered
+        .expect("the close listener runs")
+        .expect("a reconnect is offered")
+        .expect("accepted from the close listener");
+    let failed = patience(PATIENCE, reconnecting).await.unwrap();
+    let Err(TransportError::Reconnect(error)) = &failed else {
+        panic!("a reconnect error: {failed:?}");
+    };
+    assert!(
+        matches!(
+            error
+                .source()
+                .and_then(|cause| cause.downcast_ref::<TransportError>()),
+            Some(TransportError::Connect(_))
+        ),
+        "the actual socket connect failure is retained"
+    );
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Closed,
+        "closed after its one attempt"
+    );
+    client.dispose();
 }
