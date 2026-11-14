@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -53,9 +54,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var handler = new PendingUpgrade();
-        using var invoker = new HttpMessageInvoker(handler);
         using var cancelling = new CancellationTokenSource();
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Handler = handler });
         var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = cancelling.Token });
         var outcome = Record.ExceptionAsync(() => { return connecting; });
         await handler.Entered.Task.WaitAsync(Patience, Cancelled);
@@ -506,8 +506,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         await _client.Connect(Target with { CancellationToken = Cancelled });
         Assert.Equal((false, true), (_client.Carries(Bearer), _client.IsSecure));
 
-        var observed = new ObservedRequests(true);
-        using var invoker = new HttpMessageInvoker(observed);
+        using var observed = new ObservedRequests(true);
 
         foreach (var (host, tls, expected) in new[]
         {
@@ -520,7 +519,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             ("192.0.2.1", true, true),
         })
         {
-            await using var judged = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+            await using var judged = new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = observed });
 
             await Assert.ThrowsAsync<WebSocketException>(() =>
             {
@@ -768,8 +767,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Writes_no_credential_that_settles_in_the_turn_its_client_is_disposed()
     {
         using var handler = new PendingUpgrade();
-        using var invoker = new HttpMessageInvoker(handler);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = handler });
         var messages = new List<TransportMessage>();
         client.Message += messages.Add;
         var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
@@ -803,8 +801,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var cancelling = new CancellationTokenSource();
             using var handler = new PendingUpgrade();
-            using var invoker = new HttpMessageInvoker(handler);
-            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Handler = handler });
             var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (_) => { entered.TrySetResult(); return new ValueTask<string>(answer.Task); }, CancellationToken = cancelling.Token });
             var outcome = Record.ExceptionAsync(() => { return connecting; });
             await entered.Task.WaitAsync(Patience, Cancelled);
@@ -1365,8 +1362,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
         await application.StartAsync(Cancelled);
 
-        using var invoker = new HttpMessageInvoker(new SocketsHttpHandler
+        using var handler = new SocketsHttpHandler
         {
+            // as the client's own: no redirect followed
+            AllowAutoRedirect = false,
             SslOptions = new SslClientAuthenticationOptions
             {
                 RemoteCertificateValidationCallback = (_, offered, _, _) =>
@@ -1374,8 +1373,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     return offered is not null && offered.GetCertHashString() == certificate.GetCertHashString();
                 },
             },
-        });
-        await using var secured = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+        };
+        await using var secured = new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = handler });
         var messages = Channel.CreateUnbounded<TransportMessage>();
 
         secured.Message += (message) =>
@@ -1415,12 +1414,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Brackets_an_IPv6_literal_host()
     {
-        var observed = new ObservedRequests(true);
-        using var invoker = new HttpMessageInvoker(observed);
+        using var observed = new ObservedRequests(true);
 
         foreach (var host in new[] { "::1", "[::1]", "127.0.0.1", "example.test" })
         {
-            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = observed });
 
             await Assert.ThrowsAsync<WebSocketException>(() =>
             {
@@ -3012,9 +3010,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
-        var observed = new ObservedRequests(false);
-        using var invoker = new HttpMessageInvoker(observed);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
+        using var observed = new ObservedRequests(false);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Handler = observed });
 
         await ConnectRefused(client, listener);
 
@@ -3541,5 +3538,129 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
 
         Assert.Equal(ReadyState.Closed, refused.Got);
+    }
+
+    // a client under the TLS given, to the front's port, which hears one message each way with the
+    // plain server behind it
+    private async Task OneEachWay((WebSocketTransportClient Client, int Port) connected, bool isSecured)
+    {
+        var (client, port) = connected;
+        var heard = Channel.CreateUnbounded<(TransportMessage Message, string ConnectionHandle)>();
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        Action<TransportMessage, string> listener = (message, connectionHandle) =>
+        {
+            heard.Writer.TryWrite((message, connectionHandle));
+        };
+
+        client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+        _server.Message += listener;
+
+        try
+        {
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port, Secured = isSecured, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await client.Send(new TransportMessage("hello"u8.ToArray(), false)).WaitAsync(Patience, Cancelled);
+
+            var (message, connectionHandle) = await Next(heard);
+
+            Assert.Equal("hello", Encoding.UTF8.GetString(message.Bytes.Span));
+            await _server.Send(new TransportMessage("again"u8.ToArray(), false), connectionHandle).WaitAsync(Patience, Cancelled);
+            Assert.Equal("again", Encoding.UTF8.GetString((await Next(messages)).Bytes.Span));
+            Assert.True(client.IsSecure);
+            await client.CloseConnection().WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            _server.Message -= listener;
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Connects_presenting_a_client_certificate_under_an_intermediate_to_a_server_that_requires_one_trusting_the_server_by_the_authorities_it_is_given_over_TLS_1_2_and_TLS_1_3()
+    {
+        foreach (var protocol in new[] { SslProtocols.Tls12, SslProtocols.Tls13 })
+        {
+            await using var front = TlsFront.Start(_port, new TlsFrontOptions { Protocol = protocol });
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = Pki.Client() });
+
+            await OneEachWay((client, front.Port), true);
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Fails_its_connect_presenting_a_client_certificate_its_server_does_not_trust_or_none_over_TLS_1_2_and_TLS_1_3()
+    {
+        var stranger = Pki.Client() with { Certificate = Pki.Read("stranger-client.pem"), Key = Pki.Read("stranger-client.key") };
+        var none = new TlsOptions { Authorities = Pki.Read("root.pem") };
+
+        foreach (var protocol in new[] { SslProtocols.Tls12, SslProtocols.Tls13 })
+        {
+            await using var front = TlsFront.Start(_port, new TlsFrontOptions { Protocol = protocol });
+
+            foreach (var tls in new[] { stranger, none })
+            {
+                await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = tls });
+
+                // * under TLS 1.3 its upgrade may already be written as its server's refusal comes
+                await Assert.ThrowsAnyAsync<Exception>(() =>
+                {
+                    return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+            }
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Fails_its_connect_to_a_server_under_no_authority_it_trusts_given_or_of_its_platform()
+    {
+        foreach (var (serving, tls) in new[]
+        {
+            ("stranger-server", Pki.Client()),
+            ("server", Pki.Client() with { Authorities = null }),
+        })
+        {
+            await using var front = TlsFront.Start(_port, new TlsFrontOptions { Serving = serving });
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = tls });
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+            {
+                return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Connects_in_the_clear_with_tls_given_which_a_secured_connect_alone_uses()
+    {
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = Pki.Client() });
+
+        // * to a host on the loopback, which is secure in the clear (spec 13.4)
+        await OneEachWay((client, _port), false);
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Refuses_tls_beside_what_it_is_given_that_keeps_a_TLS_of_its_own()
+    {
+        using var handler = new SocketsHttpHandler { AllowAutoRedirect = false };
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = handler, Tls = Pki.Client() });
+        });
+
+        Assert.Equal(("options", "tls is refused beside a Handler, which keeps a TLS of its own"), (refusal.ParamName, refusal.Message.Split(" (Parameter", 2)[0]));
+
+        // * a tls of no member is none, taken beside it
+        await using var taken = new WebSocketTransportClient(new WebSocketTransportClientOptions { Handler = handler, Tls = new TlsOptions() });
+
+        Assert.Equal(ReadyState.Uninitialized, taken.ReadyState);
     }
 }

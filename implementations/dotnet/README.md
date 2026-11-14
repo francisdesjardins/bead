@@ -216,7 +216,7 @@ A binding to a real broker is a project of its own, beside its adapter. `Bead.Tr
 decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
 one network connection that keeps no session, its Client Identifier the participant's id,
 authenticated by a `Password` under its id, as given or what its `PasswordProvider` hands at each
-link's start, by a TLS client certificate (`Tls`), or with neither by its User Name alone; a
+link's start, by a TLS client certificate (`Tls`, a `TlsOptions`), or with neither by its User Name alone; a
 subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as its shared
 subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1, or of QoS 0 where its
 `Delivery` is `AtMostOnce`, counted to its byte by `MqttPackets` before it goes, one of QoS 1 held
@@ -281,7 +281,7 @@ a relay of its own that a case's `lose` cuts.
 AMQPNetLite (spec 15.32 to 15.38, decision 0043): `amqp://` or `amqps://`; one network connection
 opened anew at each start, its container-id the participant's id, authenticated by SASL PLAIN under
 its id, its `Password` as given or what its `PasswordProvider` hands at each link's start, or by
-EXTERNAL under a TLS client certificate (`Tls`), never ANONYMOUS: the adapter is refused as it is
+EXTERNAL under a TLS client certificate (`Tls`, a `TlsOptions`), never ANONYMOUS: the adapter is refused as it is
 built given neither, and its password is given, asked and refused as an MQTT 5 link's is; its start
 waits `ConnectTimeout` for its password, where it asks its provider, its broker's OPEN and its
 sessions; its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
@@ -528,7 +528,8 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
-  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: one
+  client or a WebSocket client given a `Handler` keeps the handler's behaviour, the WebSocket
+  client's held in an invoker of its own and never disposed by it. Neither follows a redirect: one
   answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
   listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
   `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
@@ -538,6 +539,25 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   another kind that follows all the same is caught by its answer's `RequestMessage`, gone to
   another URL than the one asked, which fails the connect, and loses the connection of a send or a
   listen.
+- **A client's TLS** (spec 15.39, [decision
+  0053](../../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)):
+  each client, `WebSocketTransportClientOptions` and `HttpTransportClientOptions`, and each broker's
+  adapter, `MqttBrokerAdapterOptions` and `AmqpBrokerAdapterOptions`, takes a `Tls`, a
+  `TlsOptions` of `Bead.Core`, of three members, each PEM text: `Authorities`, the trust anchors
+  its server's certificate chains to, in place of the platform's roots (RFC 5280 §6.1.1);
+  `Certificate`, the client's certificate first, then the intermediates that certify it (RFC 8446
+  §4.4.2); and `Key`, its private key, PKCS #8, SEC1 or PKCS #1, unencrypted, never printed. A
+  certificate without its key, a key without its certificate or of another, an encrypted key, and
+  a member that reads as nothing are each an `ArgumentException` as the client is built, and so is
+  a `Tls` beside a `Handler`, which keeps a TLS of its own: the way to the platform's TLS. A
+  transport's client holds it in the clear and uses it on a secured connect alone, through a
+  `SocketsHttpHandler` of its own whose `SslOptions` present the certificate by a
+  `SslStreamCertificateContext`, its intermediates with it, and judge the server by a chain to the
+  authorities alone; a broker's adapter refuses it over a URL that is not TLS, and takes a password
+  beside authorities alone. Its leaf is imported again from PKCS #12, since Schannel refuses an
+  ephemeral key, and on Windows the platform writes the intermediates into the user's CA store,
+  from which Schannel sends them. The brokers' libraries take a collection, presented as the leaf
+  alone, or nothing on Windows, where no store holds its intermediates (`docs/support.md`).
 - **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
@@ -556,7 +576,7 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   its attempt is over, its
   callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
   that cancels itself while that attempt's token is still live fails it as any failure of its does.
-  What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
+  What else a connect awaits, a WebSocket client's `Handler` and an HTTP client's, is bounded
   alike, one that ignores its token among them. A connect refuses, an `ArgumentException`, nothing
   moved: both given; one that is no field value — anything but visible ASCII, spaces and tabs, or a
   space or a tab first or last (RFC 9110 §5.5), which the HTTP client refuses alike before a send

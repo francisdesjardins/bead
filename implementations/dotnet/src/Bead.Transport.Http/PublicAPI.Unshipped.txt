@@ -1,1 +1,3 @@
 #nullable enable
+Bead.Transport.Http.HttpTransportClientOptions.Tls.get -> Bead.TlsOptions?
+Bead.Transport.Http.HttpTransportClientOptions.Tls.init -> void

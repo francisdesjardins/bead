@@ -1,1 +1,5 @@
 #nullable enable
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Handler.get -> System.Net.Http.HttpMessageHandler?
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Handler.init -> void
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.get -> Bead.TlsOptions?
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.init -> void

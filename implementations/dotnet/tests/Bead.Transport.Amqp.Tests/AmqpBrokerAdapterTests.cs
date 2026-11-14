@@ -46,7 +46,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     private static readonly string[] PeerInbox = ["bead", "i", "peer"];
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
 
-    // a self-signed certificate for 127.0.0.1, its server's and its client's alike
+    // a self-signed certificate for 127.0.0.1, its server's and its client's alike, as PEM text with
+    // its key's
+    private static readonly Lazy<(string Pem, string Key)> SelfSigned = new(SelfSignedOf);
+
+    // and as its server serves it
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
 
     private AmqpScript _script = null!;
@@ -76,25 +80,26 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     {
         var url = new Uri(Environment.GetEnvironmentVariable("BEAD_AMQP_TLS_URL") ?? throw new InvalidOperationException("BEAD_AMQP_TLS_URL is not set"));
         var certificates = Environment.GetEnvironmentVariable("BEAD_AMQP_CERTIFICATES") ?? throw new InvalidOperationException("BEAD_AMQP_CERTIFICATES is not set");
-        using var ca = X509Certificate2.CreateFromPem(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("BEAD_AMQP_CA") ?? throw new InvalidOperationException("BEAD_AMQP_CA is not set"), Cancelled));
-        using var servingKey = X509Certificate2.CreateFromPemFile(Path.Combine(certificates, "ada.pem"), Path.Combine(certificates, "ada.key"));
-        using var callingKey = X509Certificate2.CreateFromPemFile(Path.Combine(certificates, "bob.pem"), Path.Combine(certificates, "bob.key"));
-        // * imported with their keys so SslStream can use them on Windows
-        using var servingCertificate = X509CertificateLoader.LoadPkcs12(servingKey.Export(X509ContentType.Pkcs12), null);
-        using var callingCertificate = X509CertificateLoader.LoadPkcs12(callingKey.Export(X509ContentType.Pkcs12), null);
+        var authorities = await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("BEAD_AMQP_CA") ?? throw new InvalidOperationException("BEAD_AMQP_CA is not set"), Cancelled);
 
-        AmqpBrokerAdapter AdapterFor(string id, X509Certificate2 certificate)
+        // * each a leaf its fixture's own CA issues, no intermediate between (docs/support.md)
+        async Task<AmqpBrokerAdapter> AdapterFor(string id)
         {
             return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions
             {
                 Id = id,
                 Uri = url,
-                Tls = new AmqpBrokerTlsOptions { TrustChain = new X509Certificate2Collection(ca), ClientCertificates = new X509Certificate2Collection(certificate) },
+                Tls = new TlsOptions
+                {
+                    Authorities = authorities,
+                    Certificate = await File.ReadAllTextAsync(Path.Combine(certificates, $"{id}.pem"), Cancelled),
+                    Key = await File.ReadAllTextAsync(Path.Combine(certificates, $"{id}.key"), Cancelled),
+                },
             });
         }
 
-        await using var servingAdapter = AdapterFor("ada", servingCertificate);
-        await using var callingAdapter = AdapterFor("bob", callingCertificate);
+        await using var servingAdapter = await AdapterFor("ada");
+        await using var callingAdapter = await AdapterFor("bob");
         await using var serving = new BrokerParticipant(servingAdapter, new BrokerParticipantOptions { Heartbeat = Timeout.InfiniteTimeSpan });
         await using var calling = new BrokerParticipant(callingAdapter, new BrokerParticipantOptions { Heartbeat = Timeout.InfiniteTimeSpan });
         await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
@@ -167,7 +172,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         await _script.DisposeAsync();
     }
 
-    private static X509Certificate2 CertificateOf()
+    private static (string Pem, string Key) SelfSignedOf()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256);
@@ -180,8 +185,21 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
 
         using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
+        return (made.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem());
+    }
+
+    private static X509Certificate2 CertificateOf()
+    {
+        using var made = X509Certificate2.CreateFromPem(SelfSigned.Value.Pem, SelfSigned.Value.Key);
+
         // imported again, so SslStream can use its key on Windows
         return X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+    }
+
+    // the self-signed certificate as its client presents it, with its key, trusting it where told
+    private static TlsOptions CertifiedOf(bool isTrusting)
+    {
+        return new TlsOptions { Authorities = isTrusting ? SelfSigned.Value.Pem : null, Certificate = SelfSigned.Value.Pem, Key = SelfSigned.Value.Key };
     }
 
     // an adapter of the id to the script, its password unless told
@@ -334,7 +352,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 ConnectTimeout = TimeSpan.FromSeconds(1),
                 Id = Id,
                 Password = certificate ? null : Password,
-                Tls = certificate ? new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value] } : null,
+                Tls = certificate ? CertifiedOf(false) : null,
                 Uri = secured.Uri,
             });
             var (_, downs) = HeardOf(adapter);
@@ -862,7 +880,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             await using var certified = new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions
             {
                 Id = Id,
-                Tls = new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value], TrustChain = [Certificate.Value] },
+                Tls = CertifiedOf(true),
                 Uri = secured.Uri,
             });
             var external = await Started((certified, secured));
@@ -871,11 +889,15 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             await certified.Stop();
         }
 
-        // a certificate in the clear is refused as it is built
-        Assert.StartsWith("a TLS client certificate is carried over amqps", Assert.Throws<ArgumentException>(() =>
+        // a certificate in the clear is refused as it is built, and so are authorities alone: its URL
+        // and its TLS are one record (spec 15.39)
+        foreach (var tls in new[] { CertifiedOf(false), new TlsOptions { Authorities = SelfSigned.Value.Pem } })
         {
-            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Tls = new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value] }, Uri = _script.Uri });
-        }).Message, StringComparison.Ordinal);
+            Assert.StartsWith($"a TLS client certificate is carried over amqps, not {_script.Uri.OriginalString}", Assert.Throws<ArgumentException>(() =>
+            {
+                return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Tls = tls, Uri = _script.Uri });
+            }).Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -3255,11 +3277,40 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         await held.Closed.WaitAsync(Patience, Cancelled);
     }
 
+    // spec 15.39: built over amqps, never started, so no broker is needed
+    [Fact]
+    public async Task Takes_a_password_beside_tls_that_names_authorities_alone()
+    {
+        Func<CancellationToken, ValueTask<string>> provider = (_) =>
+        {
+            return ValueTask.FromResult(Password);
+        };
+        var authorities = new TlsOptions { Authorities = SelfSigned.Value.Pem };
+
+        foreach (var options in new[]
+        {
+            new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Tls = authorities, Uri = new Uri("amqps://127.0.0.1:5671") },
+            new AmqpBrokerAdapterOptions { Id = Id, PasswordProvider = provider, Tls = authorities, Uri = new Uri("amqps://127.0.0.1:5671") },
+        })
+        {
+            await using var adapter = new AmqpBrokerAdapter(options);
+
+            Assert.True(adapter.IsSecure);
+        }
+
+        // * and refused given neither a password nor a certificate, whatever its authorities: its link
+        // never authenticates as ANONYMOUS
+        Assert.StartsWith("an AMQP link authenticates by a password or by its client certificate", Assert.Throws<ArgumentException>(() =>
+        {
+            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Tls = authorities, Uri = new Uri("amqps://127.0.0.1:5671") });
+        }).Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Refuses_a_password_beside_a_client_certificate_both_a_password_and_its_provider_and_neither()
     {
         var secured = new Uri("amqps://127.0.0.1:5671");
-        var certificate = new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value] };
+        var certificate = CertifiedOf(false);
         Func<CancellationToken, ValueTask<string>> provider = (_) =>
         {
             return ValueTask.FromResult(Password);

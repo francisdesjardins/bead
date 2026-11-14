@@ -1,3 +1,18 @@
 #nullable enable
 Bead.IRouterClientTransport.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.IRouterServerTransport.CloseConnection(string! connectionHandle) -> System.Threading.Tasks.Task<bool>!
+Bead.TlsOptions
+Bead.TlsOptions.<Clone>$() -> Bead.TlsOptions!
+Bead.TlsOptions.Authorities.get -> string?
+Bead.TlsOptions.Authorities.init -> void
+Bead.TlsOptions.Certificate.get -> string?
+Bead.TlsOptions.Certificate.init -> void
+Bead.TlsOptions.Equals(Bead.TlsOptions? other) -> bool
+Bead.TlsOptions.Key.get -> string?
+Bead.TlsOptions.Key.init -> void
+Bead.TlsOptions.TlsOptions() -> void
+override Bead.TlsOptions.Equals(object? obj) -> bool
+override Bead.TlsOptions.GetHashCode() -> int
+override Bead.TlsOptions.ToString() -> string!
+static Bead.TlsOptions.operator !=(Bead.TlsOptions? left, Bead.TlsOptions? right) -> bool
+static Bead.TlsOptions.operator ==(Bead.TlsOptions? left, Bead.TlsOptions? right) -> bool

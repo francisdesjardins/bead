@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace Bead.Transport.Amqp;
@@ -16,8 +15,9 @@ public sealed record AmqpBrokerAdapterOptions
     /// <summary>
     /// Its password, SASL PLAIN's under its id, as given: UTF-8 text, never empty and holding no NUL
     /// (spec 15.33, RFC 4616 §2). Refused with an <see cref="ArgumentException"/> as it is built when
-    /// it is not, beside a <see cref="PasswordProvider"/>, and beside a TLS client certificate; and so
-    /// is its adapter given neither it, its provider nor a certificate, since its link never
+    /// it is not, beside a <see cref="PasswordProvider"/>, and beside a TLS client certificate, but
+    /// taken beside a <see cref="Tls"/> that names its authorities alone; and so is its adapter given
+    /// neither it, its provider nor a certificate, whatever its authorities, since its link never
     /// authenticates as ANONYMOUS. None when none.
     /// </summary>
     public string? Password { get; init; }
@@ -35,8 +35,14 @@ public sealed record AmqpBrokerAdapterOptions
     /// </summary>
     public Func<CancellationToken, ValueTask<string>>? PasswordProvider { get; init; }
 
-    /// <summary>Its leg's TLS, over <c>amqps</c>: its client certificate, SASL EXTERNAL's, and the authorities it trusts; the system's when none.</summary>
-    public AmqpBrokerTlsOptions? Tls { get; init; }
+    /// <summary>
+    /// Its leg's TLS, over <c>amqps</c> alone (spec 15.33, 15.39): its client certificate with its
+    /// key, which its broker maps to the user its id names, its SASL then EXTERNAL; and the
+    /// authorities its broker's certificate chains to, in place of the system's. Refused with an
+    /// <see cref="ArgumentException"/> as it is built over any other URL, and as
+    /// <see cref="TlsOptions"/> says. The system's when none.
+    /// </summary>
+    public TlsOptions? Tls { get; init; }
 
     /// <summary>
     /// The largest message, as its publisher writes it, whose payload it takes: its receive bound's,
@@ -81,17 +87,4 @@ public sealed record AmqpBrokerAdapterOptions
 
         return true;
     }
-}
-
-/// <summary>An AMQP 1.0 adapter's TLS (spec 15.33, 15.38).</summary>
-public sealed record AmqpBrokerTlsOptions
-{
-    /// <summary>
-    /// Its TLS client certificates, which its broker maps to the user its id names, its SASL then
-    /// EXTERNAL; carried over <c>amqps</c> alone; none when none.
-    /// </summary>
-    public X509Certificate2Collection? ClientCertificates { get; init; }
-
-    /// <summary>The authorities its broker's certificate chains to, in place of the system's; the system's when none.</summary>
-    public X509Certificate2Collection? TrustChain { get; init; }
 }

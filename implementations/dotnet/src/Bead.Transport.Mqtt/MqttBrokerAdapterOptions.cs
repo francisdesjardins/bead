@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace Bead.Transport.Mqtt;
@@ -16,8 +15,9 @@ public sealed record MqttBrokerAdapterOptions
     /// <summary>
     /// Its Password, under its id as User Name, as given: UTF-8 text, never empty and holding no NUL
     /// (spec 15.26). Refused with an <see cref="ArgumentException"/> as it is built when it is not,
-    /// beside a <see cref="PasswordProvider"/>, and beside a TLS client certificate. With neither, its
-    /// CONNECT carries its User Name alone; none when none.
+    /// beside a <see cref="PasswordProvider"/>, and beside a TLS client certificate; taken beside a
+    /// <see cref="Tls"/> that names its authorities alone. With neither, its CONNECT carries its User
+    /// Name alone; none when none.
     /// </summary>
     public string? Password { get; init; }
 
@@ -34,8 +34,14 @@ public sealed record MqttBrokerAdapterOptions
     /// </summary>
     public Func<CancellationToken, ValueTask<string>>? PasswordProvider { get; init; }
 
-    /// <summary>Its leg's TLS, over <c>mqtts</c> or <c>wss</c>: its client certificate and the authorities it trusts; the system's when none.</summary>
-    public MqttBrokerTlsOptions? Tls { get; init; }
+    /// <summary>
+    /// Its leg's TLS, over <c>mqtts</c> or <c>wss</c> alone (spec 15.26, 15.39): its client
+    /// certificate with its key, whose identity its broker ties to its id, its CONNECT then naming
+    /// neither User Name nor Password; and the authorities its broker's certificate chains to, in
+    /// place of the system's. Refused with an <see cref="ArgumentException"/> as it is built over any
+    /// other URL, and as <see cref="TlsOptions"/> says. The system's when none.
+    /// </summary>
+    public TlsOptions? Tls { get; init; }
 
     /// <summary>
     /// Its CONNECT's Maximum Packet Size, the largest packet its broker sends it: 16,777,216 bytes
@@ -73,17 +79,4 @@ public sealed record MqttBrokerAdapterOptions
 
         return true;
     }
-}
-
-/// <summary>An MQTT 5 adapter's TLS (spec 15.26, 15.31).</summary>
-public sealed record MqttBrokerTlsOptions
-{
-    /// <summary>
-    /// Its TLS client certificates, whose identity its broker ties to its id, its CONNECT then naming
-    /// neither User Name nor Password; carried over <c>mqtts</c> or <c>wss</c> alone; none when none.
-    /// </summary>
-    public X509Certificate2Collection? ClientCertificates { get; init; }
-
-    /// <summary>The authorities its broker's certificate chains to, in place of the system's; the system's when none.</summary>
-    public X509Certificate2Collection? TrustChain { get; init; }
 }

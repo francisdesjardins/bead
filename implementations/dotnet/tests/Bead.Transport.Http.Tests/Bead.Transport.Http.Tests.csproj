@@ -47,4 +47,12 @@
     <!-- what a client transport's send gives in each state, as the TypeScript side's sendRefusalOf reads it -->
     <Compile Include="../Shared/SendRefusals.cs" Link="SendRefusals.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the test PKI every side's TLS tests read (spec 15.39), and the TLS front of their twins,
+         whose assembly fixture cleans the user's CA store on Windows -->
+    <Content Include="../../../../spec/pki/*.pem;../../../../spec/pki/*.key" LinkBase="pki" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../Shared/Pki.cs" Link="Pki.cs" />
+    <Compile Include="../Shared/TlsFront.cs" Link="TlsFront.cs" />
+  </ItemGroup>
 </Project>

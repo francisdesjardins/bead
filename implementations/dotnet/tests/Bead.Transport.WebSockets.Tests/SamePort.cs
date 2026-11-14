@@ -32,7 +32,7 @@ internal sealed class SamePort : IDisposable
     {
         ArgumentNullException.ThrowIfNull(port);
 
-        Invoker = new HttpMessageInvoker(new SocketsHttpHandler
+        Handler = new SocketsHttpHandler
         {
             // as the client's own: no redirect followed
             AllowAutoRedirect = false,
@@ -56,7 +56,8 @@ internal sealed class SamePort : IDisposable
                     throw;
                 }
             },
-        });
+        };
+        Invoker = new HttpMessageInvoker(Handler, disposeHandler: false);
     }
 
     // helpers
@@ -70,7 +71,10 @@ internal sealed class SamePort : IDisposable
         }
     }
 
-    /// <summary>What sends the handshakes.</summary>
+    /// <summary>What sends the handshakes, as a client's <c>Handler</c>.</summary>
+    public SocketsHttpHandler Handler { get; }
+
+    /// <summary>What sends the handshakes of a <see cref="ClientWebSocket"/> of the tests' own.</summary>
     public HttpMessageInvoker Invoker { get; }
 
     /// <summary>
@@ -143,6 +147,7 @@ internal sealed class SamePort : IDisposable
     public void Dispose()
     {
         Invoker.Dispose();
+        Handler.Dispose();
     }
 
     // octets kept as they are read, under a lock: the socket reads on the platform's threads

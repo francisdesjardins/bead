@@ -64,4 +64,11 @@
     <Compile Include="../Shared/Mutations.cs" Link="Mutations.cs" />
     <Compile Include="../Shared/ParcelProperties.cs" Link="ParcelProperties.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the test PKI every side's TLS tests read (spec 15.39), without the TLS front: no test here
+         presents a certificate, so none cleans the user's CA store under another assembly's handshake -->
+    <Content Include="../../../../spec/pki/*.pem;../../../../spec/pki/*.key" LinkBase="pki" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../Shared/Pki.cs" Link="Pki.cs" />
+  </ItemGroup>
 </Project>

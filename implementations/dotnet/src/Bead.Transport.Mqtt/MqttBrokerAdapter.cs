@@ -40,6 +40,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     private readonly MqttBrokerAdapterOptions _options;
     private readonly bool _isSecure;
+    // what its TLS holds, its key among it, read once and let go of at its dispose
+    private readonly TlsCredentials? _tls;
     private readonly Lock _gate = new();
     private Link? _link;
 
@@ -75,10 +77,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException($"an MQTT broker's IPv6 address is followed by its port or by nothing, not {options.Uri.OriginalString}", nameof(options));
         }
 
-        if (options.Tls?.ClientCertificates is not null && options.Uri.Scheme is not ("mqtts" or "wss"))
+        // * its URL and its TLS are one record: a TLS given over a URL that is not TLS is refused
+        // (spec 15.39)
+        if (Tls.IsGiven(options.Tls) && options.Uri.Scheme is not ("mqtts" or "wss"))
         {
-            throw new ArgumentException("a TLS client certificate is carried over mqtts or wss, never in the clear", nameof(options));
+            throw new ArgumentException($"a TLS client certificate is carried over mqtts or wss, not {options.Uri.OriginalString}", nameof(options));
         }
+
+        var tls = Tls.Assert(options.Tls, nameof(options));
 
         if (options.Id.Length == 0)
         {
@@ -88,19 +94,21 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         AssertPacketSize((nameof(MqttBrokerAdapterOptions.MaximumPacketSize), options.MaximumPacketSize));
 
         // * what its link authenticates by, held in one order on every side; with neither a password
-        // nor a provider, its User Name alone, or its certificate
-        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), options.Tls?.ClientCertificates is not null) is { } refusal)
+        // nor a provider, its User Name alone, or its certificate; its authorities beside any
+        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), tls?.Certificate is not null) is { } refusal)
         {
             throw new ArgumentException(refusal, nameof(options));
         }
 
         _options = options with
         {
+            Tls = tls,
             // ! never without end: a broker never counts a link of Keep Alive 0 lost, and its will never goes
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
+        _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
 
     /// <inheritdoc/>
@@ -790,6 +798,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 disposing.SetException(reason);
             }
+            finally
+            {
+                _tls?.Dispose();
+            }
         }
 
         await disposed;
@@ -990,12 +1002,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 tls.UseTls(true).WithTargetHost(host);
 
-                if (_options.Tls?.ClientCertificates is { } certificates)
+                // ! a collection, which the platform presents as its leaf alone, or none, where it
+                // builds no chain to the authorities its broker names: its intermediates are its
+                // store's (docs/support.md)
+                if (_tls?.Certificates is { } certificates)
                 {
                     tls.WithClientCertificates(certificates);
                 }
 
-                if (_options.Tls?.TrustChain is { } trusted)
+                if (_tls?.Authorities is { } trusted)
                 {
                     tls.WithTrustChain(trusted);
                 }
@@ -1004,7 +1019,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // * its User Name its id, with its Password where it has one; neither under its certificate,
         // which a password never stands beside
-        if (_options.Tls?.ClientCertificates is null)
+        if (_options.Tls?.Certificate is null)
         {
             builder = builder.WithCredentials(Id, password);
         }
