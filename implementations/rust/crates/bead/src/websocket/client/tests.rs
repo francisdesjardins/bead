@@ -3200,9 +3200,7 @@ async fn refuses_a_credential_that_is_no_field_value_a_space_or_a_tab_first_or_l
 
 // ── Its message limit ────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_over_ws_when_told_no_bound()
- {
+async fn compares_the_default_received_envelope_bound() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -3220,7 +3218,12 @@ async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_ov
         "whole"
     );
 
-    upgraded.send(Message::Binary(Bytes::from(vec![0_u8; maximum + 1])));
+    upgraded.send(Message::Binary(Bytes::from(vec![
+        0_u8;
+        maximum
+            .checked_add(1)
+            .unwrap()
+    ])));
 
     let code = upgraded.close_code().await;
 
@@ -4530,4 +4533,50 @@ async fn its_own_close_or_dispose_raises_a_clean_close_not_quick_on_both_ends() 
             .unwrap()
             .unwrap();
     }
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_over_ws_when_told_no_bound()
+ {
+    compares_the_default_received_envelope_bound().await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16778240_bytes_when_told_no_bound() {
+    compares_the_default_received_envelope_bound().await;
+}
+
+#[tokio::test]
+async fn raises_no_message_for_what_comes_after_it_sent_its_close() {
+    let mut held = raw().await;
+    let client = client();
+    let recorder = recorded(&client);
+    settled(client.connect(&to(held.port))).await.unwrap();
+    let mut socket = held.next().await;
+    socket.write_all(&frame_of(0x2, &[1])).await.unwrap();
+    assert_eq!(
+        messages_within(&recorder, 1).await,
+        [Bytes::from_static(&[1])]
+    );
+
+    let closing = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1000),
+        "the client's close reaches its peer first"
+    );
+    // A real peer can still write data before its close answer. That data must be drained silently.
+    socket.write_all(&frame_of(0x2, &[2])).await.unwrap();
+    socket.write_all(&close_frame(1000)).await.unwrap();
+    patience(PATIENCE, closing).await.unwrap();
+    assert_eq!(closes_within(&recorder, 1).await, [(true, false)]);
+    assert_eq!(
+        recorder.messages(),
+        [Bytes::from_static(&[1])],
+        "only the message before close"
+    );
+    assert_eq!(recorder.errors(), Vec::<String>::new(), "no error");
+    assert_eq!(client.ready_state(), ReadyState::Closed);
 }
