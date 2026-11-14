@@ -1535,8 +1535,7 @@ fn refuses_options_it_cannot_hold() {
 }
 
 // spec 15.12
-#[test]
-fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null() {
+fn compares_host_configuration() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -2864,4 +2863,14 @@ async fn ends_a_request_cancelled_before_its_head_went_204_empty_and_one_cancell
 
     assert_eq!(late.after_head(), "0\r\n\r\n", "ended with no body");
     started.stop().await;
+}
+
+#[test]
+fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null() {
+    compares_host_configuration();
+}
+
+#[test]
+fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_or_null() {
+    compares_host_configuration();
 }
