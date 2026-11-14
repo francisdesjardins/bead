@@ -2138,7 +2138,9 @@ first.
 `devtools/` is Bead's DevTools extension, Chrome's first
 ([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
-`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
+`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools,
+its tab `⦿ Bead`, Bead's mark before its name, as a character, since Chrome draws no image on a
+panel's tab; the extension's icons are the mark's, which `site/icons.mjs` rasterizes:
 
 - **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
   tell them, its steps and its envelopes met by its call id on its connection — its status by an
