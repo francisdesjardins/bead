@@ -289,11 +289,13 @@ goes nowhere, since it would settle a call it does not belong to.
 A requester that ends a call it holds open — its timeout passed, its signal aborted, its answer
 unreadable, a transfer refused, a subscription unregistered — sends a cancel: the prefix alone, on
 that call id, never answered. The other end forgets the call, takes away what it subscribed, then
-aborts the signal its resolver holds, so nothing more goes out on that call id; a cancel for no call
-has crossed its answer, and is dropped in silence. The requester reserves the call id as long as the
-call was given, 5 s when it was given no time or waited without end — and, once a result came to it
-as a transfer, as long as the other end keeps the call abandoned, should that be longer: its draws
-skip it, and what comes late on it is dropped in silence.
+aborts the signal its resolver holds — one whose turn had not come is never called, and one that
+runs on keeps a place apart until it settles (spec 9.2, step 3) — so nothing more goes out on that
+call id; a cancel for no call has crossed its answer, and is dropped in silence. The requester
+reserves the call id as long as the call was given, 5 s when it was given no time or waited without
+end — and, once a result came to it as a transfer, as long as the other end keeps the call
+abandoned, should that be longer: its draws skip it, and what comes late on it is dropped in
+silence.
 
 A failure travels once, in a failure's payload: its code on two bytes, the relays it crossed, whether
 the code is the procedure's own, and a readable detail — `maximumDetailBytes` at most, 1,024 by
@@ -1617,9 +1619,11 @@ reconnected.
 — and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read, over
 a WebSocket what waits for its sockets, `largestUnsentBytes` the most one holds, and on both the
 connections its busiest address holds, `largestAddressConnections` — the router's calls waited on
-and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its
-transfers and the bytes they hold, its subscriptions in flight, waiting or notified, those paced
-whose credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
+and answered, the busiest connection's, `largestAnsweringCalls`, and with the resolvers that outlive
+its calls, `largestTrackedCalls`, those resolvers over the whole side, `outlivingResolvers`, the
+call ids it reserved, its transfers and the bytes they hold, those whose resolvers outlive their
+call, `outlivingTransfers`, its subscriptions in flight, waiting or notified, those paced whose
+credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
 destinations, and the credentials' sessions it keeps and those of them timed, `credentialSessions`
 and `timedCredentialSessions` — and the connections' sessions.
 Nothing of it names a connection: no handle, token or address leaves the process. Each layer also

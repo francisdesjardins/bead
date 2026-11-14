@@ -266,7 +266,9 @@
     <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
     n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> avant d’en lire quoi
-    que ce soit au-delà du préfixe (§9.2).
+    que ce soit au-delà du préfixe (§9.2). Un résolveur qui tourne encore une fois son appel
+    répondu ou annulé garde une place à part jusqu’à ce qu’il se règle, autant encore que la
+    borne : un pair qui annule tout ce qu’il envoie n’empile pas de travail.
   </p>
   <p>
     Une réponse ne part qu’une fois, et seulement tant que son appel est ouvert. Celle qui arrive
