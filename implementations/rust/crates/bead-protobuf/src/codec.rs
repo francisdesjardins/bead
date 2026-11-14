@@ -34,7 +34,7 @@ pub const ENCODING: &str = "proto";
 // * Buffa's view and dynamic message decoded within 17.9.3's bound, Buffa counting the messages
 // below the top one; its own budgets of unknown fields and of elements lifted, as neither other
 // side's library holds one: the procedure's payload limit bounds a payload
-fn decode_options() -> DecodeOptions {
+pub(crate) fn decode_options() -> DecodeOptions {
     DecodeOptions::new()
         .with_recursion_limit(DEPTH)
         .with_unknown_field_limit(usize::MAX)

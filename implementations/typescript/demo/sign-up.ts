@@ -111,13 +111,21 @@ const plural = (count: number, word: string): string => {
   return `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 };
 
-/** What the closing line said of the violations the detail left out: none, `and N more`, or a stop. */
+/**
+ * What the closing line said of the violations the detail left out: none, `and N more`, or a stop;
+ * and, where the detail holds no closing line, that its reader's bound cut it, what it left out
+ * uncounted (spec 18.7): a server's whole detail read under the client's 256 bytes
+ */
 const closingOf = ({ more, stopped }: IReadViolations): string => {
   if (stopped === true) {
     return ', stopped at the first';
   }
 
-  return more === undefined || more === 0 ? '' : `, and ${String(more)} more`;
+  if (more === undefined) {
+    return ", and more the detail's bound cut, uncounted";
+  }
+
+  return more === 0 ? '' : `, and ${String(more)} more`;
 };
 
 // definition

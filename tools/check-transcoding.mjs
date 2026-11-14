@@ -12,14 +12,20 @@
 // - TypeScript: `implementations/typescript/src/transcoding/__tests__/generated/`, played by
 //   `src/transcoding/__tests__/transcoding.test.ts` and `http-gateway.test.ts`;
 // - C#: `implementations/dotnet/tests/Bead.Transcoding.Tests/Generated/`, its `openapi.json`
-//   beside its code, played by `TranscodingTests` and `HttpGatewayTests`.
+//   beside its code, played by `TranscodingTests` and `HttpGatewayTests`;
+// - Rust: `implementations/rust/crates/bead-interop/src/transcoding/generated/`, its messages
+//   Buffa's, its document embedded in its `bead_http.rs`, under `bead-interop`'s feature
+//   `transcoding`, played by `bead-protobuf`'s `tests/transcoding.rs` and the core's
+//   `tests/gateway.rs` and `tests/caller.rs` (decision 0052).
 //
-//   node tools/check-transcoding.mjs                       # check both (exit 1 on a difference)
+//   node tools/check-transcoding.mjs                       # check each (exit 1 on a difference)
 //   node tools/check-transcoding.mjs typescript            # check one side
 //   node tools/check-transcoding.mjs typescript --write    # write it in place
 //
 // From the repository's root, once builder/ is installed: beadc runs on Node from builder/src;
-// protoc is `BEADC_PROTOC`, or the one builder/tools/fetch-protoc.mjs fetches.
+// protoc is `BEADC_PROTOC`, or the one builder/tools/fetch-protoc.mjs fetches; protoc-gen-buffa,
+// for the Rust side, `BEADC_PROTOC_GEN_BUFFA`, or the one builder/tools/fetch-protoc-gen-buffa.mjs
+// fetches.
 
 import { execFileSync } from 'node:child_process';
 import {
@@ -39,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const BEADC = join(ROOT, 'builder', 'src', 'cli.ts');
 const FETCH_PROTOC = join(ROOT, 'builder', 'tools', 'fetch-protoc.mjs');
+const FETCH_PROTOC_GEN_BUFFA = join(ROOT, 'builder', 'tools', 'fetch-protoc-gen-buffa.mjs');
 // ! every `.proto` spec/transcoding.proto imports goes with it, by its name under spec/
 const PROTOS = Object.freeze(['transcoding.proto', 'transcoding-required.proto']);
 
@@ -47,7 +54,8 @@ const PROBLEM_TYPES = 'https://example.com/problems/';
 
 // * each side's folder, its output's options and where its document goes: the TypeScript side's
 // names its runtime from there, `src/service/service`, `src/proto/proto` and
-// `src/transcoding/routes`, and embeds its document alone
+// `src/transcoding/routes`; it and the Rust side embed their document alone, the Rust side's
+// messages Buffa's, through protoc-gen-buffa
 const SIDES = Object.freeze({
   typescript: Object.freeze({
     folder: 'implementations/typescript/src/transcoding/__tests__/generated',
@@ -66,6 +74,17 @@ const SIDES = Object.freeze({
     folder: 'implementations/dotnet/tests/Bead.Transcoding.Tests/Generated',
     openapi: ['  out: generated/openapi.json'],
     output: ['  - language: csharp', '    out: generated', '    gateway: {}'],
+  }),
+  rust: Object.freeze({
+    folder: 'implementations/rust/crates/bead-interop/src/transcoding/generated',
+    openapi: [],
+    output: [
+      '  - language: rust',
+      '    out: generated',
+      '    messages: generate',
+      '    gateway: {}',
+    ],
+    plugin: true,
   }),
 });
 
@@ -86,7 +105,7 @@ const filesOf = (folder) => {
 // ── Check ─────────────────────────────────────────────────────────────────────
 
 /** What differs between `side`'s folder and what beadc writes for it, or nothing once written. */
-const checkOf = (side, protoc) => {
+const checkOf = (side, tools) => {
   // ! apart under the root's `.beadc/`, not the system's temporary folder: beadc's options and a
   // project's roots must share a folder for buf, and on Windows they may sit on two drives
   mkdirSync(join(ROOT, '.beadc'), { recursive: true });
@@ -115,7 +134,7 @@ const checkOf = (side, protoc) => {
     );
     execFileSync(process.execPath, [BEADC, 'generate'], {
       cwd: apart,
-      env: { ...process.env, BEADC_PROTOC: protoc },
+      env: { ...process.env, ...tools },
       stdio: 'inherit',
     });
 
@@ -151,18 +170,34 @@ const named = process.argv.slice(2).filter((argument) => {
 
 for (const name of named) {
   if (!Object.hasOwn(SIDES, name)) {
-    console.error('usage: node tools/check-transcoding.mjs [typescript|csharp] [--write]');
+    console.error('usage: node tools/check-transcoding.mjs [typescript|csharp|rust] [--write]');
     process.exit(2);
   }
 }
 
-const protoc =
-  process.env.BEADC_PROTOC ??
-  execFileSync(process.execPath, [FETCH_PROTOC], { encoding: 'utf8' }).trim();
+const checked = named.length === 0 ? Object.keys(SIDES) : named;
 
-for (const name of named.length === 0 ? Object.keys(SIDES) : named) {
+// the path a tool's fetch prints, where its variable names none
+const fetched = (fetch) => {
+  return execFileSync(process.execPath, [fetch], { encoding: 'utf8' }).trim();
+};
+
+// * protoc for every side; protoc-gen-buffa only where a side's messages are Buffa's
+const tools = {
+  BEADC_PROTOC: process.env.BEADC_PROTOC ?? fetched(FETCH_PROTOC),
+  ...(checked.some((name) => {
+    return SIDES[name].plugin === true;
+  })
+    ? {
+        BEADC_PROTOC_GEN_BUFFA:
+          process.env.BEADC_PROTOC_GEN_BUFFA ?? fetched(FETCH_PROTOC_GEN_BUFFA),
+      }
+    : {}),
+};
+
+for (const name of checked) {
   const side = SIDES[name];
-  const differing = checkOf(side, protoc);
+  const differing = checkOf(side, tools);
 
   // * the exit code set, not exit called: every side is checked, and each folder apart taken out
   if (differing.length > 0) {

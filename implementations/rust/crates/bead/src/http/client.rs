@@ -73,7 +73,7 @@ const RETRY_CEILING: Duration = Duration::from_secs(30);
 
 // how long a pooled connection goes unused before its pool closes it: under Node's 5 s
 // `keepAliveTimeout`, as undici keeps 4 s
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
 
 // what a `Retry-After` that says nothing readable asks: the server's own second
 const RETRY_AFTER_DEFAULT: Duration = Duration::from_secs(1);
@@ -169,7 +169,7 @@ impl HttpTransportClientConnectOptions {
 
 // what a request carries: an envelope, or nothing
 #[derive(Debug)]
-struct Sending(Option<Bytes>);
+pub(crate) struct Sending(pub(crate) Option<Bytes>);
 
 impl Body for Sending {
     type Data = Bytes;
@@ -196,7 +196,7 @@ impl Body for Sending {
 }
 
 // a socket of the connector's, in clear or under TLS
-enum Socket {
+pub(crate) enum Socket {
     Plain(TcpStream),
     Secured(Box<TlsStream<TcpStream>>),
 }
@@ -250,7 +250,7 @@ impl Connection for Socket {
 // hyper's connector: a host's addresses raced (RFC 8305), then TLS for `https`, HTTP/1.1 alone
 // asked by ALPN; the TLS given, or the platform's, built at the first secured connect
 #[derive(Clone)]
-struct Connector {
+pub(crate) struct Connector {
     racing: RacingOptions,
     given: Option<Arc<ClientConfig>>,
     tls: Arc<Mutex<Option<Arc<ClientConfig>>>>,
@@ -263,6 +263,15 @@ impl fmt::Debug for Connector {
 }
 
 impl Connector {
+    // a connector under the TLS given, or the platform's, racing by `racing`
+    pub(crate) fn new(given: Option<Arc<ClientConfig>>, racing: &RacingOptions) -> Self {
+        Self {
+            racing: racing.clone(),
+            given,
+            tls: Arc::default(),
+        }
+    }
+
     fn tls(&self) -> io::Result<Arc<ClientConfig>> {
         let mut held = locked(&self.tls);
 
@@ -504,7 +513,7 @@ async fn unless_ended<F: Future>(ended: &CancellationToken, future: F) -> Option
 }
 
 // the next data of a body, none at its end
-async fn chunk_of(body: &mut Incoming) -> Result<Option<Bytes>, hyper::Error> {
+pub(crate) async fn chunk_of(body: &mut Incoming) -> Result<Option<Bytes>, hyper::Error> {
     loop {
         match poll_fn(|context| Pin::new(&mut *body).poll_frame(context)).await {
             None => return Ok(None),
@@ -1531,11 +1540,10 @@ impl HttpTransportClient {
             .clock
             .clone()
             .unwrap_or_else(|| Arc::clone(&platform));
-        let connector = Connector {
-            racing: RacingOptions::on(Arc::clone(&platform)),
-            given: options.tls.clone(),
-            tls: Arc::default(),
-        };
+        let connector = Connector::new(
+            options.tls.clone(),
+            &RacingOptions::on(Arc::clone(&platform)),
+        );
         // * HTTP/1.1 alone, a pooled connection let go once idle on Bead's timer, its executor
         // Bead's; a request no byte of which was written, on a reused connection found closed, sent
         // again: its server never saw it

@@ -10,12 +10,11 @@ client writes the same lines, [`transcript.txt`](transcript.txt), against any se
 failure of its catalogue, `NAMELESS`, and, given no name, asks its caller's by `askName`, a command
 the client answers; and `countDown`, whose request a rule of its `.proto` holds to 10 at most,
 notifies a `Tick` a step to a client that asks for them at a window of 1, and is admitted by its
-hook, `greeted`, once the connection said hello. Every half serves and calls it over WebSocket.
-The TypeScript and C# halves serve it over HTTP too, by a gateway on a port of its own: one server,
-`HelloService` offered on it once, takes its connections from its WebSocket transport and from an
-in-memory one, joined, which the gateway crosses as one more client of it, one Bead connection an
-HTTP exchange ([`spec/transcoding.md`](../../spec/transcoding.md)). The Rust half's gateway is
-ahead: its outputs name no `gateway`, and its server serves WebSocket alone.
+hook, `greeted`, once the connection said hello. Every half serves and calls it over WebSocket,
+and serves it over HTTP too, by a gateway on a port of its own: one server, `HelloService` offered
+on it once, takes its connections from its WebSocket transport and from an in-memory one, joined,
+which the gateway crosses as one more client of it, one Bead connection an HTTP exchange
+([`spec/transcoding.md`](../../spec/transcoding.md)).
 
 A rule is protovalidate's, `[(buf.validate.field).int32.lte = 10]`, which beadc compiles into each
 half's validator: the server judges every request once it reads, before its resolver, and answers
@@ -73,8 +72,7 @@ so its resolver fails, `PROCEDURE_FAILED`, 500, the server writing that line to 
 a count past its rule and one within it, both refused by the hook, `ACCESS_DENIED`, 403, before the
 rule is judged, since no exchange's connection was ever greeted, a connection's session ending
 with its exchange; and the document, as beadc wrote it. Each failure is a problem, RFC 9457's, its
-type a `tag:` URI of its code. A Rust server serves no gateway: a client against it writes the
-lines before the gateway's.
+type a `tag:` URI of its code.
 
 ## Generating
 
@@ -152,17 +150,16 @@ cd rust
 cargo build --locked                                    # target/debug/hello: the messages beadc generated with protoc-gen-buffa
 BUF=../typescript/node_modules/.bin/buf cargo build --locked --features external
                                                         # target/debug/hello-external: the messages its build script writes
-target/debug/hello serve                                # {"port":n}, then serves until its input ends
+target/debug/hello serve                                # {"port":n,"gateway":m}, then serves until its input ends
 target/debug/hello call <port>
 ```
 
 Each half takes `serve`, `serve <port>` or `call <port>`, a port its digits alone, at most 65535,
 and refuses any other arguments with its usage, exit 2. Each half in both modes built,
 `node pairs.mjs` plays each client against each server, thirty-six pairs, then asks that server's
-gateway where it serves one: a pair passes when its client exits 0 and what it writes, then the
-gateway's answers, are `transcript.txt` byte for byte, the lines before the gateway's against a
-Rust server, its server exits 0 once its input ends, the client writes nothing to its standard
-error, and the server only the line of its nameless gateway call, nothing for a Rust server. The
+gateway: a pair passes when its client exits 0 and what it writes, then the gateway's answers, are
+`transcript.txt` byte for byte, its server exits 0 once its input ends, the client writes nothing
+to its standard error, and the server only the line of its nameless gateway call. The
 Rust binaries are read from `rust/target/debug/`, or from `CARGO_TARGET_DIR`'s `debug/` where it is
 set; `HELLO_RUST`, set to anything but `built`, leaves their pairs out. CI's `examples` job runs all
 of it on Node 26, and on 24.9, the floor the TypeScript half declares, the TypeScript and C# halves
@@ -170,9 +167,8 @@ alone, sixteen pairs.
 
 ## Calling with the generated HTTP client
 
-Use the `gateway` port the TypeScript or C# server prints. Each of their outputs has `gateway: {}`,
-so its route table also exports `HelloHttpClient`. In the TypeScript project, a source file calls it with
-fetch:
+Use the `gateway` port a server prints. Each output has `gateway: {}`, so its route table also
+exports `HelloHttpClient`. In the TypeScript project, a source file calls it with fetch:
 
 ```ts
 import { HelloHttpClient } from '#hello/http';
@@ -192,13 +188,29 @@ var answer = await hello.SayHello(new SayHelloRequest { Name = "Ada" });
 Console.WriteLine(answer.Greeting);
 ```
 
+In the Rust project, the same call goes through Bead's HTTP caller, under the core's feature
+`gateway`, its output's `bead_http`:
+
+```rust
+use bead::{HttpCallOptions, HttpCallerOptions};
+
+use crate::generated::bead_http::HelloHttpClient;
+use crate::generated::messages::hello::v1::SayHelloRequest;
+
+let hello = HelloHttpClient::new("http://127.0.0.1:8080", &HttpCallerOptions::default())?;
+let request = SayHelloRequest { name: "Ada".to_owned(), ..SayHelloRequest::default() };
+let answer = hello.say_hello(&request, &HttpCallOptions::default()).await?;
+println!("{}", answer.greeting);
+```
+
 Replace `8080` with that gateway port. Each call uses its default POST route, and a problem throws
-`FailureError` or `FailureException` with its Bead code and scope. A notifying procedure exposes
-`hello.subscribeCountDown({ from: 3 })` or
-`hello.SubscribeCountDown(new CountDownRequest { From = 3 })`, an async sequence of its result then
-notifications. This service's `greeted` hook refuses that HTTP subscription: each exchange has its
-own Bead connection, and a greeting on another exchange greets another connection. A name must be
-given to `sayHello`, since HTTP answers no `askName` command.
+`FailureError` or `FailureException` with its Bead code and scope, or, in Rust, is the `CallError`
+its future gives. A notifying procedure exposes `hello.subscribeCountDown({ from: 3 })`,
+`hello.SubscribeCountDown(new CountDownRequest { From = 3 })` or
+`hello.subscribe_count_down(&request, &options)`, an async sequence of its result then
+notifications, in Rust a `Stream`. This service's `greeted` hook refuses that HTTP subscription:
+each exchange has its own Bead connection, and a greeting on another exchange greets another
+connection. A name must be given to `sayHello`, since HTTP answers no `askName` command.
 
 ## What a project outside this repository writes instead
 
@@ -210,8 +222,8 @@ names each runtime as a package, by its name and a version: `"@francisdesjardins
 `<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />`,
 `<PackageReference Include="FrancisDesjardins.Bead.Transcoding.Http" Version="<version>" />` and
 `<PackageReference Include="FrancisDesjardins.Bead.Protobuf" Version="<version>" />`;
-`bead = { package = "francisdesjardins-bead", version = "<version>", features = ["websocket"] }`,
-`bead-protobuf = { package = "francisdesjardins-bead-protobuf", version = "<version>" }`, Buffa's
+`bead = { package = "francisdesjardins-bead", version = "<version>", features = ["websocket", "gateway"] }`,
+`bead-protobuf = { package = "francisdesjardins-bead-protobuf", version = "<version>", features = ["transcoding"] }`, Buffa's
 `buffa` and `buffa-descriptor` at the one version its messages are generated for, `=0.9.2`, and,
 for messages its build writes, `bead-protobuf-build = { package = "francisdesjardins-bead-protobuf-build", version = "<version>" }`
 among its build dependencies.

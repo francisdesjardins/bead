@@ -1,6 +1,6 @@
 //! The test kit's messages (decision 0044): under the feature `testing` alone, the tests' files
-//! generated from `proto/tests.binpb`, the set protoc wrote of them, as `bead_protobuf_build` sets
-//! Buffa's generator; `node tools/check-protobuf.mjs --write`, from the Rust side's folder, writes
+//! generated from `proto/tests.binpb`, the set protoc wrote of them and of the transcoding's, which
+//! its unit tests read by their descriptors alone, as `bead_protobuf_build` sets Buffa's generator; `node tools/check-protobuf.mjs --write`, from the Rust side's folder, writes
 //! the set again. The library itself holds no generated code. `proto/codec.proto` is generated a
 //! second time by Buffa's generator as it is by default, its closed enums left closed, for the
 //! codec's refusal of such a message.

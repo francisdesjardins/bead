@@ -40,6 +40,17 @@ const STYLES: readonly string[] = Object.freeze([
   'penumbra/tokens.system.css',
 ]);
 
+/**
+ * The extension's icons, Bead's mark at each size the manifest names: `site/icons.mjs` writes them
+ * from `site/src/favicon.svg`.
+ */
+const ICONS: readonly string[] = Object.freeze([
+  'chrome/icons/icon-16.png',
+  'chrome/icons/icon-32.png',
+  'chrome/icons/icon-48.png',
+  'chrome/icons/icon-128.png',
+]);
+
 /** What the manifest holds in place of the package's version. */
 const VERSION = '%VERSION%';
 
@@ -80,6 +91,13 @@ await writeFile(pathOf('manifest.json', OUT), manifest.replace(VERSION, version)
 await Promise.all(
   Object.entries(PAGES).map(([page, path]) => {
     return copyFile(pathOf(path), pathOf(page, OUT));
+  })
+);
+
+await mkdir(new URL('icons/', OUT), { recursive: true });
+await Promise.all(
+  ICONS.map((path) => {
+    return copyFile(pathOf(path), pathOf(path.replace(/^chrome\//u, ''), OUT));
   })
 );
 

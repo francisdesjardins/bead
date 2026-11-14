@@ -1,10 +1,11 @@
 //! `bead-bench`, the Rust side's in-memory bench (decision 0036): the envelope's codec, a request
-//! written and read back, and calls of the interop service's echo on one in-memory connection
-//! kept, and exchanges, each a client and its connection drawn, called once and closed, at each
-//! size, its latencies and its throughput, written as `bead-bench/1` for `tools/bench-compare.mjs`.
+//! written and read back; protobuf's JSON read and written by Bead's mapping beside Buffa's own
+//! (decision 0052); and calls of the interop service's echo on one in-memory connection kept, and
+//! exchanges, each a client and its connection drawn, called once and closed, at each size, its
+//! latencies and its throughput, written as `bead-bench/1` for `tools/bench-compare.mjs`.
 //!
 //! `cargo run --release --locked --manifest-path benches/Cargo.toml -- [--runs 3] [--seconds 3]
-//! [--json] [--filter id-or-name]`
+//! [--json] [--transcoding] [--filter id-or-name]`, `--transcoding` measuring the JSON alone
 //!
 //! `-- --scale` measures instead how a message's cost holds as the connections a server holds grow,
 //! and fails when it does not hold flat.
@@ -32,7 +33,10 @@ use bead::{
     RequestDependencies, RequestHeader, RequestOptions, RouterSide, Server, ServerOptions,
     ServerTransport,
 };
+use bead_interop::transcoding::generated::messages::bead::transcoding::v1::Everything;
 use bead_interop::{InteropProcedures, offer_interop};
+use bead_protobuf::{JsonForm, ProtoSchema};
+use buffa_descriptor::reflect::DynamicMessage;
 use serde_json::{Value, json};
 
 mod scale;
@@ -57,10 +61,11 @@ const CODEC_BATCH: u32 = 1_000;
 // the bytes of a failure's detail an envelope written keeps, as the other sides' benches write it
 const DETAIL_BYTES: usize = 1_024;
 
-/// How a run goes: its runs, the seconds of each measure, the report as JSON, the measure it keeps
-/// to, or the scale alone.
+/// How a run goes: its runs, the seconds of each measure, the report as JSON, the JSON mapping
+/// alone, the measure it keeps to, or the scale alone.
 struct Options {
     scale: bool,
+    transcoding: bool,
     runs: u32,
     seconds: u64,
     json: bool,
@@ -70,6 +75,7 @@ struct Options {
 fn options_of(arguments: &[String]) -> Result<Options, String> {
     let mut options = Options {
         scale: false,
+        transcoding: false,
         runs: 3,
         seconds: 3,
         json: false,
@@ -102,12 +108,7 @@ fn options_of(arguments: &[String]) -> Result<Options, String> {
 
                 options.filter = Some(value.clone());
             }
-            "--transcoding" => {
-                return Err(
-                    "the Rust side has no gateway yet: its bench measures no transcoding"
-                        .to_owned(),
-                );
-            }
+            "--transcoding" => options.transcoding = true,
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -124,9 +125,10 @@ struct Measure {
     samples: Vec<f64>,
 }
 
-// the transport of a measure named `name`: none for the codec's, the in-memory one for a call's
+// the transport of a measure named `name`: none for a codec's and the JSON mapping's, the
+// in-memory one for a call's
 fn transport_of(name: &str) -> &'static str {
-    if name.starts_with("codec.") {
+    if name.starts_with("codec.") || name.starts_with("transcoding.") {
         "none"
     } else {
         "memory"
@@ -350,6 +352,138 @@ fn codecs((measures, size_bytes, seconds): (&mut Measures, usize, u64)) -> Resul
     Ok(())
 }
 
+// the rounds of each measure of the JSON mapping a batch times, as the other sides' benches take
+// them
+const TRANSCODING_BATCH: u32 = 100;
+
+// ns a round of `once` takes, timed in batches of `TRANSCODING_BATCH` over `seconds` after a
+// batch's warm-up
+fn batched<F: FnMut() -> Result<(), String>>(mut once: F, seconds: u64) -> Result<f64, String> {
+    for _ in 0..TRANSCODING_BATCH {
+        once()?;
+    }
+
+    let span = Duration::from_secs(seconds);
+    let mut rounds = 0_u32;
+    let started = Instant::now();
+
+    while started.elapsed() < span {
+        for _ in 0..TRANSCODING_BATCH {
+            once()?;
+        }
+
+        rounds = rounds.saturating_add(TRANSCODING_BATCH);
+    }
+
+    Ok(started.elapsed().as_secs_f64() * 1_000_000_000.0 / f64::from(rounds.max(1)))
+}
+
+// the payload of transcoding.json's writing of Everything, its message of every kind of field
+fn everything() -> Result<Vec<u8>, String> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../spec/transcoding.json"
+    );
+    let file: Value = serde_json::from_str(
+        &std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?,
+    )
+    .map_err(|error| format!("{path}: {error}"))?;
+
+    file.get("writings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|entry| {
+            entry.get("message").and_then(Value::as_str) == Some("bead.transcoding.v1.Everything")
+                && entry.get("body").is_some()
+        })
+        .and_then(|entry| entry.get("payload").and_then(Value::as_str))
+        .ok_or("transcoding.json holds no writing of Everything")?
+        .split_whitespace()
+        .map(|pair| u8::from_str_radix(pair, 16).map_err(|error| error.to_string()))
+        .collect()
+}
+
+// a measure's round, which fails with its words
+type Round<'a> = Box<dyn FnMut() -> Result<(), String> + 'a>;
+
+// Bead's mapping of protobuf's JSON against Buffa's own, `DynamicMessage::from_json` and `to_json`,
+// on transcoding.json's message of every kind of field, as a gateway reads a request and writes a
+// result: a body read to its message's bytes, and bytes written to a body (decision 0052)
+fn transcoding((measures, seconds): (&mut Measures, u64)) -> Result<(), String> {
+    let payload = everything()?;
+    let schema = ProtoSchema::of::<Everything>();
+    let (pool, index) = (Arc::clone(schema.pool()), schema.message());
+    let form = JsonForm::new(Arc::clone(&pool)).form_of(schema);
+    let body = form
+        .write(&payload, None)
+        .map_err(|error| format!("{error:?}"))?;
+    let size_bytes = body.len();
+    let rounds: [(&str, Round<'_>); 4] = [
+        (
+            "transcoding.read.bead",
+            Box::new(|| {
+                let read = form
+                    .read(body.as_bytes())
+                    .map_err(|error| format!("{error:?}"))?;
+
+                std::hint::black_box(read);
+
+                Ok(())
+            }),
+        ),
+        (
+            "transcoding.read.stock",
+            Box::new(|| {
+                let read = DynamicMessage::from_json(Arc::clone(&pool), index, &body)
+                    .map_err(|error| error.to_string())?;
+
+                std::hint::black_box(read.encode_to_vec());
+
+                Ok(())
+            }),
+        ),
+        (
+            "transcoding.write.bead",
+            Box::new(|| {
+                let written = form
+                    .write(&payload, None)
+                    .map_err(|error| format!("{error:?}"))?;
+
+                std::hint::black_box(written.into_bytes());
+
+                Ok(())
+            }),
+        ),
+        (
+            "transcoding.write.stock",
+            Box::new(|| {
+                let read = DynamicMessage::decode(Arc::clone(&pool), index, &payload)
+                    .map_err(|error| error.to_string())?;
+                let written = read.to_json().map_err(|error| error.to_string())?;
+
+                std::hint::black_box(written.into_bytes());
+
+                Ok(())
+            }),
+        ),
+    ];
+
+    for (name, once) in rounds {
+        if !measures.is_selected((name, size_bytes)) {
+            continue;
+        }
+
+        eprintln!("codec local/none/{size_bytes} {name}");
+
+        let nanoseconds = batched(once, seconds)?;
+
+        measures.record((name, size_bytes), (nanoseconds, "ns"));
+    }
+
+    Ok(())
+}
+
 // one measure's latencies and its throughput, into `measures`
 async fn measure(
     (stand, measures): (&Arc<Stand>, &mut Measures),
@@ -541,6 +675,12 @@ async fn main() -> Result<(), String> {
 
     for run in 1..=options.runs {
         eprintln!("run {run}/{}", options.runs);
+
+        transcoding((&mut measures, options.seconds))?;
+
+        if options.transcoding {
+            continue;
+        }
 
         for size_bytes in SIZES {
             codecs((&mut measures, size_bytes, options.seconds))?;

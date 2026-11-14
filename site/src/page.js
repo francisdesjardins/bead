@@ -3,7 +3,7 @@
 (() => {
   // each language's title and description, which the build writes beside this script
   const HEADS = JSON.parse(document.getElementById('heads').textContent);
-  const ADDRESS = 'https://francisdesjardins.ca/bead/';
+  const ADDRESS = 'https://beadproto.dev/';
   // the fixed bar, and a little air under it, above a section counted as the current one
   const READING_LINE = 96;
 

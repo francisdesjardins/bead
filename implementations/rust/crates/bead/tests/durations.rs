@@ -20,11 +20,13 @@ use bead::testing::SteppingClock;
 use bead::testing::durations::{DurationInput, DurationPlace, Durations, PlaceOutcome};
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::{
-    BeforeRequest, BoxFuture, BrokerAdapter, BrokerListener, BrokerMessage, BrokerParticipant,
-    BrokerParticipantOptions, BrokerPublication, BrokerStart, BrokerSubscription,
-    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
-    BrokerTransportServerOptions, Call, CallError, ClientListener, ConnectionHandle, DebugEvent,
-    DestinationOptions, DurationRefusal, HttpPolicy, HttpPolicyOptions, HttpTransportClient,
+    AdmissionRule, BeforeRequest, BoxFuture, BrokerAdapter, BrokerListener, BrokerMessage,
+    BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerStart,
+    BrokerSubscription, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+    BrokerTransportServer, BrokerTransportServerOptions, Call, CallError, ClientListener,
+    ConnectionHandle, DebugEvent, Descriptor, DescriptorInit, DestinationOptions, DurationRefusal,
+    HttpGateway, HttpGatewayOptions, HttpMethod, HttpPayload, HttpPolicy, HttpPolicyOptions,
+    HttpRoute, HttpRouteInit, HttpRouteTemplate, HttpTransportClient,
     HttpTransportClientConnectOptions, HttpTransportClientOptions, HttpTransportServer,
     HttpTransportServerOptions, LIMIT_DEFAULTS, LONGEST_TIMER, MemoryBroker, MemoryBrokerAdapter,
     MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryTransportClient,
@@ -35,10 +37,11 @@ use bead::{
     ResolvedRequestOptions, RouterClient, RouterClientOptions, RouterClientTransport, RouterError,
     RouterLimits, RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent,
     Server, ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
-    ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
-    TransportClientReconnectOptions, TransportError, TransportMessage, TransportServerStartOptions,
-    WebSocketTransportClient, WebSocketTransportClientConnectOptions,
-    WebSocketTransportClientOptions, WebSocketTransportServer, WebSocketTransportServerOptions,
+    ServiceProcedure, ServiceRouter, ServiceServer, ServiceServerOptions, SessionManagerOptions,
+    SharedClock, TransportClientReconnectDelay, TransportClientReconnectOptions, TransportError,
+    TransportMessage, TransportServerStartOptions, WebSocketTransportClient,
+    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+    WebSocketTransportServer, WebSocketTransportServerOptions, request_of, route_of,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -52,8 +55,8 @@ const MILLISECOND: Duration = Duration::from_millis(1);
 const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
-// stage that brings it: its AMQP 1.0 binding, its gateway
-const PLACES: [&str; 31] = [
+// stage that brings it: its AMQP 1.0 binding
+const PLACES: [&str; 33] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -85,6 +88,8 @@ const PLACES: [&str; 31] = [
     "httpTransportClient.pause",
     "mqttBrokerAdapter.keepAlive",
     "mqttBrokerAdapter.connectTimeout",
+    "gateway.timeout",
+    "gateway.heartbeat",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -105,7 +110,9 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "httpTransportClient.wait"
         | "httpTransportClient.pause"
         | "mqttBrokerAdapter.keepAlive"
-        | "mqttBrokerAdapter.connectTimeout" => &["options"],
+        | "mqttBrokerAdapter.connectTimeout"
+        | "gateway.timeout"
+        | "gateway.heartbeat" => &["options"],
         "router.reservation" => &["reserve", "cancel"],
         "relay.timeout" => &["relay", "register"],
         "session.inactivityTimeouts" => &[
@@ -122,7 +129,7 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         }
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
-        | "httpTransportServer.bodyGracePeriod" => &["options", "policy"],
+        | "httpTransportServer.bodyGracePeriod" => &["options", "gateway", "policy"],
         "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["server", "client"],
         "httpTransport.exchangeTimeout" | "httpTransport.inactivityTimeout" => {
             &["server", "client"]
@@ -131,15 +138,10 @@ fn ways_of(place: &str) -> &'static [&'static str] {
     }
 }
 
-// the ways of a place played that are ahead, each with the stage that brings it: a gateway's with
-// its gateway
-fn ahead_of(place: &str) -> &'static [&'static str] {
-    match place {
-        "httpTransportServer.sendGracePeriod"
-        | "httpTransportServer.headersTimeout"
-        | "httpTransportServer.bodyGracePeriod" => &["gateway"],
-        _ => &[],
-    }
+// the ways of a place played that are ahead, each with the stage that brings it: none, every way
+// of every place this side plays played
+fn ahead_of(_place: &str) -> &'static [&'static str] {
+    &[]
 }
 
 /// What a place built one way holds of what it was given, or its refusal.
@@ -2527,6 +2529,13 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         ("httpTransportServer.headersTimeout", "policy") => policy_way("headersTimeout", given),
         ("httpTransportServer.bodyGracePeriod", "policy") => policy_way("bodyGracePeriod", given),
+        ("httpTransportServer.sendGracePeriod", "gateway") => gateway_way("sendGracePeriod", given),
+        ("httpTransportServer.headersTimeout", "gateway") => gateway_way("headersTimeout", given),
+        ("gateway.heartbeat", "options") => gateway_way("heartbeat", given),
+        ("httpTransportServer.bodyGracePeriod", "gateway") => {
+            gateway_due("bodyGracePeriod", given).await
+        }
+        ("gateway.timeout", "options") => gateway_due("timeout", given).await,
         ("webSocketTransport.closeTimeout", "server") => {
             web_socket_server_way("closeTimeout", given)
         }
@@ -2543,6 +2552,201 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         _ => Err(format!("{place} has no way {way} here")),
     }
+}
+
+// ── The gateway ──────────────────────────────────────────────────────────────────────────────
+
+// the turns a gateway's call is given past its connection drawn to arm its timer
+const DRAWN_TURNS: u32 = 50;
+
+// a body handed to a mounted gateway: its one frame, then its end; or nothing ever
+struct Handed {
+    frame: Option<Bytes>,
+    ends: bool,
+}
+
+impl http_body::Body for Handed {
+    type Data = Bytes;
+    type Error = std::io::Error;
+
+    fn poll_frame(
+        mut self: core::pin::Pin<&mut Self>,
+        _context: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, std::io::Error>>> {
+        if let Some(bytes) = self.frame.take() {
+            return core::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes))));
+        }
+
+        // * a body that has not come stays pending: its pace is armed at its head
+        if self.ends {
+            core::task::Poll::Ready(None)
+        } else {
+            core::task::Poll::Pending
+        }
+    }
+}
+
+// `hang`, a procedure of raw bytes its server answers never, and the route a gateway serves it by
+fn hanging() -> Result<(Descriptor<RawCodec, RawCodec>, HttpRoute), String> {
+    let hang = request_of(DescriptorInit {
+        procedure: Procedure {
+            service_id: 7,
+            procedure_id: 1,
+            service_revision: 1,
+            procedure_name: "hang".to_owned(),
+            procedure_kind: None,
+            maximum_payload_bytes: None,
+            deprecation: None,
+        },
+        admission: AdmissionRule::None,
+        failures: Vec::new(),
+        request: RawCodec,
+        result: RawCodec,
+        validate: None,
+    })
+    .map_err(|error| error.to_string())?;
+    let route = route_of(HttpRouteInit {
+        procedure: ServiceProcedure::from(&hang),
+        request: HttpPayload::Raw,
+        result: HttpPayload::Raw,
+        notification: None,
+        failures: Vec::new(),
+        no_side_effects: false,
+        routes: vec![HttpRouteTemplate {
+            method: HttpMethod::Post,
+            template: "/v1/hang".to_owned(),
+            body: Some("*".to_owned()),
+            response_body: None,
+        }],
+    })
+    .map_err(|error| error.to_string())?;
+
+    Ok((hang, route))
+}
+
+// a gateway's options as it is built, of `member` given: taken or refused, no exchange made
+fn gateway_way(member: &str, given: Option<Duration>) -> Played {
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .map_err(|error| error.to_string())?;
+    let (_hang, route) = hanging()?;
+    let mut options = HttpGatewayOptions::new(memory, vec![route]);
+
+    match member {
+        "sendGracePeriod" => options.send_grace_period = given,
+        "headersTimeout" => options.headers_timeout = given,
+        "heartbeat" => options.heartbeat = given,
+        _ => return Err(format!("a gateway has no member {member} played so")),
+    }
+
+    match HttpGateway::new(&options) {
+        Ok(_) => Ok(Observed::Taken),
+        Err(refused) => Ok(Observed::Refused(refused)),
+    }
+}
+
+// a mounted gateway on a stepping clock, as `member` is given: a `POST` to `hang` declaring a body
+// of one byte, which comes, its call's timeout armed as the call goes; or declaring 100 bytes,
+// which never come, its body's pace armed at its head; what it arms, the due of its one timer
+async fn gateway_due(member: &str, given: Option<Duration>) -> Played {
+    let clock = SteppingClock::new(epoch());
+    let mut memory_options = MemoryTransportServerOptions::default();
+
+    memory_options.clock = Some(shared_of(&clock));
+
+    let memory = MemoryTransportServer::new(&memory_options).map_err(|error| error.to_string())?;
+    let server = Server::new(Arc::new(memory.clone()), &ServerOptions::default())
+        .map_err(|error| error.to_string())?;
+    let (hang, route) = hanging()?;
+    let service = ServiceServer::new(
+        vec![ServiceProcedure::from(&hang)],
+        &ServiceServerOptions::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    service
+        .on(
+            &hang,
+            Arc::new(|_request, _response| Box::pin(core::future::pending())),
+        )
+        .map_err(|error| error.to_string())?;
+    service.offer(&server).map_err(|error| error.to_string())?;
+    memory.start().await.map_err(|error| error.to_string())?;
+
+    let mut options = HttpGatewayOptions::new(memory.clone(), vec![route]);
+    let is_timeout = member == "timeout";
+
+    options.clock = Some(shared_of(&clock));
+
+    if is_timeout {
+        options.timeout = given;
+    } else {
+        options.body_grace_period = given;
+    }
+
+    let gateway = match HttpGateway::new(&options) {
+        Ok(gateway) => gateway,
+        Err(refused) => {
+            server.dispose().await.map_err(|error| error.to_string())?;
+
+            return Ok(Observed::Refused(refused));
+        }
+    };
+    let (length, body) = if is_timeout {
+        (
+            "1",
+            Handed {
+                frame: Some(Bytes::from_static(&[1])),
+                ends: true,
+            },
+        )
+    } else {
+        (
+            "100",
+            Handed {
+                frame: None,
+                ends: false,
+            },
+        )
+    };
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/v1/hang")
+        .header("host", "localhost")
+        .header("content-type", "application/octet-stream")
+        .header("content-length", length)
+        .body(body)
+        .map_err(|error| error.to_string())?;
+    let answering = tokio::spawn(gateway.answer(request, None));
+    let due = tokio::time::timeout(Duration::from_secs(5), async {
+        // the turns a call never timed waits past its connection drawn, for a timer it would arm
+        let mut after_drawn = 0_u32;
+
+        loop {
+            // * the call's timer armed as it goes, or the body's pace at its head; a call armed
+            // none, its connection drawn and its request handed on
+            let is_drawn = !memory.clients().is_empty();
+
+            if ((is_drawn || !is_timeout) && !clock.dues().is_empty()) || after_drawn > DRAWN_TURNS
+            {
+                return;
+            }
+
+            if is_timeout && is_drawn {
+                after_drawn = after_drawn.saturating_add(1);
+            }
+
+            clock.settle().await;
+            tokio::time::sleep(MILLISECOND).await;
+        }
+    })
+    .await;
+    let dues = clock.dues();
+
+    answering.abort();
+    gateway.dispose().await.map_err(|error| error.to_string())?;
+    server.dispose().await.map_err(|error| error.to_string())?;
+    due.map_err(|_elapsed| format!("{member}: its exchange never came to its timer"))?;
+
+    Ok(Observed::Held(due_of(&dues)?))
 }
 
 fn reason_of(reason: &str) -> Option<DurationRefusal> {

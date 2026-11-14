@@ -65,6 +65,9 @@ rustls-platform-verifier = { version = "0.7.1", default-features = false }
 # reason; an HTTP date (RFC 9110 §5.6.7), the one hyper writes, on every response both socket
 # servers write themselves
 hyper = { version = "1.12.0", default-features = false }
+# the gateway's: the body a mounted gateway reads and gives, named by the application's own
+# `http-body` 1.x, which hyper and axum give it, one version by semver
+http-body = { version = "1.1.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false }
 h2 = { version = "0.4.20", default-features = false }
 # the HTTP client's: the connector hyper-util's pool takes, a service of a URI

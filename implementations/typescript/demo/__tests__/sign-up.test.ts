@@ -190,6 +190,25 @@ test.describe('mountSignUp', () => {
     await expect(requestsOf(page)).toHaveCount(0);
   });
 
+  test('says its short detail cut a refusal of the server, what it left out uncounted', async ({
+    page,
+  }) => {
+    // * the server writes its whole detail; the client reads it under its 256 bytes, its closing
+    // line among what it cuts (spec 18.7)
+    await page.getByLabel('A detail of 256 bytes').check();
+    await expect(page).toHaveURL(/[?&]detail=short#rules$/u);
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await page.getByRole('button', { name: 'Break several fields' }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      "refused by the server before its resolver: PAYLOAD_INVALID, 1 violation, and more the detail's bound cut, uncounted"
+    );
+    await expect(requestsOf(page)).toHaveCount(1);
+    await expect(page.locator('[aria-invalid]')).toHaveCount(1);
+    await expect(page.locator('#sign-up-name-messages')).toHaveText(MESSAGES.name);
+  });
+
   test('says it stops at the first violation when the client judges only that one', async ({
     page,
   }) => {

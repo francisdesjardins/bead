@@ -19,10 +19,10 @@
   a payload's rules [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s,
   a closed enum [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s,
   the Rust side's rules [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s
-  and the surface [0047](0047-every-side-shows-one-public-surface.md)'s. Ahead: the Rust target's
-  `http: true`, its route table, its `<Service>HttpClient`, the document an output with `gateway`
-  writes and `examples/hello`'s Rust gateway, with the gateway's stage, the matrix's row
-  `Rust's gateway`, under a record of its own.
+  and the surface [0047](0047-every-side-shows-one-public-surface.md)'s. The Rust target's `http:
+  true`, its `bead_http.rs`, its route table, its `<Service>HttpClient`, the document an output with
+  `gateway` writes, the contract 5 and `examples/hello`'s Rust gateway are
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s.
 
 ## Context
 
@@ -414,7 +414,7 @@ message its fields reach, and refuses one whose repeated or map field of a close
 folds the error into `get`'s; a caller that writes its codec takes `?`. A break, while the major
 is 0.
 
-### The counter: 7 and 8, the other runtimes' numbers
+### The counter: 5, 7 and 8, the other runtimes' numbers
 
 `bead::GENERATED_CODE_SUPPORTS_VERSION_7` and `bead::GENERATED_CODE_SUPPORTS_VERSION_8`, `bool`
 constants `true` in the core, answer for `bead-protobuf`'s calls too. One number is one contract,
@@ -422,7 +422,10 @@ every side's, moved together, and a file names the highest it needs
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)):
 a package's file of services names 7, as `hello_bead.ts` and `HelloBead.cs` do, and
 `bead_served.rs` names 8, as `bead_served.ts` and `BeadServed.cs` do. The Rust runtime meets both
-contracts and holds those two alone, since no Rust code names an older one. A package's file ends:
+contracts and, under `gateway`, the route table's 5, which `bead_http.rs` names as `bead_http.ts`
+and `BeadHttp.cs` do
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
+it holds those three alone, since no Rust code names another. A package's file ends:
 
 ```rust
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
@@ -480,12 +483,14 @@ crate of its own, the struct is non-exhaustive to its users and the assignment f
 ### `examples/hello`'s Rust half
 
 `examples/hello/rust/`, outside the workspace, its own lock, depends by path on `bead` with
-`websocket`, `bead-protobuf`, Buffa's crates and tokio. `beadc.yaml` names two outputs,
-`rust/src/generated/generate` and `rust/src/generated/external`, the feature `external` choosing the
-mount, its `build.rs` running `config_of` over the set `buf build --as-file-descriptor-set` writes,
-never committed. It names no `gateway`: the Rust target has `http: false`, so an output naming
-`gateway` is `HTTP_UNGENERATED`. `pairs.mjs` plays `Rust, generate` and `Rust, external` among the
-halves: 36 WebSocket pairs; the gateway's lines stay the TypeScript and C# servers'.
+`websocket` and `gateway`, `bead-protobuf` with `transcoding`, Buffa's crates and tokio.
+`beadc.yaml` names two outputs, `rust/src/generated/generate` and `rust/src/generated/external`, the
+feature `external` choosing the mount, its `build.rs` running `config_of` over the set `buf build
+--as-file-descriptor-set` writes, never committed. Each output names a `gateway`, and its server
+serves it on its own listener
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
+`pairs.mjs` plays `Rust, generate` and `Rust, external` among the halves: 36 WebSocket pairs, and
+the gateway's lines of each of the three servers.
 
 ### The interop
 
@@ -519,8 +524,6 @@ builds it. `generate --check` holds the files, as it holds the other sides'.
   the major is 0.
 - **Two more projects outside the workspace**, each a `cargo deny` line, a Dependabot folder, and
   hello's Rust half a toolchain file; the `examples` job builds the Rust half in both modes.
-- **Ahead**: the Rust target's gateway, `http: true`, its route table, its `<Service>HttpClient`,
-  its document, and `examples/hello`'s Rust gateway, with `Rust's gateway`.
 
 **Its gates**: `bead-goldens` under the workspace's whole lint table, its consumer twins and its
 parity test; `generate --check` over every Rust output, the interop's and `examples/hello`'s among

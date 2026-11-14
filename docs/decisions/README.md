@@ -53,15 +53,17 @@ and beadc's Rust target, each package's typed shells beside the messages Buffa w
 of the procedures a server's transports take and the validators of a blueprint's rules, their
 runtime in `bead-protobuf`, with `examples/hello`'s Rust half and the Rust interop's descriptors
 generated
-([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
+and its HTTP/JSON gateway, features of its core, its JSON mapping a feature of `bead-protobuf`, met
+by one trait, with the route table, the HTTP client and the document an output with `gateway`
+writes, `examples/hello`'s Rust gateway and the interop both ways over it
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **the Rust side's gateway**, with the route table, the HTTP client and the document an output
-  with `gateway` writes, and `examples/hello`'s Rust gateway; then its AMQP 1.0 binding, its client
-  one of the three branches
+- **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
-  weighs, each stage under a record of its own
+  weighs, under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules
@@ -140,7 +142,7 @@ that meets the Tenth Man:
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the eight every side shares
+  the parsers the sides fuzz, the nine every side shares
   ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
   beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
   judges alone; and the `envelope` target's writer held to the refusals it documents, as
@@ -173,6 +175,11 @@ that meets the Tenth Man:
   which a pool of connections would spare a handshake an exchange; a `raw` body streamed as a
   transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events; and
   `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`;
+- what
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)
+  keeps ahead of a gateway: mounting Bead and its gateway in a host, a framework among them, a round
+  of its own; a `Service` that reads its caller's address from an extension of Bead's, beside the
+  Rust side's `answer`; and the Rust caller's typed write in place;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
@@ -208,14 +215,15 @@ table.
 
 ### Services and their names
 
-| #                                                                                                            | Decision                                                                                                                | Status   |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                  | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)              | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
-| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
-| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | accepted |
-| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                | beadc writes Rust each package's typed shells beside the messages Buffa writes                                          | accepted |
+| #                                                                                                                                             | Decision                                                                                                                                                | Status   |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                                                   | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made                                  | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)                                               | A service's procedures are typed descriptors, served and called through one layer in each runtime                                                       | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                                                  | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone                                             | accepted |
+| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)                                    | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange                                 | accepted |
+| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)                                  | One contract gives several packages, and a server's transport takes the procedures it is given                                                          | accepted |
+| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                                                 | beadc writes Rust each package's typed shells beside the messages Buffa writes                                                                          | accepted |
+| [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md) | The Rust side's gateway is a feature of its core and its JSON mapping a feature of its proto codec, met by one trait, and a `HEAD` never holds a stream | accepted |
 
 ### Transports and relays
 
@@ -290,7 +298,7 @@ table.
 
 ## Writing one
 
-The next decision is 0052. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0053. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

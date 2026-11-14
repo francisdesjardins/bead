@@ -242,7 +242,10 @@ const outputFilesOf = (
       ...(set === undefined || !messages
         ? []
         : generateRustMessages(set, { blueprint: input.blueprint, ...keeps })),
-      ...rustTarget.generate(input, { messages: output.messages }),
+      ...rustTarget.generate(input, {
+        messages: output.messages,
+        ...(http === undefined ? {} : { http }),
+      }),
     ];
   }
 

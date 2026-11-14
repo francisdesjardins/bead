@@ -18,8 +18,10 @@ autotests = false
 name = "bead_goldens"
 
 [dependencies]
-bead = { workspace = true }
-bead-protobuf = { workspace = true }
+# an output with a gateway, `subsets` and `transcoding`, mounts `bead_http.rs`, which names the
+# core's gateway and bead-protobuf's JSON form
+bead = { workspace = true, features = ["gateway"] }
+bead-protobuf = { workspace = true, features = ["transcoding"] }
 buffa = { workspace = true }
 buffa-descriptor = { workspace = true }
 buffa-types = { workspace = true }

@@ -6,10 +6,18 @@ using Google.Protobuf.WellKnownTypes;
 
 namespace Bead.Interop.Tests;
 
-/// <summary>The generated C# HTTP client against the TypeScript gateway, twins of interop.test.ts.</summary>
-public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
+/// <summary>
+/// The generated C# HTTP client against the TypeScript gateway, and against the Rust one, the cases
+/// of the trait <c>server=Rust</c>, where <c>BEAD_INTEROP_RUST_SERVER</c> names its built binary;
+/// twins of interop.test.ts.
+/// </summary>
+public sealed class HttpInteropTests(InteropTests.TypeScriptServer server, InteropTests.RustServer rust)
 {
     private const string Reason = "it starts the TypeScript server, and Node or the TypeScript side are not installed";
+
+    // the gateway each test calls
+    private const string TypeScript = "TypeScript";
+    private const string Rust = "Rust";
 
     /// <summary>How long a stream waits for its place: the gateway keeps one stream an address.</summary>
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -22,11 +30,11 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         }
     }
 
-    private async Task<Uri> Gateway()
+    private async Task<Uri> Gateway(string side)
     {
-        var ports = await server.Ports();
+        var port = side == Rust ? await rust.GatewayPort() : (await server.Ports()).GatewayPort;
 
-        return new Uri($"http://127.0.0.1:{ports.GatewayPort}");
+        return new Uri($"http://127.0.0.1:{port}");
     }
 
     // * a stream's end, once the gateway frees the place the test before held: busy before any entry, it goes again
@@ -70,10 +78,12 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         }
     }
 
-    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
-    public async Task Calls_the_other_gateway_with_protobuf_JSON_and_every_native_encoding()
+    [Theory(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    [InlineData(TypeScript)]
+    [InlineData(Rust, Skip = InteropTests.RustServer.Reason, SkipUnless = nameof(InteropTests.IsRustInterop), SkipType = typeof(InteropTests), Traits = ["server", "Rust"])]
+    public async Task Calls_the_other_gateway_with_protobuf_JSON_and_every_native_encoding(string side)
     {
-        using var client = new TranscodingHttpClient(await Gateway());
+        using var client = new TranscodingHttpClient(await Gateway(side));
         var book = await client.GetBook(new GetBookRequest { Name = "shelves/a/books/b", Revision = 7 });
 
         Assert.Equal(new Book { Name = "shelves/a/books/b", Pages = 7, Title = "A tale" }, book);
@@ -82,10 +92,12 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         Assert.Equal("{\"a\":\"José\",\"z\":[true,null]}", (await client.Json(PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes("{\"z\":[true,null],\"a\":\"José\"}")))).GetRawText());
     }
 
-    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
-    public async Task Reads_the_other_gateway_problems_and_presents_its_authorization()
+    [Theory(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    [InlineData(TypeScript)]
+    [InlineData(Rust, Skip = InteropTests.RustServer.Reason, SkipUnless = nameof(InteropTests.IsRustInterop), SkipType = typeof(InteropTests), Traits = ["server", "Rust"])]
+    public async Task Reads_the_other_gateway_problems_and_presents_its_authorization(string side)
     {
-        using var client = new TranscodingHttpClient(await Gateway());
+        using var client = new TranscodingHttpClient(await Gateway(side));
         var application = await Assert.ThrowsAsync<FailureException>(() => { return client.Fail(new FailRequest { Detail = "by choice" }); });
         var protocol = await Assert.ThrowsAsync<FailureException>(() => { return client.WhoAmI(new Empty()); });
 
@@ -94,10 +106,12 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         Assert.Equal("ada", (await client.WhoAmI(new Empty(), new Transcoding.HttpCallOptions { Authorization = "Bearer good" })).Session);
     }
 
-    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
-    public async Task Reads_the_other_gateway_result_notifications_and_ending_failure()
+    [Theory(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    [InlineData(TypeScript)]
+    [InlineData(Rust, Skip = InteropTests.RustServer.Reason, SkipUnless = nameof(InteropTests.IsRustInterop), SkipType = typeof(InteropTests), Traits = ["server", "Rust"])]
+    public async Task Reads_the_other_gateway_result_notifications_and_ending_failure(string side)
     {
-        using var client = new TranscodingHttpClient(await Gateway());
+        using var client = new TranscodingHttpClient(await Gateway(side));
         var received = new List<(bool IsResult, int Value)>();
         var failed = await FailureOnceAdmitted(async () =>
         {
@@ -113,10 +127,12 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         Assert.Equal([(true, 2), (false, 1), (false, 0)], received);
     }
 
-    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
-    public async Task Reads_the_other_gateway_own_route_size_and_busy_refusals()
+    [Theory(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    [InlineData(TypeScript)]
+    [InlineData(Rust, Skip = InteropTests.RustServer.Reason, SkipUnless = nameof(InteropTests.IsRustInterop), SkipType = typeof(InteropTests), Traits = ["server", "Rust"])]
+    public async Task Reads_the_other_gateway_own_route_size_and_busy_refusals(string side)
     {
-        var url = await Gateway();
+        var url = await Gateway(side);
         using var missing = new TranscodingHttpClient(new Uri(url, "/missing/"));
         var route = await Assert.ThrowsAsync<FailureException>(() => { return missing.Json(PayloadCodecs.Json.Decode("null"u8.ToArray())); });
         Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Peer, "the HTTP call answers 404; a path no route matches"), (route.Code, route.Origin, route.Detail));
@@ -130,14 +146,16 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
         Assert.StartsWith("the HTTP call answers 503; Retry-After: 1;", busy.Detail, StringComparison.Ordinal);
     }
 
-    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
-    public async Task Compares_the_gateways_OpenAPI_documents_byte_for_byte()
+    [Theory(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    [InlineData(TypeScript)]
+    [InlineData(Rust, Skip = InteropTests.RustServer.Reason, SkipUnless = nameof(InteropTests.IsRustInterop), SkipType = typeof(InteropTests), Traits = ["server", "Rust"])]
+    public async Task Compares_the_gateways_OpenAPI_documents_byte_for_byte(string side)
     {
         await using var memory = new MemoryTransportServer();
         await using var local = new HttpGateway(new HttpGatewayOptions { Transport = memory, Routes = HttpRoutes.All, Document = HttpRoutes.OpenApiDocument.ToArray() });
         var own = await local.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var http = new HttpClient();
-        using var remote = await http.GetAsync(new Uri(await Gateway(), "/openapi.json"), Cancelled);
+        using var remote = await http.GetAsync(new Uri(await Gateway(side), "/openapi.json"), Cancelled);
         using var served = await http.GetAsync(new Uri($"http://127.0.0.1:{own.Port}/openapi.json"), Cancelled);
 
         Assert.Equal(System.Net.HttpStatusCode.OK, remote.StatusCode);

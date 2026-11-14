@@ -252,7 +252,8 @@ what it adds, and the failures it raises: each router carries its own table, `CL
 ### The Bead envelope
 
 The router's protocol is called Bead, after Baily's beads — the points of light that break through
-along the edge of the Moon at an eclipse. Its unit is the envelope: a fixed 8-byte prefix, in network
+along the edge of the Moon at an eclipse. It reads another way too: each envelope a bead, strung on
+its connection, in order, at the pace of the one who receives. Its unit is the envelope: a fixed 8-byte prefix, in network
 byte order, then a part of the kind's own, then optional blocks, then the payload. There is no
 length field: each transport delimits the envelope, as WebSocket does with its messages.
 
@@ -1545,7 +1546,7 @@ proxy's rule on a rule's path guards nothing the default route leaves open: what
 is its admission, which every route meets alike.
 
 A `proto` body is read by Bead's own mapping of protobuf's JSON over its message's schema, and a
-result written in Bead's proto JSON form, one sequence of bytes on the TypeScript and C# sides:
+result written in Bead's proto JSON form, one sequence of bytes on every side:
 fields in their numbers' order, a map's entries sorted, a `float` at its shortest, each well-known
 type in its one form; protobuf-es's `fromJson` and `toJson` are never called, and the binary payload
 stays its own. A request read whole that leaves a field of `LEGACY_REQUIRED` presence unset is
@@ -1557,29 +1558,35 @@ violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with `www-authentic
 answer the gateway could not take 502. A request whose `accept` names `text/event-stream` to a
 procedure that notifies is a stream of Server-Sent Events: its result, each notification a
 `message`, the failure that ends it, each an `id`, paced by what its response takes, 16 at once; one
-that carries `Last-Event-ID` is answered 204, so an `EventSource` stops rather than calls again.
+that carries `Last-Event-ID` is answered 204, so an `EventSource` stops rather than calls again. A
+`HEAD` that asks a stream is answered as its `GET` begins, its head alone, and ends there, its
+subscription and its place with it.
 
 Every body the gateway writes meets `maximumUnsentBytes` and its send pace,
 `minimumSendBytesPerSecond` after `sendGracePeriod`: whole answers, problems, the document and
 stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
 reports the bound on `error`, releases the exchange's place and socket, and cancels a stream's call.
 
-Each exchange draws one Bead connection, closed as its response ends: a connection's session, a
-subscription, a bound of the calls it answers, are one caller's, never every caller's. Its
-`authorization` is presented whole as `ELSEWHERE`, or under `authorization: 'bearer-jwt'` its
-`Bearer` token as a `JWT`; a command its server sends is answered `SERVICE_UNKNOWN`, and a
-connection's session ends with its exchange. It judges a request in the order of `transcoding.md`
-10.1 by the HTTP transport's own gates — hosts, origins and CORS, Fetch Metadata, its bounds, calls
-and streams counted apart — from one policy object, `httpPolicyOf`, which
-`createHTTPTransportServer` takes too, so two listeners never keep two lists alike; a member given
-in the policy and beside it is refused. It listens on its own port, or answers as `listener` on a
-server the application builds; mounted, it goes before whatever reads a body there, or that reader
-keeps to the application's own paths: Express's body parsers, for one, go after it, and a framework
-that parses a body before any route's handler, as Fastify does, hands it each request from a hook
-that runs first, Fastify's `onRequest`. A body read before it, wholly or in part, is answered 500
-and reported on `error`, never called with what was left. One origin for `/bead` and `/api/…` comes
-from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
-application's to serve.
+Each exchange draws one Bead connection, its client of the router `limits` the gateway is given,
+closed as its response ends: a connection's session, a subscription, a bound of the calls it
+answers, are one caller's, never every caller's. Its `authorization` is presented whole as
+`ELSEWHERE`, or under `authorization: 'bearer-jwt'` its `Bearer` token as a `JWT`; a command its
+server sends is answered `SERVICE_UNKNOWN`, and a connection's session ends with its exchange. It
+judges a request in the order of `transcoding.md` 10.1 by the HTTP transport's own gates — hosts,
+origins and CORS, Fetch Metadata (a request of no origin from another site taken only as a `GET`
+navigation no `object` or `embed` makes, web.dev's resource isolation policy), its bounds, calls and
+streams counted apart — from one policy object, `httpPolicyOf`, which `createHTTPTransportServer`
+takes too, so two listeners never keep two lists alike; a member given in the policy and beside it
+is refused. It listens on its own port, or answers as `listener` on a server the application builds;
+mounted, it goes before whatever reads a body there, or that reader keeps to the application's own
+paths: Express's body parsers, for one, go after it, and a framework that parses a body before any
+route's handler, as Fastify does, hands it each request from a hook that runs first, Fastify's
+`onRequest`. A body read before it, wholly or in part, is answered 500 and reported on `error`,
+never called with what was left. One origin for `/bead` and `/api/…` comes from a proxy in front.
+Mounted, it keeps every gate of 10.1 from its step 2, its problems, its pace and its bounds; its
+host owns what HTTP refuses of its own, its head's bounds and timeouts, its socket's write deadline,
+a path its own router answers first, and whatever reads the body before it. It serves the document
+at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the application's to serve.
 
 The same `bead_http.ts` exports a client of each service, `<Service>HttpClient`, which calls its
 gateway through `fetch` (`transcoding.md` 12): `new HelloHttpClient(url, options?)` takes the
@@ -2063,8 +2070,8 @@ Prometheus text format 0.0.4. With `?transport=worker`, the Bead
 server and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
-`demo/dist/playground/`, every path relative and nothing started — the site publishes it at
-`/bead/playground/`, where the page, served as files alone, is its worker's and hides what needs a
+`demo/dist/playground/`, every path relative and nothing started — beadproto.dev publishes it at
+`/playground/`, where the page, served as files alone, is its worker's and hides what needs a
 server. In the console, `localStorage.setItem('bead:debug', 'd(rx), read')` sends the calls that filter
 keeps to the console — and the envelopes, when it asks for them by `e(…)` — with no reload, and
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the
@@ -2132,7 +2139,9 @@ first.
 `devtools/` is Bead's DevTools extension, Chrome's first
 ([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
-`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
+`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools,
+its tab `⦿ Bead`, Bead's mark before its name, as a character, since Chrome draws no image on a
+panel's tab; the extension's icons are the mark's, which `site/icons.mjs` rasterizes:
 
 - **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
   tell them, its steps and its envelopes met by its call id on its connection — its status by an

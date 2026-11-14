@@ -1,7 +1,7 @@
 export const meta = {
   name: 'bead-page-audit',
   description:
-    'Hold every claim of the Bead page francisdesjardins.ca serves to the repository, in English and in French: each batch of sections audited, each finding verified, one synthesis; with `apply`, the fixes written into site/ and the page rebuilt',
+    'Hold every claim of the Bead page beadproto.dev serves to the repository, in English and in French: each batch of sections audited, each finding verified, one synthesis; with `apply`, the fixes written into site/ and the page rebuilt',
   whenToUse:
     'At each release, from bead-release-documents; and whenever what the page states may have drifted from the code, the matrix or the records',
   phases: [
@@ -55,7 +55,7 @@ const BATCHES = ARGS.batches || [
 ];
 
 const COMMON = `
-You hold to the repository the page francisdesjardins.ca serves at /bead/, built from ${REPO}/site/: its content is site/src/content.en.html and site/src/content.fr.html (its sections by \`<section id="…">\`, the same ids in both), its tables and byte examples site/src/data.mjs, its snippets site/src/snippets/, its diagrams' Mermaid sources site/diagrams/en and site/diagrams/fr. A \`{{fact of="…"}}\` is filled by site/build.mjs from the repository and holds by construction; the words around it do not.
+You hold to the repository the page beadproto.dev serves, built from ${REPO}/site/: its content is site/src/content.en.html and site/src/content.fr.html (its sections by \`<section id="…">\`, the same ids in both), its tables and byte examples site/src/data.mjs, its snippets site/src/snippets/, its diagrams' Mermaid sources site/diagrams/en and site/diagrams/fr. A \`{{fact of="…"}}\` is filled by site/build.mjs from the repository and holds by construction; the words around it do not.
 The page is written for a hiring reader. It must hold in every point, today: what each side (TypeScript, C#, Rust) does, what is ahead and in what order, numbers, names, codes, byte values, the standards it cites, and the French saying what the English says.
 - The truth is the repository, read at its HEAD: spec/spec.md and its companions, the conformance files, docs/support.md (what each side plays, what is ahead), docs/decisions/ and their index's "Where Bead goes", the READMEs, CHANGELOG.md, and the code of implementations/typescript, implementations/dotnet, implementations/rust and builder/. Cite file:line for each truth.
 - What is ahead is said plainly, with no date or condition. A claim the page leaves out is a finding only where its absence makes what it says false or misleading, as a table of what a side does that omits what it does.

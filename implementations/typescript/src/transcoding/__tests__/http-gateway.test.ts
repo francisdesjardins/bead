@@ -468,6 +468,35 @@ test('draws one Bead connection per exchange, and closes it as its response ends
   expect(opened.length).toBe(2);
 });
 
+test('gives each exchange’s client the router limits it is given', async () => {
+  await using limited = await startTranscoding({ limits: { maximumPayloadBytes: 16 } });
+  await using unlimited = await startTranscoding();
+  const past = `{"aString":"${'a'.repeat(40)}"}`;
+
+  // a request within its client's bound goes
+  expect(
+    await send(limited.port, { body: '{"aString":"a"}', path: '/api/Transcoding/echo' })
+  ).toMatchObject({ body: '{"aString":"a"}', status: 200 });
+
+  // * one past it refused by its exchange's own client before it goes, each exchange alike
+  for (let count = 1; count <= 2; count += 1) {
+    const refused = await send(limited.port, { body: past, path: '/api/Transcoding/echo' });
+
+    expect(refused.status).toBe(413);
+    expect(JSON.parse(refused.body)).toMatchObject({
+      code: 34,
+      detail: 'a payload is 16 bytes at most, not 42',
+      title: 'PAYLOAD_TOO_LARGE',
+    });
+  }
+
+  // a gateway given none holds by the defaults
+  expect(await send(unlimited.port, { body: past, path: '/api/Transcoding/echo' })).toMatchObject({
+    body: past,
+    status: 200,
+  });
+});
+
 test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt', async () => {
   await using elsewhere = await startTranscoding();
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
@@ -562,6 +591,39 @@ test('refuses a request with no Origin from a page of another site, and a naviga
       })
     ).status
   ).toBe(200);
+});
+
+test('refuses a HEAD navigation, and one an object or an embed makes, from another site, to a route and to the document', async () => {
+  await using fixture = await startTranscoding({ origins: [ORIGIN] });
+  const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' };
+
+  for (const path of ['/v1/books/2', '/openapi.json']) {
+    for (const [method, destination] of [
+      ['HEAD', 'document'],
+      ['GET', 'object'],
+      ['GET', 'embed'],
+    ] as const) {
+      const refused = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method,
+        path,
+      });
+
+      expect(refused.status, `${method} ${path}, ${destination}`).toBe(403);
+      expect(refused.headers['bead-refusal']).toBe('origin-refused');
+    }
+
+    // * a GET navigation any other destination makes, a frame's among them, is taken
+    for (const destination of ['document', 'iframe']) {
+      const taken = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method: 'GET',
+        path,
+      });
+
+      expect(taken.status, `GET ${path}, ${destination}`).toBe(200);
+    }
+  }
 });
 
 test('answers a call whose peer closes before its result with 502 and releases its place', async () => {
@@ -680,6 +742,63 @@ test('answers a stream’s request that carries Last-Event-ID with 204 and no ca
       path: '/api/Transcoding/ticks',
     })
   ).toMatchObject({ body: '{"ticks":2}', status: 200 });
+});
+
+test('answers a HEAD that asks a stream as its GET begins, and ends at its head, its subscription with it', async () => {
+  await using fixture = await startTranscoding({ maximumConnectionsPerAddress: 1 });
+  const drawn: string[] = [];
+  const closed: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+  fixture.memory.on('close', (_wasClean, handle) => {
+    closed.push(handle);
+  });
+
+  const host = `host: 127.0.0.1:${String(fixture.port)}`;
+  const asked = (method: string): string => {
+    return [`${method} /v1/watch HTTP/1.1`, host, 'accept: text/event-stream', '', ''].join('\r\n');
+  };
+  // * one socket, kept alive: every byte it takes, in order
+  const socket = opened(fixture.port, asked('HEAD'));
+  const chunks: Buffer[] = [];
+  const received = (): string => {
+    return Buffer.concat(chunks).toString('latin1');
+  };
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  await until(() => {
+    return received().includes('\r\n\r\n');
+  });
+
+  const head = received().slice(0, received().indexOf('\r\n\r\n')).toLowerCase();
+
+  expect(head).toMatch(/^http\/1\.1 200 /u);
+  expect(head).toContain('content-type: text/event-stream');
+  expect(head).toContain('cache-control: no-store');
+  expect(head).not.toContain('content-length');
+
+  // its call made on a connection of its own, closed as its response ended: its subscription with it
+  await until(() => {
+    return closed.length === 1;
+  });
+  expect(closed).toEqual(drawn);
+
+  // its place freed: the same socket's next request, the GET of its stream, opens it, nothing between
+  socket.write(asked('GET'));
+  await until(() => {
+    return received().includes('data: {}\n\n');
+  });
+  socket.destroy();
+
+  const next = received().slice(received().indexOf('\r\n\r\n') + 4);
+
+  expect(next).toMatch(/^HTTP\/1\.1 200 /u);
+  expect(next).toContain('event: result\nid: 1\ndata: {}\n\n');
+  expect(drawn).toHaveLength(2);
 });
 
 test('answers a preflight with the methods its URL’s routes take', async () => {
@@ -1034,6 +1153,34 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
     status: 500,
   });
   expect(reported).toEqual(['the clock broke']);
+});
+
+test('answers a route’s variable that names no field 500, reported, none of its words in the problem', async () => {
+  // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+  // programmer's error its binding meets, past every gate, before any connection is drawn
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.getBook
+        ? { ...init, routes: [{ method: 'GET', template: '/v1/{nope}' }] }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  let connections = 0;
+
+  fixture.server.transport.on('connection', () => {
+    connections += 1;
+  });
+
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/x' });
+
+  expect(answered).toMatchObject({
+    body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(connections).toBe(0);
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain('nope');
 });
 
 test('answers 500 a connection its server failed to draw but by refusing it, reported, with no detail', async () => {

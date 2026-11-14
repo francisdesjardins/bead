@@ -4,11 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>bead — a binary call protocol, its server in a Web Worker</title>
-    <link rel="canonical" href="https://francisdesjardins.ca/bead/playground/" />
+    <link rel="canonical" href="https://beadproto.dev/playground/" />
     <meta
       name="description"
       content="Bead, a binary call protocol, one surface in TypeScript, C# and Rust, tried in the page: calls, subscriptions at the client's pace, transfers, cancellation, payload rules, and the same sign-up over HTTP and JSON with its OpenAPI document."
     />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
@@ -160,7 +163,7 @@
         flex-wrap: wrap;
         align-items: center;
         gap: var(--app-space-3) var(--app-space-6);
-        /* penumbra's bar height, francisdesjardins.ca's Bead page's alike, its hairline below it;
+        /* penumbra's bar height, Bead's page's alike, its hairline below it;
            a phone, where it wraps, grows it */
         min-height: calc(var(--app-topbar-height) - 1px);
         max-width: var(--app-content-max-width);
@@ -172,18 +175,47 @@
         display: flex;
         flex: 1 1 auto;
         flex-wrap: wrap;
-        align-items: baseline;
+        align-items: center;
         gap: var(--app-space-1) var(--app-space-3);
       }
 
-      .back {
-        font-size: var(--app-text-sm);
+      .wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        color: var(--app-text);
+        /* the page's brand alike, so both bars read as one site's */
+        font-family: var(--app-font-mono);
+        font-weight: 500;
+        font-size: var(--app-text-md);
+        letter-spacing: 0.01em;
         text-decoration: none;
+        white-space: nowrap;
       }
 
-      .wordmark {
-        font: 600 var(--app-text-lg) / var(--app-lh-tight) var(--app-font-display);
-        letter-spacing: -0.02em;
+      /* Bead's mark, the page's and the favicon's drawing: the Moon's disc, dark in either theme,
+         and the Sun's light breaking through its edge in the accent */
+      .mark {
+        flex: none;
+        width: 22px;
+        height: 22px;
+      }
+
+      .mark .moon {
+        fill: var(--app-body);
+        stroke: var(--app-text-tertiary);
+        stroke-width: 1;
+      }
+
+      .mark .rim {
+        fill: none;
+        stroke: var(--app-primary);
+        stroke-width: 0.9;
+        stroke-opacity: 0.6;
+      }
+
+      .mark .bead {
+        fill: var(--app-primary);
       }
 
       .tag {
@@ -464,7 +496,7 @@
         grid-template-columns: minmax(0, 1fr);
         gap: var(--app-space-8);
         align-items: start;
-        /* the frame francisdesjardins.ca's Bead page shares: penumbra's content width, the same
+        /* the frame Bead's page shares: penumbra's content width, the same
            gutter at its sides */
         max-width: var(--app-content-max-width);
         margin: 0 auto;
@@ -1574,8 +1606,15 @@
     <header class="topbar">
       <div class="topbar-inner">
         <p class="brand">
-          <a class="back" href="/" data-static>← francisdesjardins.ca</a>
-          <span class="wordmark">Bead</span>
+          <a class="wordmark" href="https://beadproto.dev/" title="Bead's page"
+            ><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true">
+              <circle class="moon" cx="14" cy="18" r="10.5" />
+              <path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" />
+              <circle class="bead" cx="15.94" cy="6.97" r="1.8" />
+              <circle class="bead" cx="21.64" cy="9.81" r="2.5" />
+              <circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg
+            >Bead</a
+          >
           <span class="tag">demo</span>
         </p>
         <nav class="transports" aria-label="Transport">

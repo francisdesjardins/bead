@@ -1395,11 +1395,17 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (isStream) {
       const write = writerOf(response);
+      // * a HEAD is answered as its GET begins, and ends at its head, its subscription with it (8.1)
+      const isHead = request.method === 'HEAD';
       // the stream's end follows its last queued event
       let written = Promise.resolve(false);
       const opened = createEventStream(
         {
           answer: (problem) => {
+            if (isHead) {
+              release();
+            }
+
             answerProblem(exchange, { problem });
             close();
           },
@@ -1415,6 +1421,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
             });
+
+            if (isHead) {
+              // ! its place freed before its socket takes its head, where its caller may ask again,
+              // never left to its response's `close`
+              isGone = true;
+              release();
+              opened.close();
+              close();
+              response.end();
+            }
           },
           write: async (text) => {
             if (isGone) {
@@ -1743,13 +1759,18 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       response.setHeader('access-control-expose-headers', '*');
     }
 
-    // 5: a request of no origin from another site, but a navigation to what reads alone
+    // 5: a request of no origin from another site, but a GET navigation no `object` or `embed`
+    // makes, to what reads alone (web.dev's resource isolation policy)
     const site = headerOf(request, 'sec-fetch-site');
 
     if (origin === undefined && (site === 'same-site' || site === 'cross-site')) {
-      const isNavigation = headerOf(request, 'sec-fetch-mode') === 'navigate';
-      const navigated =
-        path === undefined || request.method !== 'GET' ? undefined : chosenOf(path, 'GET');
+      const destination = headerOf(request, 'sec-fetch-dest');
+      const isNavigation =
+        headerOf(request, 'sec-fetch-mode') === 'navigate' &&
+        request.method === 'GET' &&
+        destination !== 'object' &&
+        destination !== 'embed';
+      const navigated = path === undefined || !isNavigation ? undefined : chosenOf(path, 'GET');
 
       if (!isNavigation || !(isDocument || navigated?.isNavigable === true)) {
         refuse(exchange, {

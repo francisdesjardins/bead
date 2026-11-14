@@ -31,9 +31,11 @@
   `bead-protobuf`, the counter of the contract with generated code, `bead-goldens` and the
   interop's descriptors generated, is
   [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)'s.
-  Ahead: its gateway, with the route table, the HTTP client and the document an output with
-  `gateway` writes; and its AMQP 1.0 binding, each stage under a record of its own. The crate's
-  layout and its modules are its README's.
+  Its HTTP/JSON gateway, features of its core, its JSON mapping a feature of `bead-protobuf`, with
+  the route table, the HTTP client and the document an output with `gateway` writes, is
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s.
+  Ahead: its AMQP 1.0 binding, under a record of its own. The crate's layout and its modules are its
+  README's.
 
 ## Context
 
@@ -119,15 +121,16 @@ counts the receiver.
 
 ### The core, and the stages after it
 
-| Crate                                                     | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                  | What it plays                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bead`, `bead-interop`                                    | `bead`: the envelope's codec, the routers, the service layer, its server half and its client half, its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
-| `bead`                                                    | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
-| `bead-protobuf`                                           | the `proto` payload's codec, on Buffa 0.9.2, its crates required exactly: the check of a payload's records, the required walk, the typed codec and the dynamic one; the validators' runtime, `validate` ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md))                                                                                                                                        | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`; `spec/validations.json`'s verdicts, through the validators beadc generates for `spec/validations.proto`, and the differential's Rust testee                                                                                                                                             |
-| `bead-protobuf-build`                                     | Bead's setting of Buffa's generator for a build script, `config_of` and `opened_of`: the code of a message as `bead-protobuf`'s codec reads it, from a `FileDescriptorSet`                                                                                                                                                                                                                                                                     | nothing of the files: `bead-protobuf`'s tests' messages are generated through it                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `bead-goldens`                                            | dev only, `Bead.Goldens`' twin: beadc's Rust goldens, each output mounted whole under the workspace's lints, its consumer twins and its parity test ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md))                                                                                                                                                                                            | nothing of the files: beadc's output, as an application compiles it                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `bead` with `websocket` and `http`, `bead-interop-server` | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                         | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
-| `bead` with `mqtt` and `amqp`, `bead-interop-server`      | the MQTT 5 adapter and its client, over the core's sockets ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)), and the AMQP 1.0 adapter, ahead; `bead-interop-server` over MQTT 5                                                                                                                                                                                       | the cases over MQTT 5 of `spec/transports.json`; `mqttPublishBounds` and `mqttAcknowledgementCodes`; the places of `mqttBrokerAdapter`; the twins of 15.25 to 15.31; the interop over MQTT 5 both ways                                                                                                                                                                                                                                                                                        |
+| Crate                                                          | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | What it plays                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bead`, `bead-interop`                                         | `bead`: the envelope's codec, the routers, the service layer, its server half and its client half, its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service                                                                                                            | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
+| `bead`                                                         | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                                                                                                                                   | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
+| `bead-protobuf`                                                | the `proto` payload's codec, on Buffa 0.9.2, its crates required exactly: the check of a payload's records, the required walk, the typed codec and the dynamic one; the validators' runtime, `validate` ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)); under `transcoding`, protobuf's JSON mapping, `JsonForm`, and a request's binding, `HttpBinding` ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)) | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite, binary and JSON, through a Rust testee of `tools/protobuf-conformance.mjs`; `spec/transcoding.json` but the exchange its `differs` excuses it from, through the gateway; `spec/validations.json`'s verdicts, through the validators beadc generates for `spec/validations.proto`, and the differential's Rust testee                              |
+| `bead-protobuf-build`                                          | Bead's setting of Buffa's generator for a build script, `config_of` and `opened_of`: the code of a message as `bead-protobuf`'s codec reads it, from a `FileDescriptorSet`                                                                                                                                                                                                                                                                                                                                                                                | nothing of the files: `bead-protobuf`'s tests' messages are generated through it                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `bead-goldens`                                                 | dev only, `Bead.Goldens`' twin: beadc's Rust goldens, each output mounted whole under the workspace's lints, its consumer twins and its parity test ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md))                                                                                                                                                                                                                                                                                                       | nothing of the files: beadc's output, as an application compiles it                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bead` with `websocket` and `http`, `bead-interop-server`      | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                                                                                                                                    | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
+| `bead` with `mqtt` and `amqp`, `bead-interop-server`           | the MQTT 5 adapter and its client, over the core's sockets ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)), and the AMQP 1.0 adapter, ahead; `bead-interop-server` over MQTT 5                                                                                                                                                                                                                                                                                                  | the cases over MQTT 5 of `spec/transports.json`; `mqttPublishBounds` and `mqttAcknowledgementCodes`; the places of `mqttBrokerAdapter`; the twins of 15.25 to 15.31; the interop over MQTT 5 both ways                                                                                                                                                                                                                                                                                        |
+| `bead` with `transcoding` and `gateway`, `bead-interop-server` | the gateway's route table, templates, problems and events under `transcoding`, and under `gateway` its host, on its own listener or mounted by `answer`, and its caller, `HttpCaller` ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)); `bead-interop-server`, the `Transcoding` service's gateway                                                                                                                                                         | `spec/transcoding.json` with `bead-protobuf`'s `transcoding`, but the exchange its `differs` excuses it from; the gateway's places of `spec/durations.json`; transcoding's twins; the interop over its gateway both ways                                                                                                                                                                                                                                                                      |
 
 The broker's core sits in `bead`, since the C# side's `Bead.Core` holds the broker's core and the
 in-memory broker, and its cases need no socket; the `proto` codec stands apart, since the router
@@ -154,17 +157,19 @@ their runtime in `bead-protobuf` beside the `proto` codec, the core holding the 
 contract with generated code, and the hooks' record, with `examples/hello`'s Rust half and the
 interop's descriptors, under
 [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md).
-Ahead, in this order: its gateway, with the route table, the HTTP client and the document an
-output with `gateway` writes, and hello's Rust gateway, since a target that writes no route table
-refuses `gateway` (`HTTP_UNGENERATED`); and its AMQP 1.0 binding, each stage under a record of its
-own.
+Its HTTP/JSON gateway, the features `transcoding` and `gateway` of its core, its JSON mapping
+`bead-protobuf`'s feature `transcoding`, the two met by one trait, `MessageForm`, with the route
+table, the HTTP client and the document an output with `gateway` writes, hello's Rust gateway and
+the interop both ways over it, plays `spec/transcoding.json`, under
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md).
+Ahead: its AMQP 1.0 binding, under a record of its own.
 
 ### The partial side
 
 The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-language.md)'s rule: each
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
-`Rust's gateway` and `Rust's AMQP 1.0 binding`, each a row of the matrix and of `AHEAD`;
+`Rust's AMQP 1.0 binding`, a row of the matrix and of `AHEAD`;
 `Rust's service manager over a router of the application's own`, which no conformance
 file plays, a row of the matrix alone. **Its tests are told from its sources by a predicate**, since
 a suffix does not tell them, both being `.rs`: a module's `tests.rs`, a crate's `tests/` and the
@@ -184,14 +189,14 @@ a twin.
   application's build script, where messages are the stock generators'
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
   its surface pinned by the house; `bead-house`, dev only, holds the house's own checks;
-  `bead-goldens`, dev only, `Bead.Goldens`' twin, compiles beadc's Rust goldens. The crates
-  of the stages ahead are named already, so no rename follows: `bead-transcoding` and
-  `bead-transcoding-http`. A part that needs the core's inside and ships to applications, a
-  transport, comes as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)):
-  its sockets
-  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md))
-  and its broker bindings
-  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+  `bead-goldens`, dev only, `Bead.Goldens`' twin, compiles beadc's Rust goldens. A part that
+  needs the core's inside and ships to applications comes as a feature of that crate
+  ([0047](0047-every-side-shows-one-public-surface.md)): the core's sockets
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+  its broker bindings
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)),
+  its transcoding and its gateway, and `bead-protobuf`'s JSON mapping
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -437,12 +442,12 @@ carries one `#[expect]` at its root with its reason.
 **The core compiles for the browser's target**, `wasm32-unknown-unknown`: CI runs clippy over its
 library there, so a dependency or an API that does not build in a page (tokio's `net` or
 `rt-multi-thread`, a native TLS stack, `std::os`) fails the change that brings it, and the socket
-transports and the broker bindings sit in features of the core, `websocket`, `http`, `mqtt` and
-`amqp`, AMQP 1.0's ahead, that the check leaves out by name, each reaching the core's inside by
-`pub(crate)`. The target is checked, never run: the folder's `.cargo/config.toml` gives getrandom
-its `unsupported` backend on it,
-`--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case, which adds no
-dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks, and has no
+transports, the broker bindings and the gateway sit in features of the core, `websocket`, `http`,
+`mqtt`, `amqp`, AMQP 1.0's ahead, and `gateway`, that the check leaves out by name, each reaching
+the core's inside by `pub(crate)`; `transcoding`, which holds no socket, it checks. The target is
+checked, never run: the folder's `.cargo/config.toml` gives getrandom its `unsupported` backend on
+it, `--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case, which adds
+no dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks, and has no
 effect on a crate that depends on Bead. A draw there is an error, which each of Bead's draws already
 takes as a `Result`. What would trap there at run time, a clock or a thread, the disallowed lists
 hold.
@@ -703,12 +708,12 @@ is added to fit a library.**
   3, with its reason. Buffa's runtime holds `unsafe` code of its own, as a dependency may; the
   generated code holds none, and `bead-protobuf` forbids it.
 - **The testee** of `tools/protobuf-conformance.mjs` reads binary through the read path above and
-  writes from the owned message. Its JSON goes through Buffa's `DynamicMessage` and its ProtoJSON,
-  `serde_json` reading with `float_roundtrip`; Bead's own mapping of protobuf's JSON comes with its
-  gateway, ahead
-  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
-  and with it the two `FieldNameExtension.Validator` tests join its failure list, as they stand on
-  both other sides'. The runner's binary asks glibc 2.38 or later, Debian 13's.
+  writes from the owned message. Its JSON goes through Bead's own mapping of protobuf's JSON,
+  `JsonForm`
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md),
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)),
+  and its failure list names the two `FieldNameExtension.Validator` tests with the reason both other
+  sides give. The runner's binary asks glibc 2.38 or later, Debian 13's.
 
 ### Debugging and metrics
 
@@ -759,11 +764,12 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
 --workspace --all-targets --all-features --locked` and again on each member's default features, the
-core's lib linted with no feature, with `websocket` alone, with `http` alone and with `mqtt` alone
-(`cargo clippy -p francisdesjardins-bead --lib --locked`, `--features websocket`, `--features http`,
-`--features mqtt`), the browser target's `cargo clippy -p francisdesjardins-bead --lib --features
-testing --locked --target wasm32-unknown-unknown`, by its features, no socket and no broker binding
-among them
+core's lib linted with no feature, with `websocket` alone, with `http` alone, with `mqtt` alone,
+with `transcoding` alone and with `gateway` alone (`cargo clippy -p francisdesjardins-bead --lib
+--locked`, `--features websocket`, `--features http`, `--features mqtt`, `--features transcoding`,
+`--features gateway`), `bead-protobuf`'s with `transcoding`, the browser target's `cargo clippy -p
+francisdesjardins-bead --lib --features testing,transcoding --locked --target
+wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
 `cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
 fuzz targets and the conformance player, outside the workspace, the tests under coverage held to the
@@ -772,12 +778,15 @@ floor, and the fuzz targets built on the dated nightly, never run; on Windows, `
 target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
 each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
 Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its ten targets: eight the twins of the other sides' eight,
-`envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
-and `proto-codecs`, each reading what no socket or broker feature holds, through a crate's surface,
-`bead::internal` or a test kit; and `mqtt-packets`, its MQTT 5 client's reader of a broker's
-packets, and `mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, the Rust
-side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
+([0006](0006-a-rule-has-its-gate.md)), its eleven targets: nine the twins of the other sides' nine,
+`envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`,
+`proto-codecs` and `json-form`, each reading what no socket or broker feature holds, through a
+crate's surface, `bead::internal` or a test kit, `json-form` through `bead-protobuf`'s `JsonForm`
+under its feature `transcoding`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
+and `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and `mqtt-websocket-frames`,
+its MQTT 5 client's reader of a WebSocket's frames, the Rust side's alone, through `bead::internal`
+under the feature `mqtt`, which the fuzz
 project's manifest turns on beside `testing`
 ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 Its suite holds the envelope readers' and the parcel reader's seeded mutations, the same inputs as

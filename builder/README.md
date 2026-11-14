@@ -713,7 +713,7 @@ reported, protobuf's `CS0612` and `CS0618` none either.
 
 ## The Rust target
 
-`beadc generate` writes a Rust output as one module tree under three roots of beadc's own
+`beadc generate` writes a Rust output as one module tree under four roots of beadc's own
 ([decision 0051](../docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)),
 which the output's `mod.rs` mounts and an application mounts in turn, `mod generated;` (or
 `pub mod`); `beadc init --language rust` names `rust/src/generated`, since edition 2024 reserves
@@ -735,8 +735,14 @@ which the output's `mod.rs` mounts and an application mounts in turn, `mod gener
   `beadc.yaml` writes them, each a `&'static [ProcedureAddress]` a transport's option `procedures`
   takes as `SERVED_PROCEDURES.web_socket.to_vec()`, and the contract with the runtime that option
   needs, `GENERATED_CODE_SUPPORTS_VERSION_8`.
+- **`bead_http`**, where an output names its `gateway`: its route table, its document and each
+  service's HTTP client ([HTTP and the OpenAPI document](#http-and-the-openapi-document),
+  [decision 0052](../docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)),
+  and the contract with the runtime they need,
+  `GENERATED_CODE_SUPPORTS_VERSION_5`, which the core's feature `gateway` gives; such an output
+  depends on `bead` with `gateway` and `bead-protobuf` with `transcoding`.
 
-Every file of `services` and `bead_served` is `include!`d, which rustfmt never follows, and every
+Every file of `services`, `bead_served` and `bead_http` is `include!`d, which rustfmt never follows, and every
 item of `mod.rs` is `#[rustfmt::skip]`, so an application's `cargo fmt` changes nothing beadc
 writes. Every runtime item is named from its crate's root, `::bead::…`, `::bead_protobuf::…`,
 `::std::…`, `::core::…`, and a message by its path from the service's module to `messages`
@@ -773,8 +779,10 @@ message's own rules a function of its own that it calls in turn, each rule's sit
 name is Buffa's snake case, an acronym one word (`getHTTPStatus2`, `on_get_http_status2`), a keyword
 a raw identifier, `r#type`, or with Buffa's `_` where Rust holds no raw one, `self_`: the key, the
 descriptor's `procedureName`, never moves. The target refuses, for its output, two transports' keys
-that render as one field (`getHTTP`, `getHttp`), and a package whose module is a type its parent
-package's service gives beside it.
+that render as one field (`getHTTP`, `getHttp`), a package whose module is a type its parent
+package's service gives beside it, and, for an output with a `gateway`, a procedure a client calls
+whose method would be one its `<Service>HttpClient` holds already: `new`, and `clone` and `fmt` of
+`Clone` and `Debug`.
 
 **A description** is beadc's one-line summary, then an HTML block, one `<p>` a paragraph, its text
 escaped as HTML's and each character rustc refuses in a comment, a lone CR and the bidirectional
@@ -786,7 +794,9 @@ services' module allows `deprecated` for the file's own uses, as C#'s `#pragma` 
 consumer's are reported at its own site; it allows `dead_code`, since an application uses the items
 of its own side alone, `unreachable_pub`, since it mounts the tree privately or publicly as it will,
 `clippy::struct_field_names`, since a record's fields are its procedures' names, and
-`clippy::type_complexity`, since a descriptor's type names each of its codecs by its whole path; `bead_served`
+`clippy::type_complexity`, since a descriptor's type names each of its codecs by its whole path; `bead_http`
+allows the same, since a client's fields are its procedures' names and a requester's type names its
+codecs; `bead_served`
 allows `dead_code` and `unreachable_pub` alike, and `messages` rustc's `unnameable_types` and
 `unreachable_pub` beside Buffa's own lints. Buffa 0.9.2 marks nothing protobuf deprecates.
 
@@ -808,7 +818,9 @@ repeated or map field of a closed enum. The plugin writes no module root, so bea
 `config_of` over the same set writes the same files.
 
 **Its goldens**, under [`test/golden/rust/`](test/golden/rust/), each a whole output: the comments
-fixture's (`comments/`); the subsets' blueprint's, split (`subsets/`); the interop's, its procedure
+fixture's (`comments/`); the subsets' blueprint's, split, its gateway's `bead_http.rs` among them
+(`subsets/`); `spec/transcoding.proto`'s with a gateway, its messages Buffa's through the plugin
+(`transcoding/`); the interop's, its procedure
 that notifies, its command and a failure deprecated (`deprecations/`), and its procedures, a hook
 and transports named by Rust's keywords and an acronym (`keywords/`); the messages fixture's
 `messages.proto`, its messages Buffa's through the plugin (`messages/`); and its `rules.proto`, its
@@ -1020,24 +1032,30 @@ layer answers it.
   and `HTTP_PROBLEM_TYPES`, each route through `routeOf` of `gateway.runtime`,
   `@francisdesjardins/bead/transcoding` by default;
   the C# target writes `BeadHttp.cs` beside its first service's file, in its namespace, the static
-  class `HttpRoutes`: `All`, `OpenApiDocument`, a UTF-8 literal, and `ProblemTypes`. An output
-  without it writes neither and embeds nothing, so no assembly carries a document it never serves.
+  class `HttpRoutes`: `All`, `OpenApiDocument`, a UTF-8 literal, and `ProblemTypes`; the Rust
+  target writes `bead_http.rs` at the output's root, mounted as `bead_http`: `HttpRoutes::get()`,
+  made once a process, its messages' JSON forms one `bead_protobuf::JsonForm` over the pool they
+  embed, `OPENAPI_DOCUMENT`, a string literal of Rust's escapes, and `HTTP_PROBLEM_TYPES`. An output
+  without it writes none and embeds nothing, so no package carries a document it never serves.
   The same file writes a client of each service, `<Service>HttpClient` (transcoding 12), over the
   runtime's caller, which writes each request and reads each answer by its gateway's mapping, an
   RFC 9457 problem read as a Bead failure of its code and its scope: a requester of each procedure
   a client calls, on its default `POST` route alone, and, for one that notifies, a stream of its
-  result then its notifications, through `fetch` in TypeScript and `HttpClient` in C#; a command
-  has none. Each takes its gateway's URL first and its options last:
+  result then its notifications, through `fetch` in TypeScript, `HttpClient` in C# and hyper in
+  Rust; a command has none. Each takes its gateway's URL first and its options last:
   `new HelloHttpClient(url, options?)`, `hello.sayHello(request, options?)` and
   `hello.subscribeCountDown(request, options?)` in TypeScript, `new HelloHttpClient(uri, options)`,
-  `hello.SayHello(request, options)` and `hello.SubscribeCountDown(request, options)` in C#.
+  `hello.SayHello(request, options)` and `hello.SubscribeCountDown(request, options)` in C#,
+  `HelloHttpClient::new(url, &options)?`, `hello.say_hello(&request, &options)` and
+  `hello.subscribe_count_down(&request, &options)` in Rust, flat, as transcoding 12.1 reads.
 - **`google.api.http` leaves the messages** as protovalidate's options do: what protoc-gen-es and
   protoc are handed holds neither the option nor the import of `annotations.proto`, unless an output
   keeps them, `keepHttpOptions`. `idempotency_level` stays, protobuf's own.
 
 [`spec/transcoding.proto`](../spec/transcoding.proto)'s output is the goldens under
-[`test/golden/typescript/transcoding/`](test/golden/typescript/transcoding/) and
-[`test/golden/csharp/transcoding/`](test/golden/csharp/transcoding/), its document
+[`test/golden/typescript/transcoding/`](test/golden/typescript/transcoding/),
+[`test/golden/csharp/transcoding/`](test/golden/csharp/transcoding/) and
+[`test/golden/rust/transcoding/`](test/golden/rust/transcoding/), its document
 [`test/golden/transcoding.openapi.json`](test/golden/transcoding.openapi.json); beadc's tests hold
 the document to OpenAPI 3.1's own schema, vendored under [`test/openapi/`](test/openapi/) and pinned
 by its sha256, every body [`spec/transcoding.json`](../spec/transcoding.json)'s `writings` hold

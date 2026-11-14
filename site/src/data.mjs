@@ -835,9 +835,11 @@ export const PARTS = Object.freeze([
       },
       {
         sides: ['Rust'],
-        ahead: ["Rust's gateway"],
-        whole: true,
-        says: ['Ahead', 'À venir'],
+        ahead: [],
+        says: [
+          'On hyper, or mounted by its <code>answer</code>',
+          'Sur hyper, ou montée par son <code>answer</code>',
+        ],
       },
     ],
   },

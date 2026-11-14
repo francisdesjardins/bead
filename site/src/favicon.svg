@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2.6 4.7 25 25">
+  <!-- Baily's beads: the Moon's disc, and the Sun's light breaking through its edge in points -->
+  <style>
+    .moon { fill: #17111d; }
+    .rim { stroke: #c13584; }
+    .bead { fill: #c13584; }
+    @media (prefers-color-scheme: dark) {
+      .moon { fill: #15111c; stroke: #6d6278; stroke-width: 0.9; }
+      .rim { stroke: #ff8bc4; }
+      .bead { fill: #ff8bc4; }
+    }
+  </style>
+  <circle class="moon" cx="14" cy="18" r="10.5" />
+  <path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" fill="none" stroke-width="0.9" stroke-opacity="0.6" />
+  <circle class="bead" cx="15.94" cy="6.97" r="1.8" />
+  <circle class="bead" cx="21.64" cy="9.81" r="2.5" />
+  <circle class="bead" cx="24.87" cy="15.29" r="1.5" />
+</svg>

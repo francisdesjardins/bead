@@ -34,10 +34,12 @@ required-features = ["external"]
 external = ["dep:bead-protobuf-build"]
 
 [dependencies]
-# the core and its WebSocket transport, the server's and the client's
-bead = { package = "francisdesjardins-bead", path = "../../../implementations/rust/crates/bead", features = ["websocket"] }
-# the proto codec the generated descriptors name, and the validators' runtime their rules call
-bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../../../implementations/rust/crates/bead-protobuf" }
+# the core, its WebSocket transport, the server's and the client's, and its gateway, the server's
+# HTTP routes, which the generated bead_http.rs names (decision 0052)
+bead = { package = "francisdesjardins-bead", path = "../../../implementations/rust/crates/bead", features = ["websocket", "gateway"] }
+# the proto codec the generated descriptors name, the validators' runtime their rules call, and
+# protobuf's JSON mapping, each route's message form
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../../../implementations/rust/crates/bead-protobuf", features = ["transcoding"] }
 # Buffa's runtime and descriptors, which the generated messages name: the one Buffa the generated
 # code is for, as bead-protobuf requires it
 buffa = { version = "=0.9.2", default-features = false, features = ["std"] }

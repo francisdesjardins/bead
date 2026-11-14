@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bead: not found</title>
+    <meta name="description" content="No page of Bead's at this address." />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+      /* the page's faces and palette, both schemes, as src/styles.css has them */
+      @font-face {
+        font-family: 'Geist';
+        font-weight: 400 600;
+        font-display: swap;
+        src: url('/fonts/geist.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Newsreader';
+        font-weight: 400 600;
+        font-display: swap;
+        src: url('/fonts/newsreader.woff2') format('woff2');
+      }
+      :root {
+        color-scheme: light dark;
+        --paper: #fdfcfe;
+        --text: #17111d;
+        --text-secondary: #4a4055;
+        --accent: #c13584;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #15111c;
+          --text: #f2ecf5;
+          --text-secondary: #b2a7bf;
+          --accent: #ff8bc4;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-content: center;
+        gap: 2.5rem;
+        padding: 2rem 1rem;
+        box-sizing: border-box;
+        background: var(--paper);
+        color: var(--text);
+        font: 1rem/1.6 Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font: 600 1.75rem/1.2 Newsreader, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+      }
+      p {
+        margin: 0;
+        color: var(--text-secondary);
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <section>
+      <h1>Not found</h1>
+      <p>No page of Bead’s is at this address. <a href="/?lng=en" hreflang="en">Bead’s page</a></p>
+    </section>
+    <section lang="fr-CA">
+      <h1>Page introuvable</h1>
+      <p>Aucune page de Bead n’est à cette adresse. <a href="/?lng=fr" hreflang="fr">La page de Bead</a></p>
+    </section>
+  </body>
+</html>

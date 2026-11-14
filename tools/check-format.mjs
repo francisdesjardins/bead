@@ -41,8 +41,12 @@ const ROOT = [
   // and what it generates is held by site/check.mjs
   'site/build.mjs',
   'site/check.mjs',
+  'site/deploy.mjs',
+  'site/icons.mjs',
   'site/render.mjs',
+  'site/__tests__',
   'site/package.json',
+  'site/wrangler.jsonc',
   'site/src/data.mjs',
   'site/src/head.js',
   'site/src/page.js',

@@ -21,5 +21,8 @@ pub mod messages;
 #[path = "../../../../../builder/test/golden/rust/subsets/mod.rs"]
 pub mod subsets;
 
+#[path = "../../../../../builder/test/golden/rust/transcoding/mod.rs"]
+pub mod transcoding;
+
 #[path = "../../../../../builder/test/golden/rust/validations/mod.rs"]
 pub mod validations;

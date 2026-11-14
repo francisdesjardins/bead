@@ -590,9 +590,14 @@ Notifications go as Server-Sent Events,
 least the weight it gives `application/json`
 ([RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)), each by the first range
 that names it most specifically, a weight off RFC 9110's `qvalue` grammar (§12.4.2) as none
-given, 1: never through `*/*` or `text/*`, which a `fetch` sends by default. Any other request to it
-is a call as any other, which subscribes nothing (section 11.2), its result 200 and of section 5's
-form.
+given, 1: never through `*/*` or `text/*`, which a `fetch` sends by default. A `HEAD` that would open
+a stream is answered as its `GET` begins: its call made as that `GET`'s, then that `GET`'s head — 200
+`text/event-stream` and section 6.2's fields, or its failure's problem (section 8.2) — with no content
+([RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2)); its response ends at its
+head ([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)), which closes its
+exchange's connection and so ends its subscription (section 8.6). It is counted as its `GET`'s stream
+(section 10.3), and frees that place as it ends its response. Any other request to it is a call as
+any other, which subscribes nothing (section 11.2), its result 200 and of section 5's form.
 
 8.2. A gateway MUST write nothing of a stream before its call is answered: a failure is a problem
 of its status, as any call's (section 7); a result opens the stream, 200 `text/event-stream`, and
@@ -664,13 +669,14 @@ _Transcoding: `spec/transcoding.json`._
 3. a path no route matches, 404 `path-unknown` (section 3.10);
 4. an `origin` neither its own nor one `origins` names, 403 `origin-refused`;
 5. a request with no `origin` whose `sec-fetch-site` is `same-site` or `cross-site`, 403
-   `origin-refused`, unless its `sec-fetch-mode` is `navigate` and it asks `/openapi.json`, a
-   default route's `GET`, or a `get` rule on a method marked `NO_SIDE_EFFECTS`: a page of another
-   origin shows its `origin` on every request but a `GET` or a `HEAD` that is no CORS request
+   `origin-refused`, unless its `sec-fetch-mode` is `navigate`, its method `GET` and its
+   `sec-fetch-dest` neither `object` nor `embed`, and it asks `/openapi.json`, a default route's
+   `GET`, or a `get` rule on a method marked `NO_SIDE_EFFECTS`: a page of another origin shows its
+   `origin` on every request but a `GET` or a `HEAD` that is no CORS request
    ([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)), so what comes from one without it
-   is a subresource or a navigation, which
-   [Fetch Metadata](https://www.w3.org/TR/fetch-metadata/)'s resource isolation policy refuses but
-   a navigation; a request with no `sec-fetch-site` is taken;
+   is a subresource or a navigation, which web.dev's
+   [resource isolation policy](https://web.dev/articles/fetch-metadata) refuses but a `GET`
+   navigation no `object` or `embed` makes; a request with no `sec-fetch-site` is taken;
 6. a preflight, an `OPTIONS` that carries `access-control-request-method`, from an origin `origins`
    names: 204, its `access-control-allow-methods` the methods its path's routes take in section
    3.10's order, and its `access-control-allow-headers` and `access-control-max-age` as section

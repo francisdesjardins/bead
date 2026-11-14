@@ -23,12 +23,13 @@ outputs:
     out: dotnet/gen/external
     messages: external
     gateway: {}
-  # Rust's gateway is ahead: its outputs serve WebSocket alone
   - language: rust
     out: rust/src/generated/generate
+    gateway: {}
   - language: rust
     out: rust/src/generated/external
     messages: external
+    gateway: {}
 # the OpenAPI document of hello's routes, which an output with a gateway embeds and its gateway
 # serves
 openapi:

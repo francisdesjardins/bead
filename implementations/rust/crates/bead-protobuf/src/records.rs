@@ -92,6 +92,15 @@ impl ProtoSchema {
         self.message
     }
 
+    /// The schema of the message `message` of its pool, its shapes shared.
+    #[cfg(feature = "transcoding")]
+    pub(crate) fn at(&self, message: MessageIndex) -> Self {
+        Self {
+            shapes: Arc::clone(&self.shapes),
+            message,
+        }
+    }
+
     /// The shape of its message.
     pub(crate) fn root(&self) -> &Shape {
         self.shape(self.message)

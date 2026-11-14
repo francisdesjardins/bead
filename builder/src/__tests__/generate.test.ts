@@ -756,7 +756,7 @@ test("two rules of one method that tie are HTTP_ROUTE_OVERLAP, and a rule at /op
   expect(existsSync(join(folder, 'gen'))).toBe(false);
 });
 
-test("an output with a gateway whose target writes no route table is HTTP_UNGENERATED; both of beadc's write one", () => {
+test("an output with a gateway whose target writes no route table is HTTP_UNGENERATED; each of beadc's three, TypeScript, C# and Rust, writes one", () => {
   const folder = routedProject(
     [
       'version: 1',
@@ -769,6 +769,11 @@ test("an output with a gateway whose target writes no route table is HTTP_UNGENE
       '  - language: csharp',
       '    out: gen/cs',
       '    messages: external',
+      '    gateway: {}',
+      '  - language: rust',
+      '    out: gen/rs',
+      '    messages: external',
+      '    gateway: {}',
       '',
     ].join('\n'),
     [['One', '/v1/{name}']]
@@ -779,18 +784,21 @@ test("an output with a gateway whose target writes no route table is HTTP_UNGENE
 
   expect(ungeneratedOf(config, { checked })).toEqual([]);
   expect(
-    ungeneratedOf(config, { checked, targets: { typescript: routeless, csharp: routeless } }).map(
-      (diagnostic) => {
-        return [diagnostic.rule, diagnostic.file, diagnostic.message];
-      }
-    )
-  ).toEqual([
-    [
-      'HTTP_UNGENERATED',
-      'beadc.yaml',
-      'outputs[0] asks a gateway of the elsewhere target, which writes no route table: take gateway out of it, or give it to an output whose target writes one',
-    ],
-  ]);
+    ungeneratedOf(config, {
+      checked,
+      targets: { typescript: routeless, csharp: routeless, rust: routeless },
+    }).map((diagnostic) => {
+      return [diagnostic.rule, diagnostic.file, diagnostic.message];
+    })
+  ).toEqual(
+    [0, 1, 2].map((index) => {
+      return [
+        'HTTP_UNGENERATED',
+        'beadc.yaml',
+        `outputs[${String(index)}] asks a gateway of the elsewhere target, which writes no route table: take gateway out of it, or give it to an output whose target writes one`,
+      ];
+    })
+  );
 });
 
 test('writes the document openapi.out names, and embeds it byte for byte in each output with gateway: {}, its route table beside it; --check holds them, and clean takes a route table out', () => {
@@ -1286,7 +1294,7 @@ test("writes a Rust output from a blueprint, its tree's root beside each package
   expect(existsSync(join(folder, 'src', 'generated', 'own.rs'))).toBe(true);
 });
 
-test('a Rust output with a gateway is HTTP_UNGENERATED, its target writing no route table, and one of external messages names no plugin', () => {
+test('a Rust output with a gateway writes bead_http.rs and mounts it, and one of external messages names no plugin', () => {
   const folder = routedProject(
     [
       'version: 1',
@@ -1303,16 +1311,28 @@ test('a Rust output with a gateway is HTTP_UNGENERATED, its target writing no ro
   );
   const config = configOf(folder);
 
-  expect(
-    ungeneratedOf(config, { checked: checkedOf(config) }).map((diagnostic) => {
-      return [diagnostic.rule, diagnostic.message];
-    })
-  ).toEqual([
-    [
-      'HTTP_UNGENERATED',
-      'outputs[0] asks a gateway of the rust target, which writes no route table: take gateway out of it, or give it to an output whose target writes one',
-    ],
-  ]);
+  expect(ungeneratedOf(config, { checked: checkedOf(config) })).toEqual([]);
+
+  generate(folder);
+
+  const table = textOf(folder, 'gen/rs/bead_http.rs');
+  const mod = textOf(folder, 'gen/rs/mod.rs');
+
+  expect(mod).toContain('pub mod bead_http {');
+  expect(mod).toContain('    include!("bead_http.rs");\n');
+  // * its route of the rule, the document beside it, its client
+  expect(table).toContain(
+    '::bead::HttpRouteTemplate { method: ::bead::HttpMethod::Post, template: "/v1/{name}".to_owned(), body: Some("*".to_owned()), response_body: None },'
+  );
+  expect(table).toContain('pub const OPENAPI_DOCUMENT: &str = "{');
+  expect(table).toContain('pub struct XHttpClient {');
+  // * the descriptors it names, its service's file writes
+  expect(table).toContain('procedure: ::bead::ServiceProcedure::from(&procedures.one),');
+  expect(textOf(folder, 'gen/rs/services/x.v1.rs')).toContain('pub struct XProcedures {');
+  expect(textOf(folder, 'gen/rs/services/x.v1.rs')).toContain('    pub one: ::bead::');
+  // * messages taken from the application's build, which no plugin writes
+  expect(existsSync(join(folder, 'gen', 'rs', 'messages'))).toBe(false);
+  expect(mod).not.toContain('protoc-gen-buffa');
 });
 
 test('the Rust target writes the addresses the TypeScript target writes for one cut', () => {

@@ -6,3 +6,7 @@ node_modules/
 
 # ! the root ignores every dist/: this one is the page the site serves, built and committed
 !/dist/
+
+# what deploy.mjs assembles and Wrangler uploads, and what Wrangler keeps for itself
+/out/
+.wrangler/
