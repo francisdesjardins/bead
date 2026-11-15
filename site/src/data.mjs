@@ -377,8 +377,8 @@ export const FAILURES = Object.freeze([
     4,
     'gate',
     [
-      'A request past chunkBytes, or another envelope past maximumEnvelopeBytes.',
-      'Une requête au-delà de chunkBytes, ou une autre enveloppe au-delà de maximumEnvelopeBytes.',
+      'A request or a result past chunkBytes, whole or an opening, or another envelope past maximumEnvelopeBytes.',
+      'Une requête ou un résultat au-delà de chunkBytes, entiers ou une ouverture, ou une autre enveloppe au-delà de maximumEnvelopeBytes.',
     ],
   ],
   [
