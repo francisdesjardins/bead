@@ -339,21 +339,49 @@ envelopes = [
      {'kind': 20, 'header': {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 5}, 'payload': '01 02 03'}),
     ('a credit, nothing after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 0A',
      {'kind': 21, 'header': {'callId': 7, 'creditEnd': 10, 'kind': 21}}),
+    # 12.2: a reader holds a request and a result to chunkBytes, and any other envelope to
+    # maximumEnvelopeBytes, a chunk to chunkBytes within its transfer alone; each a byte past it here
+    ('a chunk past chunkBytes reads, held to it within its transfer', ['12.2', '12.2.2', '12.6.1'],
+     'A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 2C | 68 69',
+     {'kind': 20, 'header': {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 44}, 'payload': '68 69'}, 17),
+    ('a notification past chunkBytes reads', ['12.2'], 'A1 13 00 02  00 00 00 04 | 68 69',
+     {'kind': 19, 'header': {'callId': 4, 'kind': 19}, 'payload': '68 69'}, 9),
+    ('a failure past chunkBytes reads', ['12.2'], 'A1 12 00 02  00 00 00 05 | 00 13 00 00',
+     {'kind': 18, 'header': {'callId': 5, 'kind': 18}, 'failure': {'code': 19, 'detail': '', 'relays': 0, 'scope': 0}}, 11),
 ]
 
 envelope_refusals = [
-    ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, MALFORMED, 'a cancel carries no payload, not 1 bytes'),
-    ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, MALFORMED, 'a chunk carries one byte at least'),
-    ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, MALFORMED,
+    ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, None, MALFORMED,
+     'a cancel carries no payload, not 1 bytes'),
+    ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, None, MALFORMED,
+     'a chunk carries one byte at least'),
+    ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, None, MALFORMED,
      'a credit carries no payload, not 1 bytes'),
     # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
     # vector that fails two checks cites 5.1's order
-    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, ENVELOPE_TOO_LARGE,
-     'an envelope is 13 bytes at most, not 14'),
+    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, None,
+     ENVELOPE_TOO_LARGE, 'an envelope is 13 bytes at most, not 14'),
     ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13,
-     ENVELOPE_TOO_LARGE, None),
-    ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, MALFORMED, None),
-    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, MALFORMED, None),
+     None, ENVELOPE_TOO_LARGE, None),
+    ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, None, MALFORMED, None),
+    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, None,
+     MALFORMED, None),
+    # 12.2: a request and a result, whole or an opening, held to chunkBytes by the kind byte 1 names,
+    # whatever their layout; the detail names the kind whenever chunkBytes held it, even a chunkBytes
+    # as large as the envelope's bound
+    ('a request past chunkBytes', ['5.1.2', '12.2', '12.2.2'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', None, 13,
+     ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+    ("a request's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'],
+     'A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 00 00 01 00 | 68', None, 20, ENVELOPE_TOO_LARGE,
+     'a request is 20 bytes at most, not 21'),
+    ('a result past chunkBytes', ['5.1.2', '12.2', '12.2.2'], 'A1 11 00 02  00 00 00 04 | 68 69 6A 6B 6C 6D', None, 13, ENVELOPE_TOO_LARGE,
+     'a result is 13 bytes at most, not 14'),
+    ("a result's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'], 'A1 11 04 04  00 00 00 04  00 00 00 00 00 00 01 00 | 68', None, 16,
+     ENVELOPE_TOO_LARGE, 'a result is 16 bytes at most, not 17'),
+    ("a request of a layout to come past chunkBytes, its kind's bound checked before its layout", ['5.1', '5.1.2', '12.2'],
+     f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', None, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+    ("a request past a chunkBytes as large as the envelope's bound names a request", ['5.1.2', '12.2'],
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
 ]
 
 failures = [
@@ -1106,7 +1134,7 @@ document = {
         "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
         'kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.',
         "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
-        "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
+        "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
         "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
@@ -1127,9 +1155,11 @@ document = {
     'prefixRefusals': [entry(name=name, clauses=clauses, bytes=data, code=MALFORMED) for name, clauses, data in prefix_refusals],
     'headerRefusals': [entry(name=name, clauses=step_seven(clauses, code, detail), bytes=data, code=code, detail=detail)
                        for name, clauses, data, code, detail in header_refusals],
-    'envelopes': [entry(name=name, clauses=clauses, bytes=data, envelope=envelope) for name, clauses, data, envelope in envelopes],
-    'envelopeRefusals': [entry(name=name, clauses=clauses, bytes=data, maximumEnvelopeBytes=maximum, code=code, detail=detail)
-                         for name, clauses, data, maximum, code, detail in envelope_refusals],
+    'envelopes': [entry(name=name, clauses=clauses, bytes=data, chunkBytes=chunk[0] if chunk else None, envelope=envelope)
+                  for name, clauses, data, envelope, *chunk in envelopes],
+    'envelopeRefusals': [entry(name=name, clauses=clauses, bytes=data, maximumEnvelopeBytes=maximum, chunkBytes=chunk, code=code,
+                               detail=detail)
+                         for name, clauses, data, maximum, chunk, code, detail in envelope_refusals],
     'failures': [entry(name=name, clauses=clauses, record=record, maximumDetailBytes=maximum, failure=failure)
                  for name, clauses, record, maximum, failure in failures],
     'failureRefusals': [entry(name=name, clauses=clauses, record=record, code=MALFORMED) for name, clauses, record in failure_refusals],

@@ -661,16 +661,20 @@ always go in one envelope. A side that sends no transfer fails a request whose p
 one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a result with
 `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
-12.2. Both ends of a connection set their limits alike: nothing announces them. A receiver holds
-`chunkBytes` to a CHUNK (section 12.6) and to a request, whole or an opening, as section 12.1 has
-its requester send it; any other envelope it holds to `maximumEnvelopeBytes`. Each is the bound
-section 5.1's second step holds an envelope to, by the kind its prefix names, so a request past
-`chunkBytes` is answered as one too large (section 9.6, item 2), and nothing of it is held.
+12.2. Both ends of a connection set their limits alike: nothing announces them. Section 5.1's
+second step holds an envelope of any layout to the bound its kind gives, as its prefix names it: a
+request and a result, whole or an opening, to `chunkBytes`, as section 12.1 has their sender send
+them; any other envelope to `maximumEnvelopeBytes`. A request past its bound is refused as one too
+large (section 9.6, item 2) before any step of section 9.2 holds it, its credential's resolution
+among them, so nothing of it is held. A result past its bound ends its call as one too large
+(section 9.6, item 3): no sender that keeps section 12.1 writes one. A chunk is held to
+`chunkBytes` within its transfer, by section 12.6, item 1; one for no transfer under way is judged
+as section 12.9's table says, whatever its size.
 
 | Limit                       | By default  | Bounds                                                                                                                                                                                                              |
 | --------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                                                                                                                      |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                                                         |
+| `chunkBytes`                | 1,048,576   | a request's and a result's envelope, whole or an opening; a chunk's, within its transfer; and the largest a payload goes whole in                                                                                   |
 | `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send: one transfer's share of its connection, so the envelopes beside it go between its chunks, the budget holding its total (section 12.4) |
 | `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                                                                                                               |
 | `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each one's total, from its admission until its payload is whole or it ends (section 12.4)                                                        |
