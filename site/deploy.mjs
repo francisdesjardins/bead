@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Deploys what beadproto.dev serves: assembles `out/` from the files it lists, and nothing else, then
 // uploads it by the Wrangler `package.json` pins, to the Worker `wrangler.jsonc` names, which serves
-// files alone. The page, `dist/index.html`, at `/`; the demo's static build, `demo/dist/playground/`
+// files alone. The page, `dist/index.html`, at `/`; the DevTools extension's privacy policy,
+// `dist/privacy/index.html`, at `/privacy/`; the demo's static build, `demo/dist/playground/`
 // of the TypeScript side, built here from its own sources, at `/playground/`, its copy of the faces
 // left out; Bead's mark and the faces the page and the demo draw with; the 404 page,
 // `dist/404.html`; and, written here, `_redirects`, `_headers`, `robots.txt` and `sitemap.xml`.
@@ -49,6 +50,7 @@ export const TOKEN_VARIABLES = Object.freeze(['CLOUDFLARE_API_TOKEN', 'CLOUDFLAR
 // it is, under this folder
 export const FILES = Object.freeze({
   'index.html': 'dist/index.html',
+  'privacy/index.html': 'dist/privacy/index.html',
   '404.html': 'dist/404.html',
   'favicon.svg': 'src/favicon.svg',
   'favicon.ico': 'src/favicon.ico',
@@ -114,13 +116,20 @@ export const inlineScriptHashes = (html) => {
   });
 };
 
-// * one policy for every path: the page's scripts by their hashes, the demo's and its worker's from
-// this host; the styles inline, which the page's diagrams carry by the attribute, a hash taking none
-// of them, and its sheets by the dozen
-export const headersOf = (html) => {
+// * one policy for every path: the scripts of every page given, by their hashes, each once, the
+// demo's and its worker's from this host; the styles inline, which the page's diagrams carry by the
+// attribute, a hash taking none of them, and its sheets by the dozen
+export const headersOf = (...pages) => {
+  const hashes = [
+    ...new Set(
+      pages.flatMap((html) => {
+        return inlineScriptHashes(html);
+      })
+    ),
+  ];
   const policy = [
     "default-src 'none'",
-    ["script-src 'self'", ...inlineScriptHashes(html)].join(' '),
+    ["script-src 'self'", ...hashes].join(' '),
     "worker-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
@@ -150,17 +159,22 @@ Allow: /
 Sitemap: ${ADDRESS}sitemap.xml
 `;
 
-// the page's two languages, each its address, each naming both and the default, and the demo
+// the page's two languages and the privacy policy's, each its address, each naming both and the
+// default, and the demo
 export const sitemapOf = (day) => {
-  const alternates = [
-    ['en', ADDRESS],
-    ['fr', `${ADDRESS}?lng=fr`],
-    ['x-default', ADDRESS],
-  ]
-    .map(([language, address]) => {
-      return `    <xhtml:link rel="alternate" hreflang="${language}" href="${address}"/>\n`;
-    })
-    .join('');
+  const alternatesOf = (page) => {
+    return [
+      ['en', page],
+      ['fr', `${page}?lng=fr`],
+      ['x-default', page],
+    ]
+      .map(([language, address]) => {
+        return `    <xhtml:link rel="alternate" hreflang="${language}" href="${address}"/>\n`;
+      })
+      .join('');
+  };
+  const alternates = alternatesOf(ADDRESS);
+  const privacy = `${ADDRESS}privacy/`;
   const url = (address, links) => {
     return `  <url>\n    <loc>${address}</loc>\n    <lastmod>${day}</lastmod>\n${links}  </url>\n`;
   };
@@ -170,6 +184,8 @@ export const sitemapOf = (day) => {
     '        xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' +
     url(ADDRESS, alternates) +
     url(`${ADDRESS}?lng=fr`, alternates) +
+    url(privacy, alternatesOf(privacy)) +
+    url(`${privacy}?lng=fr`, alternatesOf(privacy)) +
     url(`${ADDRESS}playground/`, '') +
     '</urlset>\n'
   );
@@ -243,17 +259,18 @@ export const assemble = ({ out = OUT, demo = DEMO, day }) => {
     write(path);
     written.push(served);
   };
-  // ! the page as the browser reads it, its line breaks LF: the hashes of its scripts are of these
+  // ! each page as the browser reads it, its line breaks LF: the hashes of its scripts are of these
   // bytes, which `out/` holds
-  const page = join(HERE, ...FILES['index.html'].split('/'));
-  const html = existsSync(page) ? readFileSync(page, 'utf8').replaceAll('\r\n', '\n') : '';
+  const pages = [];
   for (const [served, source] of Object.entries(FILES)) {
     const from = join(HERE, ...source.split('/'));
     if (!existsSync(from)) {
       throw new Error(`deploy: ${source} is missing`);
     }
     put(served, (path) => {
-      if (served === 'index.html') {
+      if (served.endsWith('.html')) {
+        const html = readFileSync(from, 'utf8').replaceAll('\r\n', '\n');
+        pages.push(html);
         writeFileSync(path, html);
       } else {
         copyFileSync(from, path);
@@ -267,7 +284,7 @@ export const assemble = ({ out = OUT, demo = DEMO, day }) => {
   }
   const generated = {
     _redirects: REDIRECTS,
-    _headers: headersOf(html),
+    _headers: headersOf(...pages),
     'robots.txt': ROBOTS,
     'sitemap.xml': sitemapOf(day),
   };
@@ -323,9 +340,17 @@ const main = async () => {
   console.log(`deploy: ${trial ? 'a trial of the tree at' : 'the commit'} ${commit}`);
 
   // the page and the not-found page, as their build gives them, which check.mjs holds in CI
-  const { NOT_FOUND, OUT: PAGE, build, buildNotFound } = await import('./build.mjs');
+  const {
+    NOT_FOUND,
+    OUT: PAGE,
+    PRIVACY,
+    build,
+    buildNotFound,
+    buildPrivacy,
+  } = await import('./build.mjs');
   for (const [path, name, page] of [
     [PAGE, 'index.html', build()],
+    [PRIVACY, 'privacy/index.html', buildPrivacy()],
     [NOT_FOUND, '404.html', buildNotFound()],
   ]) {
     if (readFileSync(path, 'utf8').replaceAll('\r\n', '\n') !== page) {

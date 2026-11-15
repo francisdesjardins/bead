@@ -1,0 +1,153 @@
+<header class="hero">
+  <p class="eyebrow">Bead DevTools · politique de confidentialité</p>
+  <h1>Bead DevTools et vos données</h1>
+  <p class="lede">
+    L’extension montre ce que font les clients Bead d’une page. Elle n’envoie rien nulle part.
+  </p>
+</header>
+
+<section id="short" data-toc="En bref">
+  <h2>En bref</h2>
+  <p>
+    Bead DevTools est une extension de Chrome qui ajoute un panneau Bead aux DevTools. Le panneau
+    montre les appels, les enveloppes, les métriques et les colis du courtier des clients Bead que
+    construit la page que vous inspectez.
+  </p>
+  <ul>
+    <li>
+      Elle ne lit que ce que les clients Bead d’une page disent à son crochet, et les échanges HTTP
+      propres à Bead.
+    </li>
+    <li>
+      Elle garde ce qu’elle lit dans la mémoire du panneau, jusqu’à ce qu’il se ferme ou que vous le
+      vidiez.
+    </li>
+    <li>
+      Elle n’envoie rien hors de votre navigateur. Elle n’a ni serveur, ni mesure d’audience, ni
+      publicité, et n’exécute aucun code qui ne soit dans son paquet.
+    </li>
+    <li>Elle ne demande aucune permission à Chrome. Elle ne vend ni ne partage aucune donnée.</li>
+  </ul>
+</section>
+
+<section id="reads" data-toc="Ce qu’elle lit">
+  <h2>Ce qu’elle lit</h2>
+  <p>
+    Sur chaque page, avant que ses propres scripts ne s’exécutent, l’extension définit un crochet.
+    Un client Bead construit dans cette page s’annonce à ce crochet. Tant qu’aucun panneau Bead
+    n’est ouvert sur l’onglet, le crochet ne transmet rien d’autre que l’annonce d’un client et son
+    genre.
+  </p>
+  <p>Pendant qu’un panneau Bead est ouvert sur l’onglet, le crochet et le panneau lisent :</p>
+  <ul>
+    <li>
+      chaque appel que font ou que servent les clients Bead de la page : sa procédure, ses temps,
+      son statut, et ses charges utiles en texte et en arbre ;
+    </li>
+    <li>chaque enveloppe que ces clients envoient et reçoivent, et les métriques de chacun ;</li>
+    <li>
+      les colis, les changements de lien et les rapports de chaque participant de courtier Bead que
+      la page construit ;
+    </li>
+    <li>
+      la pile du code qui a fait chaque appel, les adresses et les lignes de ses scripts, pour que
+      le panneau puisse l’ouvrir dans Sources ;
+    </li>
+    <li>
+      dans le panneau Network, seulement les échanges dont le type de contenu est celui de Bead,
+      <code>application/prs.bead</code>, et leurs corps. Il ignore tout autre échange.
+    </li>
+  </ul>
+  <p>
+    Un justificatif que porte un appel n’est noté que par son schéma, jamais par son jeton. Une page
+    ou une application peut tenir ses clients à l’écart du panneau en leur donnant
+    <code>devtools: false</code>.
+  </p>
+</section>
+
+<section id="keeps" data-toc="Ce qu’elle garde">
+  <h2>Ce qu’elle garde</h2>
+  <p>
+    Ce que lit le panneau reste dans sa mémoire. Il disparaît quand le panneau se ferme, quand les
+    DevTools se ferment, ou quand vous le videz. Avec Preserve log, il reste d’un rechargement de la
+    page à l’autre, tant que les DevTools restent ouverts. L’extension n’en écrit rien sur votre
+    disque.
+  </p>
+  <p>
+    Le panneau garde deux de vos choix dans le stockage propre à l’extension, sur votre appareil :
+    où il place le détail d’un appel, et la part de la séparation entre la liste et le détail. Il
+    n’y garde rien d’autre.
+  </p>
+  <p>Trois actions écrivent ou lisent un fichier, chacune seulement à votre demande :</p>
+  <ul>
+    <li>
+      Export enregistre les enregistrements que tient le panneau dans un fichier JSON, là où votre
+      navigateur enregistre les fichiers.
+    </li>
+    <li>Import lit un fichier JSON que vous choisissez, dans le panneau seul.</li>
+    <li>
+      Le menu d’un appel copie sa requête, sa réponse ou un extrait de code dans votre
+      presse-papiers.
+    </li>
+  </ul>
+</section>
+
+<section id="sends" data-toc="Ce qu’elle envoie">
+  <h2>Ce qu’elle envoie</h2>
+  <p>
+    Rien ne quitte votre navigateur. L’extension ne fait aucune requête réseau à elle. Elle n’a ni
+    mesure d’audience, ni télémétrie, ni rapport de plantage, ni compte. Tout son code est dans le
+    paquet que distribue le Chrome Web Store, et elle ne charge aucun code distant.
+  </p>
+  <p>
+    Les enregistrements ne voyagent que dans le navigateur : du crochet, dans la page, au pont de
+    l’extension, puis à son service worker, puis au panneau du même onglet, par la messagerie de
+    Chrome.
+  </p>
+  <p>
+    L’extension ne change rien à la page que le crochet qu’elle définit. Elle ne recharge la page
+    que si vous le lui demandez.
+  </p>
+</section>
+
+<section id="permissions" data-toc="Ses permissions">
+  <h2>Ses permissions</h2>
+  <p>
+    Le manifeste de l’extension ne nomme aucune permission et aucune permission d’hôte. Il déclare
+    quatre parties :
+  </p>
+  <ul>
+    <li>
+      deux scripts de contenu sur toute adresse, <code>&lt;all_urls&gt;</code>, à
+      <code>document_start</code> : le crochet, dans le monde propre de la page, qui doit être en
+      place avant que le client Bead de la page ne se charge ; et le pont, dans le monde isolé de
+      l’extension, qui porte les enregistrements du crochet jusqu’au panneau ;
+    </li>
+    <li>une page DevTools, qui ajoute le panneau Bead aux DevTools ;</li>
+    <li>un service worker, qui associe chaque onglet au panneau ouvert sur lui.</li>
+  </ul>
+  <p>
+    Chrome prévient que de tels scripts de contenu peuvent lire et modifier vos données sur tous les
+    sites. Le crochet ne lit que ce que lui donnent les clients Bead d’une page, et le garde dans
+    votre navigateur.
+  </p>
+</section>
+
+<section id="contact" data-toc="Contact">
+  <h2>Contact</h2>
+  <p>
+    Cette page dit ce que fait l’extension dans sa version actuelle. Une version qui change ce
+    qu’elle lit, garde ou envoie change cette page avec elle. Le code est ouvert, sous la licence
+    Apache-2.0, dans <a href="https://github.com/francisdesjardins/bead">le dépôt de Bead</a>.
+    Posez une question ou signalez un problème dans ses
+    <a href="https://github.com/francisdesjardins/bead/issues">issues</a>.
+  </p>
+</section>
+
+<footer>
+  <p>
+    Bead DevTools est conçu par
+    <a href="https://francisdesjardins.ca/?lng=fr">Francis Desjardins</a>.
+    <a href="/?lng=fr">La page de Bead</a> présente le protocole.
+  </p>
+</footer>

@@ -1,0 +1,2205 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bead DevTools: privacy policy</title>
+    <meta name="description" content="What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser." />
+    <link rel="alternate" hreflang="en" href="https://beadproto.dev/privacy/" />
+    <link rel="alternate" hreflang="fr" href="https://beadproto.dev/privacy/?lng=fr" />
+    <link rel="alternate" hreflang="x-default" href="https://beadproto.dev/privacy/" />
+    <meta name="author" content="Francis Desjardins" />
+    <meta name="theme-color" content="#c13584" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://beadproto.dev/privacy/" />
+    <meta property="og:title" content="Bead DevTools: privacy policy" />
+    <meta property="og:description" content="What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser." />
+    <meta property="og:site_name" content="Francis Desjardins" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// which the build inlines beside this script.
+(function () {
+  var root = document.documentElement;
+  var isLanguage = function (value) {
+    return value === 'en' || value === 'fr';
+  };
+  // the address first, `?lng=`, then the visitor's choice this page stored under `language`, its
+  // origin's own, then the browser's languages, then English
+  var language = null;
+  try {
+    var asked = new URLSearchParams(window.location.search).get('lng');
+    if (isLanguage(asked)) {
+      language = asked;
+    }
+  } catch (error) {
+    language = null;
+  }
+  if (language === null) {
+    try {
+      var chosen = window.localStorage.getItem('language');
+      if (isLanguage(chosen)) {
+        language = chosen;
+      }
+    } catch (error) {
+      language = null;
+    }
+  }
+  if (language === null) {
+    var tags = navigator.languages || [navigator.language || ''];
+    for (var index = 0; index < tags.length; index += 1) {
+      var base = String(tags[index]).split('-')[0].toLowerCase();
+      if (isLanguage(base)) {
+        language = base;
+        break;
+      }
+    }
+  }
+  if (language === null) {
+    language = 'en';
+  }
+  root.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
+  // the page holds English; another language is swapped in at the end of the body, and nothing is
+  // painted before
+  if (language !== 'en') {
+    root.setAttribute('data-swapping', '');
+  }
+  root.setAttribute('data-language', language);
+})();
+    </script>
+    <script>
+// Before the first paint, on Bead's page and its demo alike: the theme, as the page keeps it, and
+// its toggle, each button `data-action="theme"`, its label its `data-to-dark` or `data-to-light`.
+// A classic script in the head: the page's build inlines it and hashes it, the demo loads it from
+// its own origin.
+(() => {
+  const root = document.documentElement;
+  const KEY = 'theme-preference';
+
+  // `theme-preference`, a JSON boolean, true for dark; else the system's preference
+  let dark = null;
+  try {
+    const saved = window.localStorage.getItem(KEY);
+    if (saved !== null) {
+      dark = Boolean(JSON.parse(saved));
+    }
+  } catch {
+    dark = null;
+  }
+  if (dark === null) {
+    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
+
+  // ! every toggle, a template's included: a page that swaps its content in from a template, as
+  // the page does its language, shows each one labelled for the scheme it is in
+  const label = () => {
+    const isDark = root.getAttribute('data-color-scheme') === 'dark';
+    const toggles = [
+      ...document.querySelectorAll('[data-action="theme"]'),
+      ...[...document.querySelectorAll('template')].flatMap((template) => {
+        return [...template.content.querySelectorAll('[data-action="theme"]')];
+      }),
+    ];
+    for (const toggle of toggles) {
+      toggle.setAttribute(
+        'aria-label',
+        toggle.getAttribute(isDark ? 'data-to-light' : 'data-to-dark') ?? ''
+      );
+    }
+  };
+
+  document.addEventListener('click', (event) => {
+    const toggle =
+      event.target instanceof Element ? event.target.closest('[data-action="theme"]') : null;
+    if (toggle === null) {
+      return;
+    }
+    const next = root.getAttribute('data-color-scheme') !== 'dark';
+    root.setAttribute('data-color-scheme', next ? 'dark' : 'light');
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(next));
+    } catch {
+      // a refused storage keeps the choice for this page alone
+    }
+    label();
+  });
+
+  document.addEventListener('DOMContentLoaded', label);
+})();
+    </script>
+    <style>
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the system half of the design system.
+ *
+ * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
+ * point: consumers import this file unchanged and write their own skin beside it. Anything that
+ * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
+ * split has failed and the file has stopped being portable — `yarn check` refuses it.
+ *
+ * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
+ * saying why it is off-scale — a measured geometry, a UA constant.
+ */
+
+:root {
+  /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-space-8: 32px;
+  --app-space-10: 40px;
+  --app-space-12: 48px;
+  --app-space-14: 56px;
+
+  /* ── Type ramp ───────────────────────────────────────────────────────────────────────
+     A ~1.22 ratio off a 15px body: 11 · 13 · 15 · 18 · 22 · 28 · 36 · 46. Body is `-md`, and it
+     is 15px on purpose — larger than the 14px a component library spends its interface on,
+     smaller than a marketing 16px. This is a documentation app; 15 is the reading size. */
+  --app-text-xs: 0.6875rem;
+  --app-text-sm: 0.8125rem;
+  --app-text-md: 0.9375rem;
+  --app-text-base: 1.125rem;
+  --app-text-lg: 1.375rem;
+  --app-text-xl: 1.75rem;
+  --app-text-2xl: 2.25rem;
+  --app-text-3xl: 2.875rem;
+
+  /* Line heights are tokens too, so a new surface stops inventing a decimal. */
+  --app-lh-tight: 1.15;
+  --app-lh-snug: 1.35;
+  --app-lh-body: 1.6;
+  --app-lh-relaxed: 1.7;
+
+  /* Tracking. Display sizes tighten; the mono eyebrow is the one thing that opens up. */
+  --app-tracking-tight: -0.022em;
+  --app-tracking-snug: -0.01em;
+  --app-tracking-label: 0.14em;
+
+  /* ── Radii ───────────────────────────────────────────────────────────────────────── */
+  --app-radius-sm: 3px;
+  --app-radius: 6px;
+  --app-radius-md: 8px;
+  --app-radius-lg: 12px;
+  --app-radius-xl: 16px;
+  --app-radius-pill: 999px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────────────────────
+     The default curve front-loads the movement and settles hard, rather than easing
+     symmetrically in and out. Per element the difference is small; across a page it is what
+     stops the app feeling like it was assembled from a component library. */
+  --app-quick: 110ms;
+  --app-duration: 200ms;
+  --app-slow: 340ms;
+  --app-ease: cubic-bezier(0.2, 0, 0, 1);
+  --app-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ── Layout ──────────────────────────────────────────────────────────────────────────
+     Breakpoints cannot be custom properties (media queries resolve before the cascade), so the
+     two the app uses stay a convention: 600px (sm) and 900px (md), stated here and nowhere
+     re-invented. */
+  --app-topbar-height: 56px;
+  --app-sidebar-width: 248px;
+  --app-content-max-width: 1400px;
+  --app-measure: 68ch;
+  --app-icon-sm: 20px;
+
+  /* ── Stacking ────────────────────────────────────────────────────────────────────────
+     Small numbers, deliberately. The dialog manager assigns 1300+ and a dialog `<dialog>` paints
+     in the top layer where no `z-index` reaches it at all, so the shell only ever has to order
+     itself against itself. */
+  /* The mascot sits below the backdrop, not beside the sidebar. It is fixed, clickable and drifts
+     across the viewport, so a tie with the drawer is not decided by the scale at all — it is
+     decided by document order, and the shells render the mascot last. What that costs is the tap:
+     the drawer's backdrop is `pointer-events: auto` so a tap outside closes it, and a mascot above
+     the backdrop eats that tap while the drawer stays open. Under it, the same tap closes the
+     drawer and the open drawer dims the mascot along with the page. */
+  --app-z-mascot: 10;
+  --app-z-backdrop: 20;
+  --app-z-sidebar: 30;
+  --app-z-topbar: 40;
+
+  --app-scrollbar-width: 10px;
+}
+
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
+ *
+ * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
+ * nothing that says which product is being painted. What it carries is the part every project needs
+ * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
+ * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
+ * lift that stands in for elevation.
+ *
+ * Import it after `tokens.system.css` and write the brand over it:
+ *
+ * ```css
+ * @import 'penumbra/tokens.system.css';
+ * @import 'penumbra/tokens.skin.base.css';
+ * @import './tokens.skin.css';       // yours: a typeface, and eight colours
+ * ```
+ *
+ * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
+ * names a project paints itself with, and refuses any token the system half already declares. The
+ * complementary rule guards the system file, which refuses colour.
+ *
+ * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
+ * reads as chosen, where an alpha ladder reads as whatever is behind it.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────────── */
+  --app-bg: #f4f6fa;
+  --app-paper: #ffffff;
+
+  /* The mark's own body and its edge — a shape drawn in ink rather than in the brand. */
+  --app-body: #1e293b;
+  --app-body-edge: #475569;
+
+  /* ── Text, in three ranks ─────────────────────────────────────────────────── */
+  --app-text: #0b1120;
+  --app-text-secondary: #4a5568;
+  /* Tertiary is spent on *text* — counts, hints, placeholders — so it clears 4.5:1 rather than
+     sitting at the inactive-control tone a component library would give it. */
+  --app-text-tertiary: #5f6b7e;
+
+  /* ── Edges ────────────────────────────────────────────────────────────────── */
+  --app-divider: rgb(15 23 42 / 0.1);
+  /* A control's edge says where the control is, so WCAG 1.4.11 asks 3:1 of it. The divider above is
+     a layout hairline and owes nothing. */
+  --app-control-border: #6b788c;
+
+  /* ── States ───────────────────────────────────────────────────────────────── */
+  --app-hover: rgb(15 23 42 / 0.05);
+  --app-selected: rgb(15 23 42 / 0.09);
+
+  /* ── The four semantics ───────────────────────────────────────────────────── */
+  --app-error: #b91c1c;
+  --app-error-ink: #ffffff;
+  --app-error-hover: #991b1b;
+
+  --app-ok: #047857;
+  --app-ok-wash: rgb(4 120 87 / 0.1);
+  --app-info: #0369a1;
+  --app-info-wash: rgb(3 105 161 / 0.1);
+  --app-warn: #92400e;
+  --app-warn-wash: rgb(146 64 14 / 0.1);
+
+  /* ── Furniture ────────────────────────────────────────────────────────────── */
+  /* Black in both schemes on purpose: a scrim is an absence of light rather than a colour, and
+     tinting it slate makes it read as a surface. */
+  --app-scrim: rgb(0 0 0 / 0.5);
+  --app-scrollbar-thumb: rgb(15 23 42 / 0.16);
+  --app-scrollbar-track: transparent;
+
+  /* Edges, not elevation: one hairline and one soft shadow instead of a three-layer stack imitating
+     paper height. A brand's own glow goes in the skin over this. */
+  --app-lift: 0 1px 1px rgb(15 23 42 / 0.05), 0 18px 44px -30px rgb(15 23 42 / 0.45);
+}
+
+/* Slate dusk, not black: a saturated accent on #000 is a hazard label, on slate it is light. */
+:root[data-color-scheme='dark'] {
+  --app-bg: #0b1120;
+  --app-paper: #111a2b;
+
+  --app-body: #0b1120;
+  --app-body-edge: #334155;
+
+  --app-text: #eef2f8;
+  --app-text-secondary: #a3b0c4;
+  --app-text-tertiary: #8494ab;
+
+  --app-divider: rgb(148 163 184 / 0.16);
+  --app-control-border: #7d8ba1;
+
+  --app-hover: rgb(238 242 248 / 0.07);
+  --app-selected: rgb(238 242 248 / 0.12);
+
+  /* The bright red cannot carry white, so it takes a dark ink — the same fill/ink split a brand's
+     primary makes. */
+  --app-error: #f87171;
+  --app-error-ink: #0b1120;
+  --app-error-hover: #fca5a5;
+
+  --app-ok: #34d399;
+  --app-ok-wash: rgb(52 211 153 / 0.14);
+  --app-info: #38bdf8;
+  --app-info-wash: rgb(56 189 248 / 0.14);
+  --app-warn: #fbbf24;
+  --app-warn-wash: rgb(251 191 36 / 0.14);
+
+  --app-scrim: rgb(0 0 0 / 0.62);
+  --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+
+  --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+}
+
+/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
+   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
+   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
+   skin. */
+
+:root {
+  /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
+  --app-touch: 44px;
+  /* a block of code, on the page and the demo alike; code inline in prose is 0.875em of its text */
+  --app-text-code: var(--app-text-sm);
+}
+
+/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+   its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
+   on, and the colours of code. The page, the demo and the not-found page take this one copy; the
+   DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
+   answers to `data-color-scheme`, or to the system where no script set it. */
+
+/* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
+   static build serve the same files there */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/geist.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/newsreader.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light;
+  --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --app-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --app-font-mono:
+    'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  --app-primary: #c13584;
+  --app-primary-ink: #ffffff;
+  --app-primary-hover: #9d2a6b;
+  --app-accent: #c13584;
+  --app-flame: #c13584;
+  --app-flame-wash: rgb(193 53 132 / 0.1);
+  --app-ring: #ff69b4;
+  --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
+
+  --app-bg: #f5f2f8;
+  --app-paper: #fdfcfe;
+  --app-text: #17111d;
+  --app-text-secondary: #4a4055;
+  --app-text-tertiary: #6d6278;
+  --app-divider: rgb(23 17 29 / 0.12);
+
+  /* the ground of what is code, an inset in a card; and a refusal's wash */
+  --raised: #f1ecf5;
+  --bad-soft: rgb(185 28 28 / 0.1);
+
+  /* what went well, in the green of code's strings, at 4.5:1 on its own wash over the page */
+  --app-ok: #04694c;
+  --app-ok-wash: rgb(4 105 76 / 0.1);
+
+  /* code's colours, a token's kind each, at 4.5:1 or more on a card and on an inset */
+  --tok-comment: #625770;
+  --tok-keyword: #a62b70;
+  --tok-string: #04694c;
+  --tok-number: #035f91;
+}
+
+/* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+:root[data-color-scheme='dark'] {
+  color-scheme: dark;
+  --app-primary: #ff8bc4;
+  --app-primary-ink: #3d0b28;
+  --app-primary-hover: #ffaed5;
+  --app-accent: #ff8bc4;
+  --app-flame: #ff8bc4;
+  --app-flame-wash: rgb(255 139 196 / 0.14);
+  --app-ring: #ffaed5;
+  --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+  --app-bg: #0c0910;
+  --app-paper: #15111c;
+  --app-text: #f2ecf5;
+  --app-text-secondary: #b2a7bf;
+  --app-text-tertiary: #8d8199;
+  --app-divider: rgb(242 236 245 / 0.14);
+
+  --raised: #1c1625;
+  --bad-soft: rgb(248 113 113 / 0.12);
+
+  --tok-comment: #9d91a9;
+  --tok-keyword: #ff8bc4;
+  --tok-string: #34d399;
+  --tok-number: #38bdf8;
+}
+
+/* the system's dark, where no script chose: the not-found page runs none */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme]) {
+    color-scheme: dark;
+    --app-primary: #ff8bc4;
+    --app-primary-ink: #3d0b28;
+    --app-primary-hover: #ffaed5;
+    --app-accent: #ff8bc4;
+    --app-flame: #ff8bc4;
+    --app-flame-wash: rgb(255 139 196 / 0.14);
+    --app-ring: #ffaed5;
+    --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+    --app-bg: #0c0910;
+    --app-paper: #15111c;
+    --app-text: #f2ecf5;
+    --app-text-secondary: #b2a7bf;
+    --app-text-tertiary: #8d8199;
+    --app-divider: rgb(242 236 245 / 0.14);
+
+    --raised: #1c1625;
+    --bad-soft: rgb(248 113 113 / 0.12);
+
+    --tok-comment: #9d91a9;
+    --tok-keyword: #ff8bc4;
+    --tok-string: #34d399;
+    --tok-number: #38bdf8;
+
+    /* ! base's dark values, which base keys on the attribute alone: each as its dark block has it,
+       which the DevTools panel's tests hold */
+    --app-body: #0b1120;
+    --app-body-edge: #334155;
+    --app-control-border: #7d8ba1;
+    --app-hover: rgb(238 242 248 / 0.07);
+    --app-selected: rgb(238 242 248 / 0.12);
+    --app-error: #f87171;
+    --app-error-ink: #0b1120;
+    --app-error-hover: #fca5a5;
+    --app-ok: #34d399;
+    --app-ok-wash: rgb(52 211 153 / 0.14);
+    --app-info: #38bdf8;
+    --app-info-wash: rgb(56 189 248 / 0.14);
+    --app-warn: #fbbf24;
+    --app-warn-wash: rgb(251 191 36 / 0.14);
+    --app-scrim: rgb(0 0 0 / 0.62);
+    --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+    --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+  }
+}
+
+/* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
+   the name, a link to the page, a context word where there is one, and a row of tools at the right,
+   each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
+   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
+   demo links it. */
+
+:root {
+  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  --frame-gutter: max(var(--app-space-4), 3vw);
+}
+
+html {
+  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
+}
+
+body {
+  padding-top: var(--app-topbar-height);
+}
+
+.topbar,
+.topbar * {
+  box-sizing: border-box;
+}
+
+/* ! a height, never a least one: a bar that grows on a narrow screen covers what follows it */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--app-z-topbar);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--app-space-3);
+  height: var(--app-topbar-height);
+  /* its ends on the frame's edges */
+  padding-inline: max(
+    var(--frame-gutter),
+    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+  );
+  background: var(--app-paper);
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-2);
+  min-width: var(--app-touch);
+  min-height: var(--app-touch);
+  color: var(--app-text);
+  font-family: var(--app-font-mono);
+  font-weight: 500;
+  font-size: var(--app-text-md);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand:hover {
+  color: var(--app-text);
+}
+
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the accent */
+.mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
+}
+
+/* what part of Bead this is, after its name */
+.context {
+  flex: none;
+  color: var(--app-text-tertiary);
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+}
+
+.tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-1);
+  margin-inline-start: auto;
+}
+
+/* * a finger's square at least; the pill it shows is 40 px, inside a transparent edge of 2 px */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--app-touch);
+  height: var(--app-touch);
+  min-height: var(--app-touch);
+  margin: 0;
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
+}
+
+.tool:hover {
+  border-color: transparent;
+  background-color: var(--app-hover);
+  color: var(--app-text);
+}
+
+/* a tool drawn as a glyph: the theme, the page's menu */
+.tool[data-action='theme'],
+.tool[data-action='menu'] {
+  width: var(--app-touch);
+  padding: 0;
+  font-size: 1.25rem;
+}
+
+/* under 360 px, the bar keeps the mark and leaves the name to the heading under it */
+@media (max-width: 359px) {
+  .brand {
+    font-size: 0;
+  }
+
+  .context {
+    display: none;
+  }
+
+  .topbar {
+    gap: var(--app-space-2);
+    padding-inline: var(--app-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool {
+    transition: none;
+  }
+}
+
+/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
+   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
+
+:root {
+  /* the page's own, each of the site's */
+  --focus: var(--app-accent);
+  /* the accent on its own wash is 4.33:1 in light: the deeper hover carries it */
+  --seg-prefix: var(--app-primary-hover);
+  --seg-prefix-wash: var(--app-flame-wash);
+  --seg-kind: var(--app-info);
+  --seg-kind-wash: var(--app-info-wash);
+  --seg-record: var(--app-warn);
+  --seg-record-wash: var(--app-warn-wash);
+  --diagram-surface: var(--app-paper);
+  --diagram-node: var(--app-bg);
+  --diagram-node-line: var(--app-text-tertiary);
+  --diagram-ink: var(--app-text);
+  --diagram-edge: var(--app-text-secondary);
+  /* opaque, or a lifeline shows through a note's text */
+  --diagram-note: color-mix(in srgb, var(--app-primary) 10%, var(--app-paper));
+  --diagram-note-line: color-mix(in srgb, var(--app-primary) 55%, transparent);
+  --diagram-cluster: transparent;
+  --diagram-cluster-line: color-mix(in srgb, var(--app-text-tertiary) 55%, transparent);
+  --diagram-actor: color-mix(in srgb, var(--app-primary) 10%, var(--app-paper));
+  --diagram-actor-line: var(--app-primary);
+}
+
+/* the dark scheme, chosen; and the system's, where no script chose */
+:root[data-color-scheme='dark'] {
+  --focus: var(--app-ring);
+  --seg-prefix: var(--app-accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme]) {
+    --focus: var(--app-ring);
+    --seg-prefix: var(--app-accent);
+  }
+}
+
+/* ── Page ─────────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* nothing painted while another language is swapped in */
+:root[data-swapping] body {
+  visibility: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--app-font-body);
+  font-size: 1rem;
+  line-height: var(--app-lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--app-radius-sm);
+}
+
+a {
+  color: var(--app-accent);
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* a link's code stands on an inset, where the accent falls under 4.5:1: it takes the darker ink */
+a code {
+  color: var(--app-primary-hover);
+}
+
+.skip {
+  position: absolute;
+  top: var(--app-space-2);
+  left: var(--app-space-2);
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
+  background: var(--app-paper);
+  border-radius: var(--app-radius);
+  transform: translateY(-200%);
+}
+
+.skip:focus {
+  transform: none;
+}
+
+/* ── Top bar ──────────────────────────────────────────────────────────────── */
+
+/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
+.language .short {
+  display: none;
+}
+
+@media (max-width: 599px) {
+  .language .long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .language .short {
+    display: inline;
+  }
+}
+
+/* ── Layout and contents ──────────────────────────────────────────────────── */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--app-space-10);
+  max-width: var(--app-content-max-width);
+  margin-inline: auto;
+  padding: var(--app-space-8) var(--frame-gutter) var(--app-space-14);
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-14);
+  min-width: 0;
+  max-width: 800px;
+}
+
+main:focus {
+  outline: none;
+}
+
+.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toc a {
+  display: block;
+  padding: 3px var(--app-space-3);
+  border-left: 2px solid transparent;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+  line-height: var(--app-lh-snug);
+  text-decoration: none;
+}
+
+.toc a:hover {
+  color: var(--app-text);
+}
+
+.toc a[aria-current] {
+  border-left-color: var(--app-primary);
+  color: var(--app-text);
+  font-weight: 500;
+}
+
+.toc-title {
+  margin: 0 0 var(--app-space-2);
+  padding-left: var(--app-space-3);
+  color: var(--app-text-tertiary);
+  font: 500 var(--app-text-xs) / 1 var(--app-font-mono);
+  letter-spacing: var(--app-tracking-label);
+  text-transform: uppercase;
+}
+
+@media (min-width: 960px) {
+  .layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: var(--app-space-12);
+  }
+  .toc {
+    position: sticky;
+    top: calc(var(--app-topbar-height) + var(--app-space-6));
+    align-self: start;
+    max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-10));
+    overflow-y: auto;
+  }
+  .tool[data-action='menu'] {
+    display: none;
+  }
+}
+
+/* on a narrow screen, the contents are a panel the menu opens under the bar */
+@media (max-width: 959px) {
+  .toc {
+    display: none;
+  }
+  :root[data-menu-open] .toc {
+    position: fixed;
+    inset: var(--app-topbar-height) 0 auto;
+    z-index: var(--app-z-sidebar);
+    display: block;
+    max-height: calc(100dvh - var(--app-topbar-height));
+    overflow-y: auto;
+    padding: var(--app-space-4);
+    background: var(--app-paper);
+    border-bottom: 1px solid var(--app-divider);
+    box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
+  }
+  :root[data-menu-open] .toc a {
+    display: flex;
+    align-items: center;
+    min-height: var(--app-touch);
+  }
+}
+
+/* the menu's sheet comes in at once, or a short fade where motion is welcome */
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  :root[data-menu-open] .toc {
+    transition: opacity var(--app-quick) var(--app-ease);
+  }
+  @starting-style {
+    :root[data-menu-open] .toc {
+      opacity: 0;
+    }
+  }
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────────── */
+
+h1,
+h2,
+h3 {
+  font-family: var(--app-font-display);
+  font-weight: 500;
+  letter-spacing: var(--app-tracking-tight);
+  text-wrap: balance;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(3rem, 9vw, 4.5rem);
+  line-height: 1;
+}
+
+h2 {
+  margin: 0 0 var(--app-space-4);
+  font-size: var(--app-text-xl);
+  line-height: var(--app-lh-tight);
+}
+
+h3 {
+  margin: var(--app-space-8) 0 var(--app-space-2);
+  font-size: var(--app-text-lg);
+  line-height: var(--app-lh-snug);
+}
+
+section {
+  min-width: 0;
+}
+
+p,
+ul,
+ol {
+  max-width: var(--app-measure);
+}
+
+p {
+  margin: 0 0 var(--app-space-3);
+}
+
+ul,
+ol {
+  margin: 0 0 var(--app-space-3);
+  padding-left: 1.4em;
+}
+
+li + li {
+  margin-top: var(--app-space-1);
+}
+
+code {
+  font-family: var(--app-font-mono);
+  font-size: 0.875em;
+}
+
+p code,
+li code,
+td code,
+summary code,
+h3 code,
+.gist code {
+  padding: 1px var(--app-space-1);
+  border-radius: var(--app-radius-sm);
+  background: var(--raised);
+  overflow-wrap: anywhere;
+}
+
+.gist {
+  font-size: var(--app-text-base);
+  line-height: 1.55;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--app-text-tertiary);
+  font: 500 var(--app-text-sm) / 1.4 var(--app-font-mono);
+}
+
+.space {
+  margin-top: var(--app-space-4);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Hero and invitations ─────────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-5);
+}
+
+.lede {
+  margin: 0;
+  max-width: 34ch;
+  font-family: var(--app-font-display);
+  font-size: clamp(var(--app-text-lg), 3.2vw, var(--app-text-xl));
+  line-height: 1.3;
+  letter-spacing: var(--app-tracking-snug);
+}
+
+.invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--app-space-4);
+  padding: var(--app-space-5) var(--app-space-6);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-primary);
+  color: var(--app-primary-ink);
+}
+
+.invite p {
+  margin: 0;
+  max-width: 46ch;
+}
+
+.invite strong {
+  display: block;
+  font-family: var(--app-font-display);
+  font-size: var(--app-text-lg);
+  font-weight: 500;
+  line-height: var(--app-lh-snug);
+}
+
+.invite .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--app-space-4);
+}
+
+.invite a {
+  color: inherit;
+}
+
+/* the invite's second way out, a link a finger reaches beside its button */
+.invite .actions a:not(.button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
+}
+
+.invite :focus-visible {
+  outline-color: var(--app-primary-ink);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--app-space-5);
+  border-radius: var(--app-radius-pill);
+  background: var(--app-primary-ink);
+  color: var(--app-primary) !important;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button:hover {
+  text-decoration: underline;
+}
+
+/* ── Bytes ────────────────────────────────────────────────────────────────── */
+
+.bytes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 6px;
+  margin: var(--app-space-4) 0 0;
+}
+
+.seg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.seg .hex {
+  padding: var(--app-space-2) 10px;
+  border: 1px solid var(--seg-line);
+  border-radius: var(--app-radius);
+  background: var(--seg-bg);
+  color: var(--seg-ink);
+  font: 500 15px/1 var(--app-font-mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.seg .lbl {
+  max-width: 17ch;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.3;
+}
+
+.bytes-hero {
+  gap: var(--app-space-3) var(--app-space-2);
+  padding: var(--app-space-5);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-paper);
+}
+
+.bytes-hero .hex {
+  padding: 10px var(--app-space-3);
+  font-size: clamp(16px, 2.4vw, 20px);
+}
+
+.seg-prefix {
+  --seg-bg: var(--seg-prefix-wash);
+  --seg-ink: var(--seg-prefix);
+  --seg-line: color-mix(in srgb, var(--seg-prefix) 35%, transparent);
+}
+
+.seg-kind {
+  --seg-bg: var(--seg-kind-wash);
+  --seg-ink: var(--seg-kind);
+  --seg-line: color-mix(in srgb, var(--seg-kind) 35%, transparent);
+}
+
+.seg-record {
+  --seg-bg: var(--seg-record-wash);
+  --seg-ink: var(--seg-record);
+  --seg-line: color-mix(in srgb, var(--seg-record) 35%, transparent);
+}
+
+.seg-block {
+  --seg-bg: var(--raised);
+  --seg-ink: var(--app-text);
+  --seg-line: var(--app-divider);
+}
+
+.seg-payload {
+  --seg-bg: var(--app-paper);
+  --seg-ink: var(--app-text-secondary);
+  --seg-line: var(--app-text-tertiary);
+}
+
+.seg-payload .hex,
+.seg-payload.swatch {
+  border-style: dashed;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: var(--app-space-3) 0 0;
+  padding: 0;
+  max-width: none;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-sm);
+  list-style: none;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--seg-line);
+  border-radius: var(--app-radius-sm);
+  background: var(--seg-bg);
+}
+
+.example {
+  margin-top: var(--app-space-6);
+}
+
+.example h3 {
+  margin: 0;
+  font-size: var(--app-text-base);
+}
+
+.example p {
+  margin: var(--app-space-1) 0 0;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+}
+
+/* the header, word by word */
+.bitmap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-2);
+  margin-top: var(--app-space-4);
+  padding-bottom: var(--app-space-1);
+  overflow-x: auto;
+}
+
+.word {
+  display: grid;
+  grid-template-columns: 112px minmax(560px, 1fr);
+  gap: var(--app-space-3);
+  align-items: center;
+}
+
+.word-name {
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.word-bits {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  background: var(--app-paper);
+}
+
+.bits {
+  display: flex;
+  grid-column: span var(--w);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--app-space-2);
+  border-right: 1px solid var(--app-divider);
+  font-size: var(--app-text-sm);
+}
+
+.bits:last-child {
+  border-right: 0;
+}
+
+.bits b {
+  overflow: hidden;
+  font: 500 var(--app-text-sm) / 1.2 var(--app-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bits i {
+  color: var(--app-text-tertiary);
+  font: 400 12px/1.2 var(--app-font-mono);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.table-wrap {
+  margin-top: var(--app-space-4);
+  overflow-x: auto;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-md);
+  background: var(--app-paper);
+}
+
+.table-wrap + p,
+.table-wrap + h3 {
+  margin-top: var(--app-space-4);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+th,
+td {
+  padding: 10px var(--app-space-3);
+  border-bottom: 1px solid var(--app-divider);
+  text-align: left;
+  vertical-align: top;
+}
+
+tr:last-child td,
+tr:last-child th {
+  border-bottom: 0;
+}
+
+thead th {
+  color: var(--app-text-tertiary);
+  font: 500 var(--app-text-xs) / 1.3 var(--app-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+th[scope='row'] {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.errors td code,
+.schemes td code,
+.code-num {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+/* a table scrolls sideways on a narrow screen, so a name of code in it stays whole */
+.table-wrap td code {
+  overflow-wrap: normal;
+}
+
+.code-num {
+  font: 500 0.875rem/1.4 var(--app-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.stage {
+  color: var(--app-text-secondary);
+  font: 500 12px/1.4 var(--app-font-mono);
+  white-space: nowrap;
+}
+
+.fate {
+  padding: 1px 6px;
+  border-radius: var(--app-radius-sm);
+  font: 500 12px/1.4 var(--app-font-mono);
+  white-space: nowrap;
+}
+
+.fate-answered {
+  background: var(--app-ok-wash);
+  color: var(--app-ok);
+}
+
+.fate-reported {
+  background: var(--app-warn-wash);
+  color: var(--app-warn);
+}
+
+.fate-gate {
+  background: var(--app-flame-wash);
+  color: var(--seg-prefix);
+}
+
+.fate-rejected {
+  background: var(--raised);
+  color: var(--app-text);
+}
+
+.fates {
+  display: grid;
+  gap: 6px;
+  margin: var(--app-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fates li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--app-space-1) 10px;
+  margin: 0;
+}
+
+/* a list of rules, in two columns where there is room */
+.rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: none;
+  margin: var(--app-space-4) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--app-divider);
+  list-style: none;
+}
+
+@media (min-width: 720px) {
+  .rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--app-space-8);
+  }
+}
+
+.rules li {
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.rules strong {
+  display: block;
+  margin-bottom: var(--app-space-1);
+  font-weight: 600;
+}
+
+.rules span {
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--app-space-2);
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  margin: 0;
+  padding: var(--app-space-1) 10px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-pill);
+  background: var(--app-paper);
+  font: 500 var(--app-text-sm) / 1.4 var(--app-font-mono);
+}
+
+/* ── Folded detail ────────────────────────────────────────────────────────── */
+
+details.more {
+  margin-top: var(--app-space-4);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-md);
+  background: var(--app-paper);
+}
+
+details.more > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--app-space-2);
+  padding: 10px 14px;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more > summary::before {
+  content: '▸';
+  color: var(--app-text-tertiary);
+  font-size: 12px;
+}
+
+details.more[open] > summary::before {
+  content: '▾';
+}
+
+details.more > summary:hover {
+  color: var(--app-accent);
+}
+
+details.more > :not(summary) {
+  margin-inline: 14px;
+}
+
+details.more > :last-child {
+  margin-bottom: 14px;
+}
+
+details.more p,
+details.more li {
+  font-size: var(--app-text-md);
+}
+
+details.more h3 {
+  margin-top: var(--app-space-4);
+}
+
+details.more .example:first-of-type {
+  margin-top: var(--app-space-1);
+}
+
+details.more pre.snippet {
+  margin-bottom: var(--app-space-3);
+}
+
+/* ── Code ─────────────────────────────────────────────────────────────────── */
+
+pre {
+  margin: 0;
+}
+
+pre.snippet {
+  margin-top: var(--app-space-3);
+  padding: var(--app-space-4);
+  overflow-x: auto;
+  border-radius: var(--app-radius-md);
+  background: var(--raised);
+  font: 400 var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
+  tab-size: 2;
+}
+
+pre code {
+  font: inherit;
+}
+
+.tok-comment {
+  color: var(--tok-comment);
+  font-style: italic;
+}
+
+.tok-keyword {
+  color: var(--tok-keyword);
+}
+
+.tok-string {
+  color: var(--tok-string);
+}
+
+.tok-number {
+  color: var(--tok-number);
+}
+
+.excerpt {
+  margin: var(--app-space-4) 0 0;
+}
+
+.excerpt figcaption {
+  margin-top: var(--app-space-2);
+  font-size: var(--app-text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
+   a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
+   to the frame's edge, while its prose keeps the measure; a short block stays as it is. The room:
+   the frame, less its gutters, the contents (220px) and their gap */
+@media (min-width: 1136px) {
+  :root {
+    --code-room: calc(
+      min(100vw, var(--app-content-max-width)) - 2 * var(--frame-gutter) - 220px -
+        var(--app-space-12)
+    );
+  }
+  main pre.snippet,
+  main details.more,
+  main .excerpt {
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--code-room);
+  }
+  details.more pre.snippet {
+    max-width: 100%;
+  }
+}
+
+.files {
+  max-width: none;
+  padding: 0;
+  list-style: none;
+}
+
+.files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--app-space-4);
+  margin: 0;
+  padding: var(--app-space-2) 0;
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.file-label {
+  flex: 1 1 260px;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+}
+
+/* ── Diagrams ─────────────────────────────────────────────────────────────── */
+
+.figure {
+  margin: var(--app-space-5) 0 0;
+  padding: var(--app-space-3) var(--app-space-3) var(--app-space-4);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-md);
+  background: var(--diagram-surface);
+}
+
+.figure > figcaption {
+  margin: 0 var(--app-space-1) var(--app-space-2);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.figure > figcaption + .figure-scroll + figcaption,
+.figure > p.note {
+  margin: var(--app-space-3) var(--app-space-1) 0;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-sm);
+}
+
+/* a diagram keeps its text readable: it shrinks to its column down to most of its size, then
+   scrolls in its own box */
+.figure-scroll {
+  overflow-x: auto;
+}
+
+.figure-scroll svg {
+  display: block;
+  width: var(--w);
+  min-width: calc(var(--w) * 0.82);
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+/* ── End ──────────────────────────────────────────────────────────────────── */
+
+footer {
+  max-width: var(--app-measure);
+  padding-top: var(--app-space-4);
+  border-top: 1px solid var(--app-divider);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+}
+
+@media (max-width: 599px) {
+  .layout {
+    padding-top: var(--app-space-6);
+  }
+  main {
+    gap: var(--app-space-12);
+  }
+  .invite {
+    padding: var(--app-space-4);
+  }
+  .bytes-hero {
+    padding: var(--app-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+    </style>
+  </head>
+  <body>
+    <div id="page" data-lang="en">
+<a class="skip" href="#main">Skip to the content</a>
+<header class="topbar">
+  <a class="brand" href="/" title="Bead’s page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <span class="tools">
+    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Open the contents" data-open="Open the contents" data-close="Close the contents">≡</button>
+    <a class="tool demo" href="/playground/">Demo</a>
+    <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" title="Lire cette page en français"><span class="long">Français</span><span class="short" aria-hidden="true">FR</span></a>
+    <button type="button" class="tool" data-action="theme" aria-label="Switch to dark mode" data-to-dark="Switch to dark mode" data-to-light="Switch to light mode">◐</button>
+  </span>
+</header>
+<div class="layout">
+  <nav class="toc" id="toc" aria-label="Contents">
+    <p class="toc-title">Contents</p>
+    <ol><li><a href="#short">In short</a></li><li><a href="#reads">What it reads</a></li><li><a href="#keeps">What it keeps</a></li><li><a href="#sends">What it sends</a></li><li><a href="#permissions">Its permissions</a></li><li><a href="#contact">Contact</a></li></ol>
+  </nav>
+  <main id="main" tabindex="-1">
+<header class="hero">
+  <p class="eyebrow">Bead DevTools · privacy policy</p>
+  <h1>Bead DevTools and your data</h1>
+  <p class="lede">The extension shows what a page’s Bead clients do. It sends nothing anywhere.</p>
+</header>
+
+<section id="short">
+  <h2>In short</h2>
+  <p>
+    Bead DevTools is a Chrome extension that adds a Bead panel to DevTools. The panel shows the
+    calls, envelopes, metrics and broker parcels of the Bead clients built by the page you inspect.
+  </p>
+  <ul>
+    <li>It reads only what a page’s Bead clients tell its hook, and Bead’s own HTTP exchanges.</li>
+    <li>It keeps what it reads in the panel’s memory, until the panel closes or you clear it.</li>
+    <li>
+      It sends nothing out of your browser. It has no server, no analytics, no ads, and it runs no
+      code that is not in its package.
+    </li>
+    <li>It asks Chrome for no permission. It does not sell or share any data.</li>
+  </ul>
+</section>
+
+<section id="reads">
+  <h2>What it reads</h2>
+  <p>
+    On every page, before the page’s own scripts run, the extension defines a hook. A Bead client
+    built in that page announces itself to the hook. Until a Bead panel is open on the tab, the
+    hook passes on nothing but that a client announced itself, and its kind.
+  </p>
+  <p>While a Bead panel is open on the tab, the hook and the panel read:</p>
+  <ul>
+    <li>
+      each call the page’s Bead clients make or answer: its procedure, its timings, its status, and
+      its payloads as text and as a tree;
+    </li>
+    <li>each envelope those clients send and receive, and each client’s metrics;</li>
+    <li>the parcels, link changes and reports of each Bead broker participant the page builds;</li>
+    <li>
+      the stack of the code that made each call, its scripts’ addresses and lines, so the panel can
+      open it in Sources;
+    </li>
+    <li>
+      in the Network panel, only the exchanges whose content type is Bead’s,
+      <code>application/prs.bead</code>, and their bodies. It skips every other exchange.
+    </li>
+  </ul>
+  <p>
+    A credential a call carries is recorded by its scheme alone, never its token. A page or an
+    application can keep its clients from the panel by giving them <code>devtools: false</code>.
+  </p>
+</section>
+
+<section id="keeps">
+  <h2>What it keeps</h2>
+  <p>
+    What the panel reads stays in its memory. It is gone when the panel closes, when DevTools
+    closes, or when you clear it. With Preserve log on, it stays across a reload of the page, while
+    DevTools stays open. The extension writes none of it to your disk.
+  </p>
+  <p>
+    The panel keeps two choices of yours in the extension’s own storage, on your device: where it
+    places a call’s detail, and the share of the split between the list and the detail. It keeps
+    nothing else there.
+  </p>
+  <p>Three actions write or read a file, and each only when you ask:</p>
+  <ul>
+    <li>Export saves the records the panel holds as a JSON file, where your browser saves files.</li>
+    <li>Import reads a JSON file you choose, in the panel alone.</li>
+    <li>A call’s menu copies its request, its answer or a snippet to your clipboard.</li>
+  </ul>
+</section>
+
+<section id="sends">
+  <h2>What it sends</h2>
+  <p>
+    Nothing leaves your browser. The extension makes no network request of its own. It has no
+    analytics, no telemetry, no crash report and no account. Its code is all in the package the
+    Chrome Web Store distributes, and it loads no remote code.
+  </p>
+  <p>
+    The records travel inside the browser alone: from the hook, in the page, to the extension’s
+    bridge, then to its service worker, then to the panel on the same tab, by Chrome’s own
+    messaging.
+  </p>
+  <p>
+    The extension changes nothing on the page but the hook it defines. It reloads the page only
+    when you ask it to.
+  </p>
+</section>
+
+<section id="permissions">
+  <h2>Its permissions</h2>
+  <p>
+    The extension’s manifest names no permission and no host permission. It declares four parts:
+  </p>
+  <ul>
+    <li>
+      two content scripts on every address, <code>&lt;all_urls&gt;</code>, at
+      <code>document_start</code>: the hook, in the page’s own world, which must be in place before
+      the page’s Bead client loads; and the bridge, in the extension’s
+      isolated world, which carries the hook’s records to the panel;
+    </li>
+    <li>a DevTools page, which adds the Bead panel to DevTools;</li>
+    <li>a service worker, which pairs each tab with the panel open on it.</li>
+  </ul>
+  <p>
+    Chrome warns that such content scripts can read and change your data on every site. The hook
+    reads only what a page’s Bead clients give it, and keeps it within your browser.
+  </p>
+</section>
+
+<section id="contact">
+  <h2>Contact</h2>
+  <p>
+    This page states what the extension does in its current version. A version that changes what
+    it reads, keeps or sends changes this page with it. The code is open, under the Apache-2.0
+    licence, in <a href="https://github.com/francisdesjardins/bead">Bead’s repository</a>. Ask a
+    question or report a problem in its
+    <a href="https://github.com/francisdesjardins/bead/issues">issues</a>.
+  </p>
+</section>
+
+<footer>
+  <p>
+    Bead DevTools is made by <a href="https://francisdesjardins.ca/?lng=en">Francis Desjardins</a>.
+    <a href="/?lng=en">Bead’s page</a> presents the protocol.
+  </p>
+</footer>
+
+  </main>
+</div>
+    </div>
+    <template id="page-other" data-lang="fr">
+<a class="skip" href="#main">Aller au contenu</a>
+<header class="topbar">
+  <a class="brand" href="/" title="La page de Bead"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <span class="tools">
+    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Ouvrir le sommaire" data-open="Ouvrir le sommaire" data-close="Fermer le sommaire">≡</button>
+    <a class="tool demo" href="/playground/">Démo</a>
+    <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" title="Read this page in English"><span class="long">English</span><span class="short" aria-hidden="true">EN</span></a>
+    <button type="button" class="tool" data-action="theme" aria-label="Passer au thème sombre" data-to-dark="Passer au thème sombre" data-to-light="Passer au thème clair">◐</button>
+  </span>
+</header>
+<div class="layout">
+  <nav class="toc" id="toc" aria-label="Sommaire">
+    <p class="toc-title">Sommaire</p>
+    <ol><li><a href="#short">En bref</a></li><li><a href="#reads">Ce qu’elle lit</a></li><li><a href="#keeps">Ce qu’elle garde</a></li><li><a href="#sends">Ce qu’elle envoie</a></li><li><a href="#permissions">Ses permissions</a></li><li><a href="#contact">Contact</a></li></ol>
+  </nav>
+  <main id="main" tabindex="-1">
+<header class="hero">
+  <p class="eyebrow">Bead DevTools · politique de confidentialité</p>
+  <h1>Bead DevTools et vos données</h1>
+  <p class="lede">
+    L’extension montre ce que font les clients Bead d’une page. Elle n’envoie rien nulle part.
+  </p>
+</header>
+
+<section id="short">
+  <h2>En bref</h2>
+  <p>
+    Bead DevTools est une extension de Chrome qui ajoute un panneau Bead aux DevTools. Le panneau
+    montre les appels, les enveloppes, les métriques et les colis du courtier des clients Bead que
+    construit la page que vous inspectez.
+  </p>
+  <ul>
+    <li>
+      Elle ne lit que ce que les clients Bead d’une page disent à son crochet, et les échanges HTTP
+      propres à Bead.
+    </li>
+    <li>
+      Elle garde ce qu’elle lit dans la mémoire du panneau, jusqu’à ce qu’il se ferme ou que vous le
+      vidiez.
+    </li>
+    <li>
+      Elle n’envoie rien hors de votre navigateur. Elle n’a ni serveur, ni mesure d’audience, ni
+      publicité, et n’exécute aucun code qui ne soit dans son paquet.
+    </li>
+    <li>Elle ne demande aucune permission à Chrome. Elle ne vend ni ne partage aucune donnée.</li>
+  </ul>
+</section>
+
+<section id="reads">
+  <h2>Ce qu’elle lit</h2>
+  <p>
+    Sur chaque page, avant que ses propres scripts ne s’exécutent, l’extension définit un crochet.
+    Un client Bead construit dans cette page s’annonce à ce crochet. Tant qu’aucun panneau Bead
+    n’est ouvert sur l’onglet, le crochet ne transmet rien d’autre que l’annonce d’un client et son
+    genre.
+  </p>
+  <p>Pendant qu’un panneau Bead est ouvert sur l’onglet, le crochet et le panneau lisent :</p>
+  <ul>
+    <li>
+      chaque appel que font ou que servent les clients Bead de la page : sa procédure, ses temps,
+      son statut, et ses charges utiles en texte et en arbre ;
+    </li>
+    <li>chaque enveloppe que ces clients envoient et reçoivent, et les métriques de chacun ;</li>
+    <li>
+      les colis, les changements de lien et les rapports de chaque participant de courtier Bead que
+      la page construit ;
+    </li>
+    <li>
+      la pile du code qui a fait chaque appel, les adresses et les lignes de ses scripts, pour que
+      le panneau puisse l’ouvrir dans Sources ;
+    </li>
+    <li>
+      dans le panneau Network, seulement les échanges dont le type de contenu est celui de Bead,
+      <code>application/prs.bead</code>, et leurs corps. Il ignore tout autre échange.
+    </li>
+  </ul>
+  <p>
+    Un justificatif que porte un appel n’est noté que par son schéma, jamais par son jeton. Une page
+    ou une application peut tenir ses clients à l’écart du panneau en leur donnant
+    <code>devtools: false</code>.
+  </p>
+</section>
+
+<section id="keeps">
+  <h2>Ce qu’elle garde</h2>
+  <p>
+    Ce que lit le panneau reste dans sa mémoire. Il disparaît quand le panneau se ferme, quand les
+    DevTools se ferment, ou quand vous le videz. Avec Preserve log, il reste d’un rechargement de la
+    page à l’autre, tant que les DevTools restent ouverts. L’extension n’en écrit rien sur votre
+    disque.
+  </p>
+  <p>
+    Le panneau garde deux de vos choix dans le stockage propre à l’extension, sur votre appareil :
+    où il place le détail d’un appel, et la part de la séparation entre la liste et le détail. Il
+    n’y garde rien d’autre.
+  </p>
+  <p>Trois actions écrivent ou lisent un fichier, chacune seulement à votre demande :</p>
+  <ul>
+    <li>
+      Export enregistre les enregistrements que tient le panneau dans un fichier JSON, là où votre
+      navigateur enregistre les fichiers.
+    </li>
+    <li>Import lit un fichier JSON que vous choisissez, dans le panneau seul.</li>
+    <li>
+      Le menu d’un appel copie sa requête, sa réponse ou un extrait de code dans votre
+      presse-papiers.
+    </li>
+  </ul>
+</section>
+
+<section id="sends">
+  <h2>Ce qu’elle envoie</h2>
+  <p>
+    Rien ne quitte votre navigateur. L’extension ne fait aucune requête réseau à elle. Elle n’a ni
+    mesure d’audience, ni télémétrie, ni rapport de plantage, ni compte. Tout son code est dans le
+    paquet que distribue le Chrome Web Store, et elle ne charge aucun code distant.
+  </p>
+  <p>
+    Les enregistrements ne voyagent que dans le navigateur : du crochet, dans la page, au pont de
+    l’extension, puis à son service worker, puis au panneau du même onglet, par la messagerie de
+    Chrome.
+  </p>
+  <p>
+    L’extension ne change rien à la page que le crochet qu’elle définit. Elle ne recharge la page
+    que si vous le lui demandez.
+  </p>
+</section>
+
+<section id="permissions">
+  <h2>Ses permissions</h2>
+  <p>
+    Le manifeste de l’extension ne nomme aucune permission et aucune permission d’hôte. Il déclare
+    quatre parties :
+  </p>
+  <ul>
+    <li>
+      deux scripts de contenu sur toute adresse, <code>&lt;all_urls&gt;</code>, à
+      <code>document_start</code> : le crochet, dans le monde propre de la page, qui doit être en
+      place avant que le client Bead de la page ne se charge ; et le pont, dans le monde isolé de
+      l’extension, qui porte les enregistrements du crochet jusqu’au panneau ;
+    </li>
+    <li>une page DevTools, qui ajoute le panneau Bead aux DevTools ;</li>
+    <li>un service worker, qui associe chaque onglet au panneau ouvert sur lui.</li>
+  </ul>
+  <p>
+    Chrome prévient que de tels scripts de contenu peuvent lire et modifier vos données sur tous les
+    sites. Le crochet ne lit que ce que lui donnent les clients Bead d’une page, et le garde dans
+    votre navigateur.
+  </p>
+</section>
+
+<section id="contact">
+  <h2>Contact</h2>
+  <p>
+    Cette page dit ce que fait l’extension dans sa version actuelle. Une version qui change ce
+    qu’elle lit, garde ou envoie change cette page avec elle. Le code est ouvert, sous la licence
+    Apache-2.0, dans <a href="https://github.com/francisdesjardins/bead">le dépôt de Bead</a>.
+    Posez une question ou signalez un problème dans ses
+    <a href="https://github.com/francisdesjardins/bead/issues">issues</a>.
+  </p>
+</section>
+
+<footer>
+  <p>
+    Bead DevTools est conçu par
+    <a href="https://francisdesjardins.ca/?lng=fr">Francis Desjardins</a>.
+    <a href="/?lng=fr">La page de Bead</a> présente le protocole.
+  </p>
+</footer>
+
+  </main>
+</div>
+    </template>
+    <script type="application/json" id="heads">{"en":{"title":"Bead DevTools: privacy policy","description":"What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser.","canonical":"https://beadproto.dev/privacy/"},"fr":{"title":"Bead DevTools : politique de confidentialité","description":"Ce que lit, garde et envoie l’extension Bead DevTools : elle lit les enregistrements de débogage Bead de la page que vous inspectez, les garde dans son panneau, et n’envoie rien hors de votre navigateur.","canonical":"https://beadproto.dev/privacy/?lng=fr"}}</script>
+    <script>
+// At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
+// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
+(() => {
+  // each language's title, description and canonical address, which the build writes beside this
+  // script
+  const HEADS = JSON.parse(document.getElementById('heads').textContent);
+  // the fixed bar, and a little air under it, above a section counted as the current one
+  const READING_LINE = 96;
+
+  const root = document.documentElement;
+  const page = document.getElementById('page');
+
+  const shown = () => {
+    return page.getAttribute('data-lang');
+  };
+
+  // ── Language ────────────────────────────────────────────────────────────────
+
+  const headFor = (language) => {
+    root.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
+    root.setAttribute('data-language', language);
+    document.title = HEADS[language].title;
+    document
+      .querySelector('meta[name="description"]')
+      .setAttribute('content', HEADS[language].description);
+    // the canonical is written here alone: the bare address is the English page and `?lng=fr` the
+    // French one, so a static one in the head would contradict the French page's
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical === null) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.append(canonical);
+    }
+    canonical.setAttribute('href', HEADS[language].canonical);
+  };
+
+  // the page's content and the template's trade places: one language in the document at a time, so
+  // each id is one element's
+  const swap = (language) => {
+    if (shown() === language) {
+      return;
+    }
+    const other = document.getElementById('page-other');
+    const stash = document.createElement('template');
+    stash.id = 'page-other';
+    stash.setAttribute('data-lang', shown());
+    stash.content.append(...page.childNodes);
+    page.append(other.content);
+    other.replaceWith(stash);
+    page.setAttribute('data-lang', language);
+  };
+
+  // ── Folded blocks ───────────────────────────────────────────────────────────
+
+  const idOf = (hash) => {
+    try {
+      return decodeURIComponent(hash.slice(1));
+    } catch {
+      return '';
+    }
+  };
+
+  // every <details> around the target opened, the target's own included
+  const reveal = (id) => {
+    const target = id === '' ? null : document.getElementById(id);
+    for (let node = target; node !== null; node = node.parentElement) {
+      if (node.tagName === 'DETAILS') {
+        node.open = true;
+      }
+    }
+    return target;
+  };
+
+  // ── Contents ────────────────────────────────────────────────────────────────
+
+  const sections = () => {
+    return [...page.querySelectorAll('main section[id]')];
+  };
+
+  const current = () => {
+    let found = null;
+    for (const section of sections()) {
+      if (section.getBoundingClientRect().top - READING_LINE <= 0) {
+        found = section;
+      }
+    }
+    return found;
+  };
+
+  const mark = () => {
+    const section = current();
+    for (const link of page.querySelectorAll('.toc a')) {
+      if (section !== null && link.getAttribute('href') === `#${section.id}`) {
+        link.setAttribute('aria-current', 'location');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    }
+  };
+
+  let marking = false;
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (!marking) {
+        marking = true;
+        window.requestAnimationFrame(() => {
+          marking = false;
+          mark();
+        });
+      }
+    },
+    { passive: true }
+  );
+
+  // ── Menu ────────────────────────────────────────────────────────────────────
+
+  const menu = (open) => {
+    const button = page.querySelector('[data-action="menu"]');
+    root.toggleAttribute('data-menu-open', open);
+    button.setAttribute('aria-expanded', String(open));
+    button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
+  };
+
+  const settle = () => {
+    menu(false);
+    mark();
+  };
+
+  // ── Events ──────────────────────────────────────────────────────────────────
+
+  document.addEventListener('click', (event) => {
+    const control = event.target.closest('[data-action]');
+    if (control !== null) {
+      const action = control.getAttribute('data-action');
+      if (action === 'menu') {
+        menu(!root.hasAttribute('data-menu-open'));
+      } else if (action === 'language') {
+        event.preventDefault();
+        const next = shown() === 'en' ? 'fr' : 'en';
+        // the section being read stays where it was on the screen
+        const reading = current();
+        const before = reading === null ? 0 : reading.getBoundingClientRect().top;
+        swap(next);
+        try {
+          window.localStorage.setItem('language', next);
+        } catch {
+          // a refused storage keeps the choice in the address alone
+        }
+        const address = new URL(window.location.href);
+        address.searchParams.set('lng', next);
+        window.history.replaceState(window.history.state, '', address);
+        headFor(next);
+        settle();
+        if (reading !== null) {
+          const again = document.getElementById(reading.id);
+          window.scrollBy({ top: again.getBoundingClientRect().top - before, behavior: 'instant' });
+        }
+        page.querySelector('[data-action="language"]').focus();
+      }
+      return;
+    }
+    const link = event.target.closest('a[href^="#"]');
+    if (link !== null) {
+      reveal(idOf(link.getAttribute('href')));
+      menu(false);
+      return;
+    }
+    if (root.hasAttribute('data-menu-open') && event.target.closest('.toc') === null) {
+      menu(false);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && root.hasAttribute('data-menu-open')) {
+      menu(false);
+      page.querySelector('[data-action="menu"]').focus();
+    }
+  });
+
+  window.addEventListener('hashchange', () => {
+    const target = reveal(idOf(window.location.hash));
+    if (target !== null) {
+      target.scrollIntoView({ behavior: 'instant' });
+    }
+  });
+
+  // ── First paint ─────────────────────────────────────────────────────────────
+
+  const language = root.getAttribute('data-language') === 'fr' ? 'fr' : 'en';
+  try {
+    swap(language);
+    headFor(language);
+  } finally {
+    // ! the page is shown whatever the swap did: a throw above would otherwise leave it blank
+    root.removeAttribute('data-swapping');
+  }
+  settle();
+  const landed = reveal(idOf(window.location.hash));
+  if (landed !== null) {
+    landed.scrollIntoView({ behavior: 'instant' });
+  }
+})();
+    </script>
+  </body>
+</html>

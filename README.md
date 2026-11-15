@@ -450,19 +450,24 @@ it calls as and the wire, is a strip under it. The demo links the sheets; the bu
 into the page, under `src/styles.css`, and into the not-found page, under the styles of
 `src/404.html`.
 
+The DevTools extension's privacy policy is a second page of both languages, at `/privacy/`: its
+content is `src/privacy.en.html` and `src/privacy.fr.html`, in the page's shell, its bar and its
+scripts, and the page's footer links it. Its build refuses a key of the extension's manifest, or an
+address its content scripts match, that the policy does not state.
+
 `build.mjs` and `check.mjs` need Node alone; `render.mjs`, `icons.mjs` and `layout.mjs` need the
 Yarn project's Playwright and a Chromium, its own or one it is given, `render.mjs` Mermaid too and
 the page's faces, so that labels are measured in the face the page draws them with. `layout.mjs`
-holds the page and the not-found page to their layout: the bar 56 px tall and on one line from 320
-to 1440 px, in both languages and both themes, no page wider than a phone, every control a finger
-reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in a table split
-inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with the focus
-given back, and the theme set before the first paint:
+holds the page, the privacy policy and the not-found page to their layout: the bar 56 px tall and on
+one line from 320 to 1440 px, in both languages and both themes, no page wider than a phone, every
+control a finger reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in
+a table split inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with
+the focus given back, and the theme set before the first paint:
 
 ```sh
 cd site
-node build.mjs     # writes dist/index.html and dist/404.html, committed and never edited by hand
-node check.mjs     # each SVG its source's render, each icon the mark's, and both pages the build's
+node build.mjs     # writes dist/index.html, dist/privacy/index.html and dist/404.html, committed
+node check.mjs     # each SVG its source's render, each icon the mark's, and the pages the build's
 yarn install --immutable
 node render.mjs --chromium <chrome> --fonts src/fonts
 node icons.mjs --chromium <chrome>
@@ -473,7 +478,8 @@ node layout.mjs --chromium <chrome>
 that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`; its `site`
 job runs `layout.mjs`.
 
-`tools/check-a11y.mjs` holds the page, the not-found page and the demo's scenes to WCAG 2.2 AA, at
+`tools/check-a11y.mjs` holds the page, the privacy policy, the not-found page and the demo's scenes
+to WCAG 2.2 AA, at
 1280 and 390 px: axe's rules of the `wcag2a`, `wcag2aa`, `wcag21aa` and `wcag22aa` tags and the
 colour of statuses in both themes, with each disclosure and menu open; in the first theme, the
 checks axe cannot make, the reflow at 320 px, the text spacing, the keyboard's order and its focus
@@ -484,7 +490,7 @@ francisdesjardins.ca are held the same way:
 
 ```sh
 node site/deploy.mjs --assemble
-node tools/check-a11y.mjs --serve site/out / "/?lng=fr" /nowhere /playground/ /playground/#calls
+node tools/check-a11y.mjs --serve site/out / "/?lng=fr" /privacy/ /nowhere /playground/ /playground/#calls
 node tools/check-a11y.mjs https://beadproto.dev/ "https://beadproto.dev/?lng=fr" https://beadproto.dev/playground/
 node tools/check-a11y.mjs https://francisdesjardins.ca/ --scheme dark --width 390
 ```
