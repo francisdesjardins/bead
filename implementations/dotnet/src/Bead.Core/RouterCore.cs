@@ -1463,20 +1463,6 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
-        // ! a request, whole or a transfer's opening, is held to chunkBytes, as its requester sends it:
-        // one past it is answered at the gate, nothing of it read or held (spec 12.1, 12.2)
-        if (prefix.Kind == (byte)EnvelopeKind.Request && data.Length > Limits.ChunkBytes)
-        {
-            Gate(
-                FailureException.OfProtocol(
-                    ProtocolCode.EnvelopeTooLarge,
-                    _side,
-                    string.Create(CultureInfo.InvariantCulture, $"a request is {Limits.ChunkBytes} bytes at most, not {data.Length}")),
-                (connectionHandle, prefix, false));
-
-            return;
-        }
-
         Envelope? envelope;
 
         try
@@ -1486,6 +1472,7 @@ internal sealed partial class RouterCore : IDisposable
                 new EnvelopeReadOptions
                 {
                     Side = _side,
+                    ChunkBytes = Limits.ChunkBytes,
                     MaximumDetailBytes = Limits.MaximumDetailBytes,
                     MaximumEnvelopeBytes = Limits.MaximumEnvelopeBytes,
                 });

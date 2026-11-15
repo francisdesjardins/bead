@@ -47,7 +47,10 @@ public sealed class EnvelopeCodecTests
             ? Vectors.FromHexadecimal(hexadecimal.GetString()!)
             : [];
         var failure = expected.TryGetProperty("failure", out var record) ? Vectors.FailureOf(record) : null;
-        var envelope = EnvelopeCodec.ReadEnvelope(bytes, Options);
+        var options = vector.TryGetProperty("chunkBytes", out var chunkBytes)
+            ? Options with { ChunkBytes = chunkBytes.GetInt32() }
+            : Options;
+        var envelope = EnvelopeCodec.ReadEnvelope(bytes, options);
 
         Assert.NotNull(envelope);
         Assert.Equal((EnvelopeKind)expected.GetProperty("kind").GetByte(), envelope.Kind);
@@ -63,9 +66,12 @@ public sealed class EnvelopeCodecTests
     {
         var vector = Vectors.Of("envelopeRefusals", name);
         var bytes = Vectors.BytesOf(vector, "bytes");
-        var options = vector.TryGetProperty("maximumEnvelopeBytes", out var maximum)
+        var bounded = vector.TryGetProperty("maximumEnvelopeBytes", out var maximum)
             ? Options with { MaximumEnvelopeBytes = maximum.GetInt32() }
             : Options;
+        var options = vector.TryGetProperty("chunkBytes", out var chunkBytes)
+            ? bounded with { ChunkBytes = chunkBytes.GetInt32() }
+            : bounded;
         var failure = Assert.Throws<FailureException>(() =>
         {
             EnvelopeCodec.ReadEnvelope(bytes, options);

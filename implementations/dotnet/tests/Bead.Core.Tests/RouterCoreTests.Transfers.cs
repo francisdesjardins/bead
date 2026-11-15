@@ -1512,6 +1512,68 @@ public sealed partial class RouterCoreTests
         }
     }
 
+    [Fact]
+    public async Task Ends_ENVELOPE_TOO_LARGE_the_call_of_a_server_whose_chunkBytes_is_larger_than_its_own_its_result_whole_or_an_opening_and_cancels_it_both_ends_setting_their_limits_alike()
+    {
+        var client = new Peer(RouterSide.Client, Chunked);
+        var server = new Peer(RouterSide.Server, Chunked with { ChunkBytes = 128, WindowBytes = 256 });
+        var resolver = server.Resolve();
+
+        client.OnSend = (envelope) =>
+        {
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(envelope), Handle);
+
+            return Task.CompletedTask;
+        };
+        server.OnSend = (envelope) =>
+        {
+            client.Core.Receive(EnvelopeCodec.WriteEnvelope(envelope), Handle);
+
+            return Task.CompletedTask;
+        };
+
+        // a whole result of 108 bytes, then, on a second call, the opening of a result's transfer, 108
+        // bytes too
+        for (var call = 0; call < 2; call += 1)
+        {
+            var asked = client.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(5));
+
+            await client.Settle();
+            await server.Settle();
+            _ = resolver.Answer(call, PatternOf(call == 0 ? 100 : 300));
+
+            for (var round = 0; round < 4; round += 1)
+            {
+                await server.Settle();
+                await client.Settle();
+            }
+
+            var failed = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            // the client's own refusal, as it ends any answer that does not read
+            Assert.Equal(
+                ((ushort)ProtocolCode.EnvelopeTooLarge, "a result is 64 bytes at most, not 108", FailureOrigin.Local),
+                (failed.Code, failed.Detail, failed.Origin));
+        }
+
+        // each result to the client, whole then an opening, then its cancel to the server, and no credit
+        Assert.Equal(
+            [(EnvelopeKind.Result, false, 108), (EnvelopeKind.Result, true, 108)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Kind, envelope.Header is ResultHeader { Total: not null }, EnvelopeCodec.WriteEnvelope(envelope).Length);
+            }));
+        Assert.Equal(
+            [EnvelopeKind.Request, EnvelopeKind.Cancel, EnvelopeKind.Request, EnvelopeKind.Cancel],
+            client.Sent.Select((envelope) =>
+            {
+                return envelope.Kind;
+            }));
+    }
+
     // a resolver of one procedure, the interop service's echo, or the handler of a destination, that
     // keeps each request it is given for the test to answer; what it admits, and what handling a
     // request does, are the test's to say
