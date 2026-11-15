@@ -168,6 +168,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the size of a block of code. The page and the not-found page inline the whole stack, the
   latter built into `site/dist/404.html`. The demo's dark scheme takes every one of penumbra's dark
   values, and a block of code reads at 13 px on the page and on the demo.
+- The demo sets its text in the page's faces, Geist, Geist Mono and Newsreader, which the skin
+  declares once for the three surfaces. It takes the theme the page keeps before its first paint,
+  and a toggle in its bar switches it and keeps the choice for both. One script,
+  `penumbra/theme.js`, holds the theme for the page and the demo.
 
 ### Removed
 

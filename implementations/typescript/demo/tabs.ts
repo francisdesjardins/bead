@@ -56,6 +56,13 @@ export const mountTabs = (list: HTMLElement, { show }: ITabsOptions): ITabs => {
     }
 
     bringIntoView(tab);
+    // ! a face that loads after this widens the tabs and cuts the one selected: it is brought into
+    // view again once the faces are in
+    void document.fonts.ready.then(() => {
+      if (tab.getAttribute('aria-selected') === 'true') {
+        bringIntoView(tab);
+      }
+    });
     show(tab);
   };
 

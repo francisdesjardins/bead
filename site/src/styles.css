@@ -1,31 +1,7 @@
 /* The page's own styles, over penumbra's two sheets, Bead's overrides of them and Bead's skin, which
-   the build puts ahead of this sheet: its faces, and its own tokens, the code's, the byte roles' and
-   the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
-   the system where no script set it. */
-
-@font-face {
-  font-family: 'Geist';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/geist.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: url('/fonts/geist-mono.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/newsreader.woff2') format('woff2');
-}
+   the build puts ahead of this sheet: its own tokens, the code's, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to the
+   system where no script set it. */
 
 :root {
   /* the page's own, each of the site's */

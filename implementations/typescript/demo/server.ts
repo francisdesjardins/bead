@@ -94,6 +94,24 @@ const FILES = Object.freeze({
     path: new URL('../../devtools/penumbra/tokens.system.overrides.css', import.meta.url),
     type: 'text/css',
   },
+  // the theme as the page keeps it, before the first paint
+  '/penumbra/theme.js': {
+    path: new URL('../../devtools/penumbra/theme.js', import.meta.url),
+    type: 'text/javascript',
+  },
+  // the page's faces, where beadproto.dev serves them
+  '/fonts/geist.woff2': {
+    path: new URL('../../../../site/src/fonts/geist.woff2', import.meta.url),
+    type: 'font/woff2',
+  },
+  '/fonts/geist-mono.woff2': {
+    path: new URL('../../../../site/src/fonts/geist-mono.woff2', import.meta.url),
+    type: 'font/woff2',
+  },
+  '/fonts/newsreader.woff2': {
+    path: new URL('../../../../site/src/fonts/newsreader.woff2', import.meta.url),
+    type: 'font/woff2',
+  },
 });
 
 // helpers
@@ -126,10 +144,15 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
     return (reply.end(), undefined);
   }
 
-  const content = await readFile(file.path, 'utf8');
+  const content = await readFile(file.path);
 
+  // ! the page alone is filled in: a face is bytes, which a reading as text would break
   reply.writeHead(200, { 'content-type': file.type });
-  reply.end(content.replaceAll('%BEAD_PATHNAME%', BEAD_PATHNAME));
+  reply.end(
+    pathname === '/'
+      ? content.toString('utf8').replaceAll('%BEAD_PATHNAME%', BEAD_PATHNAME)
+      : content
+  );
 };
 
 // definition

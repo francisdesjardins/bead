@@ -22,7 +22,8 @@
     <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <script>
-// Before the first paint: the language, as the page chooses it, and the theme, as the page keeps it.
+// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// which the build inlines beside this script.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
@@ -69,21 +70,67 @@
     root.setAttribute('data-swapping', '');
   }
   root.setAttribute('data-language', language);
+})();
+    </script>
+    <script>
+// Before the first paint, on Bead's page and its demo alike: the theme, as the page keeps it, and
+// its toggle, each button `data-action="theme"`, its label its `data-to-dark` or `data-to-light`.
+// A classic script in the head: the page's build inlines it and hashes it, the demo loads it from
+// its own origin.
+(() => {
+  const root = document.documentElement;
+  const KEY = 'theme-preference';
 
   // `theme-preference`, a JSON boolean, true for dark; else the system's preference
-  var dark = null;
+  let dark = null;
   try {
-    var saved = window.localStorage.getItem('theme-preference');
+    const saved = window.localStorage.getItem(KEY);
     if (saved !== null) {
       dark = Boolean(JSON.parse(saved));
     }
-  } catch (error) {
+  } catch {
     dark = null;
   }
   if (dark === null) {
     dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
   root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
+
+  // ! every toggle, a template's included: a page that swaps its content in from a template, as
+  // the page does its language, shows each one labelled for the scheme it is in
+  const label = () => {
+    const isDark = root.getAttribute('data-color-scheme') === 'dark';
+    const toggles = [
+      ...document.querySelectorAll('[data-action="theme"]'),
+      ...[...document.querySelectorAll('template')].flatMap((template) => {
+        return [...template.content.querySelectorAll('[data-action="theme"]')];
+      }),
+    ];
+    for (const toggle of toggles) {
+      toggle.setAttribute(
+        'aria-label',
+        toggle.getAttribute(isDark ? 'data-to-light' : 'data-to-dark') ?? ''
+      );
+    }
+  };
+
+  document.addEventListener('click', (event) => {
+    const toggle =
+      event.target instanceof Element ? event.target.closest('[data-action="theme"]') : null;
+    if (toggle === null) {
+      return;
+    }
+    const next = root.getAttribute('data-color-scheme') !== 'dark';
+    root.setAttribute('data-color-scheme', next ? 'dark' : 'light');
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(next));
+    } catch {
+      // a refused storage keeps the choice for this page alone
+    }
+    label();
+  });
+
+  document.addEventListener('DOMContentLoaded', label);
 })();
     </script>
     <style>
@@ -317,6 +364,32 @@
    own, DevTools' look. The light scheme is the root's; the dark one answers to `data-color-scheme`,
    or to the system where no script set it. */
 
+/* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
+   static build serve the same files there */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/geist.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/newsreader.woff2') format('woff2');
+}
+
 :root {
   color-scheme: light;
   --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
@@ -414,33 +487,9 @@
 }
 
 /* The page's own styles, over penumbra's two sheets, Bead's overrides of them and Bead's skin, which
-   the build puts ahead of this sheet: its faces, and its own tokens, the code's, the byte roles' and
-   the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
-   the system where no script set it. */
-
-@font-face {
-  font-family: 'Geist';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/geist.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: url('/fonts/geist-mono.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/newsreader.woff2') format('woff2');
-}
+   the build puts ahead of this sheet: its own tokens, the code's, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to the
+   system where no script set it. */
 
 :root {
   /* the page's own, each of the site's */
@@ -5811,8 +5860,8 @@ disallowed-types = [
     </template>
     <script type="application/json" id="heads">{"en":{"title":"Bead: a binary protocol for calls between a client and a server","description":"Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding."},"fr":{"title":"Bead : un protocole binaire pour les appels entre un client et un serveur","description":"Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP et sa liaison MQTT 5."}}</script>
     <script>
-// At the end of the body: the language swapped in, its head, the table of contents, the menu, the
-// theme's toggle, and a folded block opened when a link lands in it.
+// At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
+// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
 (() => {
   // each language's title and description, which the build writes beside this script
   const HEADS = JSON.parse(document.getElementById('heads').textContent);
@@ -5926,7 +5975,7 @@ disallowed-types = [
     { passive: true }
   );
 
-  // ── Menu and theme ──────────────────────────────────────────────────────────
+  // ── Menu ────────────────────────────────────────────────────────────────────
 
   const menu = (open) => {
     const button = page.querySelector('[data-action="menu"]');
@@ -5935,18 +5984,8 @@ disallowed-types = [
     button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
-  const themeLabel = () => {
-    const button = page.querySelector('[data-action="theme"]');
-    const isDark = root.getAttribute('data-color-scheme') === 'dark';
-    button.setAttribute(
-      'aria-label',
-      button.getAttribute(isDark ? 'data-to-light' : 'data-to-dark')
-    );
-  };
-
   const settle = () => {
     menu(false);
-    themeLabel();
     mark();
   };
 
@@ -5958,15 +5997,6 @@ disallowed-types = [
       const action = control.getAttribute('data-action');
       if (action === 'menu') {
         menu(!root.hasAttribute('data-menu-open'));
-      } else if (action === 'theme') {
-        const dark = root.getAttribute('data-color-scheme') !== 'dark';
-        root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
-        try {
-          window.localStorage.setItem('theme-preference', JSON.stringify(dark));
-        } catch {
-          // a refused storage keeps the choice for this page alone
-        }
-        themeLabel();
       } else if (action === 'language') {
         event.preventDefault();
         const next = shown() === 'en' ? 'fr' : 'en';

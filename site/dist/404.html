@@ -239,6 +239,32 @@
    own, DevTools' look. The light scheme is the root's; the dark one answers to `data-color-scheme`,
    or to the system where no script set it. */
 
+/* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
+   static build serve the same files there */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/geist.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/newsreader.woff2') format('woff2');
+}
+
 :root {
   color-scheme: light;
   --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
@@ -335,19 +361,7 @@
   }
 }
 
-      /* the page's two faces this one draws with; its scheme the system's, since it runs no script */
-      @font-face {
-        font-family: 'Geist';
-        font-weight: 400 600;
-        font-display: swap;
-        src: url('/fonts/geist.woff2') format('woff2');
-      }
-      @font-face {
-        font-family: 'Newsreader';
-        font-weight: 400 600;
-        font-display: swap;
-        src: url('/fonts/newsreader.woff2') format('woff2');
-      }
+      /* its scheme the system's, since it runs no script */
       body {
         margin: 0;
         min-height: 100vh;

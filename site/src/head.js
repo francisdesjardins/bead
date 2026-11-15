@@ -1,4 +1,5 @@
-// Before the first paint: the language, as the page chooses it, and the theme, as the page keeps it.
+// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// which the build inlines beside this script.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
@@ -45,19 +46,4 @@
     root.setAttribute('data-swapping', '');
   }
   root.setAttribute('data-language', language);
-
-  // `theme-preference`, a JSON boolean, true for dark; else the system's preference
-  var dark = null;
-  try {
-    var saved = window.localStorage.getItem('theme-preference');
-    if (saved !== null) {
-      dark = Boolean(JSON.parse(saved));
-    }
-  } catch (error) {
-    dark = null;
-  }
-  if (dark === null) {
-    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }
-  root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
 })();

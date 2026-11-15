@@ -42,7 +42,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
 // penumbra's two sheets, Bead's copy of them, Bead's overrides of them and Bead's skin, which the
-// demo links too: the page's styles come on top of them, and the not-found page's own
+// demo links too: the page's styles come on top of them, and the not-found page's own; and beside
+// them the theme's script, which the demo loads too
 const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
 const STACK = [
   'tokens.system.css',
@@ -830,6 +831,10 @@ export const build = () => {
     })
     .replace('{{head-script}}', () => {
       return read(join(SRC, 'head.js')).trim();
+    })
+    .replace('{{theme-script}}', () => {
+      // * the theme as the demo keeps it too, one script for both
+      return read(join(PENUMBRA, 'theme.js')).trim();
     })
     .replace('{{page-script}}', () => {
       return read(join(SRC, 'page.js')).trim();
