@@ -180,6 +180,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection's sentence and the identity. The demo's scene tabs stay under the bar as the page
   scrolls, on a screen 700 px tall or more, their end faded while the list runs on. CI's `site` job
   holds the page and the not-found page to their layout from 320 to 1440 px, `site/layout.mjs`.
+- The page colours its code by the demo's scanner, `demo/highlight.ts`, and its blocks read as they
+  did. TypeScript, `.proto`, TOML and the shell share one set of keywords; C# and Rust have their
+  own. A Rust lifetime stays plain. The colours of code join Bead's skin, each at 4.5:1 or more on
+  a card and on an inset in both themes. On a phone the demo counts what crossed on the strip's
+  button alone, no longer on the wire's sheet too.
 
 ### Removed
 

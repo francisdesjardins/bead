@@ -1,15 +1,11 @@
 /* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
-   top bar, which the build puts ahead of this sheet: its own tokens, the code's, the byte roles'
-   and the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`,
-   or to the system where no script set it. */
+   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
 
 :root {
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
-  --tok-comment: #625770;
-  --tok-keyword: #a62b70;
-  --tok-string: #04694c;
-  --tok-number: #035f91;
   /* the accent on its own wash is 4.33:1 in light: the deeper hover carries it */
   --seg-prefix: var(--app-primary-hover);
   --seg-prefix-wash: var(--app-flame-wash);
@@ -35,20 +31,12 @@
 :root[data-color-scheme='dark'] {
   --focus: var(--app-ring);
   --seg-prefix: var(--app-accent);
-  --tok-comment: #9d91a9;
-  --tok-keyword: #ff8bc4;
-  --tok-string: #34d399;
-  --tok-number: #38bdf8;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme]) {
     --focus: var(--app-ring);
     --seg-prefix: var(--app-accent);
-    --tok-comment: #9d91a9;
-    --tok-keyword: #ff8bc4;
-    --tok-string: #34d399;
-    --tok-number: #38bdf8;
   }
 }
 

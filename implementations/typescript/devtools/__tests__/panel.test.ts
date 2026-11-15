@@ -406,6 +406,41 @@ const rootTokensOf = (declared: IDeclared, scheme: Scheme): Map<string, string> 
   return new Map([...declared.roots.light, ...(scheme === 'light' ? [] : declared.roots[scheme])]);
 };
 
+/** A token's colour in a scheme, `var()` followed to the value it names, as its channels. */
+const channelsOf = (tokens: Map<string, string>, name: string): number[] | undefined => {
+  let value = tokens.get(name);
+
+  while (value?.startsWith('var(--') === true) {
+    value = tokens.get(value.slice('var('.length, -1));
+  }
+
+  const hex = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/iu.exec(value ?? '');
+
+  return hex?.slice(1).map((channel) => {
+    return Number.parseInt(channel, 16);
+  });
+};
+
+/** The WCAG 2 contrast of two opaque colours, by their channels. */
+const contrastBetween = (color: number[], ground: number[]): number => {
+  const luminanceOf = (rgb: number[]): number => {
+    const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+      const share = value / 255;
+
+      return share <= 0.040_45 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+    });
+
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const [darker = 0, lighter = 0] = [luminanceOf(color), luminanceOf(ground)].toSorted(
+    (one, other) => {
+      return one - other;
+    }
+  );
+
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
 /** The custom properties a text draws with. */
 const usedIn = (text: string): string[] => {
   return [...text.matchAll(/var\((--[\w-]+)/gu)].map(([, name = '']) => {
@@ -544,6 +579,30 @@ test.describe('the panel', () => {
           `${name}: dark as chosen and as the system's apart`
         )
         .toEqual([]);
+    }
+  });
+
+  test('colours code at 4.5:1 or more on a card and on an inset, in each scheme, wherever Bead’s skin paints', async () => {
+    for (const { name, sheets } of await skinnedSurfacesOf()) {
+      const declared = declaredOf(sheets);
+
+      for (const scheme of SCHEMES) {
+        const tokens = rootTokensOf(declared, scheme);
+
+        for (const kind of ['comment', 'keyword', 'number', 'string']) {
+          for (const ground of ['--app-paper', '--raised']) {
+            const said = `${name}, ${scheme}: --tok-${kind} on ${ground}`;
+            const color = channelsOf(tokens, `--tok-${kind}`);
+            const under = channelsOf(tokens, ground);
+
+            expect.soft(color, `${said}, a colour`).toBeDefined();
+            expect.soft(under, `${said}, a ground`).toBeDefined();
+            expect
+              .soft(contrastBetween(color ?? [], under ?? []), said)
+              .toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
     }
   });
 

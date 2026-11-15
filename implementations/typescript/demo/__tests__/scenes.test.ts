@@ -145,10 +145,15 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#wire-toggle')).toBeVisible();
     await expect(sheet).toBeVisible();
     await expect(page.locator('#wire-body')).toBeHidden();
+    // * what crossed is counted once, on the strip's button
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-toggle [data-wire-count]')).toBeVisible();
     await sheet.click();
     await expect(page.locator('#wire-body')).toBeVisible();
     await expect(sheet).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator('#wire-toggle')).toHaveAttribute('aria-expanded', 'true');
+
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
 
     // a link out of the sheet folds it, which would cover where it goes
     await page.getByRole('link', { name: 'Code › Go deeper' }).click();

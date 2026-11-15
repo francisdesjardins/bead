@@ -37,6 +37,7 @@ import {
   STATUS_HEADINGS,
   WIRE,
 } from './src/data.mjs';
+import { tokensOf } from '../implementations/typescript/demo/highlight.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -489,47 +490,14 @@ const implementationsOf = (language) => {
 
 // ── Code ──────────────────────────────────────────────────────────────────────
 
-const KEYWORDS = new Set(
-  'as async await break case catch class const continue default else enum export extends false finally for from function if import in instanceof interface let message new null of package repeated return static switch syntax this throw true try type typeof undefined using var void while yield'.split(
-    ' '
-  )
-);
-
-// a block of code, coloured as the page colours it: comments, strings, numbers and keywords, by a
-// scanner that knows no grammar and needs none for a few lines of a snippet
+// a block of code, coloured by the demo's scanner, which Node runs with its types stripped: each
+// token in a span of its kind's class, the text between them as it is
 const highlight = (source, language) => {
-  if (language === 'plaintext') {
-    return escape(source);
-  }
-  const comment = language === 'toml' || language === 'shell' ? '#' : '//';
-  const pattern = new RegExp(
-    [
-      `(${comment === '#' ? '#[^\\n]*' : '\\/\\/[^\\n]*'})`,
-      '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
-      '(\\b(?:0x[0-9a-fA-F_]+|\\d[\\d_]*(?:\\.\\d+)?(?:e[+-]?\\d+)?)\\b)',
-      '([A-Za-z_$][\\w$]*)',
-    ].join('|'),
-    'gu'
-  );
-  let out = '';
-  let at = 0;
-  for (const match of source.matchAll(pattern)) {
-    out += escape(source.slice(at, match.index));
-    const [text, isComment, isString, isNumber, word] = match;
-    if (isComment !== undefined) {
-      out += `<span class="tok-comment">${escape(text)}</span>`;
-    } else if (isString !== undefined) {
-      out += `<span class="tok-string">${escape(text)}</span>`;
-    } else if (isNumber !== undefined) {
-      out += `<span class="tok-number">${escape(text)}</span>`;
-    } else if (word !== undefined && language !== 'json' && KEYWORDS.has(word)) {
-      out += `<span class="tok-keyword">${escape(text)}</span>`;
-    } else {
-      out += escape(text);
-    }
-    at = match.index + text.length;
-  }
-  return out + escape(source.slice(at));
+  return tokensOf(source, language)
+    .map(({ kind, text }) => {
+      return kind === 'text' ? escape(text) : `<span class="tok-${kind}">${escape(text)}</span>`;
+    })
+    .join('');
 };
 
 const codeBlock = (source, language) => {

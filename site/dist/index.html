@@ -359,10 +359,10 @@
 }
 
 /* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
-   its faces and the violet neutrals it paints with, and what Bead's surfaces draw code and refusals
-   on. The page, the demo and the not-found page take this one copy; the DevTools panel keeps its
-   own, DevTools' look. The light scheme is the root's; the dark one answers to `data-color-scheme`,
-   or to the system where no script set it. */
+   its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
+   on, and the colours of code. The page, the demo and the not-found page take this one copy; the
+   DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
+   answers to `data-color-scheme`, or to the system where no script set it. */
 
 /* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
    static build serve the same files there */
@@ -416,6 +416,12 @@
   /* the ground of what is code, an inset in a card; and a refusal's wash */
   --raised: #f1ecf5;
   --bad-soft: rgb(185 28 28 / 0.1);
+
+  /* code's colours, a token's kind each, at 4.5:1 or more on a card and on an inset */
+  --tok-comment: #625770;
+  --tok-keyword: #a62b70;
+  --tok-string: #04694c;
+  --tok-number: #035f91;
 }
 
 /* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
@@ -439,6 +445,11 @@
 
   --raised: #1c1625;
   --bad-soft: rgb(248 113 113 / 0.12);
+
+  --tok-comment: #9d91a9;
+  --tok-keyword: #ff8bc4;
+  --tok-string: #34d399;
+  --tok-number: #38bdf8;
 }
 
 /* the system's dark, where no script chose: the not-found page runs none */
@@ -463,6 +474,11 @@
 
     --raised: #1c1625;
     --bad-soft: rgb(248 113 113 / 0.12);
+
+    --tok-comment: #9d91a9;
+    --tok-keyword: #ff8bc4;
+    --tok-string: #34d399;
+    --tok-number: #38bdf8;
 
     /* ! base's dark values, which base keys on the attribute alone: each as its dark block has it,
        which the DevTools panel's tests hold */
@@ -650,17 +666,13 @@ body {
 }
 
 /* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
-   top bar, which the build puts ahead of this sheet: its own tokens, the code's, the byte roles'
-   and the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`,
-   or to the system where no script set it. */
+   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
 
 :root {
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
-  --tok-comment: #625770;
-  --tok-keyword: #a62b70;
-  --tok-string: #04694c;
-  --tok-number: #035f91;
   /* the accent on its own wash is 4.33:1 in light: the deeper hover carries it */
   --seg-prefix: var(--app-primary-hover);
   --seg-prefix-wash: var(--app-flame-wash);
@@ -686,20 +698,12 @@ body {
 :root[data-color-scheme='dark'] {
   --focus: var(--app-ring);
   --seg-prefix: var(--app-accent);
-  --tok-comment: #9d91a9;
-  --tok-keyword: #ff8bc4;
-  --tok-string: #34d399;
-  --tok-number: #38bdf8;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme]) {
     --focus: var(--app-ring);
     --seg-prefix: var(--app-accent);
-    --tok-comment: #9d91a9;
-    --tok-keyword: #ff8bc4;
-    --tok-string: #34d399;
-    --tok-number: #38bdf8;
   }
 }
 
