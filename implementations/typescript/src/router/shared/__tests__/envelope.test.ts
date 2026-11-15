@@ -55,21 +55,34 @@ const envelopeOf = ({ failure, header, kind, payload }: IEnvelopeVector): Envelo
 test.describe.configure({ retries: 0 });
 
 test.describe('readEnvelope and writeEnvelope', () => {
-  for (const { bytes, envelope, name } of VECTORS.envelopes) {
+  for (const { bytes, chunkBytes, envelope, name } of VECTORS.envelopes) {
     test(`reads ${name}, and writes it back`, () => {
       const expected = envelopeOf(envelope);
 
-      expect(readEnvelope(fromHexadecimal(bytes), limits)).toEqual(expected);
+      expect(
+        readEnvelope(fromHexadecimal(bytes), {
+          ...limits,
+          ...(chunkBytes === undefined ? {} : { chunkBytes }),
+        })
+      ).toEqual(expected);
       expect(writeEnvelope(expected as OutgoingEnvelope)).toEqual(fromHexadecimal(bytes));
     });
   }
 
-  for (const { bytes, code, detail, maximumEnvelopeBytes, name } of VECTORS.envelopeRefusals) {
+  for (const {
+    bytes,
+    chunkBytes,
+    code,
+    detail,
+    maximumEnvelopeBytes,
+    name,
+  } of VECTORS.envelopeRefusals) {
     test(`refuses ${name}`, () => {
       expect(
         failureOf(() => {
           return readEnvelope(fromHexadecimal(bytes), {
             ...limits,
+            ...(chunkBytes === undefined ? {} : { chunkBytes }),
             ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
           });
         })

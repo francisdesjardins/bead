@@ -790,19 +790,19 @@ admitted — `beforeRequest` sees the header and the call's session, never the p
 its procedure's limit and the router's before anything is granted: a refusal falls on the opening,
 and no chunk follows it. An opening carries exactly the bytes of its payload its sender places in
 it, `chunkBytes` less its header, a result's less the 20 bytes of an announcement too; one with no
-byte, one that holds its whole total, which needed no transfer, and one with any other count are
-refused with `CHUNK_INVALID`. A requester whose header, its TRANSFER block added, passes 1,020
-bytes or leaves its opening no byte fails the call before it goes, with `PAYLOAD_TOO_LARGE`: a
-`JWT` of 997 bytes or more, 993 beside a destination, goes whole only. A receiver holds
-`maximumTransfers` transfers per connection at once, each until its call ends; an opening past them
-is refused with `CAPACITY_EXCEEDED`. All of them together reserve at most `bufferedBytesBudget`
-bytes, each its whole total, from its admission until its payload is whole or it ends. An opening
-is admitted at once when no opening waits and the budget left holds its total; otherwise it waits,
-behind every opening before it on any connection, holding its place and none of the budget, and is
-granted nothing. The openings that wait are admitted in the order they came as the budget frees,
-and one still waiting at half `transferInactivityTimeout` is refused with `CAPACITY_EXCEEDED`: a
-request's is answered with it, a result's ends its call with it, which is cancelled. No credit waits
-on the budget, so no transfer waits on another's.
+byte, one that holds its whole total, which needed no transfer, and one short of that count are
+refused with `CHUNK_INVALID`; one past `chunkBytes` is too large. A requester whose header, its
+TRANSFER block added, passes 1,020 bytes or leaves its opening no byte fails the call before it
+goes, with `PAYLOAD_TOO_LARGE`: a `JWT` of 997 bytes or more, 993 beside a destination, goes whole
+only. A receiver holds `maximumTransfers` transfers per connection at once, each until its call
+ends; an opening past them is refused with `CAPACITY_EXCEEDED`. All of them together reserve at most
+`bufferedBytesBudget` bytes, each its whole total, from its admission until its payload is whole or
+it ends. An opening is admitted at once when no opening waits and the budget left holds its total;
+otherwise it waits, behind every opening before it on any connection, holding its place and none of
+the budget, and is granted nothing. The openings that wait are admitted in the order they came as
+the budget frees, and one still waiting at half `transferInactivityTimeout` is refused with
+`CAPACITY_EXCEEDED`: a request's is answered with it, a result's ends its call with it, which is
+cancelled. No credit waits on the budget, so no transfer waits on another's.
 
 The requester ends a transfer with a cancel, the side that answers with a failure:
 `TRANSFER_STALLED` when nothing came for `transferInactivityTimeout`, `CHUNK_INVALID` or
@@ -817,7 +817,7 @@ that opens a subscription always go in one envelope.
 | Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                                   |
 | --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWebSocketServer` and `createWebSocketClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                                      |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, within its transfer, and the largest a payload goes whole in: a request or a result that comes past it, whole or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of a request held                                                                              |
 | `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                                           |
 | `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                                    |
 | `bufferedBytesBudget`       | 268,435,456 | the bytes the transfers a router receives reserve together, each its whole total from its admission, in the order their openings came                                                                                                                                                    |
