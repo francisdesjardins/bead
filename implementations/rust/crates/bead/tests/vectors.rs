@@ -220,8 +220,11 @@ fn envelopes() -> Result<Vec<Trial>, String> {
                 move || {
                     let bytes = vectors::bytes_of(&vector.bytes)?;
                     let expected = vectors::envelope_of(&vector.envelope)?;
-                    let read =
-                        read_envelope(&bytes, RouterSide::Server, &ReadEnvelopeOptions::default())?;
+                    let mut options = ReadEnvelopeOptions::default();
+
+                    options.chunk_bytes = vector.chunk_bytes;
+
+                    let read = read_envelope(&bytes, RouterSide::Server, &options)?;
 
                     hold(read.as_ref() == Some(&expected), || {
                         format!("read {read:?}")
@@ -241,6 +244,7 @@ fn envelopes() -> Result<Vec<Trial>, String> {
             let mut options = ReadEnvelopeOptions::default();
 
             options.maximum_envelope_bytes = vector.maximum_envelope_bytes;
+            options.chunk_bytes = vector.chunk_bytes;
 
             match read_envelope(
                 &vectors::bytes_of(&vector.bytes)?,
