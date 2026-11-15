@@ -213,3 +213,43 @@ fn writes_no_destination_block_for_a_destination_left_undefined() {
         vectors::bytes_of("A1 10 00 03 00 00 00 01 00 02 00 01").expect("bytes")
     );
 }
+
+mod read_envelope {
+    #[test]
+    fn refuses_name() {
+        super::refuses_an_envelope();
+    }
+}
+
+mod read_failure {
+    #[test]
+    fn reads_name() {
+        super::reads_a_failure();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_failure();
+    }
+}
+
+mod read_prefix {
+    #[test]
+    fn reads_name() {
+        super::reads_the_prefix_of_any_layout();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_prefix();
+    }
+}
+
+mod read_header {
+    #[test]
+    fn reads_name() {
+        super::reads_what_a_writer_need_not_write();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_header();
+    }
+}

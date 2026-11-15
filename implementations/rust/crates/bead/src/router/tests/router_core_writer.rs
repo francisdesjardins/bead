@@ -11,7 +11,7 @@ use crate::constants::{EnvelopeKind, FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, FailureRecord, NotificationHeader};
 use crate::errors::CallError;
 use crate::router::core as router_core;
-use crate::router::types::{CallAddress, RouterAnswer, RouterLimitsOptions};
+use crate::router::types::{CallAddress, RouterAnswer, RouterError, RouterLimitsOptions};
 use crate::session_token::SessionToken;
 use crate::testing::core_port::{Peer, completed, error_of, request_of, scripted_header};
 use crate::transport::Sent;
@@ -72,8 +72,7 @@ async fn credentials_of(peer: &Peer) -> Vec<Option<Credential>> {
 }
 
 // spec 13.4
-#[tokio::test]
-async fn announce_the_session_when_it_changes_and_only_then() {
+async fn announced_sessions() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let other = SessionToken::new([2; 16]).expect("a token");
     for (index, current) in [Some(token()), Some(token()), Some(other), None, None]
@@ -81,7 +80,10 @@ async fn announce_the_session_when_it_changes_and_only_then() {
         .enumerate()
     {
         token_of(&peer, current).await;
-        let call_id = u32::try_from(index).expect("five answers") * 2 + 1;
+        let call_id = u32::try_from(index)
+            .expect("five answers")
+            .saturating_mul(2)
+            .saturating_add(1);
         completed(peer.respond((
             if index % 2 == 0 { empty() } else { denied() },
             call_of((call_id, "a")),
@@ -121,14 +123,15 @@ async fn announce_the_session_when_it_changes_and_only_then() {
 }
 
 // spec 13.4
-#[tokio::test]
-async fn announce_again_what_an_answer_that_did_not_go_out_announced() {
+async fn retried_announcement() {
     for later in [false, true] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         token_of(&peer, Some(token())).await;
+        let expected: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("gone"));
+        let error = RouterError::Other(Arc::clone(&expected));
         peer.owner
             .run(move |state| {
-                let error = error_of("gone");
                 state.sending.push_back(if later {
                     Ok(Sent::Later(Box::pin(async { Err(error) })))
                 } else {
@@ -137,12 +140,13 @@ async fn announce_again_what_an_answer_that_did_not_go_out_announced() {
             })
             .await
             .expect("the send scripted");
-        assert_eq!(
-            completed(peer.respond((empty(), call_of((1, "a")))))
-                .await
-                .expect_err("the send fails")
-                .to_string(),
-            "gone"
+        let returned = completed(peer.respond((empty(), call_of((1, "a")))))
+            .await
+            .expect_err("the send fails");
+        assert_eq!(returned.to_string(), "gone");
+        assert!(
+            matches!(returned, CallError::Other(error) if Arc::ptr_eq(&error, &expected)),
+            "the same send error returns"
         );
         completed(peer.respond((empty(), call_of((3, "a")))))
             .await
@@ -158,8 +162,7 @@ async fn announce_again_what_an_answer_that_did_not_go_out_announced() {
 }
 
 // spec 13.4
-#[tokio::test]
-async fn keep_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in() {
+async fn ordered_announcements() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let other = SessionToken::new([2; 16]).expect("a token");
     let (first, first_send) = oneshot::channel();
@@ -208,8 +211,7 @@ async fn keep_the_announcement_in_the_order_answers_were_written_whatever_order_
 }
 
 // spec 13.4
-#[tokio::test]
-async fn forget_the_announcement_with_the_connection_even_with_an_answer_in_flight() {
+async fn closed_announcement() {
     for fails in [false, true] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         let (release, receive) = oneshot::channel();
@@ -248,8 +250,7 @@ async fn forget_the_announcement_with_the_connection_even_with_an_answer_in_flig
 }
 
 // spec 12.2
-#[tokio::test]
-async fn refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
+async fn bounded_payloads() {
     let peer = Peer::new(
         RouterSide::Server,
         &RouterLimitsOptions {
@@ -289,12 +290,11 @@ async fn refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
 }
 
 // spec 9.2, 12.2
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test repeats its own string a bounded number of times"
 )]
-async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_ways() {
+async fn bounded_details(source_values: bool) {
     let record = FailureRecord {
         code: NonZeroU16::new(7).expect("an application code"),
         scope: FailureScope::Application,
@@ -328,7 +328,14 @@ async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_w
                 ..RouterLimitsOptions::default()
             },
         );
-        let asked = peer.request((Bytes::new(), request_of("a")));
+        let asked = peer.request((
+            if source_values && side == RouterSide::Client {
+                Bytes::from_static(&[1])
+            } else {
+                Bytes::new()
+            },
+            request_of("a"),
+        ));
         let envelope = if side == RouterSide::Server {
             Envelope::Failure {
                 header: crate::envelope::FailureHeader {
@@ -336,6 +343,8 @@ async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_w
                     credential: None,
                 },
                 failure: FailureRecord {
+                    code: NonZeroU16::new(if source_values { 1 } else { 7 })
+                        .expect("an application code"),
                     detail: "abcdefgh".to_owned(),
                     ..record.clone()
                 },
@@ -361,8 +370,7 @@ async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_w
 }
 
 // spec 12.2
-#[tokio::test]
-async fn refuse_a_notification_too_large_for_one_envelope_and_send_one_that_fits() {
+async fn bounded_notifications() {
     let peer = Peer::new(RouterSide::Server, &small());
     for call_id in [1, 2] {
         let notification = |length| Envelope::Notification {
@@ -450,4 +458,74 @@ async fn hands_an_envelope_within_its_limits_to_its_ports_transport_traced_refus
         })
         .await
         .expect("no more transport use or trace");
+}
+
+#[tokio::test]
+async fn announce_the_session_when_it_changes_and_only_then() {
+    announced_sessions().await;
+}
+
+#[tokio::test]
+async fn announces_the_session_when_it_changes_and_only_then() {
+    announced_sessions().await;
+}
+
+#[tokio::test]
+async fn announce_again_what_an_answer_that_did_not_go_out_announced() {
+    retried_announcement().await;
+}
+
+#[tokio::test]
+async fn announces_again_what_an_answer_that_did_not_go_out_announced() {
+    retried_announcement().await;
+}
+
+#[tokio::test]
+async fn keep_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in() {
+    ordered_announcements().await;
+}
+
+#[tokio::test]
+async fn keeps_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in() {
+    ordered_announcements().await;
+}
+
+#[tokio::test]
+async fn forget_the_announcement_with_the_connection_even_with_an_answer_in_flight() {
+    closed_announcement().await;
+}
+
+#[tokio::test]
+async fn forgets_the_announcement_with_the_connection_even_with_an_answer_in_flight() {
+    closed_announcement().await;
+}
+
+#[tokio::test]
+async fn refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
+    bounded_payloads().await;
+}
+
+#[tokio::test]
+async fn refuses_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
+    bounded_payloads().await;
+}
+
+#[tokio::test]
+async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_ways() {
+    bounded_details(false).await;
+}
+
+#[tokio::test]
+async fn cuts_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_ways() {
+    bounded_details(true).await;
+}
+
+#[tokio::test]
+async fn refuse_a_notification_too_large_for_one_envelope_and_send_one_that_fits() {
+    bounded_notifications().await;
+}
+
+#[tokio::test]
+async fn refuses_a_notification_too_large_for_one_envelope_and_sends_one_that_fits() {
+    bounded_notifications().await;
 }

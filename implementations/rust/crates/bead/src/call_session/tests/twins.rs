@@ -26,10 +26,14 @@ fn token(byte: u8) -> SessionToken {
     SessionToken::new([byte; 16]).expect("a token")
 }
 
-#[test]
-fn runs_none_in_the_connection_s_session_whenever_it_has_one_and_opaque_when_it_is_its_token_nothing_else()
- {
+fn connection_sessions() {
     let held = token(1);
+    for credential in [None, Some(Credential::Opaque(held))] {
+        assert_eq!(
+            connection_session_of(credential.as_ref(), (None, None)),
+            None
+        );
+    }
     for credential in [None, Some(Credential::Opaque(held))] {
         assert_eq!(
             connection_session_of(credential.as_ref(), (Some(&held), Some(json!("ada")))),
@@ -60,8 +64,7 @@ fn runs_none_in_the_connection_s_session_whenever_it_has_one_and_opaque_when_it_
     }
 }
 
-#[test]
-fn keeps_of_a_jwt_its_scheme_alone_in_a_copy_and_hands_any_other_header_as_it_came() {
+fn handed_headers() {
     let mut jwt = scripted_header(1);
     jwt.credential = Some(Credential::Jwt(Bytes::from_static(b"a.b.c")));
     let handed = handed_header_of(&jwt);
@@ -84,11 +87,14 @@ fn keeps_of_a_jwt_its_scheme_alone_in_a_copy_and_hands_any_other_header_as_it_ca
     }
 }
 
-#[test]
-fn presents_none_unless_asked_opaque_with_the_token_learned_and_fails_a_call_that_asks_before_any_session_session_required()
- {
+fn presented_sessions() {
     let known = token(1);
     for side in [RouterSide::Client, RouterSide::Server] {
+        assert_eq!(
+            presented_credential_of(Some(&RequestCredential::None), (side, Some(&known)))
+                .expect("explicit NONE with a known session"),
+            Presented::default()
+        );
         assert_eq!(
             presented_credential_of(None, (side, Some(&known))).expect("none"),
             Presented::default()
@@ -321,4 +327,39 @@ fn keys_a_session_by_its_scheme_its_claim_and_its_values_one_sub_under_two_issue
         },
         first
     );
+}
+
+#[test]
+fn runs_none_in_the_connection_s_session_whenever_it_has_one_and_opaque_when_it_is_its_token_nothing_else()
+ {
+    connection_sessions();
+}
+
+#[test]
+fn connection_session_of_runs_none_in_the_connections_session_whenever_it_has_one_and_opaque_when_it_is_its_token_nothing_else()
+ {
+    connection_sessions();
+}
+
+#[test]
+fn keeps_of_a_jwt_its_scheme_alone_in_a_copy_and_hands_any_other_header_as_it_came() {
+    handed_headers();
+}
+
+#[test]
+fn handed_header_of_keeps_of_a_jwt_its_scheme_alone_in_a_copy_and_hands_any_other_header_as_it_came()
+ {
+    handed_headers();
+}
+
+#[test]
+fn presents_none_unless_asked_opaque_with_the_token_learned_and_fails_a_call_that_asks_before_any_session_session_required()
+ {
+    presented_sessions();
+}
+
+#[test]
+fn presented_credential_of_presents_none_unless_asked_opaque_with_the_token_learned_and_fails_a_call_that_asks_before_any_session_session_required()
+ {
+    presented_sessions();
 }

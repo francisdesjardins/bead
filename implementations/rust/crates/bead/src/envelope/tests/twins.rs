@@ -48,8 +48,7 @@ fn writes_a_session_announced_as_the_token_it_was_given() {
     );
 }
 
-#[test]
-fn writes_the_relays_and_the_scope_of_an_application_failure() {
+pub(super) fn writes_the_relays_and_the_scope_of_an_application_failure_scenario() {
     use crate::envelope::write_failure;
 
     let record = FailureRecord {
@@ -86,8 +85,7 @@ fn writes_the_relays_and_the_scope_of_an_application_failure() {
     assert_eq!(write_failure(&plain.record(), 1_024)[2], 0);
 }
 
-#[test]
-fn reads_name_and_writes_it_back() {
+fn reads_name_and_writes_it_back_scenario() {
     let entries: Vec<vectors::HeaderVector> = vectors::of("headers").expect("header vectors");
     assert_ne!(entries.len(), 0);
     for vector in entries {
@@ -103,8 +101,7 @@ fn reads_name_and_writes_it_back() {
     }
 }
 
-#[test]
-fn size_each_header_by_its_kind_and_its_blocks() {
+fn size_each_header_by_its_kind_and_its_blocks_scenario() {
     let token = SessionToken::new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
         .expect("a session token");
     let plain = RequestHeader {
@@ -168,8 +165,7 @@ fn size_each_header_by_its_kind_and_its_blocks() {
     );
 }
 
-#[test]
-fn write_big_endian_and_read_every_call_id_unsigned() {
+fn write_big_endian_and_read_every_call_id_unsigned_scenario() {
     assert_eq!(
         written(&EnvelopeHeader::Result(ResultHeader {
             call_id: 0x0102_0304,
@@ -193,8 +189,7 @@ fn write_big_endian_and_read_every_call_id_unsigned() {
     }
 }
 
-#[test]
-fn reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte() {
+fn reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte_scenario() {
     let expected =
         hexadecimal::bytes_of("A1 10 08 05 00 00 00 03 00 02 00 01 00 02 00 01 E9 00 00 00")
             .expect("hexadecimal");
@@ -224,8 +219,7 @@ fn writes_the_padding_over_whatever_the_bytes_held() {
     );
 }
 
-#[test]
-fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1() {
+fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1_scenario() {
     for credit_end in [
         0,
         1 << 31,
@@ -258,16 +252,14 @@ fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1() {
     );
 }
 
-#[test]
-fn raises_its_failures_as_the_side_of_the_table_it_is_given() {
+fn raises_its_failures_as_the_side_of_the_table_it_is_given_scenario() {
     let bytes = hexadecimal::bytes_of("A1 11 00 02 00 00 00 00").expect("hexadecimal");
     let failure = read_header(&bytes, RouterSide::Client).expect_err("a call id of zero");
     assert_eq!(failure.origin(), FailureOrigin::Local);
     assert_eq!(failure.side(), Some(RouterSide::Client));
 }
 
-#[test]
-fn skip_an_advisory_envelope() {
+fn skip_an_advisory_envelope_scenario() {
     let bytes =
         Bytes::from(hexadecimal::bytes_of("A1 80 00 02 00 00 00 03 01").expect("hexadecimal"));
     assert_eq!(
@@ -277,8 +269,7 @@ fn skip_an_advisory_envelope() {
     );
 }
 
-#[test]
-fn cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole() {
+fn cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole_scenario() {
     let envelope = Envelope::Failure {
         header: FailureHeader {
             call_id: 3,
@@ -302,8 +293,7 @@ fn cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole() {
     assert!(matches!(read, Envelope::Failure { failure, .. } if failure.detail == "abcd"));
 }
 
-#[test]
-fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more() {
+fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more_scenario() {
     let options = ReadEnvelopeOptions {
         maximum_envelope_bytes: Some(64),
         ..ReadEnvelopeOptions::default()
@@ -319,13 +309,20 @@ fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more() {
         Some(Envelope::Result { .. })
     ));
     exact.push(0);
-    let failure = read_envelope(&Bytes::from(exact), RouterSide::Server, &options)
+    let failure = read_envelope(&Bytes::from(exact.clone()), RouterSide::Server, &options)
         .expect_err("one byte over");
     assert_eq!(
         failure.protocol_code(),
         Some(ProtocolCode::ENVELOPE_TOO_LARGE)
     );
     assert_eq!(failure.side(), Some(RouterSide::Server));
+    *exact.first_mut().expect("the layout byte") = 0x0a;
+    assert_eq!(
+        read_envelope(&Bytes::from(exact), RouterSide::Server, &options)
+            .expect_err("malformed before its size is checked")
+            .protocol_code(),
+        Some(ProtocolCode::ENVELOPE_MALFORMED)
+    );
 }
 
 #[test]
@@ -518,4 +515,99 @@ fn refuses_an_offset_an_end_or_a_total_that_is_not_a_whole_number_from_0_to_2_53
             assert!(bytes.is_empty(), "{field}: nothing written");
         }
     }
+}
+
+#[test]
+fn reads_name_and_writes_it_back() {
+    reads_name_and_writes_it_back_scenario();
+}
+
+#[test]
+fn reads_a_header_and_writes_it_back() {
+    reads_name_and_writes_it_back_scenario();
+}
+
+#[test]
+fn size_each_header_by_its_kind_and_its_blocks() {
+    size_each_header_by_its_kind_and_its_blocks_scenario();
+}
+
+#[test]
+fn sizes_each_header_by_its_kind_and_its_blocks() {
+    size_each_header_by_its_kind_and_its_blocks_scenario();
+}
+
+#[test]
+fn write_big_endian_and_read_every_call_id_unsigned() {
+    write_big_endian_and_read_every_call_id_unsigned_scenario();
+}
+
+#[test]
+fn writes_big_endian_and_reads_every_call_id_unsigned() {
+    write_big_endian_and_read_every_call_id_unsigned_scenario();
+}
+
+#[test]
+fn reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte() {
+    reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte_scenario();
+}
+
+#[test]
+fn reads_a_jwt_byte_0xe9_as_u00e9_and_writes_it_back_as_the_same_byte() {
+    reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte_scenario();
+}
+
+#[test]
+fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1() {
+    carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1_scenario();
+}
+
+#[test]
+fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_minus_1() {
+    carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1_scenario();
+}
+
+#[test]
+fn raises_its_failures_as_the_side_of_the_table_it_is_given() {
+    raises_its_failures_as_the_side_of_the_table_it_is_given_scenario();
+}
+
+#[test]
+fn raises_its_failures_as_the_side_it_is_given() {
+    raises_its_failures_as_the_side_of_the_table_it_is_given_scenario();
+}
+
+#[test]
+fn skip_an_advisory_envelope() {
+    skip_an_advisory_envelope_scenario();
+}
+
+#[test]
+fn skips_an_advisory_envelope() {
+    skip_an_advisory_envelope_scenario();
+}
+
+#[test]
+fn cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole() {
+    cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole_scenario();
+}
+
+#[test]
+fn cuts_a_failure_s_detail_to_the_bytes_it_is_given_a_character_whole() {
+    cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole_scenario();
+}
+
+#[test]
+fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more() {
+    take_an_envelope_of_the_largest_size_and_refuse_one_byte_more_scenario();
+}
+
+#[test]
+fn takes_an_envelope_of_the_largest_size_and_refuses_one_byte_more() {
+    take_an_envelope_of_the_largest_size_and_refuse_one_byte_more_scenario();
+}
+
+#[test]
+fn writes_the_relays_and_the_scope_of_an_application_failure() {
+    writes_the_relays_and_the_scope_of_an_application_failure_scenario();
 }

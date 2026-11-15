@@ -589,3 +589,42 @@ async fn asks_its_key_set_with_no_lock_of_its_own_held() {
         "asked once, the resolver's lock let go"
     );
 }
+
+#[test]
+fn a_session_request_writes_no_transport_credential_nor_whether_one_was_carried() {
+    let mut request = crate::router::core::SessionRequest {
+        connection_handle: handle(),
+        carried: Carried {
+            header: RequestHeader {
+                call_id: 1,
+                service_id: 1,
+                procedure_id: 1,
+                destination_id: None,
+                opens_subscription: false,
+                paced: false,
+                total: None,
+                credential: Some(Credential::Elsewhere),
+            },
+            transport_credential: Some("Bearer SECRET".to_owned()),
+        },
+    };
+    let written = format!("{request:?}");
+    assert!(
+        !written.contains("SECRET"),
+        "the credential stays private: {written}"
+    );
+    assert!(
+        !written.contains("transport_credential"),
+        "whether it came stays private: {written}"
+    );
+    assert!(
+        written.starts_with("SessionRequest { connection_handle: \"first\", header: "),
+        "its public context: {written}"
+    );
+    request.carried.transport_credential = None;
+    assert_eq!(
+        written,
+        format!("{request:?}"),
+        "nor whether one was carried"
+    );
+}

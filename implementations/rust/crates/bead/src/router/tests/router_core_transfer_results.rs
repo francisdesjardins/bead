@@ -77,8 +77,7 @@ async fn a_subscriptions_result_stays_within_one_envelope_before_the_side_hears_
     }
 }
 
-#[tokio::test]
-async fn announce_a_session_on_a_results_opening_which_leaves_room_for_it_within_its_envelope() {
+async fn session_result_opening() {
     for dotnet in [false, true] {
         let (peer, handed) = serving(false, &limits()).await;
         let token = if dotnet {
@@ -139,4 +138,14 @@ async fn announce_a_session_on_a_results_opening_which_leaves_room_for_it_within
             .await
             .expect("one result and no report");
     }
+}
+
+#[tokio::test]
+async fn announce_a_session_on_a_results_opening_which_leaves_room_for_it_within_its_envelope() {
+    session_result_opening().await;
+}
+
+#[tokio::test]
+async fn announces_a_session_on_a_results_opening_which_leaves_room_for_it_within_its_envelope() {
+    session_result_opening().await;
 }

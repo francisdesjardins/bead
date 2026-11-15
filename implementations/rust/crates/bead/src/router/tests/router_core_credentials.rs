@@ -38,7 +38,6 @@ fn ask(
 }
 
 // spec 4.4, 12.3, 13.4
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared credential presentations and both header boundaries"
@@ -47,8 +46,7 @@ fn ask(
     clippy::disallowed_methods,
     reason = "the test repeats its own string a bounded number of times"
 )]
-async fn the_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfers_opening_no_byte_fails_it_before_it_goes_payload_too_large()
- {
+async fn credential_presentations() {
     let peer = Peer::new(RouterSide::Server, &limits());
     let mut request = request_of("a");
     request.credential = Some(Credential::Jwt(Bytes::from(vec![b'x'; 36])));
@@ -196,9 +194,7 @@ async fn the_credential_this_side_presents_is_the_one_its_side_resolved_and_one_
 }
 
 // spec 4.4, 12.3
-#[tokio::test]
-async fn a_jwt_its_header_holds_whole_fails_its_call_before_it_goes_payload_too_large_once_a_transfers_header_would_pass_1020_bytes_and_goes_as_a_transfer_a_word_shorter()
- {
+async fn jwt_header_boundary() {
     let peer = Peer::new(RouterSide::Client, &RouterLimitsOptions::default());
     let payload = pattern(1_048_576);
     let ask = |length, (destination_id, payload)| {
@@ -266,4 +262,28 @@ async fn a_jwt_its_header_holds_whole_fails_its_call_before_it_goes_payload_too_
         ));
     }
     quiet(&peer).await;
+}
+
+#[tokio::test]
+async fn the_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfers_opening_no_byte_fails_it_before_it_goes_payload_too_large()
+ {
+    credential_presentations().await;
+}
+
+#[tokio::test]
+async fn this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfers_opening_no_byte_fails_it_before_it_goes_payload_too_large()
+ {
+    credential_presentations().await;
+}
+
+#[tokio::test]
+async fn a_jwt_its_header_holds_whole_fails_its_call_before_it_goes_payload_too_large_once_a_transfers_header_would_pass_1020_bytes_and_goes_as_a_transfer_a_word_shorter()
+ {
+    jwt_header_boundary().await;
+}
+
+#[tokio::test]
+async fn a_jwt_its_header_holds_whole_fails_its_call_before_it_goes_payload_too_large_once_a_transfers_header_would_pass_1_020_bytes_and_goes_as_a_transfer_a_word_shorter()
+ {
+    jwt_header_boundary().await;
 }

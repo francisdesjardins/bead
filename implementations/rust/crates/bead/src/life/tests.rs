@@ -366,3 +366,40 @@ async fn a_stop_re_entered_from_a_close_listener_shares_the_stop_in_progress() {
         "the transport stopped once"
     );
 }
+
+#[test]
+fn an_object_never_given_a_state_is_uninitialized() {
+    assert_eq!(life().ready_state(), ReadyState::Uninitialized);
+}
+
+#[tokio::test]
+#[expect(
+    clippy::as_conversions,
+    reason = "the source twin checks Connecting's numeric value; this fieldless enum has no numeric accessor"
+)]
+async fn connecting_0_is_a_state_like_any_other() {
+    let life = life();
+    let (finish, finished) = oneshot::channel();
+    let begun =
+        life.start(move || Box::pin(async move { finished.await.expect("the start released") }));
+    assert_eq!(life.ready_state(), ReadyState::Connecting);
+    assert_eq!(life.ready_state() as u8, 0);
+    finish.send(Ok(bound())).expect("the start awaited");
+    assert_eq!(begun.await.expect("started"), bound());
+    assert_eq!(life.ready_state(), ReadyState::Open);
+    life.dispose(stopping(&calls())).await.expect("disposed");
+}
+
+#[tokio::test]
+async fn is_kept_per_object() {
+    let opened = life();
+    let untouched = life();
+    opened.start(starting(&calls())).await.expect("started");
+    assert_eq!(opened.ready_state(), ReadyState::Open);
+    assert_eq!(untouched.ready_state(), ReadyState::Uninitialized);
+    opened.dispose(stopping(&calls())).await.expect("disposed");
+    untouched
+        .dispose(stopping(&calls()))
+        .await
+        .expect("disposed");
+}

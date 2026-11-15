@@ -77,19 +77,18 @@ impl Error for CodecRefusal {
     }
 }
 
-// * the refusal's reason is the JSON refusal's, in 17.2's words; what serde said, where it said
-// anything, rides in its cause
+// * the refusal's reason is the JSON refusal's, in 17.2's words; a grammar refusal and what serde
+// said, where it said anything, ride in its cause
 impl From<JsonRefusal> for CodecRefusal {
     fn from(refusal: JsonRefusal) -> Self {
         let reason = refusal.reason();
 
         match refusal {
-            JsonRefusal::NoJsonValue(_) | JsonRefusal::NotItsType(_) => {
+            JsonRefusal::NotJson | JsonRefusal::NoJsonValue(_) | JsonRefusal::NotItsType(_) => {
                 Self::new(reason).caused_by(Arc::new(refusal))
             }
             JsonRefusal::NotUtf8
             | JsonRefusal::ByteOrderMark
-            | JsonRefusal::NotJson
             | JsonRefusal::NameTwice
             | JsonRefusal::SurrogateAlone
             | JsonRefusal::NumberPastADouble
@@ -195,7 +194,7 @@ impl PayloadCodec for TextCodec {
 }
 
 /// `json`: a JSON value, read by [`json::read`] and written in its canonical form (spec 17.5 to
-/// 17.7).
+/// 17.7). A negative zero is read as zero at every depth.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct JsonCodec;
 
@@ -203,7 +202,7 @@ impl PayloadCodec for JsonCodec {
     type Value = Value;
 
     fn decode(&self, bytes: &Bytes) -> Result<Value, CodecRefusal> {
-        json::read(bytes).map_err(CodecRefusal::from)
+        read_json(bytes)
     }
 
     fn encode(&self, value: &Value) -> Result<Bytes, CodecRefusal> {
@@ -217,8 +216,40 @@ impl PayloadCodec for JsonCodec {
     }
 }
 
+fn read_json(bytes: &Bytes) -> Result<Value, CodecRefusal> {
+    let mut value = json::read(bytes)?;
+    settle_json(&mut value);
+    Ok(value)
+}
+
+// Payload codecs hand on the shared JSON value, with negative zero normalized at every depth.
+fn settle_json(value: &mut Value) {
+    match value {
+        Value::Number(number)
+            if number
+                .as_f64()
+                .is_some_and(|number| number.to_bits() == (-0_f64).to_bits()) =>
+        {
+            *value = Value::from(0);
+        }
+        Value::Array(items) => {
+            for item in items {
+                settle_json(item);
+            }
+        }
+        Value::Object(members) => {
+            for member in members.values_mut() {
+                settle_json(member);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 /// `json`, of a type of the application's own: read through [`json::read`] then `serde`, written
 /// through [`json::to_value`], which refuses a double that is not finite, then canonical.
+///
+/// A negative zero is read as zero before it is given to the type.
 pub struct JsonOf<T> {
     of: PhantomData<fn() -> T>,
 }
@@ -253,7 +284,7 @@ impl<T: Serialize + DeserializeOwned + Send + 'static> PayloadCodec for JsonOf<T
     type Value = T;
 
     fn decode(&self, bytes: &Bytes) -> Result<T, CodecRefusal> {
-        json::from_value(json::read(bytes)?).map_err(CodecRefusal::from)
+        json::from_value(read_json(bytes)?).map_err(CodecRefusal::from)
     }
 
     fn encode(&self, value: &T) -> Result<Bytes, CodecRefusal> {

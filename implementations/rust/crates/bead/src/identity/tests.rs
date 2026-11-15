@@ -9,6 +9,8 @@ use crate::constants::ProcedureKind;
 use crate::errors::Refusal;
 use crate::testing::pair::echo;
 
+mod vectors;
+
 // A Rust slice holds addresses alone: null and an object in place of a list are no inputs.
 #[test]
 fn refuses_an_address_out_of_its_range_naming_the_transport_and_the_address_and_a_list_that_is_no_array()
@@ -380,8 +382,11 @@ fn names_a_procedure_by_a_lower_case_letter_then_letters_and_digits_63_at_most()
     }
 }
 
-#[test]
-fn folds_ascii_letters_alone_as_it_compares_names() {
+fn name_folding() {
+    assert!(are_one_name("getHTTPStatus", "getHttpStatus"));
+    assert!(!are_one_name("key", "\u{212a}ey"));
+    assert!(!are_one_name("a@", "a`"));
+    assert!(!are_one_name("ab", "abc"));
     assert!(are_one_name("echo", "eCHO"), "ASCII folded");
     assert!(
         !are_one_name("caf\u{e9}", "caf\u{c9}"),
@@ -444,4 +449,46 @@ fn refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kin
         .is_ok(),
         "no kind taken every way"
     );
+}
+
+#[test]
+fn folds_ascii_letters_alone_as_it_compares_names() {
+    name_folding();
+}
+
+#[test]
+fn folds_ascii_letters_alone_character_by_character() {
+    name_folding();
+}
+
+#[test]
+fn refuses_an_id_or_a_revision_no_c_type_holds_out_of_its_range() {
+    assert_eq!(
+        check_declaration(&Procedure {
+            service_revision: 1 << 31,
+            ..echo()
+        })
+        .expect_err("a revision is at most 2^31 - 1")
+        .reason(),
+        Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+    );
+    let consumer = crate::testing::surface::Consumer::new();
+    for field in ["procedure_id", "service_id", "service_revision"] {
+        for input in ["1.5", "\"1\"", "true", "None"] {
+            consumer.refuses(
+                &format!("pub fn check(p: &mut bead::Procedure) {{ p.{field} = {input}; }}"),
+                ("E0308", "mismatched types"),
+            );
+        }
+        if field != "service_revision" {
+            consumer.refuses(
+                &format!("pub fn check(p: &mut bead::Procedure) {{ p.{field} = 65536; }}"),
+                ("overflowing_literals", "u16"),
+            );
+            consumer.refuses(
+                &format!("pub fn check(p: &mut bead::Procedure) {{ p.{field} = -1; }}"),
+                ("E0600", "cannot apply unary operator"),
+            );
+        }
+    }
 }

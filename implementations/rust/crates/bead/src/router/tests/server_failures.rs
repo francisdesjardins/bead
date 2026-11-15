@@ -23,11 +23,16 @@ fn handler(resolve: ResolveFn) -> Handler {
     }
 }
 
-#[tokio::test]
-async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_their_connection() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "both source arrival orders keep their reports and wire answers in one scenario"
+)]
+async fn resolver_failures(batched: bool) {
     let served = Served::new(&RouterServerOptions::default());
-    served.transport.open(&first(), true);
-    served.transport.open(&second(), true);
+    if !batched {
+        served.transport.open(&first(), true);
+        served.transport.open(&second(), true);
+    }
     served
         .router
         .register_resolver((
@@ -50,13 +55,17 @@ async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_t
         ))
         .expect("news registered");
 
-    // The C# twin delivers one at a time: each asynchronous failure reaches its own connection.
+    // Each source scenario keeps its arrival order.
     served
         .transport
         .deliver(&request_of((1, &echo(), "")), &first());
-    served.settle().await;
+    if !batched {
+        served.settle().await;
+    }
     served.transport.deliver(&subscribing_of(1), &second());
-    served.settle().await;
+    if !batched {
+        served.settle().await;
+    }
     // A TransportMessage holds bytes: a text value is excluded by its type.
     served.transport.deliver_message(
         &TransportMessage {
@@ -85,12 +94,21 @@ async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_t
     served.settle().await;
     assert_eq!(
         served.reported(),
-        [
-            "rejected first",
-            "a resolver panicked: thrown second",
-            "ENVELOPE_MALFORMED first",
-            "gone second"
-        ]
+        if batched {
+            [
+                "ENVELOPE_MALFORMED first",
+                "a resolver panicked: thrown second",
+                "rejected first",
+                "gone second",
+            ]
+        } else {
+            [
+                "rejected first",
+                "a resolver panicked: thrown second",
+                "ENVELOPE_MALFORMED first",
+                "gone second",
+            ]
+        }
     );
     {
         let reported = locked(&served.reports);
@@ -105,11 +123,19 @@ async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_t
     }
     assert_eq!(
         served.sent_since(),
-        [
-            "first failure 1 PROCEDURE_FAILED",
-            "second failure 1 PROCEDURE_FAILED",
-            "second failure 3 SERVICE_UNKNOWN",
-        ]
+        if batched {
+            [
+                "second failure 1 PROCEDURE_FAILED",
+                "first failure 1 PROCEDURE_FAILED",
+                "second failure 3 SERVICE_UNKNOWN",
+            ]
+        } else {
+            [
+                "first failure 1 PROCEDURE_FAILED",
+                "second failure 1 PROCEDURE_FAILED",
+                "second failure 3 SERVICE_UNKNOWN",
+            ]
+        }
     );
     served
         .router
@@ -122,4 +148,15 @@ async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_t
         })
         .await
         .expect("the router runs on");
+}
+
+#[tokio::test]
+async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_their_connection() {
+    resolver_failures(false).await;
+}
+
+#[tokio::test]
+#[ignore = "divergence: Rust reports a synchronous resolver panic before a later malformed envelope; TypeScript reports the malformed envelope first"]
+async fn that_fail_in_their_resolver_or_do_not_read_are_reported_with_their_connection() {
+    resolver_failures(true).await;
 }

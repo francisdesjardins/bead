@@ -55,9 +55,7 @@ async fn last_failure(peer: &Peer, timeout: u64) {
     );
 }
 
-#[tokio::test]
-async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
- {
+async fn sending_inactivity() {
     use crate::constants::EnvelopeKind::{Cancel, Failure, Request, Result};
     for dotnet in [false, true] {
         let (peer, handed) = serving(
@@ -139,7 +137,6 @@ async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeo
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin keeps the combined, progressed and unbounded receiving scenarios together"
@@ -148,7 +145,7 @@ async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeo
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+async fn receiving_inactivity() {
     use super::router_core_requester::opening as result_opening;
     use super::router_core_transfer_edges::{chunk, opening};
     use crate::constants::EnvelopeKind::{Cancel, Credit, Failure, Request};
@@ -261,4 +258,26 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
         );
         quiet(&client).await;
     }
+}
+
+#[tokio::test]
+async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
+ {
+    sending_inactivity().await;
+}
+
+#[tokio::test]
+async fn ends_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
+ {
+    sending_inactivity().await;
+}
+
+#[tokio::test]
+async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+    receiving_inactivity().await;
+}
+
+#[tokio::test]
+async fn ends_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+    receiving_inactivity().await;
 }

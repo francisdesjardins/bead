@@ -229,6 +229,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Rust side's session request's debug text leaves out its transport credential and whether
+  one was carried, keeping the connection and the request header.
+- The Rust side's JSON codec keeps its parser's refusal as the cause of a `not JSON` refusal,
+  alongside its reason, as the TypeScript and C# sides do.
+- Rust's `json` payload codecs normalize `-0` to `0` at every depth on read, including typed
+  payloads, as the TypeScript and C# sides do.
 - WCAG 2.2 AA on Bead's page, its demo and the DevTools panel: a link's code and a green outcome on
   its wash reach 4.5:1, the page's tables and its header's words, which scroll sideways on a phone,
   take the keyboard's focus, and the focus on a phone is scrolled to above the demo's folded wire.

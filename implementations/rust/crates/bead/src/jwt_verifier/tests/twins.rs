@@ -6,12 +6,11 @@ use super::holding;
 use crate::jwt_verifier::{JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtVerdict, verify_jwt};
 use crate::testing::surface::Consumer;
 
-#[test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test repeats its own string a bounded number of times"
 )]
-fn throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name() {
+fn throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name_scenario() {
     let (_, keys, audiences, now) = holding();
     let bytes_32 = "A".repeat(43);
     let bytes_31 = "A".repeat(42);
@@ -113,4 +112,14 @@ fn refuses_at_crit_a_token_whose_header_names_crit_with_an_escape_whatever_a_tok
         verify_jwt(headed(&escaped).as_bytes(), &against).expect("judged"),
         JwtVerdict::Refused(JwtRefusal::Crit)
     );
+}
+
+#[test]
+fn throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name() {
+    throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name_scenario();
+}
+
+#[test]
+fn throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token() {
+    throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name_scenario();
 }

@@ -216,7 +216,7 @@ fn writes_each_series_from_one_reading_of_its_counts() {
 }
 
 #[test]
-fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedures_by_default() {
+fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1_000_procedures_by_default() {
     assert_eq!(
         super::METRICS_REGISTRY_DEFAULTS.maximum_procedures,
         Some(1_000)
@@ -245,6 +245,12 @@ fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedure
         "pub fn check(o: &mut bead::MetricsRegistryOptions) { o.maximum_procedures = Some(1.5); }",
         ("E0308", "mismatched types"),
     );
+    for value in ["f64::NAN", "f64::INFINITY"] {
+        consumer.refuses(
+            &format!("pub fn check(o: &mut bead::MetricsRegistryOptions) {{ o.maximum_procedures = Some({value}); }}"),
+            ("E0308", "mismatched types"),
+        );
+    }
 }
 
 // spec 16.7
@@ -566,4 +572,22 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
         ],
         "every call counted at both ends"
     );
+}
+
+// Duration holds nanoseconds; the binary floating-point reading is converted at that boundary.
+#[test]
+fn holds_a_duration_in_whole_microseconds_its_fraction_dropped_a_reading_s_binary_fraction_losing_none()
+ {
+    let milliseconds = [0.0, 0.03, 0.0309, 0.3 - 0.2, 1.0, 1_000.000_4, 2.5];
+    let microseconds = milliseconds.map(|reading| {
+        crate::router::core::microseconds_of(
+            Duration::try_from_secs_f64(reading / 1_000.0).expect("a finite duration"),
+        )
+    });
+    assert_eq!(microseconds, [0, 30, 30, 100, 1_000, 1_000_000, 2_500]);
+}
+
+#[test]
+fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedures_by_default() {
+    refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1_000_procedures_by_default();
 }

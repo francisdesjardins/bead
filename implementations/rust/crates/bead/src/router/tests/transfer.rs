@@ -656,8 +656,8 @@ fn halves_an_odd_window_exactly_64_bytes_short_of_half_of_129_and_65_not() {
     assert_eq!(incoming.credit_to_grant(), Some(195));
 }
 
-#[test]
-fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart() {
+fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario()
+ {
     let whole = pattern_of(102_400);
     let mut outgoing = OutgoingTransfer::new(whole.clone(), (1_004, 1_008));
     let mut incoming = incoming(&outgoing.opening(), (102_400, 1_008, 8_192));
@@ -681,4 +681,14 @@ fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_c
     assert_eq!(incoming.payload(), whole);
     assert_eq!((chunks, credits), (101, 20));
     assert_eq!(outgoing.next_chunk(), None);
+}
+
+#[test]
+fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart() {
+    carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario();
+}
+
+#[test]
+fn carries_100_kib_through_envelopes_of_1_024_bytes_and_a_window_of_8_kib_a_few_credits_apart() {
+    carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario();
 }

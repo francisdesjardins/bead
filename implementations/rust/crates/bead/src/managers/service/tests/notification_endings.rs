@@ -145,8 +145,7 @@ async fn dropped_with_its_connection_it_tells_dropped_hears_nothing_more_has_not
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_disconnect_error() {
+async fn dropped_registration() {
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let heard = Heard::default();
@@ -216,4 +215,15 @@ async fn a_registration_while_the_last_one_is_leaving_waits_for_it_then_register
     fixture.clock.settle().await;
     assert_eq!(*locked(&heard), ["news"]);
     fixture.router.dispose().await;
+}
+
+#[tokio::test]
+async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_disconnect_error() {
+    dropped_registration().await;
+}
+
+#[tokio::test]
+async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_disconnect_exception()
+ {
+    dropped_registration().await;
 }

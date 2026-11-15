@@ -120,9 +120,11 @@ fn ids(admitted: &Admitted) -> Vec<u32> {
 }
 
 // spec 9.2, 13.1
-#[tokio::test]
-async fn a_credential_of_a_scheme_the_side_takes_none_of_is_refused_credential_unsupported_naming_those_it_takes_past_its_route_and_before_it_resolves()
- {
+#[expect(
+    clippy::too_many_lines,
+    reason = "both source orders share the unsupported schemes and route refusals before resolution"
+)]
+async fn unsupported_credential_schemes(source_order: bool) {
     let resolve = || -> SessionHook {
         Box::new(|_, _| panic!("unsupported credentials never reach session resolution"))
     };
@@ -135,16 +137,20 @@ async fn a_credential_of_a_scheme_the_side_takes_none_of_is_refused_credential_u
         .expect("OPAQUE alone");
     first
         .owner
-        .run(|state| {
+        .run(move |state| {
             for (id, credential) in [
                 (1, jwt()),
                 (3, Credential::Elsewhere),
                 (5, future_scheme(0xffff, Bytes::from_static(&[1, 2]))),
-                (11, future_scheme(7, Bytes::from_static(&[1, 2]))),
             ] {
                 receive(state, (request(id, Some(credential)), "a", None));
             }
-            for (id, service_id, procedure_id) in [(7, 2, 99), (9, 9, 1)] {
+            let routes = if source_order {
+                [(7, 2, 99), (11, 2, 1), (9, 9, 1)]
+            } else {
+                [(11, 2, 1), (7, 2, 99), (9, 9, 1)]
+            };
+            for (id, service_id, procedure_id) in routes {
                 receive(
                     state,
                     (
@@ -152,7 +158,14 @@ async fn a_credential_of_a_scheme_the_side_takes_none_of_is_refused_credential_u
                             header: RequestHeader {
                                 service_id,
                                 procedure_id,
-                                credential: Some(future_scheme(7, Bytes::new())),
+                                credential: Some(future_scheme(
+                                    7,
+                                    if id == 11 {
+                                        Bytes::from_static(&[1, 2])
+                                    } else {
+                                        Bytes::new()
+                                    },
+                                )),
                                 ..scripted_header(id)
                             },
                             payload: Bytes::new(),
@@ -184,25 +197,28 @@ async fn a_credential_of_a_scheme_the_side_takes_none_of_is_refused_credential_u
     first.settle().await;
     second.settle().await;
     let unsupported = ProtocolCode::CREDENTIAL_UNSUPPORTED.get().get();
-    assert_eq!(
-        failures(&first).await,
-        [
-            (1, unsupported, "OPAQUE".to_owned()),
-            (3, unsupported, "OPAQUE".to_owned()),
-            (5, unsupported, "OPAQUE".to_owned()),
-            (11, unsupported, "OPAQUE".to_owned()),
-            (
-                7,
-                ProtocolCode::PROCEDURE_UNKNOWN.get().get(),
-                "no procedure 99 in service 2".to_owned()
-            ),
-            (
-                9,
-                ProtocolCode::SERVICE_UNKNOWN.get().get(),
-                "no service 9".to_owned()
-            ),
-        ]
+    let future = (11, unsupported, "OPAQUE".to_owned());
+    let route = (
+        7,
+        ProtocolCode::PROCEDURE_UNKNOWN.get().get(),
+        "no procedure 99 in service 2".to_owned(),
     );
+    let unknown_service = (
+        9,
+        ProtocolCode::SERVICE_UNKNOWN.get().get(),
+        "no service 9".to_owned(),
+    );
+    let mut expected = vec![
+        (1, unsupported, "OPAQUE".to_owned()),
+        (3, unsupported, "OPAQUE".to_owned()),
+        (5, unsupported, "OPAQUE".to_owned()),
+    ];
+    expected.extend(if source_order {
+        [route, future, unknown_service]
+    } else {
+        [future, route, unknown_service]
+    });
+    assert_eq!(failures(&first).await, expected);
     assert_eq!(
         failures(&second).await,
         [
@@ -261,9 +277,7 @@ async fn hands_session_of_what_its_transport_carried_for_an_elsewhere_alone_what
 }
 
 // spec 13.1
-#[tokio::test]
-async fn whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_error_of_that_code_stays_procedure_failed_reported()
- {
+async fn capacity_errors() {
     for message in ["as many calls wait already", "too many"] {
         let (peer, handed, admitted) = serving(Some(Box::new(move |request, _| {
             let error = if request.carried.header.call_id == 1 {
@@ -305,9 +319,93 @@ async fn whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exc
 }
 
 // spec 13.1
-#[tokio::test]
-async fn a_credential_of_a_jwt_or_an_elsewhere_resolves_in_a_later_turn_whether_its_resolution_waits_or_not_its_call_id_held_meanwhile()
- {
+async fn deferred_source_order() {
+    let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let carried = Arc::new(Mutex::new(Vec::new()));
+    let handed = Handed::default();
+    let mut resolving = handler((&handed, &Arc::default()));
+    let admitting = Arc::clone(&order);
+    resolving.admit = Some(Arc::new(move |request| {
+        assert_eq!(
+            request
+                .session
+                .as_ref()
+                .and_then(|session| session.data.clone()),
+            Some(serde_json::json!("ada"))
+        );
+        locked(&admitting).push(format!("admit {} ada", request.header.call_id));
+        Ok(None)
+    }));
+    let logging = Arc::clone(&order);
+    let carrying = Arc::clone(&carried);
+    let checking = Arc::clone(&order);
+    peer.owner
+        .run(move |state| {
+            state.schemes = vec![CredentialScheme::ELSEWHERE, CredentialScheme::JWT];
+            state.session = Some(Box::new(move |request, _| {
+                locked(&logging).push(format!("resolve {}", request.carried.header.call_id));
+                locked(&carrying).push((
+                    request.carried.header.call_id,
+                    request.carried.transport_credential.clone(),
+                ));
+                Resolution::Now(Ok(Resolved::Session(session())))
+            }));
+            router_core::register_resolver(&state.core.resolvers, (&echo(), resolving, None))
+                .expect("echo registered");
+            receive(state, (request(1, Some(jwt())), "a", None));
+            receive(
+                state,
+                (
+                    request(3, Some(Credential::Elsewhere)),
+                    "a",
+                    Some("Bearer mF_9.B5f-4.1JqM"),
+                ),
+            );
+            receive(state, (request(5, None), "a", None));
+            receive(state, (request(1, None), "a", None));
+            assert_eq!(
+                *locked(&checking),
+                ["resolve 1", "resolve 3", "resolve 5", "admit 5 ada"]
+            );
+        })
+        .await
+        .expect("NONE admits before the deferred credentials");
+    peer.settle().await;
+    assert_eq!(
+        *locked(&order),
+        [
+            "resolve 1",
+            "resolve 3",
+            "resolve 5",
+            "admit 5 ada",
+            "admit 1 ada",
+            "admit 3 ada"
+        ]
+    );
+    assert_eq!(
+        *locked(&carried),
+        [
+            (1, None),
+            (3, Some("Bearer mF_9.B5f-4.1JqM".to_owned())),
+            (5, None)
+        ]
+    );
+    assert_eq!(
+        locked(&handed)
+            .iter()
+            .map(|props| props.header.call_id)
+            .collect::<Vec<_>>(),
+        [5, 1, 3]
+    );
+    peer.owner.run(|state| {
+        assert!(state.sent.is_empty(), "no envelope is sent");
+        assert!(matches!(state.reports.as_slice(), [(handle, crate::router::types::RouterError::Failure(failure))]
+            if handle.as_ref() == "a" && failure.protocol_code() == Some(ProtocolCode::ENVELOPE_MALFORMED)));
+    }).await.expect("the duplicate resolving call is reported once");
+}
+
+async fn deferred_credentials() {
     let (release, waiting) = oneshot::channel();
     let mut waiting = Some(waiting);
     let resolved = Arc::new(Mutex::new(Vec::new()));
@@ -380,4 +478,41 @@ async fn a_credential_of_a_jwt_or_an_elsewhere_resolves_in_a_later_turn_whether_
         ]
     );
     assert!(peer.sent().await.is_empty(), "no envelope is sent");
+}
+
+#[tokio::test]
+async fn a_credential_of_a_scheme_the_side_takes_none_of_is_refused_credential_unsupported_naming_those_it_takes_past_its_route_and_before_it_resolves()
+ {
+    unsupported_credential_schemes(false).await;
+}
+
+#[tokio::test]
+async fn of_a_scheme_the_side_takes_none_of_is_refused_credential_unsupported_naming_those_it_takes_past_its_route_and_before_it_resolves()
+ {
+    unsupported_credential_schemes(true).await;
+}
+
+#[tokio::test]
+async fn a_credential_of_a_jwt_or_an_elsewhere_resolves_in_a_later_turn_whether_its_resolution_waits_or_not_its_call_id_held_meanwhile()
+ {
+    deferred_credentials().await;
+}
+
+#[tokio::test]
+async fn of_a_jwt_or_an_elsewhere_resolves_in_a_later_turn_whether_its_resolution_waits_or_not_its_call_id_held_meanwhile()
+ {
+    deferred_source_order().await;
+    deferred_credentials().await;
+}
+
+#[tokio::test]
+async fn whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_error_of_that_code_stays_procedure_failed_reported()
+ {
+    capacity_errors().await;
+}
+
+#[tokio::test]
+async fn a_credential_whose_resolution_rejects_with_a_refusal_exception_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_exception_of_that_code_stays_procedure_failed_reported()
+ {
+    capacity_errors().await;
 }

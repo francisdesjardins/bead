@@ -14,13 +14,11 @@ use crate::testing::core_port::{Peer, scripted_header};
 use crate::testing::pair::echo;
 
 // spec 13.1: an owned header is compared by value; cloned tokens identify the same cancellation.
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared immediate and fallback scenarios prove the receive checkpoints, sessions, header values and signal identities together"
 )]
-async fn a_credential_of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_session_handed_to_its_admission_then_to_its_resolver()
- {
+async fn immediate_credentials() {
     for none_has_session in [false, true] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         let order = Arc::new(Mutex::new(Vec::new()));
@@ -193,4 +191,16 @@ async fn a_credential_of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_s
             }
         }).await.expect("only the duplicate and unknown route are refused");
     }
+}
+
+#[tokio::test]
+async fn a_credential_of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_session_handed_to_its_admission_then_to_its_resolver()
+ {
+    immediate_credentials().await;
+}
+
+#[tokio::test]
+async fn of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_session_handed_to_its_admission_then_to_its_resolver()
+ {
+    immediate_credentials().await;
 }

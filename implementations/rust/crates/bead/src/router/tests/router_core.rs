@@ -661,6 +661,16 @@ async fn forgets_a_call_its_requester_cancels_then_cancels_its_signal_nothing_an
 #[tokio::test]
 async fn takes_a_cancel_of_no_call_in_silence_offered_to_the_side_and_reports_one_of_its_own_parity()
  {
+    unknown_cancel().await;
+}
+
+#[tokio::test]
+async fn take_a_cancel_of_no_call_in_silence_offered_to_the_side_and_report_one_of_its_own_parity()
+{
+    unknown_cancel().await;
+}
+
+async fn unknown_cancel() {
     let peer = crate::testing::core_port::Peer::new(
         crate::RouterSide::Server,
         &RouterLimitsOptions::default(),

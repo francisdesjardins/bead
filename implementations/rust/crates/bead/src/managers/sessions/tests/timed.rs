@@ -92,6 +92,36 @@ impl Timed {
 }
 
 #[tokio::test]
+async fn infinity_stops_a_running_timer() {
+    let fixture = Timed::new();
+    fixture
+        .set(Session::new(handle(FIRST), at(0)))
+        .expect("the session stored");
+    {
+        let mut state = locked(&fixture.state);
+        let mut told = locked(&fixture.arming.told);
+        state
+            .update_connection_inactivity_timeout(
+                (&handle(FIRST), Some(milliseconds(20))),
+                (&fixture.arming, &mut told),
+            )
+            .expect("the running timer")
+            .expect("a stored session");
+        assert_eq!(fixture.arming.clock.dues(), [milliseconds(20)]);
+        state
+            .update_connection_inactivity_timeout(
+                (&handle(FIRST), Some(crate::duration::NEVER)),
+                (&fixture.arming, &mut told),
+            )
+            .expect("the timeout without end")
+            .expect("a stored session");
+    }
+    assert_eq!(fixture.arming.clock.dues(), []);
+    fixture.arming.clock.advance(milliseconds(60)).await;
+    assert_eq!(fixture.reached(), Vec::<&str>::new());
+}
+
+#[tokio::test]
 async fn delete_stops_a_connection_and_forgets_it_an_unknown_one_is_false() {
     let fixture = Timed::new();
     fixture

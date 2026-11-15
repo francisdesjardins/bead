@@ -98,8 +98,7 @@ async fn rejects_what_waits_once_its_connection_closed_and_forgets_its_session()
     scripted.router.dispose().await;
 }
 
-#[tokio::test]
-async fn of_the_clients_own_parity_are_reported_and_never_answered() {
+async fn wrong_parity_command() {
     let scripted = Scripted::new();
     let handed = Arc::new(Mutex::new(Vec::new()));
     scripted
@@ -124,4 +123,14 @@ async fn of_the_clients_own_parity_are_reported_and_never_answered() {
     );
     assert_eq!(scripted.codes(), ["ENVELOPE_MALFORMED"]);
     scripted.router.dispose().await;
+}
+
+#[tokio::test]
+async fn of_the_clients_own_parity_are_reported_and_never_answered() {
+    wrong_parity_command().await;
+}
+
+#[tokio::test]
+async fn the_servers_requests_of_the_clients_own_parity_are_reported_and_never_answered() {
+    wrong_parity_command().await;
 }

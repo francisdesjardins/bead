@@ -306,10 +306,20 @@ pub(crate) enum Resolution {
 }
 
 /// A request as a side resolves its credential: where it came from, and what it came with.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct SessionRequest {
     pub(crate) connection_handle: ConnectionHandle,
     pub(crate) carried: Carried,
+}
+
+impl fmt::Debug for SessionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionRequest")
+            .field("connection_handle", &self.connection_handle)
+            .field("header", &self.carried.header)
+            .finish_non_exhaustive()
+    }
 }
 
 /// An answer about to be written, as its side is shown it before.
@@ -2480,6 +2490,10 @@ fn resolve_session<S: Side>(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/credential_schemes.rs"]
+mod credential_schemes_tests;
 
 // the schemes the side takes, OPAQUE always, and the detail that names them
 fn schemes_detail_of(schemes: &BTreeSet<u16>) -> String {

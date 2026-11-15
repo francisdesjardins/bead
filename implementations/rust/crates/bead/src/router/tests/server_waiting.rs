@@ -164,8 +164,7 @@ async fn held(served: &Served) -> Vec<(ConnectionHandle, u32, u16)> {
         .expect("subscriptions read")
 }
 
-#[tokio::test]
-async fn takes_the_place_when_that_call_fails_and_hears_what_comes() {
+async fn waiting_failed_holder() {
     let holding = Holding::new(Outcome::Fail).await;
     holding.release().await;
     assert_eq!(held(&holding.served).await, [(first(), 3, 5)]);
@@ -173,8 +172,7 @@ async fn takes_the_place_when_that_call_fails_and_hears_what_comes() {
     assert_eq!(holding.served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn takes_the_place_when_that_call_is_cancelled() {
+async fn waiting_cancelled_holder() {
     let holding = Holding::new(Outcome::Cancel).await;
     holding.served.transport.deliver(&cancel_of(1), &first());
     holding.served.settle().await;
@@ -183,22 +181,26 @@ async fn takes_the_place_when_that_call_is_cancelled() {
     assert_eq!(holding.served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn takes_the_place_when_the_answer_of_that_call_cannot_go_out() {
-    let holding = Holding::new(Outcome::Answer).await;
-    holding
-        .served
-        .transport
-        .send_as((&first(), Sending::Thrown("gone".to_owned())));
-    holding.release().await;
-    holding.served.transport.send_as((&first(), Sending::Taken));
-    assert_eq!(held(&holding.served).await, [(first(), 3, 5)]);
-    assert_eq!(holding.notify().await, ["first notification 3 flash"]);
-    assert_eq!(holding.served.reported(), ["gone first"]);
+async fn waiting_refused_answer() {
+    for later in [false, true] {
+        let holding = Holding::new(Outcome::Answer).await;
+        holding.served.transport.send_as((
+            &first(),
+            if later {
+                Sending::Rejected("gone".to_owned())
+            } else {
+                Sending::Thrown("gone".to_owned())
+            },
+        ));
+        holding.release().await;
+        holding.served.transport.send_as((&first(), Sending::Taken));
+        assert_eq!(held(&holding.served).await, [(first(), 3, 5)]);
+        assert_eq!(holding.notify().await, ["first notification 3 flash"]);
+        assert_eq!(holding.served.reported(), ["gone first"]);
+    }
 }
 
-#[tokio::test]
-async fn stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leaves_later() {
+async fn waiting_answered_holder() {
     let holding = Holding::new(Outcome::Answer).await;
     holding.release().await;
     assert_eq!(held(&holding.served).await, [(first(), 1, 5)]);
@@ -217,8 +219,7 @@ async fn stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leave
     );
 }
 
-#[tokio::test]
-async fn takes_nothing_once_cancelled_or_unsubscribed_itself() {
+async fn waiting_cancelled_self() {
     for cancel in [true, false] {
         let holding = Holding::new(Outcome::Fail).await;
         if cancel {
@@ -242,8 +243,7 @@ async fn takes_nothing_once_cancelled_or_unsubscribed_itself() {
     }
 }
 
-#[tokio::test]
-async fn waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over() {
+async fn waiting_procedures() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.open(&first(), true);
     let released = CancellationToken::new();
@@ -268,8 +268,7 @@ async fn waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place
     assert_eq!(served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn is_the_first_answered_one_answered_after_it_waits_for_nothing() {
+async fn waiting_first_answer() {
     let holding = Holding::new(Outcome::Fail).await;
     holding
         .served
@@ -281,8 +280,7 @@ async fn is_the_first_answered_one_answered_after_it_waits_for_nothing() {
     assert_eq!(holding.notify().await, ["first notification 3 flash"]);
 }
 
-#[tokio::test]
-async fn is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after() {
+async fn waiting_ended_session() {
     let holding = Holding::new(Outcome::Fail).await;
     holding
         .served
@@ -397,8 +395,7 @@ async fn a_connection_that_closes_takes_its_calls_in_flight_and_waiting_away() {
     assert_eq!(holding.served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_failed_to_go_out() {
+async fn waiting_closed_connection() {
     let holding = Holding::new(Outcome::Answer).await;
     let released = CancellationToken::new();
     holding.served.transport.send_as((
@@ -451,4 +448,100 @@ async fn keeps_apart_the_subscribing_calls_in_flight_on_one_connection_each_sett
     served.settle().await;
     assert_eq!(held(&served).await, [(first(), 3, 7)]);
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn takes_the_place_when_that_call_fails_and_hears_what_comes() {
+    waiting_failed_holder().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_takes_the_place_when_the_call_that_holds_it_fails_and_hears_what_comes()
+ {
+    waiting_failed_holder().await;
+}
+
+#[tokio::test]
+async fn takes_the_place_when_that_call_is_cancelled() {
+    waiting_cancelled_holder().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_takes_the_place_when_the_call_that_holds_it_is_cancelled() {
+    waiting_cancelled_holder().await;
+}
+
+#[tokio::test]
+async fn takes_the_place_when_the_answer_of_that_call_cannot_go_out() {
+    waiting_refused_answer().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_takes_the_place_when_the_answer_of_the_call_that_holds_it_cannot_go_out()
+ {
+    waiting_refused_answer().await;
+}
+
+#[tokio::test]
+async fn stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leaves_later() {
+    waiting_answered_holder().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_stays_out_once_the_call_that_holds_its_place_is_answered_and_does_not_take_a_place_it_leaves_later()
+ {
+    waiting_answered_holder().await;
+}
+
+#[tokio::test]
+async fn takes_nothing_once_cancelled_or_unsubscribed_itself() {
+    waiting_cancelled_self().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_takes_nothing_once_cancelled_or_unsubscribed_itself() {
+    waiting_cancelled_self().await;
+}
+
+#[tokio::test]
+async fn waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over() {
+    waiting_procedures().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over()
+ {
+    waiting_procedures().await;
+}
+
+#[tokio::test]
+async fn is_the_first_answered_one_answered_after_it_waits_for_nothing() {
+    waiting_first_answer().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_is_the_first_answered_one_answered_after_it_waits_for_nothing() {
+    waiting_first_answer().await;
+}
+
+#[tokio::test]
+async fn takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_failed_to_go_out() {
+    waiting_closed_connection().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_takes_no_place_on_a_connection_that_closed_as_the_answer_of_the_call_that_holds_it_failed_to_go_out()
+ {
+    waiting_closed_connection().await;
+}
+
+#[tokio::test]
+async fn is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after() {
+    waiting_ended_session().await;
+}
+
+#[tokio::test]
+async fn a_waiting_subscription_is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after()
+ {
+    waiting_ended_session().await;
 }

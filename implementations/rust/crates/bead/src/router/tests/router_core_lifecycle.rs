@@ -30,24 +30,26 @@ fn call_of(call_id: u32, handle: &str) -> CallAddress {
 }
 
 // spec 10.4
-#[tokio::test]
-async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
- {
+async fn unhanded_requests() {
     for side in [RouterSide::Client, RouterSide::Server] {
         let peer = Peer::new(side, &RouterLimitsOptions::default());
-        let first_id = if side == RouterSide::Client { 1 } else { 2 };
+        let first_id = if side == RouterSide::Client { 1_u32 } else { 2 };
+        let expected: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("refused"));
+        let error = crate::router::types::RouterError::Other(Arc::clone(&expected));
         peer.owner
-            .run(|state| {
-                state.sending.push_back(Err(error_of("refused")));
+            .run(move |state| {
+                state.sending.push_back(Err(error));
             })
             .await
             .expect("the transport refuses outright");
-        assert_eq!(
-            completed(peer.request((Bytes::new(), request_of("a"))))
-                .await
-                .expect_err("the refusal is heard")
-                .to_string(),
-            "refused"
+        let returned = completed(peer.request((Bytes::new(), request_of("a"))))
+            .await
+            .expect_err("the refusal is heard");
+        assert_eq!(returned.to_string(), "refused");
+        assert!(
+            matches!(returned, CallError::Other(error) if Arc::ptr_eq(&error, &expected)),
+            "the same transport error returns"
         );
 
         // * the port gives the call up in the send's turn, before returning its refusal, as the
@@ -74,7 +76,7 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
                 .collect::<Vec<_>>(),
             [
                 (EnvelopeKind::Request, first_id),
-                (EnvelopeKind::Request, first_id + 2)
+                (EnvelopeKind::Request, first_id.saturating_add(2))
             ]
         );
         peer.owner
@@ -88,7 +90,7 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
         assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
         quiet(&peer).await;
 
-        for call_id in [first_id, first_id + 2] {
+        for call_id in [first_id, first_id.saturating_add(2)] {
             peer.receive((result_of(call_id, None), Arc::from("a")));
         }
         peer.settle().await;
@@ -120,8 +122,7 @@ async fn cancel(peer: &Peer, call_id: u32) {
 }
 
 // spec 9.1, 10.1
-#[tokio::test]
-async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_fails_with() {
+async fn request_failures() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let mut request = request_of("a");
     request.options.timeout = Duration::from_millis(10);
@@ -168,13 +169,15 @@ async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_
 }
 
 // spec 10.1, 10.4
-#[tokio::test]
-async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
- {
+async fn timeout_cancel_order() {
     for side in [RouterSide::Client, RouterSide::Server] {
         for millis in [20, 1_000] {
             let peer = Peer::new(side, &RouterLimitsOptions::default());
-            let first_id = if side == RouterSide::Client { 1 } else { 2 };
+            let (first_id, next_id) = if side == RouterSide::Client {
+                (1, 3)
+            } else {
+                (2, 4)
+            };
             let ask = || {
                 let mut request = request_of("a");
                 request.options.timeout = Duration::from_millis(millis);
@@ -203,7 +206,7 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
                 [
                     (EnvelopeKind::Request, first_id),
                     (EnvelopeKind::Cancel, first_id),
-                    (EnvelopeKind::Request, first_id + 2)
+                    (EnvelopeKind::Request, next_id)
                 ]
             );
             peer.clock.advance(Duration::from_millis(millis)).await;
@@ -226,8 +229,8 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
                 [
                     (EnvelopeKind::Request, first_id),
                     (EnvelopeKind::Cancel, first_id),
-                    (EnvelopeKind::Request, first_id + 2),
-                    (EnvelopeKind::Cancel, first_id + 2)
+                    (EnvelopeKind::Request, next_id),
+                    (EnvelopeKind::Cancel, next_id)
                 ]
             );
             quiet(&peer).await;
@@ -236,9 +239,7 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
 }
 
 // spec 10.4
-#[tokio::test]
-async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
- {
+async fn reservation_delays() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     peer.owner
         .run(|state| {
@@ -268,8 +269,7 @@ async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_giv
 }
 
 // spec 10.4
-#[tokio::test]
-async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+async fn reserved_call_ids() {
     for last in [4, 2] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         peer.owner
@@ -312,9 +312,7 @@ async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
 }
 
 // spec 10.4
-#[tokio::test]
-async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
- {
+async fn connection_reservations() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     peer.owner
         .run(|state| requester::reserve(state, (&call_of(2, "a"), None)))
@@ -365,8 +363,7 @@ async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_
 }
 
 // spec 10.4, 12.3
-#[tokio::test]
-async fn stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothing_more_of_it() {
+async fn ended_requests() {
     for (ending, total, timeout, initial, code, side) in [
         ("failure", 200, 1, Some(92), 21, RouterSide::Server),
         ("cancel", 200, 1, Some(92), 0, RouterSide::Server),
@@ -428,8 +425,7 @@ async fn stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothi
 }
 
 // spec 12.3
-#[tokio::test]
-async fn ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
+async fn late_chunk_failure(server_credit: u64) {
     for side in [RouterSide::Server, RouterSide::Client] {
         let peer = Peer::new(side, &limits());
         let call_id = if side == RouterSide::Client { 1 } else { 2 };
@@ -447,7 +443,17 @@ async fn ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
             })
             .await
             .expect("the chunk held");
-        peer.receive((credit(call_id, 100), Arc::from("a")));
+        peer.receive((
+            credit(
+                call_id,
+                if side == RouterSide::Server {
+                    server_credit
+                } else {
+                    100
+                },
+            ),
+            Arc::from("a"),
+        ));
         peer.settle().await;
         if side == RouterSide::Server {
             peer.receive((
@@ -482,9 +488,7 @@ async fn ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
 }
 
 // spec 10.1, 12.3
-#[tokio::test]
-async fn waits_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfer_then_its_timeout_for_its_answer()
- {
+async fn request_transfer_timer() {
     let peer = Peer::new(
         RouterSide::Server,
         &RouterLimitsOptions {
@@ -510,7 +514,7 @@ async fn waits_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfe
     }
     let sent = pieces(&peer).await;
     assert_eq!(
-        &sent[sent.len() - 2..],
+        &sent[sent.len().checked_sub(2).expect("both cancels were sent")..],
         [
             (EnvelopeKind::Cancel, 2, None, 0),
             (EnvelopeKind::Cancel, 4, None, 0)
@@ -558,8 +562,7 @@ async fn waits_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfe
 }
 
 // spec 10.1
-#[tokio::test]
-async fn stops_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_process_waiting() {
+async fn ended_call_timers() {
     let peer = Peer::new(RouterSide::Server, &limits());
     let result = peer.request((Bytes::new(), request_of("a")));
     let cancelled = peer.request((Bytes::new(), request_of("a")));
@@ -594,9 +597,7 @@ async fn stops_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_
 }
 
 // spec 10.4, 12.4
-#[tokio::test]
-async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_place_given_back_the_peer_told_its_call_id_reserved()
- {
+async fn returned_result_budget() {
     for ending in ["cancel", "signal", "timer"] {
         let peer = Peer::new(
             RouterSide::Server,
@@ -672,13 +673,11 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
 }
 
 // spec 10.4, 12.4
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared reservation scenarios and their late-chunk boundary"
 )]
-async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_peer_keeps_its_call_abandoned_or_its_timeout_when_longer()
- {
+async fn partial_result_reservations() {
     for (ending, timeout, reservation) in [
         ("whole", Some(1_000), 4_000),
         ("failure", Some(1_000), 4_000),
@@ -810,8 +809,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
 }
 
 // spec 9.1, 11
-#[tokio::test]
-async fn says_whether_its_requests_open_a_subscription_and_whether_it_is_paced() {
+async fn subscription_flags() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let mut calls = Vec::new();
     for (opens, paced) in [
@@ -876,13 +874,11 @@ async fn says_whether_its_requests_open_a_subscription_and_whether_it_is_paced()
 }
 
 // spec 9.1
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared hand-off and refusal scenarios, with their callback orderings"
 )]
-async fn hears_its_request_handed_to_the_transport_whole_or_its_transfers_opening_then_refused_by_it_and_nothing_of_one_never_handed()
- {
+async fn handed_requests() {
     let peer = Peer::new(
         RouterSide::Server,
         &RouterLimitsOptions {
@@ -891,6 +887,23 @@ async fn hears_its_request_handed_to_the_transport_whole_or_its_transfers_openin
             ..limits()
         },
     );
+    peer.owner
+        .run(|state| {
+            let limits = &state.core.limits;
+            assert_eq!(
+                (
+                    limits.buffered_bytes_budget,
+                    limits.chunk_bytes,
+                    limits.maximum_envelope_bytes,
+                    limits.maximum_payload_bytes,
+                    limits.maximum_transfers,
+                    limits.window_bytes
+                ),
+                (1_024, 64, 64, 1_024, 4, 128)
+            );
+        })
+        .await
+        .expect("the source's complete resolved limits");
     let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ask = |length, handle: &str| {
         let telling = Arc::clone(&heard);
@@ -989,4 +1002,160 @@ async fn hears_its_request_handed_to_the_transport_whole_or_its_transfers_openin
     );
     assert_eq!(peer.sent().await.len(), 5);
     quiet(&peer).await;
+}
+
+#[tokio::test]
+async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
+ {
+    unhanded_requests().await;
+}
+
+#[tokio::test]
+async fn sends_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserves_nothing()
+ {
+    unhanded_requests().await;
+}
+
+#[tokio::test]
+async fn says_whether_its_requests_open_a_subscription_and_whether_it_is_paced() {
+    subscription_flags().await;
+}
+
+#[tokio::test]
+async fn say_whether_they_open_a_subscription_and_whether_it_is_paced() {
+    subscription_flags().await;
+}
+
+#[tokio::test]
+async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_fails_with() {
+    request_failures().await;
+}
+
+#[tokio::test]
+async fn time_out_and_reject_never_throw_what_their_payload_or_the_transport_fails_with() {
+    request_failures().await;
+}
+
+#[tokio::test]
+async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
+ {
+    timeout_cancel_order().await;
+}
+
+#[tokio::test]
+async fn cancel_a_request_that_times_out_before_its_caller_hears_of_it_so_a_call_made_again_goes_out_behind()
+ {
+    timeout_cancel_order().await;
+}
+
+#[tokio::test]
+async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
+ {
+    reservation_delays().await;
+}
+
+#[tokio::test]
+async fn reserve_a_call_id_as_long_as_its_call_was_given_or_5s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
+ {
+    reservation_delays().await;
+}
+
+#[tokio::test]
+async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+    reserved_call_ids().await;
+}
+
+#[tokio::test]
+async fn draw_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+    reserved_call_ids().await;
+}
+
+#[tokio::test]
+async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
+ {
+    connection_reservations().await;
+}
+
+#[tokio::test]
+async fn reserve_by_connection_and_forget_the_reservations_of_a_connection_or_of_every_one_as_they_go()
+ {
+    connection_reservations().await;
+}
+
+#[tokio::test]
+async fn hears_its_request_handed_to_the_transport_whole_or_its_transfers_opening_then_refused_by_it_and_nothing_of_one_never_handed()
+ {
+    handed_requests().await;
+}
+
+#[tokio::test]
+async fn hear_their_request_handed_to_the_transport_whole_or_its_transfers_opening_then_refused_by_it_and_nothing_of_one_never_handed()
+ {
+    handed_requests().await;
+}
+
+#[tokio::test]
+async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_peer_keeps_its_call_abandoned_or_its_timeout_when_longer()
+ {
+    partial_result_reservations().await;
+}
+
+#[tokio::test]
+async fn reserve_the_call_id_of_a_result_it_received_in_part_as_long_as_the_peer_keeps_its_call_abandoned_or_its_timeout_when_longer()
+ {
+    partial_result_reservations().await;
+}
+
+#[tokio::test]
+async fn stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothing_more_of_it() {
+    ended_requests().await;
+}
+
+#[tokio::test]
+async fn stop_a_request_the_peer_answers_or_its_caller_gives_up_and_send_nothing_more_of_it() {
+    ended_requests().await;
+}
+
+#[tokio::test]
+async fn ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
+    late_chunk_failure(100).await;
+}
+
+#[tokio::test]
+async fn end_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
+    late_chunk_failure(92).await;
+}
+
+#[tokio::test]
+async fn waits_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfer_then_its_timeout_for_its_answer()
+ {
+    request_transfer_timer().await;
+}
+
+#[tokio::test]
+async fn wait_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfer_then_its_timeout_for_its_answer()
+ {
+    request_transfer_timer().await;
+}
+
+#[tokio::test]
+async fn stops_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_process_waiting() {
+    ended_call_timers().await;
+}
+
+#[tokio::test]
+async fn stop_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_process_waiting() {
+    ended_call_timers().await;
+}
+
+#[tokio::test]
+async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_place_given_back_the_peer_told_its_call_id_reserved()
+ {
+    returned_result_budget().await;
+}
+
+#[tokio::test]
+async fn end_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_place_given_back_the_peer_told_its_call_id_reserved()
+ {
+    returned_result_budget().await;
 }

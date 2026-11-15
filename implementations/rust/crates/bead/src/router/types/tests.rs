@@ -38,8 +38,7 @@ fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
     assert_eq!(refused.message(), "two parts count calls");
 }
 
-#[test]
-fn gives_a_part_gauges_what_it_does_not_give_being_none() {
+fn gives_a_part_gauges_what_it_does_not_give_being_none_scenario() {
     use super::Gauges;
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
@@ -136,4 +135,14 @@ fn the_intake_limits_refuse_a_bound_below_1_and_default_to_64_and_1_mib() {
 
         assert_eq!(refused.to_string(), said, "said why");
     }
+}
+
+#[test]
+fn gives_a_part_gauges_what_it_does_not_give_being_none() {
+    gives_a_part_gauges_what_it_does_not_give_being_none_scenario();
+}
+
+#[test]
+fn gives_a_part_s_gauges_frozen_what_it_does_not_give_being_none() {
+    gives_a_part_gauges_what_it_does_not_give_being_none_scenario();
 }

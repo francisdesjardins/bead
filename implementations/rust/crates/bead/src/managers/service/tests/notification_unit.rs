@@ -148,8 +148,7 @@ async fn a_drop_silences_the_callbacks_tells_the_manager_and_fails_a_registratio
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
+async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too_scenario() {
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let first = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
@@ -377,4 +376,14 @@ async fn an_unregistration_whose_future_is_dropped_still_leaves_and_the_next_reg
         registration.unregister().await.expect("last out");
         fixture.router.dispose().await;
     }
+}
+
+#[tokio::test]
+async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
+    a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too_scenario().await;
+}
+
+#[tokio::test]
+async fn a_trigger_settles_as_every_callback_did_the_promises_they_returned_too() {
+    a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too_scenario().await;
 }

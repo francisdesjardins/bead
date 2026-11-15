@@ -310,8 +310,7 @@ async fn a_command_that_times_out_is_cancelled_on_its_even_call_id() {
     );
 }
 
-#[tokio::test]
-async fn a_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect_error() {
+async fn disposed_callback_subscription() {
     let served = opened(&RouterServerOptions::default());
     let thrown = Arc::new(Mutex::new(Vec::new()));
     let throwing = Arc::clone(&thrown);
@@ -353,4 +352,14 @@ async fn a_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect
         .expect("no subscription remains");
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect_error() {
+    disposed_callback_subscription().await;
+}
+
+#[tokio::test]
+async fn a_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect_exception() {
+    disposed_callback_subscription().await;
 }

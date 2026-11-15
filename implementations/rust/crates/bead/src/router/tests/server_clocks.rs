@@ -8,9 +8,7 @@ use crate::testing::SteppingClock;
 use crate::testing::clockless::Clockless;
 use crate::testing::scripted::ScriptedServer;
 
-#[tokio::test]
-async fn runs_on_its_transports_clock_or_on_the_one_it_is_given_when_its_transport_has_none_and_refuses_one_that_differs()
- {
+async fn server_transport_clock() {
     let clock: SharedClock = SteppingClock::new(super::january_first());
     let system: SharedClock =
         Arc::new(SystemClock::new(&SystemClockOptions::default()).expect("a system clock"));
@@ -60,4 +58,15 @@ async fn runs_on_its_transports_clock_or_on_the_one_it_is_given_when_its_transpo
         router.dispose().await;
     }
     assert_eq!(transport.listener_count(), 0);
+}
+
+#[tokio::test]
+async fn runs_on_its_transports_clock_or_on_the_one_it_is_given_when_its_transport_has_none_and_refuses_one_that_differs()
+ {
+    server_transport_clock().await;
+}
+
+#[tokio::test]
+async fn runs_on_its_transports_clock_and_refuses_another() {
+    server_transport_clock().await;
 }

@@ -143,24 +143,31 @@ fn spells_its_16_bytes_in_unpadded_base64url_and_reads_them_back() {
 }
 
 #[test]
-fn is_one_token_only_when_every_byte_is_one_byte_apart_at_either_end_is_another() {
-    let token = SessionToken::new(BYTES).expect("a token");
-    let apart = |index: usize| {
-        let mut bytes = BYTES;
+fn are_one_token_only_when_every_byte_is_one_byte_apart_at_either_end_is_another() {
+    let bytes = core::array::from_fn(|index: usize| {
+        u8::try_from(index.saturating_mul(17)).expect("a byte")
+    });
+    let held = SessionToken::new(bytes).expect("sixteen nonzero bytes");
+    assert!(SessionToken::from_slice(&bytes).expect("a copy").is(&held));
 
-        if let Some(byte) = bytes.get_mut(index) {
-            *byte ^= 0x01;
-        }
+    for index in [0, 15] {
+        let mut other = bytes;
+        *other.get_mut(index).expect("either end") ^= 1;
+        assert!(!SessionToken::new(other).expect("another token").is(&held));
+    }
 
-        SessionToken::new(bytes).expect("a token")
-    };
-
-    assert!(
-        token.is(&TEXT.parse().expect("a token")),
-        "the same, read again"
-    );
-    assert!(!token.is(&apart(0)), "a byte apart at its start");
-    assert!(!token.is(&apart(15)), "a byte apart at its end");
+    let text = held.to_string();
+    for presented in [
+        "",
+        text.get(..text.len() - 1).expect("one character fewer"),
+        &format!("{text}A"),
+    ] {
+        assert!(
+            !presented
+                .parse::<SessionToken>()
+                .is_ok_and(|token| token.is(&held))
+        );
+    }
 }
 
 #[test]

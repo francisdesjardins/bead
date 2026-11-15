@@ -252,9 +252,7 @@ async fn tells_in_its_gauges_what_its_fullest_queue_holds_at_the_bounds_its_opti
     assert_eq!(served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn sends_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
-{
+async fn paced_queue() {
     let paced = Paced::new(None);
     paced
         .served
@@ -659,4 +657,16 @@ async fn paces_a_call_handed_its_place_as_its_own_request_asked_whatever_its_hol
         ]
     );
     assert_eq!(paced.served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn sends_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
+{
+    paced_queue().await;
+}
+
+#[tokio::test]
+async fn a_paced_subscription_is_sent_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
+ {
+    paced_queue().await;
 }

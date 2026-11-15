@@ -195,8 +195,7 @@ async fn counts_the_calls_that_wait_for_each_issuers_deadline_apart() {
     }
 }
 
-#[tokio::test]
-async fn frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for()
+async fn frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for_scenario()
  {
     let fixture = Fixture::with(vec![], Some(10_000));
     fixture.hold().await;
@@ -226,4 +225,16 @@ async fn frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_
     assert_eq!(fixture.clock.dues(), []);
     fixture.clock.advance(Duration::from_mins(1)).await;
     assert_eq!(fixture.count(), 1);
+}
+
+#[tokio::test]
+async fn frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for()
+ {
+    frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for_scenario().await;
+}
+
+#[tokio::test]
+async fn frees_the_place_of_each_call_that_leaves_its_wait_10000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for()
+ {
+    frees_the_place_of_each_call_that_leaves_its_wait_10_000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for_scenario().await;
 }

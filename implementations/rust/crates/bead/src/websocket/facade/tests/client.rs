@@ -1084,3 +1084,169 @@ fn hands_its_runtime_to_its_transport_every_layer_on_it() {
     runtime.block_on(client.dispose());
     runtime.block_on(served.server.dispose()).expect("stopped");
 }
+
+#[tokio::test]
+async fn each_client_is_an_iclient() {
+    let client = client_with(&RouterLimitsOptions::default());
+    let bead_client = client.client();
+    assert!(core::ptr::eq(client.router(), bead_client.router()));
+    assert!(core::ptr::eq(client.services(), bead_client.services()));
+    assert_eq!(
+        core::any::type_name_of_val(client.services()),
+        core::any::type_name::<crate::ServiceManagerClient>()
+    );
+    client.dispose().await;
+}
+
+#[tokio::test]
+async fn calls_the_server_and_reads_its_failures_as_the_peer_s() {
+    use crate::payloads::JsonCodec;
+
+    let server = server_with(&ServerOptions::default());
+    let failing = procedure(8, ("fail", Some(ProcedureKind::Request)));
+    server
+        .services()
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .unwrap()
+        .on(Arc::new(|request, response| {
+            response.result(request.payload)
+        }))
+        .unwrap();
+    server
+        .services()
+        .get_request_resolver(
+            &failing,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .unwrap()
+        .on(Arc::new(|request, response| {
+            assert_eq!(request.payload, serde_json::Value::Null);
+            response.failure(&crate::Failure::application(
+                core::num::NonZeroU16::new(7).unwrap(),
+                "this procedure fails, on purpose",
+            ))
+        }))
+        .unwrap();
+    let port = port_of(&server).await;
+    let client = client_with(&RouterLimitsOptions::default());
+    connect(&client, port).await;
+    let echoing = client
+        .services()
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
+        .unwrap();
+    let answered = patience(
+        PATIENCE,
+        echoing
+            .call(serde_json::json!({"a": 1}), &RequestOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(crate::json::write(&answered).unwrap(), b"{\"a\":1}");
+    let refusing = client
+        .services()
+        .get_request(&failing, RequestDependencies::new(JsonCodec, JsonCodec))
+        .unwrap();
+    let refused = patience(
+        PATIENCE,
+        refusing
+            .call(serde_json::Value::Null, &RequestOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    let Err(CallError::Failure(failure)) = refused else {
+        panic!("the peer's failure, not {refused:?}");
+    };
+    assert_eq!(failure.code().get(), 7);
+    assert_eq!(failure.origin(), FailureOrigin::Peer);
+    assert_eq!(failure.side(), Some(RouterSide::Server));
+    assert_eq!(failure.detail(), "this procedure fails, on purpose");
+    assert_eq!(failure.scope(), FailureScope::Application);
+    assert_eq!(
+        failure.procedure(),
+        Some(ProcedureAddress {
+            service_id: 1,
+            procedure_id: 8
+        })
+    );
+    client.dispose().await;
+    server.dispose().await.unwrap();
+}
+
+#[tokio::test]
+async fn answers_the_server_s_command_over_the_socket() {
+    use crate::managers::service::CommandOptions;
+    use crate::payloads::JsonCodec;
+
+    let server = server_with(&ServerOptions::default());
+    let asking = procedure(9, ("ask", Some(ProcedureKind::Request)));
+    let clock = procedure(10, ("clock", Some(ProcedureKind::Command)));
+    let command = server
+        .services()
+        .get_command(&clock, RequestDependencies::new(JsonCodec, JsonCodec))
+        .unwrap();
+    server
+        .services()
+        .get_request_resolver(
+            &asking,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .unwrap()
+        .on(Arc::new(move |request, response| {
+            let command = command.clone();
+            Box::pin(async move {
+                assert_eq!(request.payload, serde_json::Value::Null);
+                let mut options = CommandOptions::new(Arc::clone(&request.connection_handle));
+                options.timeout = Some(Duration::from_secs(10));
+                let answer = command
+                    .call(
+                        serde_json::json!("What time is it where you are?"),
+                        &options,
+                    )
+                    .map_err(ResolverError::other)?
+                    .await
+                    .map_err(ResolverError::other)?;
+                response.result(answer).await
+            })
+        }))
+        .unwrap();
+    let port = port_of(&server).await;
+    let client = client_with(&RouterLimitsOptions::default());
+    client
+        .services()
+        .get_command_resolver(
+            &clock,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .unwrap()
+        .on(Arc::new(|request, response| {
+            assert_eq!(
+                request.payload,
+                serde_json::json!("What time is it where you are?")
+            );
+            response.result(serde_json::json!("noon"))
+        }))
+        .unwrap();
+    connect(&client, port).await;
+    let requester = client
+        .services()
+        .get_request(&asking, RequestDependencies::new(JsonCodec, JsonCodec))
+        .unwrap();
+    let answer = patience(
+        PATIENCE,
+        requester
+            .call(serde_json::Value::Null, &RequestOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(crate::json::write(&answer).unwrap(), b"\"noon\"");
+    client.dispose().await;
+    server.dispose().await.unwrap();
+}

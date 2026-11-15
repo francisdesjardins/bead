@@ -2216,6 +2216,7 @@ crate::router::server
   struct SessionRequest<'a> #[non_exhaustive]
     pub connection_handle: &'a ConnectionHandle
     pub header: &'a RequestHeader
+    implements Debug
     derives Debug
   struct RouterServerOptions #[non_exhaustive]
     pub clock: Option<SharedClock>

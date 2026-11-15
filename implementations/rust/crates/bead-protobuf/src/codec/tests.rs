@@ -1369,3 +1369,98 @@ fn refuses_a_message_whose_generator_left_a_repeated_closed_enum_closed() {
         "a cycle that reaches no such field"
     );
 }
+
+#[test]
+fn refuses_a_value_10000_deep_before_its_library_writes_any_of_it() {
+    #[expect(
+        clippy::mem_forget,
+        reason = "the source values are 10,000 messages deep; dropping them recurses as deep"
+    )]
+    fn run() {
+        let probe = wrapped(Probe::default(), (10_000, child_of));
+        let cycle = wrapped(
+            Loop::default(),
+            (5_000, |inner| Loop {
+                back: MessageField::some(Back {
+                    r#loop: MessageField::some(inner),
+                    ..Back::default()
+                }),
+                ..Loop::default()
+            }),
+        );
+        let alone = wrapped(
+            Alone::default(),
+            (10_000, |inner| Alone {
+                alone: MessageField::some(inner),
+                ..Alone::default()
+            }),
+        );
+        assert!(ProtoSchema::of::<Loop>().root().reaches);
+        assert_refused((&probe, None), "a message");
+        assert_refused((&cycle, None), "a message that reaches a required field");
+        assert_refused((&alone, None), "a message that reaches no required field");
+        core::mem::forget(probe);
+        core::mem::forget(cycle);
+        core::mem::forget(alone);
+    }
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(run)
+        .expect("a thread of 1 MiB")
+        .join()
+        .expect("the writer refuses before a recursive walk or write");
+}
+
+#[test]
+fn refuses_a_payload_with_a_syntax_error_and_a_value_with_a_type_error_in_the_same_words() {
+    refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words();
+}
+
+#[test]
+fn refuses_a_payload_and_a_value_with_a_format_exception_in_the_same_words() {
+    refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words();
+}
+
+#[test]
+fn plays_every_encoding_of_the_file_through_a_codec_of_its_own_and_no_other() {
+    let file: serde_json::Value =
+        bead::testing::files::read_by_bead("codecs.json").expect("the complete codec file");
+    let mut encodings = std::collections::BTreeSet::new();
+    for group in ["payloads", "values"] {
+        let entries = file[group].as_array().expect("a codec vector group");
+        assert!(!entries.is_empty(), "{group} has its entries");
+        encodings.extend(
+            entries
+                .iter()
+                .map(|entry| entry["encoding"].as_str().expect("an encoding")),
+        );
+    }
+    let proto = ProtoCodec::<Probe>::new().expect("the generated Probe codec");
+    let codecs: std::collections::BTreeSet<&str> = [
+        bead::RawCodec.encoding(),
+        bead::TextCodec.encoding(),
+        bead::JsonCodec.encoding(),
+        proto.encoding(),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(encodings, codecs);
+    assert_eq!(codecs.len(), 4, "one codec for each encoding");
+}
+
+#[test]
+fn a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_protobuf_es_writes_it() {
+    let codec = ProtoCodec::<Probe>::new().expect("the generated Probe codec");
+    let mut keyed = Probe::default();
+    keyed.children.insert(String::new(), Probe::default());
+    assert_eq!(
+        codec.encode(&keyed).expect("the empty key"),
+        bytes_of("62 04 0A 00 12 00")
+    );
+    let mut valued = Probe::default();
+    valued.tallies.insert("a".to_owned(), 0);
+    assert_eq!(
+        codec.encode(&valued).expect("the zero value"),
+        bytes_of("82 01 05 0A 01 61 10 00")
+    );
+}

@@ -35,9 +35,7 @@ fn to_destination(
 }
 
 // spec 13.1
-#[tokio::test]
-async fn a_credential_of_a_jwt_or_an_elsewhere_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
- {
+async fn forwarded_credentials() {
     for (destination, carried) in [(7, "Bearer a.b.c"), (9, "Bearer mF_9.B5f-4.1JqM")] {
         let asked = Arc::new(Mutex::new(Vec::new()));
         let keeping = Arc::clone(&asked);
@@ -184,13 +182,11 @@ async fn hands_a_destinations_handler_the_bearer_credentials_its_call_came_with_
 type Release = oneshot::Sender<Result<Resolved, Unresolved>>;
 
 // spec 13.1
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared cancellation scenarios cover stale resolutions, replacements and connection isolation"
 )]
-async fn a_credential_resolving_its_calls_cancel_or_its_connections_close_tells_session_of_by_the_calls_signal_and_what_it_settles_to_then_is_dropped()
- {
+async fn cancelled_resolutions() {
     for replaces_with_none in [false, true] {
         let pending: Arc<Mutex<BTreeMap<u32, Release>>> = Arc::default();
         let signals = Arc::new(Mutex::new(Vec::new()));
@@ -330,9 +326,7 @@ async fn a_credential_resolving_its_calls_cancel_or_its_connections_close_tells_
 }
 
 // spec 13.1, 12.3
-#[tokio::test]
-async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
- {
+async fn deferred_transfer_opening() {
     for total in [100, 300] {
         let header = RequestHeader {
             total: Some(total),
@@ -391,7 +385,7 @@ async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_res
         peer.settle().await;
         assert_eq!(locked(&admitted).len(), 1);
         assert!(locked(&handed).is_empty());
-        let expected = total.min(opening + 128);
+        let expected = total.min(opening.saturating_add(128));
         let sent = peer.sent().await;
         assert!(
             matches!(sent.as_slice(), [(_, Envelope::Credit { header })] if header.call_id == 1 && header.credit_end == expected),
@@ -399,4 +393,40 @@ async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_res
         );
         quiet(&peer).await;
     }
+}
+
+#[tokio::test]
+async fn a_credential_of_a_jwt_or_an_elsewhere_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
+ {
+    forwarded_credentials().await;
+}
+
+#[tokio::test]
+async fn of_a_jwt_or_an_elsewhere_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
+ {
+    forwarded_credentials().await;
+}
+
+#[tokio::test]
+async fn a_credential_resolving_its_calls_cancel_or_its_connections_close_tells_session_of_by_the_calls_signal_and_what_it_settles_to_then_is_dropped()
+ {
+    cancelled_resolutions().await;
+}
+
+#[tokio::test]
+async fn resolving_its_calls_cancel_or_its_connections_close_tells_session_of_by_the_calls_signal_and_what_it_settles_to_then_is_dropped()
+ {
+    cancelled_resolutions().await;
+}
+
+#[tokio::test]
+async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
+ {
+    deferred_transfer_opening().await;
+}
+
+#[tokio::test]
+async fn resolving_a_transfers_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
+ {
+    deferred_transfer_opening().await;
 }

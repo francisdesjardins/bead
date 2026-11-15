@@ -145,8 +145,7 @@ fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCod
 }
 
 // debugging 3.1, 3.4
-#[tokio::test]
-async fn is_on_only_while_someone_listens() {
+async fn manager_debug_listeners() {
     let pair = pair().await;
     let manager = &pair.client.services().manager;
 
@@ -214,16 +213,17 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
 }
 
 // debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6, 4.1.8
-#[tokio::test]
-async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
+
+async fn request_steps() {
     let pair = pair().await;
     let manager = &pair.client.services().manager;
     let heard = recorded(manager);
 
     serve_echo(&pair, Some(Duration::from_millis(30)));
 
+    let mut payload = json!({ "text": "hello" });
     let call = asking(manager)
-        .call(json!({ "text": "hello" }), &RequestOptions::default())
+        .call(payload.clone(), &RequestOptions::default())
         .expect("echo called");
 
     pair.clock.advance(Duration::from_millis(30)).await;
@@ -233,6 +233,9 @@ async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
         json!({ "text": "hello" }),
         "its payload"
     );
+
+    payload["text"] = Value::from("changed after");
+    assert_eq!(payload["text"], "changed after");
 
     let heard = locked(&heard).clone();
     let steps: Vec<_> = heard
@@ -1201,4 +1204,25 @@ fn refuses_a_filter_given_whole_in_the_grammar_s_names_as_it_is_made() {
             .starts_with("a debug filter takes a kind among request, result, failure"),
         "a kind no grammar names"
     );
+}
+
+#[tokio::test]
+async fn is_on_only_while_someone_listens() {
+    manager_debug_listeners().await;
+}
+
+#[tokio::test]
+async fn is_debugging_only_while_someone_listens() {
+    manager_debug_listeners().await;
+}
+
+// debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6, 4.1.8
+#[tokio::test]
+async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
+    request_steps().await;
+}
+
+#[tokio::test]
+async fn tells_each_step_of_a_request_with_copies_and_once_answered_a_duration() {
+    request_steps().await;
 }

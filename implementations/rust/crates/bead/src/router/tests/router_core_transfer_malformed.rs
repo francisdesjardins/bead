@@ -69,9 +69,7 @@ fn invalid(outcome: Result<crate::RouterResult, CallError>, side: RouterSide) {
     assert_eq!(failure.side(), Some(side));
 }
 
-#[tokio::test]
-async fn end_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
- {
+async fn unreadable_transfer_chunks() {
     simultaneous().await;
     unreadable_result().await;
     whole_and_abandoned().await;
@@ -258,4 +256,16 @@ async fn whole_and_abandoned() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].header.call_id, 1);
     assert_eq!(seen[0].payload, pattern((100, false)));
+}
+
+#[tokio::test]
+async fn end_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
+ {
+    unreadable_transfer_chunks().await;
+}
+
+#[tokio::test]
+async fn ends_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
+ {
+    unreadable_transfer_chunks().await;
 }

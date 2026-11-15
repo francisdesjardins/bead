@@ -113,13 +113,11 @@ pub(super) fn narrow() -> RouterLimitsOptions {
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatch_it()
- {
+async fn out_of_order_payload() {
     let (peer, handed) = serving(false, &limits()).await;
     let payload = pattern(300);
     let sent_payload = payload.clone();
@@ -207,7 +205,6 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
         .expect("the excessive chunk reported");
 }
 
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays both totals and the refusal before, and acceptance after, the call ends"
@@ -216,8 +213,7 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
-{
+async fn held_transfer_place() {
     let (first, middle) = (44, 92);
 
     for (answer, next_total) in [(9, 60), (1, 100)] {
@@ -328,7 +324,6 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays both connections sharing a budget and the same connection's incremental grants"
@@ -337,8 +332,7 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
- {
+async fn released_payload_budget() {
     let (peer, handed) = serving(false, &narrow()).await;
     let payload = pattern(150);
     peer.owner
@@ -355,7 +349,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
     let payload = pattern(150);
     peer.owner
         .run(move |state| {
-            for offset in [44, 92] {
+            for offset in [44_usize, 92] {
                 receive(
                     state,
                     (
@@ -363,7 +357,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
                             1,
                             (
                                 u64::try_from(offset).expect("an offset"),
-                                payload.slice(offset..(offset + 48).min(100)),
+                                payload.slice(offset..offset.saturating_add(48).min(100)),
                                 100,
                             ),
                         ),
@@ -429,7 +423,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
     let payload = pattern(200);
     same.owner
         .run(move |state| {
-            for offset in [44, 92] {
+            for offset in [44_usize, 92] {
                 receive(
                     state,
                     (
@@ -437,7 +431,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
                             1,
                             (
                                 u64::try_from(offset).expect("an offset"),
-                                payload.slice(offset..offset + 48),
+                                payload.slice(offset..offset.saturating_add(48)),
                                 200,
                             ),
                         ),
@@ -459,7 +453,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
     let payload = pattern(200);
     same.owner
         .run(move |state| {
-            for offset in [140, 188] {
+            for offset in [140_usize, 188] {
                 receive(
                     state,
                     (
@@ -467,7 +461,7 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that
                             1,
                             (
                                 u64::try_from(offset).expect("an offset"),
-                                payload.slice(offset..(offset + 48).min(200)),
+                                payload.slice(offset..offset.saturating_add(48).min(200)),
                                 200,
                             ),
                         ),
@@ -553,8 +547,7 @@ async fn answer_chunk_invalid_to_an_opening_that_carries_other_than_its_sender_p
     assert!(locked(&handed).is_empty());
 }
 
-#[tokio::test]
-async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() {
+async fn cancelled_receiving_budget() {
     let (peer, handed) = serving(false, &narrow()).await;
     peer.owner
         .run(|state| {
@@ -601,12 +594,11 @@ async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() 
         .expect("the late chunk is silent");
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn stall_no_request_whose_payload_came_whole_however_long_its_resolver_takes() {
+async fn whole_payload_wait() {
     let (peer, handed) = serving(
         true,
         &RouterLimitsOptions {
@@ -699,4 +691,60 @@ async fn stall_no_request_whose_payload_came_whole_however_long_its_resolver_tak
             )
         ]
     );
+}
+
+#[tokio::test]
+async fn stall_no_request_whose_payload_came_whole_however_long_its_resolver_takes() {
+    whole_payload_wait().await;
+}
+
+#[tokio::test]
+async fn stalls_no_request_whose_payload_came_whole_however_long_its_resolver_takes() {
+    whole_payload_wait().await;
+}
+
+#[tokio::test]
+async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatch_it()
+ {
+    out_of_order_payload().await;
+}
+
+#[tokio::test]
+async fn assembles_a_requests_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatches_it()
+ {
+    out_of_order_payload().await;
+}
+
+#[tokio::test]
+async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() {
+    cancelled_receiving_budget().await;
+}
+
+#[tokio::test]
+async fn ends_a_requests_transfer_its_requester_cancels_giving_the_budget_back() {
+    cancelled_receiving_budget().await;
+}
+
+#[tokio::test]
+async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
+{
+    held_transfer_place().await;
+}
+
+#[tokio::test]
+async fn holds_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
+ {
+    held_transfer_place().await;
+}
+
+#[tokio::test]
+async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
+ {
+    released_payload_budget().await;
+}
+
+#[tokio::test]
+async fn gives_the_budget_back_once_a_payload_is_whole_and_admits_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
+ {
+    released_payload_budget().await;
 }

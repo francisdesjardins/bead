@@ -17,6 +17,7 @@ use super::*;
 use crate::NEVER;
 use crate::platform::JoinHandle;
 use crate::testing::{Instant, SteppingClock, patience, rest};
+use crate::transport::RouterClientTransport;
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -146,6 +147,36 @@ impl ServerListener for Recorder {
             told.errors
                 .push((error.to_string(), connection_handle.cloned()));
         }));
+    }
+}
+
+#[derive(Default)]
+struct ClientCloses {
+    heard: Mutex<Vec<(bool, bool)>>,
+    changed: Notify,
+}
+
+impl crate::transport::ClientListener for ClientCloses {
+    fn on_close(&self, was_clean: bool, is_quick: bool) {
+        self.heard.lock().unwrap().push((was_clean, is_quick));
+        self.changed.notify_waiters();
+    }
+}
+
+impl ClientCloses {
+    async fn wait(&self) -> Vec<(bool, bool)> {
+        patience(PATIENCE, async {
+            loop {
+                let changed = self.changed.notified();
+                let heard = self.heard.lock().unwrap().clone();
+                if !heard.is_empty() {
+                    return heard;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .unwrap()
     }
 }
 
@@ -377,8 +408,7 @@ fn binary(bytes: &[u8]) -> Message {
 
 // ── Its life ───────────────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_picked() {
+async fn compares_a_system_picked_port() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     assert_eq!(server.ready_state(), ReadyState::Uninitialized, "before");
@@ -396,8 +426,7 @@ async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_pi
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn throws_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
+async fn compares_a_taken_port() {
     let (server, _, port) = started(&briefly_closing()).await;
     let other = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let taken = TransportServerStartOptions {
@@ -502,8 +531,7 @@ async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping
     server.dispose().await.unwrap();
 }
 
-#[tokio::test]
-async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts() {
+async fn compares_restarting_after_two_stops() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
 
@@ -516,17 +544,66 @@ async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_acce
     );
 
     let first = server.start(&on_loopback()).await.unwrap();
+    let client =
+        crate::WebSocketTransportClient::new(&crate::WebSocketTransportClientOptions::default())
+            .unwrap();
+    let closes = Arc::new(ClientCloses::default());
+    client.listen(Arc::<ClientCloses>::clone(&closes));
+    patience(
+        PATIENCE,
+        client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            first.port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let before = recorder.connections(1).await.remove(0);
+    assert!(before.ends_with(";ordinal=1"));
 
     stopped(&server).await;
     stopped(&server).await;
 
+    assert_eq!(closes.wait().await, [(false, false)]);
+    assert_eq!(client.ready_state(), ReadyState::Closed);
     let second = server.start(&on_loopback()).await.unwrap();
 
     assert_ne!(first.port, second.port, "a new port");
 
-    let _client = client(second.port).await;
-
-    recorder.connections(1).await;
+    patience(
+        PATIENCE,
+        client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            second.port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let after = recorder.connections(2).await.remove(1);
+    assert!(
+        after.ends_with(";ordinal=2"),
+        "the next arrival is ranked after the old connection"
+    );
+    assert_ne!(before, after, "no handle is given twice");
+    assert_eq!(
+        server
+            .clients()
+            .into_iter()
+            .map(|peer| peer.connection_handle)
+            .collect::<Vec<_>>(),
+        [after],
+        "only the new connection"
+    );
+    patience(
+        PATIENCE,
+        client
+            .disconnect(&crate::TransportClientDisconnectOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
     stopped(&server).await;
 }
 
@@ -647,51 +724,93 @@ async fn refuses_to_start_on_an_address_that_is_no_bare_ip_address_ending_closed
     }
 }
 
-#[tokio::test]
-async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_ipv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
- {
+async fn compares_every_localhost_name() {
+    use crate::websocket::client::{WebSocketTransportClient, WebSocketTransportClientOptions};
+
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
-    let bound = server
-        .start(&TransportServerStartOptions {
+    let bound = patience(
+        PATIENCE,
+        server.start(&TransportServerStartOptions {
             find_open_port: Some(true),
             ..TransportServerStartOptions::default()
-        })
-        .await
-        .unwrap();
-
-    // a host without the IPv6 loopback listens on 127.0.0.1 alone, and says so
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let has_ipv6 = bound.address == "localhost";
-
     assert!(
         has_ipv6 || bound.address == "127.0.0.1",
-        "where it listens: {}",
-        bound.address
+        "the actual listening address"
     );
-
-    let _ipv4 = client(bound.port).await;
-
-    recorder.connections(1).await;
-
+    let mut clients = Vec::new();
+    let names: &[&str] = if has_ipv6 {
+        &["127.0.0.1", "::1", "localhost"]
+    } else {
+        &["127.0.0.1", "localhost"]
+    };
+    for name in names {
+        let client =
+            WebSocketTransportClient::new(&WebSocketTransportClientOptions::default()).unwrap();
+        patience(
+            PATIENCE,
+            client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+                *name, bound.port,
+            )),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(client.ready_state(), ReadyState::Open, "reached by {name}");
+        clients.push(client);
+    }
+    recorder.connections(names.len()).await;
+    let held = server.clients();
+    assert_eq!(held.len(), names.len());
+    assert_eq!(held[0].address, "127.0.0.1");
     if has_ipv6 {
-        let socket = TcpStream::connect(("::1", bound.port)).await.unwrap();
-        let (_ipv6, _) =
-            tokio_tungstenite::client_async(format!("ws://[::1]:{}/", bound.port), socket)
-                .await
-                .unwrap();
-        let handles = recorder.connections(2).await;
-
+        assert_eq!(held[1].address, "::1");
         assert!(
-            handles[1].starts_with("type=WS;ip=::1;"),
-            "the IPv6 loopback"
+            held[1].connection_handle.starts_with("type=WS;ip=::1;"),
+            "the IPv6 loopback handle"
         );
     }
-
     assert!(
-        server.is_secure(&recorder.connections(1).await[0]),
-        "secure on the loopback"
+        matches!(held.last().unwrap().address.as_str(), "127.0.0.1" | "::1"),
+        "localhost reaches a loopback"
     );
+    assert!(
+        held.iter()
+            .all(|peer| server.is_secure(&peer.connection_handle)),
+        "every actual connection is secure there"
+    );
+    for client in &clients {
+        patience(
+            PATIENCE,
+            client
+                .disconnect(&crate::TransportClientDisconnectOptions::default())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    }
     stopped(&server).await;
+    assert_eq!(
+        server.clients(),
+        Vec::<TransportServerClient>::new(),
+        "none held"
+    );
+    for address in if has_ipv6 {
+        &["127.0.0.1", "::1"][..]
+    } else {
+        &["127.0.0.1"][..]
+    } {
+        assert!(
+            crate::net::loopbacks::listener_on(address.parse().unwrap(), bound.port).is_ok(),
+            "{address} let go of the exact port"
+        );
+    }
 }
 
 #[tokio::test]
@@ -866,8 +985,12 @@ async fn meets_a_connection_already_registered_and_can_send_to_it() {
         Some(true),
         "registered"
     );
-    assert!(
-        handle.starts_with("type=WS;ip=127.0.0.1;port=") && handle.contains(";ordinal="),
+    assert_eq!(
+        handle.as_ref(),
+        format!(
+            "type=WS;ip=127.0.0.1;port={};ordinal=1",
+            client.get_ref().local_addr().unwrap().port()
+        ),
         "its handle: {handle}"
     );
     stopped(&server).await;
@@ -927,63 +1050,68 @@ async fn keeps_a_connection_whose_connection_listener_throws_its_messages_heard_
 }
 
 // spec 15.2
-#[tokio::test]
-async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
-    let stepping = SteppingClock::new(dated_at());
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        clock: Some(Arc::<SteppingClock>::clone(&stepping)),
-        ..briefly_closing()
-    })
-    .await;
-    let mut client = client(port).await;
-    let handle = recorder.connections(1).await.remove(0);
-    let second = Duration::from_secs(1);
+async fn compares_message_activity() {
+    for (text_value, binary_value) in [
+        ("hi", &[1, 2][..]),
+        ("hi", &b"bytes"[..]),
+        ("hello", &b"bytes"[..]),
+    ] {
+        let stepping = SteppingClock::new(dated_at());
+        let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+            clock: Some(Arc::<SteppingClock>::clone(&stepping)),
+            ..briefly_closing()
+        })
+        .await;
+        let mut client = client(port).await;
+        let handle = recorder.connections(1).await.remove(0);
+        let second = Duration::from_secs(1);
 
-    assert_eq!(server.clients()[0].last_activity, None, "none before");
+        assert_eq!(server.clients()[0].last_activity, None, "none before");
 
-    stepping.advance(second).await;
-    client.send(Message::text("hi")).await.unwrap();
+        stepping.advance(second).await;
+        client.send(Message::text(text_value)).await.unwrap();
 
-    // * a text message is handed on as it came, marked so, for its router to judge: its transport
-    // reports nothing of it
-    let (text, on) = recorder.messages(1).await.remove(0);
+        // * a text message is handed on as it came, marked so, for its router to judge: its transport
+        // reports nothing of it
+        let (text, on) = recorder.messages(1).await.remove(0);
 
-    assert_eq!(&*text.data, b"hi", "the text, as its bytes");
-    assert!(text.is_text, "marked text");
-    assert_eq!(on, handle, "its connection");
-    assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
-    assert_eq!(
-        text.port,
-        Some(server.clients()[0].port.unwrap()),
-        "its port"
-    );
-    assert_eq!(text.credential, None, "no credential");
-    assert_eq!(
-        server.clients()[0].last_activity,
-        dated_at().checked_add(second),
-        "stamped by the text, on its clock"
-    );
+        assert_eq!(&*text.data, text_value.as_bytes(), "the text, as its bytes");
+        assert!(text.is_text, "marked text");
+        assert_eq!(on, handle, "its connection");
+        assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
+        assert_eq!(
+            text.port,
+            Some(server.clients()[0].port.unwrap()),
+            "its port"
+        );
+        assert_eq!(text.credential, None, "no credential");
+        assert_eq!(
+            server.clients()[0].last_activity,
+            dated_at().checked_add(second),
+            "stamped by the text, on its clock"
+        );
 
-    // each message stamps it again
-    stepping.advance(second).await;
-    client.send(binary(&[1, 2])).await.unwrap();
+        // each message stamps it again
+        stepping.advance(second).await;
+        client.send(binary(binary_value)).await.unwrap();
 
-    let (bytes, on) = recorder.messages(2).await.remove(1);
+        let (bytes, on) = recorder.messages(2).await.remove(1);
 
-    assert_eq!(&*bytes.data, &[1, 2], "the binary one");
-    assert!(!bytes.is_text, "not marked text");
-    assert_eq!(on, handle, "its connection");
-    assert_eq!(
-        server.clients()[0].last_activity,
-        dated_at().checked_add(second * 2),
-        "stamped by the binary"
-    );
-    assert_eq!(
-        recorder.count(|told| told.errors.len()),
-        0,
-        "nothing reported"
-    );
-    stopped(&server).await;
+        assert_eq!(&*bytes.data, binary_value, "the binary one");
+        assert!(!bytes.is_text, "not marked text");
+        assert_eq!(on, handle, "its connection");
+        assert_eq!(
+            server.clients()[0].last_activity,
+            dated_at().checked_add(second.checked_mul(2).unwrap()),
+            "stamped by the binary"
+        );
+        assert_eq!(
+            recorder.count(|told| told.errors.len()),
+            0,
+            "nothing reported"
+        );
+        stopped(&server).await;
+    }
 }
 
 #[tokio::test]
@@ -1057,29 +1185,31 @@ async fn delivers_a_message_sent_in_frames_as_one_and_names_its_connection() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
-    let (server, recorder, port) = started(&briefly_closing()).await;
-    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let mut request = request_of("GET / HTTP/1.1", &["Host: 127.0.0.1"]).into_bytes();
+async fn compares_upgrade_carried_frames() {
+    for (opcode, bytes) in [(0x2, &[7][..]), (0x1, &b"early"[..])] {
+        let (server, recorder, port) = started(&briefly_closing()).await;
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut request = request_of("GET / HTTP/1.1", &["Host: 127.0.0.1"]).into_bytes();
 
-    request.extend(masked_frame(0x2, (&[7], true)));
-    socket.write_all(&request).await.unwrap();
+        request.extend(masked_frame(opcode, (bytes, true)));
+        socket.write_all(&request).await.unwrap();
 
-    let messages = recorder.messages(1).await;
+        let messages = recorder.messages(1).await;
 
-    assert_eq!(
-        recorder.order()[..2],
-        ["connection", "message"],
-        "its connection told first"
-    );
-    assert_eq!(
-        messages[0].1,
-        recorder.connections(1).await[0],
-        "on that connection"
-    );
-    assert_eq!(&*messages[0].0.data, &[7], "the frame read with the head");
-    stopped(&server).await;
+        assert_eq!(
+            recorder.order(),
+            ["connection", "message"],
+            "its connection told first, with no extra event"
+        );
+        assert_eq!(
+            messages[0].1,
+            recorder.connections(1).await[0],
+            "on that connection"
+        );
+        assert_eq!(&*messages[0].0.data, bytes, "the frame read with the head");
+        assert_eq!(messages[0].0.is_text, opcode == 0x1, "its frame kind");
+        stopped(&server).await;
+    }
 }
 
 #[tokio::test]
@@ -1111,18 +1241,24 @@ async fn sends_to_a_connection_in_order_one_message_at_a_time() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn resolves_a_send_for_a_handle_nobody_holds() {
-    let (server, _, _) = started(&briefly_closing()).await;
-    let sent = server.send(
-        TransportMessage {
-            data: Bytes::from_static(&[1]),
-            ..TransportMessage::default()
-        },
-        &Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=99"),
-    );
-
-    assert!(matches!(sent, Ok(Sent::Done)), "done");
+async fn compares_an_unknown_send() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    let _client = client(port).await;
+    recorder.connections(1).await;
+    for (is_text, bytes, handle) in [
+        (false, &[1][..], "type=WS;ip=127.0.0.1;port=1;ordinal=1"),
+        (true, &b"hello"[..], "type=WS;ip=0.0.0.0;port=1;ordinal=1"),
+    ] {
+        let sent = server.send(
+            TransportMessage {
+                data: Bytes::copy_from_slice(bytes),
+                is_text,
+                ..TransportMessage::default()
+            },
+            &Arc::from(handle),
+        );
+        assert!(matches!(sent, Ok(Sent::Done)), "done");
+    }
     stopped(&server).await;
 }
 
@@ -1165,16 +1301,16 @@ async fn closes_one_connection_which_is_gone_once_it_resolves() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn resolves_false_closing_a_handle_nobody_holds() {
-    let (server, _, _) = started(&briefly_closing()).await;
+async fn compares_an_unknown_close() {
+    let (server, recorder, _) = started(&briefly_closing()).await;
 
     assert!(
         !server
-            .close(&Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=99"))
+            .close(&Arc::from("type=WS;ip=0.0.0.0;port=1;ordinal=1"))
             .await,
         "nobody holds it"
     );
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "no close told");
     stopped(&server).await;
 }
 
@@ -1492,41 +1628,43 @@ async fn tells_a_close_from_its_peer_with_no_status_code_as_its_platform_reads_i
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
-    let (server, recorder, port) = started(&briefly_closing()).await;
-    let (mut socket, _) = upgraded(port).await;
-    let handle = recorder.connections(1).await.remove(0);
+async fn compares_protocol_error_events() {
+    for (opcode, payload, code) in [(0x3, &[1][..], 1002), (0x1, &[0xff, 0xfe][..], 1007)] {
+        let (server, recorder, port) = started(&briefly_closing()).await;
+        let (mut socket, _) = upgraded(port).await;
+        let handle = recorder.connections(1).await.remove(0);
 
-    // a frame of an opcode RFC 6455 reserves
-    socket
-        .write_all(&masked_frame(0x3, (&[1], true)))
-        .await
-        .unwrap();
+        // a frame RFC 6455 refuses: a reserved opcode or text that is no UTF-8
+        socket
+            .write_all(&masked_frame(opcode, (payload, true)))
+            .await
+            .unwrap();
 
-    let closes = recorder.closes(1).await;
-    let errors = recorder.errors(1).await;
-    let order = recorder.order();
+        let closes = recorder.closes(1).await;
+        let errors = recorder.errors(1).await;
+        let order = recorder.order();
+        assert_eq!(errors.len(), 1, "exactly one error");
 
-    assert_eq!(
-        order[order.len() - 2..],
-        ["error", "close"],
-        "its error, then its close"
-    );
-    assert_eq!(
-        errors[0].1.as_ref(),
-        Some(&handle),
-        "its error's connection"
-    );
-    assert!(
-        errors[0]
-            .0
-            .starts_with(&format!("{handle} is closed with 1002: ")),
-        "its error: {}",
-        errors[0].0
-    );
-    assert_eq!(closes, vec![(false, handle)], "unclean");
-    stopped(&server).await;
+        assert_eq!(
+            order,
+            ["connection", "error", "close"],
+            "its error, then its close"
+        );
+        assert_eq!(
+            errors[0].1.as_ref(),
+            Some(&handle),
+            "its error's connection"
+        );
+        assert!(
+            errors[0]
+                .0
+                .starts_with(&format!("{handle} is closed with {code}: ")),
+            "its error: {}",
+            errors[0].0
+        );
+        assert_eq!(closes, vec![(false, handle)], "unclean");
+        stopped(&server).await;
+    }
 }
 
 // ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that is no
@@ -1650,15 +1788,36 @@ async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_m
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_when_told_no_bound() {
+async fn checks_the_default_envelope_limit() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
-    let past = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap() + 1;
+    let limit = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap();
+    let past = limit.checked_add(1).unwrap();
 
+    client.send(binary(&vec![0; limit])).await.unwrap();
+
+    let messages = recorder.messages(1).await;
+
+    assert_eq!(
+        messages[0].0.data.len(),
+        16_778_240,
+        "the exact limit taken"
+    );
+    assert_eq!(messages[0].1, handle, "its connection");
+    assert!(!messages[0].0.is_text, "binary");
     client.send(binary(&vec![0; past])).await.unwrap();
 
+    assert!(
+        matches!(
+            next_of(&mut client).await,
+            Some(Ok(Message::Close(Some(CloseFrame {
+                code: CloseCode::Size,
+                ..
+            }))))
+        ),
+        "one byte past the limit closes with 1009"
+    );
     while let Some(Ok(_)) = next_of(&mut client).await {}
 
     assert_eq!(
@@ -1673,7 +1832,27 @@ async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_wh
         ),
         "an envelope's limit"
     );
+    assert!(server.clients().is_empty(), "none held");
+    assert!(
+        server.gauges().unwrap().connection_handles.is_empty(),
+        "no handle held"
+    );
+    assert_eq!(
+        recorder.count(|told| told.messages.len()),
+        1,
+        "nothing past the bound heard"
+    );
     stopped(&server).await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_when_told_no_bound() {
+    checks_the_default_envelope_limit().await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16778240_bytes_when_told_no_bound() {
+    checks_the_default_envelope_limit().await;
 }
 
 #[tokio::test]
@@ -1831,16 +2010,19 @@ async fn stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_whi
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
- {
+async fn compares_stopping_raw_connections(disposing: bool) {
     let (server, recorder, port) = started(&briefly_closing()).await;
+    assert_eq!(server.ready_state(), ReadyState::Open);
     let mut first = client(port).await;
     let mut second = client(port).await;
 
-    recorder.connections(2).await;
+    let handles = recorder.connections(2).await;
 
-    let stopping = server.stop();
+    let stopping = if disposing {
+        server.dispose()
+    } else {
+        server.stop()
+    };
 
     for client in [&mut first, &mut second] {
         assert!(
@@ -1859,7 +2041,18 @@ async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_
 
     patience(PATIENCE, stopping).await.unwrap().unwrap();
 
-    let closes = recorder.closes(2).await;
+    let mut closes = recorder.told.lock().unwrap().closes.clone();
+    let mut expected = handles
+        .into_iter()
+        .map(|handle| (false, handle))
+        .collect::<Vec<_>>();
+    closes.sort();
+    expected.sort();
+    assert_eq!(
+        closes, expected,
+        "both exact handles told before the stop resolves"
+    );
+    assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
 
     assert!(
         closes.iter().all(|(is_clean, _)| !is_clean),
@@ -1870,6 +2063,81 @@ async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_
         TcpStream::connect(("127.0.0.1", port)).await.is_err(),
         "it listens no more"
     );
+}
+
+async fn compares_stopping_transport_clients(disposing: bool) {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    assert_eq!(server.ready_state(), ReadyState::Open);
+    let mut clients = Vec::new();
+    for _ in 0..2 {
+        let client = crate::WebSocketTransportClient::new(
+            &crate::WebSocketTransportClientOptions::default(),
+        )
+        .unwrap();
+        let closes = Arc::new(ClientCloses::default());
+        client.listen(Arc::<ClientCloses>::clone(&closes));
+        patience(
+            PATIENCE,
+            client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+                "127.0.0.1",
+                port,
+            )),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        clients.push((client, closes));
+    }
+    let handles = recorder.connections(2).await;
+    patience(
+        PATIENCE,
+        if disposing {
+            server.dispose()
+        } else {
+            server.stop()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let mut notifications = recorder.told.lock().unwrap().closes.clone();
+    let mut expected = handles
+        .into_iter()
+        .map(|handle| (false, handle))
+        .collect::<Vec<_>>();
+    notifications.sort();
+    expected.sort();
+    assert_eq!(
+        notifications, expected,
+        "both server closes before stop resolves"
+    );
+    for (client, closes) in clients {
+        assert_eq!(
+            closes.wait().await,
+            [(false, false)],
+            "neither clean nor quick"
+        );
+        assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    }
+    assert!(server.clients().is_empty(), "no client held");
+    assert!(
+        server.gauges().unwrap().connection_handles.is_empty(),
+        "no handle held"
+    );
+    assert_eq!(
+        server.ready_state(),
+        ReadyState::Closed,
+        "the server closed"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).await.is_err(),
+        "no late connection"
+    );
+}
+
+async fn compares_stopping_connections(disposing: bool) {
+    compares_stopping_raw_connections(disposing).await;
+    compares_stopping_transport_clients(disposing).await;
 }
 
 #[tokio::test]
@@ -2373,21 +2641,32 @@ async fn reads_the_host_of_an_upgrade_as_it_came_an_idn_page_s_own_in_punycode_a
     );
 }
 
-#[tokio::test]
-async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
- {
-    for (options, refusal) in [
-        (judging(&["bead.test:8080"], &[]), "a hosts entry"),
-        (judging(&[], &["*"]), "an origins entry"),
-        (judging(&[], &["null"]), "an origins entry"),
+fn compares_host_configuration() {
+    for (hosts, origins, words) in [
+        (vec!["bead.test:8080"], vec![], "bead.test:8080"),
+        (
+            vec!["bead.test", "bead.test:8080"],
+            vec![],
+            "bead.test:8080",
+        ),
+        (vec!["bead.test", "*"], vec![], "hosts takes * alone"),
+        (vec![], vec!["*"], "no wildcard"),
+        (vec![], vec!["null"], "a sandboxed frame of any site"),
+        (vec![], vec!["https://bead.test/"], "an origins entry"),
+        (
+            vec!["*"],
+            vec!["https://bead.test", "null"],
+            "a sandboxed frame of any site",
+        ),
     ] {
-        let refused = WebSocketTransportServer::new(&options).unwrap_err();
-
+        let refused = WebSocketTransportServer::new(&judging(&hosts, &origins)).unwrap_err();
         assert!(
-            refused.to_string().contains(refusal) || refused.to_string().contains("origin"),
-            "refused: {refused}"
+            refused.to_string().contains(words),
+            "{hosts:?}, {origins:?}: {refused}"
         );
     }
+    WebSocketTransportServer::new(&judging(&["*"], &["https://bead.test"]))
+        .expect("the valid lists");
 }
 
 #[tokio::test]
@@ -2832,8 +3111,7 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
     answering.await.unwrap();
 }
 
-#[tokio::test]
-async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
+async fn compares_answered_and_unanswered_pings() {
     // beats wide enough that a pong never misses one on a loaded machine
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         heartbeat: Some(Duration::from_millis(200)),
@@ -2841,12 +3119,25 @@ async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
     })
     .await;
     let answering = reading(client(port).await);
+    let transport =
+        crate::WebSocketTransportClient::new(&crate::WebSocketTransportClientOptions::default())
+            .unwrap();
+    patience(
+        PATIENCE,
+        transport.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let (_silent, _) = upgraded(port).await;
-    let handles = recorder.connections(2).await;
+    let handles = recorder.connections(3).await;
 
     assert_eq!(
         recorder.closes(1).await,
-        vec![(false, Arc::clone(&handles[1]))],
+        vec![(false, Arc::clone(&handles[2]))],
         "the silent one dropped"
     );
 
@@ -2858,9 +3149,16 @@ async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
             .iter()
             .map(|client| Arc::clone(&client.connection_handle))
             .collect::<Vec<_>>(),
-        vec![Arc::clone(&handles[0])],
-        "the answering one kept"
+        vec![Arc::clone(&handles[0]), Arc::clone(&handles[1])],
+        "both answering clients kept"
     );
+    assert_eq!(transport.ready_state(), ReadyState::Open);
+    assert_eq!(
+        recorder.told.lock().unwrap().closes,
+        [(false, Arc::clone(&handles[2]))],
+        "no later close after three more beats"
+    );
+    assert_eq!(recorder.count(|told| told.errors.len()), 0, "no error");
     stopped(&server).await;
     answering.await.unwrap();
 }
@@ -2880,8 +3178,7 @@ async fn beats_every_heartbeat_when_told_nothing() {
     reader.await.unwrap();
 }
 
-#[tokio::test]
-async fn pings_nothing_with_a_heartbeat_of_infinity() {
+async fn compares_infinite_and_finite_heartbeats() {
     for (heartbeat, dues) in [
         (Duration::from_millis(200), vec![Duration::from_millis(200)]),
         (NEVER, vec![]),
@@ -2895,11 +3192,37 @@ async fn pings_nothing_with_a_heartbeat_of_infinity() {
             },
         )
         .await;
-        let reader = reading(client(port).await);
+        let mut peer = client(port).await;
 
-        recorder.connections(1).await;
+        let handle = recorder.connections(1).await.remove(0);
 
         assert_eq!(stepping.dues(), dues, "beats of {heartbeat:?}");
+        stepping.advance(Duration::from_millis(200)).await;
+        if heartbeat == NEVER {
+            use futures_util::FutureExt;
+            assert!(
+                peer.next().now_or_never().is_none(),
+                "no ping without an armed interval"
+            );
+        } else {
+            assert!(
+                matches!(next_of(&mut peer).await, Some(Ok(Message::Ping(_)))),
+                "its one played beat sends a ping"
+            );
+            peer.flush().await.unwrap();
+        }
+        assert_eq!(
+            server
+                .clients()
+                .into_iter()
+                .map(|peer| peer.connection_handle)
+                .collect::<Vec<_>>(),
+            [handle],
+            "the ping does not drop its peer"
+        );
+        assert_eq!(recorder.count(|told| told.closes.len()), 0);
+        assert_eq!(recorder.count(|told| told.errors.len()), 0);
+        let reader = reading(peer);
         stopped(&server).await;
         reader.await.unwrap();
     }
@@ -3654,4 +3977,239 @@ async fn lets_its_port_go_once_its_last_handle_is_dropped_idle_without_its_stop(
     drop(server);
 
     assert!(is_let_go(port).await, "its port let go");
+}
+
+#[tokio::test]
+async fn listens_on_a_port_the_system_picked() {
+    compares_a_system_picked_port().await;
+}
+
+#[tokio::test]
+async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_picked() {
+    compares_a_system_picked_port().await;
+}
+
+#[tokio::test]
+async fn rejects_with_eaddrinuse_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop()
+ {
+    compares_a_taken_port().await;
+}
+
+#[tokio::test]
+async fn throws_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
+    compares_a_taken_port().await;
+}
+
+#[tokio::test]
+async fn delivers_text_as_a_string_and_binary_as_an_array_buffer_stamping_the_activity() {
+    compares_message_activity().await;
+}
+
+#[tokio::test]
+async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
+    compares_message_activity().await;
+}
+
+#[tokio::test]
+async fn resolves_for_a_handle_nobody_holds() {
+    compares_an_unknown_send().await;
+}
+
+#[tokio::test]
+async fn resolves_a_send_for_a_handle_nobody_holds() {
+    compares_an_unknown_send().await;
+}
+
+#[tokio::test]
+async fn resolves_false_for_a_handle_nobody_holds() {
+    compares_an_unknown_close().await;
+}
+
+#[tokio::test]
+async fn resolves_false_closing_a_handle_nobody_holds() {
+    compares_an_unknown_close().await;
+}
+
+#[tokio::test]
+async fn closes_every_connection_each_emitting_its_close_before_it_resolves_and_stops_listening() {
+    compares_stopping_connections(false).await;
+}
+
+#[tokio::test]
+async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
+ {
+    compares_stopping_connections(false).await;
+}
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_or_null() {
+    compares_host_configuration();
+}
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
+ {
+    compares_host_configuration();
+}
+
+#[tokio::test]
+async fn raises_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+    compares_upgrade_carried_frames().await;
+}
+
+#[tokio::test]
+async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+    compares_upgrade_carried_frames().await;
+}
+
+#[tokio::test]
+async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
+    compares_protocol_error_events().await;
+}
+
+#[tokio::test]
+async fn raises_an_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
+    compares_protocol_error_events().await;
+}
+
+#[tokio::test]
+async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts() {
+    compares_restarting_after_two_stops().await;
+}
+
+#[tokio::test]
+async fn stops_twice_then_starts_again_on_a_new_port() {
+    compares_restarting_after_two_stops().await;
+}
+
+#[tokio::test]
+async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_ipv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
+ {
+    compares_every_localhost_name().await;
+}
+
+#[tokio::test]
+async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_1_and_by_localhost_reports_localhost_and_is_secure_there()
+ {
+    compares_every_localhost_name().await;
+}
+
+#[tokio::test]
+async fn pings_nothing_with_a_heartbeat_of_infinity() {
+    compares_infinite_and_finite_heartbeats().await;
+}
+
+#[tokio::test]
+async fn beats_nothing_with_a_heartbeat_of_infinity() {
+    compares_infinite_and_finite_heartbeats().await;
+}
+
+#[tokio::test]
+async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
+    compares_answered_and_unanswered_pings().await;
+}
+
+#[tokio::test]
+async fn keeps_the_clients_that_answer_its_pings_a_browser_s_as_ws_s_and_drops_one_that_does_not_on_the_wire()
+ {
+    compares_answered_and_unanswered_pings().await;
+}
+
+#[tokio::test]
+async fn await_using_stops_it_closing_with_1001_and_refusing_what_comes_after() {
+    compares_stopping_connections(true).await;
+}
+
+#[tokio::test]
+async fn closes_each_connection_with_1001_as_it_stops() {
+    compares_stopping_connections(false).await;
+}
+
+#[tokio::test]
+async fn waits_for_a_head_not_whole() {
+    let (server, recorder, port) = started(&judging(&["bead.test"], &[])).await;
+    let whole = request_of("GET / HTTP/1.1", &[]);
+    let bytes = whole.as_bytes();
+    let (partial, last) = bytes.split_at(bytes.len().checked_sub(1).unwrap());
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    socket.write_all(partial).await.unwrap();
+    assert!(
+        patience(Duration::from_millis(200), socket.readable())
+            .await
+            .is_err(),
+        "no answer during 200 ms without the head's last byte"
+    );
+    assert_eq!(server.clients(), Vec::<TransportServerClient>::new());
+    assert_eq!(recorder.count(|told| told.connections.len()), 0);
+    socket.write_all(last).await.unwrap();
+    let expected = b"HTTP/1.1 101 Switching Protocols\r\n";
+    let mut answer = vec![0; expected.len()];
+    patience(PATIENCE, socket.read_exact(&mut answer))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(answer, expected);
+    recorder.connections(1).await;
+    assert_eq!(server.clients().len(), 1);
+    assert_eq!(recorder.count(|told| told.refusals.len()), 0);
+    assert_eq!(recorder.count(|told| told.errors.len()), 0);
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn reads_a_head_whole_its_method_its_target_and_its_fields_as_they_came_an_octet_past_ascii_refused_400_unmarked()
+ {
+    let (server, recorder, port) = started(&judging(&["bead.test"], &[])).await;
+    let request = request_of("GET /bead?x=1 HTTP/1.1", &["X-Other:  caf\t"]);
+    let HeadRead::Whole(head) = read_head(request.as_bytes()) else {
+        panic!("the production reader takes the complete head");
+    };
+    assert_eq!(
+        (
+            head.method.as_str(),
+            head.target.as_str(),
+            head.http_version
+        ),
+        ("GET", "/bead?x=1", "1.1")
+    );
+    assert_eq!(head.raw_fields.last().unwrap(), "caf");
+    assert!(head.raw_fields.iter().any(|name| name == "X-Other"));
+    assert_eq!(head.length, request.len());
+    let (answer, _) = answer_of(port, &request).await;
+    assert!(answer.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+    assert!(!answer.to_ascii_lowercase().contains("bead-refusal:"));
+    recorder.connections(1).await;
+
+    let request: Vec<u8> = request_of("GET / HTTP/1.1", &["X-Other: caf\u{e9}"])
+        .chars()
+        .map(|character| u8::try_from(u32::from(character)).unwrap())
+        .collect();
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    socket.write_all(&request).await.unwrap();
+    let mut answer = Vec::new();
+    patience(PATIENCE, socket.read_to_end(&mut answer))
+        .await
+        .unwrap()
+        .ok();
+    assert_eq!(
+        latin1(&answer),
+        "HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    );
+    assert_eq!(
+        recorder.count(|told| told.connections.len()),
+        1,
+        "only the ASCII head connects"
+    );
+    assert_eq!(
+        recorder.count(|told| told.refusals.len()),
+        0,
+        "unmarked HTTP refusal"
+    );
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn shutdown_stops_it_as_stop_does() {
+    // the C# side's Shutdown is the stop of its transport's interface, the trait's stop here
+    compares_stopping_connections(false).await;
 }

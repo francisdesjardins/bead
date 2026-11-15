@@ -1,5 +1,6 @@
 //! A core's combined gauges and calls counted once, including an unreadable request's failed refusal.
 
+use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +10,7 @@ use super::locked;
 use super::router_core_sessions::{handler, receive, request};
 use super::router_core_transfer_edges::serving;
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
-use crate::envelope::Envelope;
+use crate::envelope::{Envelope, ResultHeader};
 use crate::errors::CallError;
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
 use crate::router::core as router_core;
@@ -44,7 +45,7 @@ async fn count_what_its_pieces_hold_together_and_nothing_once_its_connections_we
     for dotnet in [false, true] {
         let (peer, _) = serving(false, &RouterLimitsOptions::default()).await;
         let mut options = request_of("a");
-        options.options.timeout = core::time::Duration::from_secs(if dotnet { 5 } else { 1 });
+        options.options.timeout = Duration::from_secs(if dotnet { 5 } else { 1 });
         let waiting = peer.request((Bytes::new(), options));
         peer.owner
             .run(|state| {
@@ -109,9 +110,7 @@ async fn count_what_its_pieces_hold_together_and_nothing_once_its_connections_we
     }
 }
 
-#[tokio::test]
-async fn count_a_call_that_carries_no_series_under_other_and_a_router_given_no_registry_counts_nothing()
- {
+async fn uncounted_series() {
     for dotnet in [false, true] {
         let registry = registry();
         let metrics = registry.attach(RouterSide::Server);
@@ -281,4 +280,55 @@ async fn counts_an_unreadable_request_once_when_its_refusal_transport_throws_or_
         expected.sort();
         assert_eq!(counts(&registry), expected);
     }
+}
+
+#[tokio::test]
+async fn count_a_call_that_carries_no_series_under_other_and_a_router_given_no_registry_counts_nothing()
+ {
+    uncounted_series().await;
+}
+
+#[tokio::test]
+async fn counts_a_call_that_carries_no_series_under_other_and_a_router_given_no_registry_counts_nothing()
+ {
+    uncounted_series().await;
+}
+
+// debugging 11.4
+#[tokio::test]
+async fn holds_a_duration_in_whole_microseconds_its_fraction_dropped_a_time_spans_ticks_over_10() {
+    let registry = registry();
+    let metrics = registry.attach(RouterSide::Client);
+    let series = metrics.declare_requester(&echo()).expect("echo declared");
+    let peer = Peer::new(RouterSide::Client, &RouterLimitsOptions::default());
+    peer.owner
+        .run(move |state| state.core.metrics = Some(metrics))
+        .await
+        .expect("metrics attached");
+
+    for (call_id, ticks) in [(1, 19), (3, 306_000)] {
+        let mut options = request_of("a");
+        options.series = Some(series.clone());
+        options.options.timeout = crate::duration::NEVER;
+        let waiting = peer.request((Bytes::from_static(&[0]), options));
+        peer.settle().await;
+        // * each source tick is 100 ns: 1.9 us, then 30.6 ms
+        peer.clock.advance(Duration::from_nanos(ticks * 100)).await;
+        peer.receive((
+            Envelope::Result {
+                header: ResultHeader {
+                    call_id,
+                    total: None,
+                    credential: None,
+                },
+                payload: Bytes::new(),
+            },
+            Arc::from("a"),
+        ));
+        completed(waiting).await.expect("the counted call answers");
+    }
+
+    let text = registry.exposition().text;
+    assert!(text.lines().any(|line| line == "bead_client_call_duration_seconds_sum{service=\"2\",procedure=\"echo\",type=\"request\"} 0.030601"), "each duration drops its fractional microsecond: {text}");
+    assert!(text.lines().any(|line| line == "bead_client_call_duration_seconds_bucket{service=\"2\",procedure=\"echo\",type=\"request\",le=\"1e-05\"} 1"), "the first call occupies the 10 us bucket: {text}");
 }

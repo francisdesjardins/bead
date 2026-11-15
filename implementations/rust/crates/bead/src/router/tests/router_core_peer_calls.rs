@@ -117,6 +117,15 @@ async fn refuses_a_request_that_opens_a_subscription_on_a_connection_that_carrie
 // spec 9.0
 #[tokio::test]
 async fn its_answers_name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record() {
+    answer_headers().await;
+}
+
+#[tokio::test]
+async fn name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record() {
+    answer_headers().await;
+}
+
+async fn answer_headers() {
     let (peer, handed, admitted) = serving(None).await;
     let forwarding = handler((&handed, &admitted));
     peer.owner
