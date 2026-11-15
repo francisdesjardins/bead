@@ -1758,7 +1758,8 @@
           right: 0;
           bottom: 0;
           left: 0;
-          z-index: 10;
+          /* the sheet, open, lies over the sticky scene tabs, under the strip's menus and the bar */
+          z-index: calc(var(--app-z-backdrop) + 1);
           display: grid;
           grid-template-rows: auto minmax(0, 1fr);
           max-height: 75dvh;

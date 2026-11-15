@@ -207,6 +207,50 @@ test.describe('mountScenes', () => {
     });
     await expect.poll(tabsTopOf).toBe(56);
 
+    // * the wire's sheet, open, covers the tabs where it reaches them: a refusal long enough to
+    // raise it past them
+    for (const name of ["Break it past the server's bound", 'Sign up']) {
+      await page.getByRole('button', { name, exact: true }).evaluate((button) => {
+        (button as HTMLElement).click();
+      });
+    }
+    await expect(page.locator('#sign-up-status')).toContainText('PAYLOAD_INVALID');
+    await page.evaluate(() => {
+      scrollTo(0, 0);
+    });
+    // the drawer the desktop opened is the sheet, open, on a phone
+    await expect(page.locator('#wire-sheet')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#wire-body')).toBeVisible();
+    const covered = await page.evaluate(() => {
+      const tabs = (document.getElementById('scene-tabs') as HTMLElement).getBoundingClientRect();
+      const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
+      const y = Math.max(tabs.top, sheet.top) + 2;
+      return {
+        reaches: sheet.top < tabs.bottom,
+        onTop: document
+          .getElementById('wire')
+          ?.contains(document.elementFromPoint(tabs.left + 40, y)),
+      };
+    });
+    expect(covered).toEqual({ reaches: true, onTop: true });
+
+    // * and the strip's disclosure, opened, lies over the sheet
+    await page.locator('#status-toggle').click();
+    const disclosed = await page.evaluate(() => {
+      const detail = (
+        document.getElementById('status-detail') as HTMLElement
+      ).getBoundingClientRect();
+      const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
+      return {
+        reaches: sheet.top < detail.bottom,
+        onTop: document
+          .getElementById('status-detail')
+          ?.contains(document.elementFromPoint(detail.left + 20, detail.bottom - 2)),
+      };
+    });
+    expect(disclosed).toEqual({ reaches: true, onTop: true });
+    await page.locator('#status-toggle').click();
+
     // a screen too short for them scrolls them away
     await page.setViewportSize({ width: 390, height: 600 });
     await page.evaluate(() => {

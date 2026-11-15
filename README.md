@@ -455,8 +455,9 @@ Yarn project's Playwright and a Chromium, its own or one it is given, `render.mj
 the page's faces, so that labels are measured in the face the page draws them with. `layout.mjs`
 holds the page and the not-found page to their layout: the bar 56 px tall and on one line from 320
 to 1440 px, in both languages and both themes, no page wider than a phone, every control a finger
-reaches 44 px on a coarse pointer, every block of code at 13 px, the keyboard's focus shown, the
-menu closed by Escape with the focus given back, and the theme set before the first paint:
+reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in a table split
+inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with the focus
+given back, and the theme set before the first paint:
 
 ```sh
 cd site

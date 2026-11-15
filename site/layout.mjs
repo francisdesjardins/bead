@@ -3,7 +3,8 @@
 // to their layout in a headless Chromium, served on the loopback with the page's faces at /fonts/:
 // the top bar 56 px tall and on one line, every tool whole, at each width from a small phone to a
 // wide desktop, in both languages and both themes; no page wider than a phone; every control a
-// finger reaches 44 px on a coarse pointer; every block of code at 13 px; the keyboard's focus shown
+// finger reaches 44 px on a coarse pointer; every block of code at 13 px; no name of code in a table,
+// which scrolls sideways, split inside its word on a phone; the keyboard's focus shown
 // on the bar's tools and the menu's links; the menu opened, closed by Escape and the focus given
 // back; and the theme the page keeps, set before the first paint.
 //
@@ -154,6 +155,24 @@ const smallTargetsOf = (page) => {
   }, TOUCH);
 };
 
+// the names of code in a table that a phone breaks inside a word: a table scrolls sideways
+// instead, so a name with no space or hyphen in it stays on one line
+const splitCodesOf = (page) => {
+  return page.evaluate(() => {
+    return [
+      ...new Set(
+        [...document.querySelectorAll('td code, th code')]
+          .filter((code) => {
+            return code.getClientRects().length > 1 && !/[s-]/u.test(code.textContent.trim());
+          })
+          .map((code) => {
+            return code.textContent.trim();
+          })
+      ),
+    ];
+  });
+};
+
 const codeSizesOf = (page) => {
   return page.evaluate(() => {
     return [
@@ -209,6 +228,11 @@ const holdBar = async ({ browser, address, path, label, scheme, items, alone = f
       }
       if (PHONES.includes(width) && (await isSideways(page))) {
         faults.push(`${label}, ${scheme}, ${width} px: the page scrolls sideways`);
+      }
+      if (PHONES.includes(width)) {
+        for (const name of await splitCodesOf(page)) {
+          faults.push(`${label}, ${scheme}, ${width} px: ${name} split inside its word in a table`);
+        }
       }
     }
     const sizes = await codeSizesOf(page);
