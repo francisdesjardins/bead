@@ -1673,6 +1673,11 @@
           padding-bottom: calc(var(--app-space-14) + var(--app-space-10));
         }
 
+        /* the focus is scrolled to above the folded wire, never under it */
+        html {
+          scroll-padding-bottom: calc(var(--app-space-14) + var(--app-space-4));
+        }
+
         h1 {
           font-size: var(--app-text-xl);
         }

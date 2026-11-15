@@ -3,10 +3,11 @@
 // One call on a span of time, as the Calls list's Waterfall and the Timeline's rows draw it: its bar
 // from its start to its end, a subscription a line, a ring a notification heard, and a tick a chunk,
 // a credit or a cancel. Every place is a percentage of the track, so a track keeps its drawing at
-// any width with nothing redrawn. A bar under 6 px is also drawn as an instant, a diamond on its
-// start, as the Trace Event Format's viewers mark an instant event; the panel's sheet shows it by
-// the bar's own width. Marks that fall within one percent of the track of another are drawn once,
-// so a transfer of thousands of chunks draws tens of ticks.
+// any width with nothing redrawn. An ended subscription's dashed line stops on a cap where it
+// ended, so it reads apart from an open one's solid line, which runs on. A bar under 6 px is also
+// drawn as an instant, a diamond on its start, as the Trace Event Format's viewers mark an instant
+// event; the panel's sheet shows it by the bar's own width. Marks that fall within one percent of
+// the track of another are drawn once, so a transfer of thousands of chunks draws tens of ticks.
 
 // dependencies
 
@@ -70,6 +71,11 @@ const placesOf = (moments: readonly number[], span: ISpan): number[] => {
   return places;
 };
 
+/** The stop at the end of an ended subscription's line, as the legend draws it too. */
+export const capOf = (): HTMLElement => {
+  return make('span', { className: 'cap' });
+};
+
 const markOf = (className: string, place: number): HTMLElement => {
   return make('span', { attributes: { style: `left:${String(place)}%` }, className });
 };
@@ -94,7 +100,11 @@ export const trackOf = (call: ICall, span: ISpan, options: ITrackOptions): HTMLE
         attributes: {
           style: `left:${String(left)}%;width:${String(Math.max(right - left, 0))}%`,
         },
-        children: isWhole ? [make('span', { className: 'instant' })] : [],
+        children: [
+          ...(isWhole ? [make('span', { className: 'instant' })] : []),
+          // * an end the span cuts off is out of sight: no cap on the track's edge
+          ...(status === 'closed' && end <= span.to ? [capOf()] : []),
+        ],
         className: `extent ${status}`,
       }),
       ...placesOf(

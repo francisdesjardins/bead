@@ -181,3 +181,52 @@ test('merges the ticks that fall in one percent of the track', async ({ page }) 
   expect(places.ticks).toEqual([10, 11, 12, 13, 14, 15]);
   expect(places.rings).toEqual([50, 51, 52, 53, 54, 55, 56, 57, 58, 59]);
 });
+
+test('stops an ended subscription’s line on a cap at its end, and leaves an open one’s without', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 400 });
+  await loadView(page, 'track', { scheme: 'light' });
+  // * two subscriptions answered at once, the second cancelled 600 ms in
+  const subscriptionOf = (key: number, cancel?: number): ICall => {
+    return {
+      ...callOf(key, { at: 100, duration: 0 }),
+      request: { ...envelopeOf(100, EnvelopeKind.REQUEST), header: { opensSubscription: true } },
+      ...(cancel === undefined ? {} : { cancel: envelopeOf(cancel, EnvelopeKind.CANCEL) }),
+    };
+  };
+  const drawn = await page.evaluate(
+    ({ calls, from }) => {
+      const { view } = globalThis as unknown as { view: IView };
+
+      return calls.map((call) => {
+        const track = view.trackOf(call, { from, to: from + 1_000 }, { now: from + 1_000 });
+
+        document.body.append(track);
+
+        const line = track.querySelector('.extent') as HTMLElement;
+        const cap = line.querySelector('.cap');
+        const at = line.getBoundingClientRect();
+        const box = cap?.getBoundingClientRect();
+
+        return {
+          status: line.className,
+          ...(box === undefined
+            ? {}
+            : {
+                cap: {
+                  atEnd: Math.round(box.right) === Math.round(at.right),
+                  pastLine: Math.round(box.height - at.height),
+                },
+              }),
+        };
+      });
+    },
+    { calls: [subscriptionOf(1), subscriptionOf(2, 700)], from: T0 }
+  );
+
+  expect(drawn).toEqual([
+    { status: 'extent open' },
+    { status: 'extent closed', cap: { atEnd: true, pastLine: 6 } },
+  ]);
+});

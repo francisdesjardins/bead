@@ -15,7 +15,7 @@ import { type ISpan, tickStepOf, ticksOf } from '../model/scale';
 import { clockOf, spanOf } from '../model/words';
 import { callLabelOf, durationWordsOf, typeWordsOf } from './calls';
 import { currentOf, listen, make, STATUS_NAMES, statusIconOf } from './dom';
-import { trackOf } from './track';
+import { capOf, trackOf } from './track';
 
 // interfaces
 
@@ -84,6 +84,7 @@ const legendOf = (): HTMLElement => {
           [
             make('span', {
               attributes: { style: 'left:0;width:100%' },
+              children: status === 'closed' ? [capOf()] : [],
               className: `extent ${status}`,
             }),
           ],

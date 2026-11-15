@@ -548,8 +548,12 @@ export const startPanel = (host: IPanelHost): void => {
     shown.callsTable.hidden = state.mode !== 'calls';
     shown.envelopesTable.hidden = state.mode !== 'envelopes';
 
+    // * the two modes are one choice, a radio group: the one chosen checked, and the Tab's stop
     for (const button of document.querySelectorAll<HTMLElement>('[data-mode]')) {
-      button.setAttribute('aria-pressed', String(button.dataset['mode'] === state.mode));
+      const isChosen = button.dataset['mode'] === state.mode;
+
+      button.setAttribute('aria-checked', String(isChosen));
+      button.tabIndex = isChosen ? 0 : -1;
     }
 
     if (state.mode === 'calls') {
@@ -1569,6 +1573,19 @@ export const startPanel = (host: IPanelHost): void => {
     button.addEventListener('click', () => {
       state.mode = button.dataset['mode'] === 'envelopes' ? 'envelopes' : 'calls';
       draw();
+    });
+    // an arrow key chooses the other mode, and the focus goes with the choice
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(event.key)) {
+        return;
+      }
+
+      event.preventDefault();
+      // ! the list's own arrows step through its rows: the group's are the group's alone
+      event.stopPropagation();
+      state.mode = state.mode === 'calls' ? 'envelopes' : 'calls';
+      draw();
+      document.querySelector<HTMLElement>(`[data-mode="${state.mode}"]`)?.focus();
     });
   }
 

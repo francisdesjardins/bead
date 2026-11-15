@@ -57,6 +57,10 @@
   --raised: #f1ecf5;
   --bad-soft: rgb(185 28 28 / 0.1);
 
+  /* what went well, in the green of code's strings, at 4.5:1 on its own wash over the page */
+  --app-ok: #04694c;
+  --app-ok-wash: rgb(4 105 76 / 0.1);
+
   /* code's colours, a token's kind each, at 4.5:1 or more on a card and on an inset */
   --tok-comment: #625770;
   --tok-keyword: #a62b70;

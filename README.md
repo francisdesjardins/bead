@@ -472,6 +472,27 @@ node layout.mjs --chromium <chrome>
 that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`; its `site`
 job runs `layout.mjs`.
 
+`tools/check-a11y.mjs` holds the page, the not-found page and the demo's scenes to WCAG 2.2 AA, at
+1280 and 390 px: axe's rules of the `wcag2a`, `wcag2aa`, `wcag21aa` and `wcag22aa` tags and the
+colour of statuses in both themes, with each disclosure and menu open; in the first theme, the
+checks axe cannot make, the reflow at 320 px, the text spacing, the keyboard's order and its focus
+shown and never under a sticky bar, 44 px targets on a coarse pointer, the states of tabs, radios
+and toggles, and motion under reduced motion. Axe and Playwright are the TypeScript side's. It serves a
+folder as the host does, or reads any address, so beadproto.dev after a deploy and
+francisdesjardins.ca are held the same way:
+
+```sh
+node site/deploy.mjs --assemble
+node tools/check-a11y.mjs --serve site/out / "/?lng=fr" /nowhere /playground/ /playground/#calls
+node tools/check-a11y.mjs https://beadproto.dev/ "https://beadproto.dev/?lng=fr" https://beadproto.dev/playground/
+node tools/check-a11y.mjs https://francisdesjardins.ca/ --scheme dark --width 390
+```
+
+It prints each violation by its rule, its element and the pages it is on, and exits 1 on any. An
+exception is a line of `tools/a11y-exceptions.json`, its rule, its selector and its reason. The
+demo's page tests and the DevTools panel's call it for what a test brings about: the served
+transports, a call opened in each of its tabs. CI's `typescript` job runs it over `site/out`.
+
 beadproto.dev is a Cloudflare Worker that serves files alone, `beadproto`, which `wrangler.jsonc`
 configures: no script, no workers.dev address, no preview address, and a path nothing answers a 404. `deploy.mjs` assembles `out/` from the files it lists, and nothing else: the page at `/`, the
 demo's static build at `/playground/`, built there from its sources, Bead's mark and the page's
@@ -1060,8 +1081,13 @@ against each server.
 - `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
   committed `site/dist/index.html` and `site/dist/404.html` byte for byte
   ([The page](#the-page)).
+- `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
+  axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
+  installed, with Playwright's Chromium.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
-  repositories it makes under the system's temporary folder.
+  repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
+  saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
+  fails them there instead.
 
 Two run before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `pre-commit` holds the staged root files to their format, when the TypeScript side is installed,

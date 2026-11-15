@@ -4,6 +4,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
+import {
+  auditPage,
+  EACH_SCHEME,
+  EACH_WIDTH,
+  ONCE,
+  reportOf,
+  type IViolation,
+} from '../../../../tools/check-a11y.mjs';
 import type { ActivityRecord, BackgroundMessage } from '../messages';
 import type { ILog } from '../model/log';
 import { assertBuilt, EXTENSION } from './fixtures';
@@ -604,6 +612,57 @@ test.describe('the panel', () => {
         }
       }
     }
+  });
+
+  test('holds every view and each tab of a call to WCAG 2.2 AA, in both themes, at 1280 and 390 px', async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+
+    const found: IViolation[] = [];
+
+    for (const themeName of THEMES) {
+      await openWithTraffic(page, { themeName });
+
+      for (const width of [1280, 390]) {
+        await resize(page, { height: 800, width });
+
+        for (const tab of ['calls', 'timeline', 'state', 'metrics', 'broker', 'wire']) {
+          await page.click(`[data-tab="${tab}"]`);
+          found.push(
+            ...(await auditPage(page, {
+              label: `${tab}, ${themeName}, ${String(width)} px`,
+              checks: themeName === THEMES[0] ? EACH_WIDTH : EACH_SCHEME,
+            }))
+          );
+        }
+
+        await page.click('[data-tab="calls"]');
+        await rowOf(page, 'whoami').click();
+
+        for (const detail of ['overview', 'payload', 'exchange', 'trace', 'diff']) {
+          const button = page.locator(`[data-detail="${detail}"]`);
+
+          // * a call shows the tabs its records give it
+          if (await button.isVisible()) {
+            await button.click();
+            found.push(
+              ...(await auditPage(page, {
+                label: `a call’s ${detail}, ${themeName}, ${String(width)} px`,
+                checks: themeName === THEMES[0] ? EACH_WIDTH : EACH_SCHEME,
+              }))
+            );
+          }
+        }
+      }
+
+      // ! a panel is pointed at by a mouse: a finger's 44 px is the page's and the demo's floor
+      if (themeName === THEMES[0]) {
+        found.push(...(await auditPage(page, { label: `a call, ${themeName}`, checks: ONCE })));
+      }
+    }
+
+    expect(reportOf(found)).toEqual([]);
   });
 
   test('greets the background with its tab, follows DevTools’ theme, and reads the registries as its Metrics view opens', async ({
@@ -1317,6 +1376,38 @@ test.describe('the panel', () => {
     await expect(page.locator('#envelopes tr')).toHaveCount(25);
     await page.fill('#filter', 'e(credit)');
     await expect(page.locator('#envelopes tr')).toHaveCount(3);
+  });
+
+  test('chooses between Calls and Envelopes as a radio group, by a click and by the arrow keys, the focus with the choice', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+
+    const calls = page.locator('[data-mode="calls"]');
+    const envelopes = page.locator('[data-mode="envelopes"]');
+    const selected = page.locator('#calls tr[aria-selected="true"]');
+
+    await expect(page.locator('.list-bar [role="radiogroup"]')).toHaveAccessibleName('Show');
+    await expect(calls).toHaveAttribute('aria-checked', 'true');
+    await expect(envelopes).toHaveAttribute('tabindex', '-1');
+    await expect(selected).toContainText('whoami');
+
+    await calls.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(envelopes).toHaveAttribute('aria-checked', 'true');
+    await expect(envelopes).toBeFocused();
+    await expect(calls).toHaveAttribute('tabindex', '-1');
+    await expect(page.locator('#envelopes')).toBeVisible();
+
+    // * the group's arrows are its own: the list's selection does not step with them
+    await page.keyboard.press('ArrowDown');
+    await expect(calls).toHaveAttribute('aria-checked', 'true');
+    await expect(calls).toBeFocused();
+    await expect(selected).toContainText('whoami');
+
+    await envelopes.click();
+    await expect(envelopes).toHaveAttribute('aria-checked', 'true');
   });
 
   test('keeps the call whose envelope was clicked selected in the Envelopes mode, each of its envelopes marked', async ({

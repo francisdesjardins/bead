@@ -104,7 +104,8 @@ jobs:
     name: TypeScript (Node ${{ matrix.node }})
     needs: playwright
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    # the WCAG 2.2 AA sweeps of the page, the demo and the panel take some five minutes of it
+    timeout-minutes: 20
     # the image of the Playwright the side pins, Chromium in it: no browser to install
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
@@ -170,6 +171,23 @@ jobs:
       # build above, in Chromium.
       - if: matrix.node == '26'
         run: $YARN test:demo
+      # The page, the not-found page and every scene of the demo, as beadproto.dev serves them from
+      # out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its own tests, which fail here
+      # rather than skip.
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the check's own tests
+        working-directory: .
+        env:
+          BEAD_A11Y_REQUIRED: '1'
+        run: node --test tools/__tests__/check-a11y.test.mjs
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the page and the demo as served
+        working-directory: .
+        run: >-
+          node --input-type=module -e "(await import('./site/deploy.mjs')).assemble({ day: '1970-01-01' })"
+          && node tools/check-a11y.mjs --serve site/out / '/?lng=fr' /nowhere /playground/
+          '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
+          '/playground/#code' '/playground/#packages'
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
       # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files

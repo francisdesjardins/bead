@@ -56,6 +56,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the server's detail of 1,024 bytes holds, and the page says how many its closing line counts. The
   box that bounds the client's detail to 256 bytes says it bounds the refusals the client writes and
   the details it reads.
+- `tools/check-a11y.mjs` holds pages to WCAG 2.2 AA in Chromium: axe's rules of the `wcag2a`,
+  `wcag2aa`, `wcag21aa` and `wcag22aa` tags and statuses told by more than colour, in both themes,
+  each disclosure and menu open; and, in one theme, the checks axe cannot make, the reflow at
+  320 px, the text spacing, the keyboard's order and its focus shown and never under a sticky bar,
+  44 px targets on a coarse pointer, the states of tabs, radios and toggles, and motion under
+  reduced motion. It serves a folder
+  or reads any address; its exceptions, each with its reason, are `tools/a11y-exceptions.json`. CI's
+  `typescript` job runs it over the page, the not-found page and every scene of the demo, and the
+  demo's and the DevTools panel's tests over the served transports and each view and tab of a call.
+  `@axe-core/playwright` 4.14.0 is a dev dependency of the TypeScript side.
+- An ended subscription's line in the DevTools panel's Timeline and Waterfall stops on a cap where
+  it ended, and the legend's swatch shows it, so an ended line reads apart from an open one.
 
 ### Changed
 
@@ -207,6 +219,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- WCAG 2.2 AA on Bead's page, its demo and the DevTools panel: a link's code and a green outcome on
+  its wash reach 4.5:1, the page's tables and its header's words, which scroll sideways on a phone,
+  take the keyboard's focus, and the focus on a phone is scrolled to above the demo's folded wire.
+  The panel's controls are 24 px tall or more, and its Calls and Envelopes switch is a radio group,
+  chosen by the arrow keys.
 - beadc retries its work area's `.beadc` parent's creation too when another run removes it as
   it is made, which Windows answers with ENOENT, where it failed the run.
 - beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it

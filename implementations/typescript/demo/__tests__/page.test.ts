@@ -10,6 +10,7 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { auditAddress, reportOf } from '../../../../tools/check-a11y.mjs';
 import {
   outcomeOf,
   PLAYGROUND,
@@ -322,6 +323,30 @@ test.describe('the demo’s page', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('#transports')).toBeVisible();
     expect(await outlineByTabOf(page, '#transports a'), 'a transport').not.toBe('none');
+  });
+
+  test('holds every scene to WCAG 2.2 AA, in both themes, at 1280 and 390 px, the strip’s disclosures and menus open', async ({
+    browser,
+  }) => {
+    test.setTimeout(600_000);
+
+    const found = [];
+
+    for (const scene of ['', ...SCENES]) {
+      found.push(
+        ...(await auditAddress(browser, `${served?.url ?? ''}#${scene}`, {
+          label: `#${scene}`,
+          // * the served transports shown, so the chip's menu of the others is opened too
+          prepare: async (page: Page) => {
+            await page.evaluate(() => {
+              document.body.dataset['beadTransport'] = 'ws';
+            });
+          },
+        }))
+      );
+    }
+
+    expect(reportOf(found)).toEqual([]);
   });
 
   test('sets every block of code at 13 px', async ({ page }) => {

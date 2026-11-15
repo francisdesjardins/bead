@@ -51,8 +51,9 @@
         --removed: rgb(197 34 31 / 0.12);
         --syntax-string: #925b12;
         --list-bar-height: calc(var(--app-space-8) + var(--app-space-1));
-        /* the compact DevTools control floor is independent of text padding */
-        --control-height: 22px;
+        /* the compact DevTools control floor, independent of text padding: a button inside a group
+           keeps WCAG 2.5.8's 24 px, and a group stands as tall as a control */
+        --control-height: 28px;
         /* a button inside a group: the control's height less the group's two hairlines and insets */
         --segment-height: calc(var(--control-height) - 4px);
         --menu-row-height: calc(var(--app-space-6) + var(--app-space-1));
@@ -253,7 +254,8 @@
         opacity: 0.5;
       }
 
-      button[aria-pressed='true'] {
+      button[aria-pressed='true'],
+      button[aria-checked='true'] {
         border-color: var(--app-accent);
         background: var(--app-flame-wash);
         color: var(--app-accent);
@@ -339,7 +341,8 @@
         background: transparent;
       }
 
-      .group button[aria-pressed='true'] {
+      .group button[aria-pressed='true'],
+      .group button[aria-checked='true'] {
         border-color: var(--app-accent);
         background: var(--app-flame-wash);
       }
@@ -704,6 +707,21 @@
           var(--app-text-secondary) 0 3px,
           transparent 3px 5px
         );
+      }
+
+      /* * an ended subscription stops where it ended: a cap across its line's end, in the line's
+         colour, so an open line (solid, to the track's edge) and an ended one (dashed, capped) read
+         apart in either theme */
+      .wf .cap {
+        position: absolute;
+        /* the cap stands three pixels past each side of the two-pixel line */
+        top: -3px;
+        right: 0;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 2px;
+        /* the line's two pixels and three on each side */
+        height: 8px;
+        background: var(--app-text-secondary);
       }
 
       /* * a call too short for a bar of 6 px is an instant: a diamond on its start, its bar
@@ -2004,9 +2022,19 @@
       >
         <div id="list" class="rows" tabindex="0" aria-label="Calls, newest first">
           <div class="list-bar">
-            <span class="group" role="group" aria-label="Show">
-              <button type="button" data-mode="calls" aria-pressed="true">Calls</button>
-              <button type="button" data-mode="envelopes" aria-pressed="false">Envelopes</button>
+            <span class="group" role="radiogroup" aria-label="Show">
+              <button type="button" role="radio" data-mode="calls" aria-checked="true" tabindex="0">
+                Calls
+              </button>
+              <button
+                type="button"
+                role="radio"
+                data-mode="envelopes"
+                aria-checked="false"
+                tabindex="-1"
+              >
+                Envelopes
+              </button>
             </span>
             <span id="range"></span>
           </div>

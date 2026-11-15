@@ -201,7 +201,7 @@ const headerOf = (language) => {
       return `<div class="word"><code class="word-name">${escape(pick(name, language))}</code><div class="word-bits">${cells}</div></div>`;
     })
     .join('');
-  return `<div class="bitmap" role="img" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
+  return `<div class="bitmap" role="img" tabindex="0" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
 };
 
 const stageOf = (code, language) => {
@@ -229,7 +229,7 @@ const failuresOf = (language) => {
   const body = FAILURES.map(([name, code, fate, when]) => {
     return `<tr><td class="code-num">${code}</td><td><code>${name}</code></td><td><span class="stage">${escape(stageOf(code, language))}</span></td><td>${fateOf(fate, language)}</td><td>${escape(pick(when, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const statusesOf = (language) => {
@@ -239,7 +239,7 @@ const statusesOf = (language) => {
   const body = STATUSES.map(([status, what]) => {
     return `<tr><td class="code-num">${status}</td><td>${escape(pick(what, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const wireOf = (language) => {
@@ -485,7 +485,7 @@ const implementationsOf = (language) => {
       .join('');
     return `<tr><th scope="row">${escape(pick(part.name, language))}</th>${cells}</tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 // ── Code ──────────────────────────────────────────────────────────────────────
