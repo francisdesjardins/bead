@@ -31,6 +31,8 @@ export interface IToken {
 interface ILanguageOptions {
   comment: string;
   keywords: ReadonlySet<string>;
+  /** What reads as text though a keyword is in it, tried once the strings fail. */
+  plain?: string;
   strings: readonly string[];
 }
 
@@ -53,6 +55,7 @@ const scannerOf = (options: ILanguageOptions): IScanner => {
       [
         `(?<comment>${options.comment})`,
         `(?<string>${options.strings.join('|')})`,
+        ...(options.plain === undefined ? [] : [`(?<plain>${options.plain})`]),
         `(?<number>${NUMBER})`,
         WORD,
       ].join('|'),
@@ -63,7 +66,7 @@ const scannerOf = (options: ILanguageOptions): IScanner => {
 
 // what a match of a scanner is, by the group that matched it
 const kindOf = (match: RegExpExecArray, keywords: ReadonlySet<string>): TokenKind => {
-  const { comment, number, string } = match.groups ?? {};
+  const { comment, number, plain, string } = match.groups ?? {};
 
   if (comment !== undefined) {
     return 'comment';
@@ -75,6 +78,10 @@ const kindOf = (match: RegExpExecArray, keywords: ReadonlySet<string>): TokenKin
 
   if (number !== undefined) {
     return 'number';
+  }
+
+  if (plain !== undefined) {
+    return 'text';
   }
 
   return keywords.has(match[0]) ? 'keyword' : 'text';
@@ -122,6 +129,9 @@ const RUST_STRING = String.raw`"(?:[^"\\]|\\[\s\S])*"`;
 
 const RUST_CHARACTER = String.raw`'(?:[^'\\\n]|\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.))'`;
 
+// a lifetime or a loop's label, `'static` or `'outer`, whose word is no keyword there
+const LIFETIME = String.raw`'[A-Za-z_]\w*`;
+
 const NUMBER = String.raw`\b(?:0x[0-9a-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:e[+-]?\d+)?)\b`;
 
 const WORD = String.raw`[A-Za-z_$][\w$]*`;
@@ -141,6 +151,7 @@ const SCANNERS: Readonly<Record<CodeLanguage, IScanner | null>> = Object.freeze(
   rust: scannerOf({
     comment: SLASH_COMMENT,
     keywords: RUST_KEYWORDS,
+    plain: LIFETIME,
     strings: [RAW, RUST_STRING, RUST_CHARACTER],
   }),
   shell: scannerOf({ comment: HASH_COMMENT, keywords: KEYWORDS, strings: QUOTED }),

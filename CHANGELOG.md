@@ -183,8 +183,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The page colours its code by the demo's scanner, `demo/highlight.ts`, and its blocks read as they
   did. TypeScript, `.proto`, TOML and the shell share one set of keywords; C# and Rust have their
   own. A Rust lifetime stays plain. The colours of code join Bead's skin, each at 4.5:1 or more on
-  a card and on an inset in both themes. On a phone the demo counts what crossed on the strip's
-  button alone, no longer on the wire's sheet too.
+  a card and on an inset in both themes.
+- The demo's Code view reads `examples/hello` in TypeScript, C# and Rust, one file at a time: the
+  role a tab, the language a segmented control beside it, each choice keeping the other, and the
+  language kept for the next visit. Its code is coloured as the page colours it. On a phone the
+  file runs down the page, and the demo counts what crossed on the wire's sheet, whose bar stays in
+  view.
 
 ### Removed
 

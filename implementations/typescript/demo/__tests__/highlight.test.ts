@@ -128,6 +128,28 @@ test.describe('tokensOf', () => {
     expect(colouredOf('const function = undefined;', 'rust')).toEqual(['keyword const']);
   });
 
+  test('leaves a Rust lifetime plain though its word is a keyword, and keeps the keyword', () => {
+    expect(
+      colouredOf(
+        "static NAME: &'static str = \"hello\";\nfn served() -> impl Future + 'static { 'outer: loop { break 'outer; } }",
+        'rust'
+      )
+    ).toEqual([
+      'keyword static',
+      'string "hello"',
+      'keyword fn',
+      'keyword impl',
+      'keyword loop',
+      'keyword break',
+    ]);
+    // * a character is still one, the lifetime's mark aside
+    expect(colouredOf("let c = 'a'; let s: &'a str;", 'rust')).toEqual([
+      'keyword let',
+      "string 'a'",
+      'keyword let',
+    ]);
+  });
+
   test('gives each example the demo shows back whole, no string run past its line', async () => {
     for (const [language, paths] of Object.entries(EXAMPLES)) {
       for (const path of paths) {

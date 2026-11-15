@@ -2,8 +2,7 @@
 
 // The page's scenes, one a tab: what to try, its payload rules, its OpenAPI document, its server
 // and its code. The scene shown is the address's fragment, `#rules`, so a link opens it and Back
-// returns to the one before; with none named, what to try. Their tabs' end fades while the list
-// runs on past it. Beside them the wire, its calls or its envelopes, folded until a visitor opens
+// returns to the one before; with none named, what to try. Beside them the wire, its calls or its envelopes, folded until a visitor opens
 // it, which this browser alone remembers.
 
 // dependencies
@@ -52,19 +51,6 @@ const remember = (isOpen: boolean): void => {
   } catch {
     // nothing kept: the next visit shows it folded
   }
-};
-
-/** Marks `list` while it runs on past its end, which the page's style fades. */
-const markRunsOn = (list: HTMLElement): void => {
-  const mark = (): void => {
-    list.toggleAttribute('data-runs-on', list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
-  };
-
-  list.addEventListener('scroll', mark, { passive: true });
-  // its width, as the screen's changes, and its tabs', once the faces are in
-  new ResizeObserver(mark).observe(list);
-  void document.fonts.ready.then(mark);
-  mark();
 };
 
 /** Mounts the wire: folded, or open as this browser remembers it, one log shown at a time. */
@@ -181,6 +167,5 @@ export const mountScenes = (): void => {
   addEventListener('hashchange', showNamed);
   addEventListener('popstate', showNamed);
   showNamed();
-  markRunsOn(list);
   mountWire();
 };

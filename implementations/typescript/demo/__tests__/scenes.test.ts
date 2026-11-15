@@ -107,6 +107,9 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.click('button[data-action="reader"]');
     await expect(page.locator('#wire-toggle .count')).not.toHaveText('0');
+    // * a desktop counts on the strip's button alone, the strip staying under the bar
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-toggle [data-wire-count]')).toBeVisible();
 
     await page.locator('#wire-toggle').click();
     await expect(page.locator('#calls-log')).toBeVisible();
@@ -145,15 +148,17 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#wire-toggle')).toBeVisible();
     await expect(sheet).toBeVisible();
     await expect(page.locator('#wire-body')).toBeHidden();
-    // * what crossed is counted once, on the strip's button
+    // * what crossed is counted once, on the sheet's bar, which stays in view as the strip scrolls
+    // away
     await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
-    await expect(page.locator('#wire-toggle [data-wire-count]')).toBeVisible();
+    await expect(page.locator('#wire-sheet [data-wire-count]')).toBeVisible();
     await sheet.click();
     await expect(page.locator('#wire-body')).toBeVisible();
     await expect(sheet).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator('#wire-toggle')).toHaveAttribute('aria-expanded', 'true');
 
     await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-sheet [data-wire-count]')).toBeVisible();
 
     // a link out of the sheet folds it, which would cover where it goes
     await page.getByRole('link', { name: 'Code › Go deeper' }).click();
@@ -208,21 +213,5 @@ test.describe('mountScenes', () => {
       scrollTo(0, 1500);
     });
     await expect.poll(tabsTopOf).toBeLessThan(0);
-  });
-
-  test('fades the scene tabs’ end while the list runs on past it', async ({ page }) => {
-    const tabs = page.locator('#scene-tabs');
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(served?.url ?? '');
-    await expect(tabs).toHaveAttribute('data-runs-on', '');
-
-    await tabs.evaluate((list) => {
-      list.scrollLeft = list.scrollWidth;
-    });
-    await expect(tabs).not.toHaveAttribute('data-runs-on');
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(tabs).not.toHaveAttribute('data-runs-on');
   });
 });

@@ -2,7 +2,8 @@
 
 // A tablist as the WAI-ARIA tabs pattern lays it out: one tab selected, the only one Tab reaches;
 // the arrow keys move between them, Home and End to the ends, the selection following the focus.
-// What a tab selected shows is its caller's: a panel of its own, or what one panel holds.
+// A list that runs on past its end is marked while it does, for the page's style to fade. What a
+// tab selected shows is its caller's: a panel of its own, or what one panel holds.
 
 // types
 
@@ -22,6 +23,21 @@ export interface ITabs {
   /** The list's tabs, in their order. */
   readonly tabs: readonly HTMLButtonElement[];
 }
+
+// helpers
+
+/** Marks `list` while it runs on past its end, which the page's style fades. */
+const markRunsOn = (list: HTMLElement): void => {
+  const mark = (): void => {
+    list.toggleAttribute('data-runs-on', list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+  };
+
+  list.addEventListener('scroll', mark, { passive: true });
+  // its width, as the screen's changes, and its tabs', once the faces are in
+  new ResizeObserver(mark).observe(list);
+  void document.fonts.ready.then(mark);
+  mark();
+};
 
 // definition
 
@@ -85,6 +101,8 @@ export const mountTabs = (list: HTMLElement, { show }: ITabsOptions): ITabs => {
       }
     });
   }
+
+  markRunsOn(list);
 
   return Object.freeze({ select, tabs });
 };
