@@ -4124,3 +4124,92 @@ async fn await_using_stops_it_closing_with_1001_and_refusing_what_comes_after() 
 async fn closes_each_connection_with_1001_as_it_stops() {
     compares_stopping_connections(false).await;
 }
+
+#[tokio::test]
+async fn waits_for_a_head_not_whole() {
+    let (server, recorder, port) = started(&judging(&["bead.test"], &[])).await;
+    let whole = request_of("GET / HTTP/1.1", &[]);
+    let bytes = whole.as_bytes();
+    let (partial, last) = bytes.split_at(bytes.len().checked_sub(1).unwrap());
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    socket.write_all(partial).await.unwrap();
+    assert!(
+        patience(Duration::from_millis(200), socket.readable())
+            .await
+            .is_err(),
+        "no answer during 200 ms without the head's last byte"
+    );
+    assert_eq!(server.clients(), Vec::<TransportServerClient>::new());
+    assert_eq!(recorder.count(|told| told.connections.len()), 0);
+    socket.write_all(last).await.unwrap();
+    let expected = b"HTTP/1.1 101 Switching Protocols\r\n";
+    let mut answer = vec![0; expected.len()];
+    patience(PATIENCE, socket.read_exact(&mut answer))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(answer, expected);
+    recorder.connections(1).await;
+    assert_eq!(server.clients().len(), 1);
+    assert_eq!(recorder.count(|told| told.refusals.len()), 0);
+    assert_eq!(recorder.count(|told| told.errors.len()), 0);
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn reads_a_head_whole_its_method_its_target_and_its_fields_as_they_came_an_octet_past_ascii_refused_400_unmarked()
+ {
+    let (server, recorder, port) = started(&judging(&["bead.test"], &[])).await;
+    let request = request_of("GET /bead?x=1 HTTP/1.1", &["X-Other:  caf\t"]);
+    let HeadRead::Whole(head) = read_head(request.as_bytes()) else {
+        panic!("the production reader takes the complete head");
+    };
+    assert_eq!(
+        (
+            head.method.as_str(),
+            head.target.as_str(),
+            head.http_version
+        ),
+        ("GET", "/bead?x=1", "1.1")
+    );
+    assert_eq!(head.raw_fields.last().unwrap(), "caf");
+    assert!(head.raw_fields.iter().any(|name| name == "X-Other"));
+    assert_eq!(head.length, request.len());
+    let (answer, _) = answer_of(port, &request).await;
+    assert!(answer.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+    assert!(!answer.to_ascii_lowercase().contains("bead-refusal:"));
+    recorder.connections(1).await;
+
+    let request: Vec<u8> = request_of("GET / HTTP/1.1", &["X-Other: caf\u{e9}"])
+        .chars()
+        .map(|character| u8::try_from(u32::from(character)).unwrap())
+        .collect();
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    socket.write_all(&request).await.unwrap();
+    let mut answer = Vec::new();
+    patience(PATIENCE, socket.read_to_end(&mut answer))
+        .await
+        .unwrap()
+        .ok();
+    assert_eq!(
+        latin1(&answer),
+        "HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    );
+    assert_eq!(
+        recorder.count(|told| told.connections.len()),
+        1,
+        "only the ASCII head connects"
+    );
+    assert_eq!(
+        recorder.count(|told| told.refusals.len()),
+        0,
+        "unmarked HTTP refusal"
+    );
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn shutdown_stops_it_as_stop_does() {
+    // the C# side's Shutdown is the stop of its transport's interface, the trait's stop here
+    compares_stopping_connections(false).await;
+}

@@ -95,6 +95,7 @@ fn ring_of() -> PatternTable {
 
 #[test]
 fn matches_in_time_linear_in_its_input() {
+    let begun = bead::testing::Instant::now();
     // * a backtracking engine never ends on this one; a table reads a cell a character
     for length in [1_000, 100_000] {
         let (matched, reads) = counted(&NESTED, &format!("{}!", repeated("a", length)));
@@ -106,6 +107,7 @@ fn matches_in_time_linear_in_its_input() {
 
     assert!(matches_pattern(&NESTED, &repeated("a", 100_000)), "matched");
     assert!(!matches_pattern(&NESTED, ""), "nothing matches nothing");
+    assert!(begun.elapsed().as_millis() <= 5_000);
 }
 
 #[test]
@@ -118,6 +120,7 @@ fn walks_one_cell_a_character_whatever_the_pattern_s_size() {
         .filter_map(|point| char::from_u32(*point))
         .collect();
     let text: String = (0..1_048_576).map(|at| points[at % points.len()]).collect();
+    let begun = bead::testing::Instant::now();
     let (matched, reads) = counted(&ring, &text);
 
     assert_eq!(ring.transitions.len(), 16_384, "the largest table");
@@ -125,6 +128,17 @@ fn walks_one_cell_a_character_whatever_the_pattern_s_size() {
     assert_eq!(reads.cells, 1_048_576, "a cell a character");
     // a binary search over 1,024 bounds: 10 reads a character
     assert_eq!(reads.bounds, 1_048_576 * 10, "10 reads a character");
+    assert!(begun.elapsed().as_millis() <= 5_000);
+    assert!(
+        !matches_pattern(
+            &PatternTable {
+                accepting: &[1],
+                ..ring
+            },
+            &text
+        ),
+        "one state past the actual final state refuses the same text"
+    );
 }
 
 #[test]
@@ -133,6 +147,14 @@ fn keeps_a_match_once_reached_wherever_it_is_and_stops_there() {
 
     assert!(matched, "matched");
     assert_eq!(reads.cells, 4, "stopped there");
+    let leaving = PatternTable {
+        transitions: &[0, 0, 1, 0, 2, 1, 0, 0, 0],
+        ..ANYWHERE
+    };
+    assert!(matches_pattern(
+        &leaving,
+        &format!("xxok{}", repeated("y", 1_000))
+    ));
     assert!(!matches_pattern(&ANYWHERE, "o k"), "no ok");
 }
 
