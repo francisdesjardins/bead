@@ -1,0 +1,101 @@
+/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+   its faces and the violet neutrals it paints with, and what Bead's surfaces draw code and refusals
+   on. The page, the demo and the not-found page take this one copy; the DevTools panel keeps its
+   own, DevTools' look. The light scheme is the root's; the dark one answers to `data-color-scheme`,
+   or to the system where no script set it. */
+
+:root {
+  color-scheme: light;
+  --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --app-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --app-font-mono:
+    'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  --app-primary: #c13584;
+  --app-primary-ink: #ffffff;
+  --app-primary-hover: #9d2a6b;
+  --app-accent: #c13584;
+  --app-flame: #c13584;
+  --app-flame-wash: rgb(193 53 132 / 0.1);
+  --app-ring: #ff69b4;
+  --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
+
+  --app-bg: #f5f2f8;
+  --app-paper: #fdfcfe;
+  --app-text: #17111d;
+  --app-text-secondary: #4a4055;
+  --app-text-tertiary: #6d6278;
+  --app-divider: rgb(23 17 29 / 0.12);
+
+  /* the ground of what is code, an inset in a card; and a refusal's wash */
+  --raised: #f1ecf5;
+  --bad-soft: rgb(185 28 28 / 0.1);
+}
+
+/* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+:root[data-color-scheme='dark'] {
+  color-scheme: dark;
+  --app-primary: #ff8bc4;
+  --app-primary-ink: #3d0b28;
+  --app-primary-hover: #ffaed5;
+  --app-accent: #ff8bc4;
+  --app-flame: #ff8bc4;
+  --app-flame-wash: rgb(255 139 196 / 0.14);
+  --app-ring: #ffaed5;
+  --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+  --app-bg: #0c0910;
+  --app-paper: #15111c;
+  --app-text: #f2ecf5;
+  --app-text-secondary: #b2a7bf;
+  --app-text-tertiary: #8d8199;
+  --app-divider: rgb(242 236 245 / 0.14);
+
+  --raised: #1c1625;
+  --bad-soft: rgb(248 113 113 / 0.12);
+}
+
+/* the system's dark, where no script chose: the not-found page runs none */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme]) {
+    color-scheme: dark;
+    --app-primary: #ff8bc4;
+    --app-primary-ink: #3d0b28;
+    --app-primary-hover: #ffaed5;
+    --app-accent: #ff8bc4;
+    --app-flame: #ff8bc4;
+    --app-flame-wash: rgb(255 139 196 / 0.14);
+    --app-ring: #ffaed5;
+    --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+    --app-bg: #0c0910;
+    --app-paper: #15111c;
+    --app-text: #f2ecf5;
+    --app-text-secondary: #b2a7bf;
+    --app-text-tertiary: #8d8199;
+    --app-divider: rgb(242 236 245 / 0.14);
+
+    --raised: #1c1625;
+    --bad-soft: rgb(248 113 113 / 0.12);
+
+    /* ! base's dark values, which base keys on the attribute alone: each as its dark block has it,
+       which the DevTools panel's tests hold */
+    --app-body: #0b1120;
+    --app-body-edge: #334155;
+    --app-control-border: #7d8ba1;
+    --app-hover: rgb(238 242 248 / 0.07);
+    --app-selected: rgb(238 242 248 / 0.12);
+    --app-error: #f87171;
+    --app-error-ink: #0b1120;
+    --app-error-hover: #fca5a5;
+    --app-ok: #34d399;
+    --app-ok-wash: rgb(52 211 153 / 0.14);
+    --app-info: #38bdf8;
+    --app-info-wash: rgb(56 189 248 / 0.14);
+    --app-warn: #fbbf24;
+    --app-warn-wash: rgb(251 191 36 / 0.14);
+    --app-scrim: rgb(0 0 0 / 0.62);
+    --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+    --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+  }
+}

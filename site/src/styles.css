@@ -1,7 +1,7 @@
-/* The site's skin, as its home has it, over penumbra's system half and Bead's overrides of it, which
-   the build puts ahead of this sheet; and the page's own tokens on top: the code, the byte roles and
-   the diagrams', each of the site's. The light scheme is the root's; the dark one answers to
-   `data-color-scheme`, or to the system where no script set it. */
+/* The page's own styles, over penumbra's two sheets, Bead's overrides of them and Bead's skin, which
+   the build puts ahead of this sheet: its faces, and its own tokens, the code's, the byte roles' and
+   the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
 
 @font-face {
   font-family: 'Geist';
@@ -28,38 +28,8 @@
 }
 
 :root {
-  color-scheme: light;
-  --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-  --app-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-  --app-font-mono:
-    'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
-
-  --app-primary: #c13584;
-  --app-primary-ink: #ffffff;
-  --app-primary-hover: #9d2a6b;
-  --app-accent: #c13584;
-  --app-flame-wash: rgb(193 53 132 / 0.1);
-  --app-ring: #ff69b4;
-
-  --app-bg: #f5f2f8;
-  --app-paper: #fdfcfe;
-  --app-text: #17111d;
-  --app-text-secondary: #4a4055;
-  --app-text-tertiary: #6d6278;
-  --app-divider: rgb(23 17 29 / 0.12);
-  --app-control-border: #6b788c;
-  --app-hover: rgb(15 23 42 / 0.05);
-
-  --app-ok: #047857;
-  --app-ok-wash: rgb(4 120 87 / 0.1);
-  --app-info: #0369a1;
-  --app-info-wash: rgb(3 105 161 / 0.1);
-  --app-warn: #92400e;
-  --app-warn-wash: rgb(146 64 14 / 0.1);
-
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
-  --code-bg: #f1ecf5;
   --tok-comment: #625770;
   --tok-keyword: #a62b70;
   --tok-string: #04694c;
@@ -87,30 +57,8 @@
 
 /* the dark scheme, chosen; and the system's, where no script chose */
 :root[data-color-scheme='dark'] {
-  color-scheme: dark;
-  --app-primary: #ff8bc4;
-  --app-primary-ink: #3d0b28;
-  --app-primary-hover: #ffaed5;
-  --app-accent: #ff8bc4;
-  --app-flame-wash: rgb(255 139 196 / 0.14);
-  --app-ring: #ffaed5;
-  --app-bg: #0c0910;
-  --app-paper: #15111c;
-  --app-text: #f2ecf5;
-  --app-text-secondary: #b2a7bf;
-  --app-text-tertiary: #8d8199;
-  --app-divider: rgb(242 236 245 / 0.14);
-  --app-control-border: #7d8ba1;
-  --app-hover: rgb(238 242 248 / 0.07);
-  --app-ok: #34d399;
-  --app-ok-wash: rgb(52 211 153 / 0.14);
-  --app-info: #38bdf8;
-  --app-info-wash: rgb(56 189 248 / 0.14);
-  --app-warn: #fbbf24;
-  --app-warn-wash: rgb(251 191 36 / 0.14);
   --focus: var(--app-ring);
   --seg-prefix: var(--app-accent);
-  --code-bg: #1c1625;
   --tok-comment: #9d91a9;
   --tok-keyword: #ff8bc4;
   --tok-string: #34d399;
@@ -119,30 +67,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme]) {
-    color-scheme: dark;
-    --app-primary: #ff8bc4;
-    --app-primary-ink: #3d0b28;
-    --app-primary-hover: #ffaed5;
-    --app-accent: #ff8bc4;
-    --app-flame-wash: rgb(255 139 196 / 0.14);
-    --app-ring: #ffaed5;
-    --app-bg: #0c0910;
-    --app-paper: #15111c;
-    --app-text: #f2ecf5;
-    --app-text-secondary: #b2a7bf;
-    --app-text-tertiary: #8d8199;
-    --app-divider: rgb(242 236 245 / 0.14);
-    --app-control-border: #7d8ba1;
-    --app-hover: rgb(238 242 248 / 0.07);
-    --app-ok: #34d399;
-    --app-ok-wash: rgb(52 211 153 / 0.14);
-    --app-info: #38bdf8;
-    --app-info-wash: rgb(56 189 248 / 0.14);
-    --app-warn: #fbbf24;
-    --app-warn-wash: rgb(251 191 36 / 0.14);
     --focus: var(--app-ring);
     --seg-prefix: var(--app-accent);
-    --code-bg: #1c1625;
     --tok-comment: #9d91a9;
     --tok-keyword: #ff8bc4;
     --tok-string: #34d399;
@@ -506,7 +432,7 @@ h3 code,
 .gist code {
   padding: 1px var(--app-space-1);
   border-radius: var(--app-radius-sm);
-  background: var(--code-bg);
+  background: var(--raised);
   overflow-wrap: anywhere;
 }
 
@@ -675,7 +601,7 @@ h3 code,
 }
 
 .seg-block {
-  --seg-bg: var(--code-bg);
+  --seg-bg: var(--raised);
   --seg-ink: var(--app-text);
   --seg-line: var(--app-divider);
 }
@@ -882,7 +808,7 @@ th[scope='row'] {
 }
 
 .fate-rejected {
-  background: var(--code-bg);
+  background: var(--raised);
   color: var(--app-text);
 }
 
@@ -1029,8 +955,8 @@ pre.snippet {
   padding: var(--app-space-4);
   overflow-x: auto;
   border-radius: var(--app-radius-md);
-  background: var(--code-bg);
-  font: 400 13.5px/1.55 var(--app-font-mono);
+  background: var(--raised);
+  font: 400 var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
   tab-size: 2;
 }
 

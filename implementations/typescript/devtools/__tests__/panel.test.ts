@@ -25,9 +25,29 @@ interface IFake {
 /** DevTools' themes, as `chrome.devtools.panels.themeName` names them. */
 type ThemeName = (typeof THEMES)[number];
 
+/** The three schemes a root declaration answers to: none, dark as a script chose it, the system's. */
+type Scheme = (typeof SCHEMES)[number];
+
+/** What a surface's sheets declare: each scheme's root tokens, and what any other rule declares. */
+interface IDeclared {
+  local: Set<string>;
+  roots: Record<Scheme, Map<string, string>>;
+  unread: string[];
+}
+
 // constants
 
 const THEMES = Object.freeze(['dark', 'default'] as const);
+
+const SCHEMES = Object.freeze(['light', 'chosen', 'system'] as const);
+
+/** The root's selector in each scheme, its quotes as the sheets write them, and the system's query. */
+const ROOT_OF = Object.freeze({
+  chosen: ":root[data-color-scheme='dark']",
+  light: ':root',
+  system: ':root:not([data-color-scheme])',
+});
+const SYSTEM_DARK = '@media (prefers-color-scheme: dark)';
 
 /** A selected tab and another, in the views' bar and in a call's. */
 const TAB_PAIRS = Object.freeze([
@@ -295,6 +315,162 @@ const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
 };
 
+/** A sheet's top-level blocks, each its prelude and its body, its comments gone. */
+const blocksOf = (sheet: string): { body: string; prelude: string }[] => {
+  const text = sheet.replaceAll(/\/\*[\s\S]*?\*\//gu, '');
+  const blocks: { body: string; prelude: string }[] = [];
+  let depth = 0;
+  let opened = 0;
+  let after = 0;
+
+  for (const { index } of text.matchAll(/[{}]/gu)) {
+    if (text[index] === '{') {
+      if (depth === 0) {
+        opened = index;
+      }
+      depth += 1;
+    } else {
+      depth -= 1;
+      if (depth === 0) {
+        const prelude = text.slice(after, opened).split(';').at(-1) ?? '';
+
+        blocks.push({ body: text.slice(opened + 1, index), prelude: prelude.trim() });
+        after = index + 1;
+      }
+    }
+  }
+
+  return blocks;
+};
+
+/** Each rule of a sheet that declares a custom property: its query, its selector, what it declares. */
+const rulesOf = (
+  sheet: string,
+  query = ''
+): { declarations: [name: string, value: string][]; query: string; selector: string }[] => {
+  return blocksOf(sheet).flatMap(({ body, prelude }) => {
+    if (prelude.startsWith('@media')) {
+      return rulesOf(body, prelude.replaceAll(/\s+/gu, ' '));
+    }
+    const declarations = [...body.matchAll(/(--[\w-]+)\s*:\s*([^;]*)/gu)].map(
+      ([, name = '', value = '']): [name: string, value: string] => {
+        return [name, value.replaceAll(/\s+/gu, ' ').trim()];
+      }
+    );
+
+    if (prelude.startsWith('@') || declarations.length === 0) {
+      return [];
+    }
+
+    return [
+      { declarations, query, selector: prelude.replaceAll('"', "'").replaceAll(/\s+/gu, ' ') },
+    ];
+  });
+};
+
+/** What a surface's sheets declare, read in their order: the root's by scheme, the rest as local. */
+const declaredOf = (sheets: readonly string[]): IDeclared => {
+  const declared: IDeclared = {
+    local: new Set(),
+    roots: { chosen: new Map(), light: new Map(), system: new Map() },
+    unread: [],
+  };
+
+  for (const { declarations, query, selector } of sheets.flatMap((sheet) => {
+    return rulesOf(sheet);
+  })) {
+    const scheme = SCHEMES.find((each) => {
+      return selector === ROOT_OF[each] && query === (each === 'system' ? SYSTEM_DARK : '');
+    });
+
+    if (scheme !== undefined) {
+      for (const [name, value] of declarations) {
+        declared.roots[scheme].set(name, value);
+      }
+    } else if (selector.startsWith(':root') && (selector !== ':root' || query === SYSTEM_DARK)) {
+      // a root this reading does not place in a scheme would answer for it unseen
+      declared.unread.push(`${query} ${selector}`.trim());
+    } else {
+      // a rule's own, or the root's under a query of the width, drawn with where it holds
+      for (const [name] of declarations) {
+        declared.local.add(name);
+      }
+    }
+  }
+
+  return declared;
+};
+
+/** The root's tokens in a scheme: the light ones, under the dark ones that answer to it. */
+const rootTokensOf = (declared: IDeclared, scheme: Scheme): Map<string, string> => {
+  return new Map([...declared.roots.light, ...(scheme === 'light' ? [] : declared.roots[scheme])]);
+};
+
+/** The custom properties a text draws with. */
+const usedIn = (text: string): string[] => {
+  return [...text.matchAll(/var\((--[\w-]+)/gu)].map(([, name = '']) => {
+    return name;
+  });
+};
+
+/** The sheets an HTML page holds: its `<style>` elements, and each `style` attribute as a rule. */
+const stylesOf = (html: string): string[] => {
+  return [
+    ...[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gu)].map(([, sheet = '']) => {
+      return sheet;
+    }),
+    ...[...html.matchAll(/\sstyle="([^"]*)"/gu)].map(([, declarations = '']) => {
+      return `[style] { ${declarations} }`;
+    }),
+  ];
+};
+
+/**
+ * The surfaces Bead's skin paints, each its sheets in the order the browser reads them and every
+ * text that draws with them: the demo as its page links them, and the page and its not-found page
+ * as the page's build writes them.
+ */
+const skinnedSurfacesOf = async (): Promise<
+  { name: string; sheets: string[]; texts: string[] }[]
+> => {
+  const devtools = new URL('../', import.meta.url);
+  const demo = new URL('../demo/', devtools);
+  const site = new URL('../../../site/dist/', devtools);
+  const page = await readFile(new URL('index.html', demo), 'utf8');
+  const linked = await Promise.all(
+    [...page.matchAll(/<link rel="stylesheet" href="(penumbra\/[^"]+)"/gu)].map(([, href = '']) => {
+      return readFile(new URL(href, devtools), 'utf8');
+    })
+  );
+  const scripts = await Promise.all(
+    (await readdir(demo))
+      .filter((name) => {
+        return name.endsWith('.ts');
+      })
+      .map((name) => {
+        return readFile(new URL(name, demo), 'utf8');
+      })
+  );
+  const built = await Promise.all(
+    ['index.html', '404.html'].map((name) => {
+      return readFile(new URL(name, site), 'utf8');
+    })
+  );
+
+  return [
+    {
+      name: 'the demo',
+      sheets: [...linked, ...stylesOf(page)],
+      texts: [...linked, page, ...scripts],
+    },
+    ...['the page', 'the not-found page'].map((name, index) => {
+      const html = built[index] ?? '';
+
+      return { name, sheets: stylesOf(html), texts: [html] };
+    }),
+  ];
+};
+
 // definition
 
 test.describe('the panel', () => {
@@ -335,6 +511,40 @@ test.describe('the panel', () => {
       });
 
     expect([...new Set(undefinedOnes)]).toEqual([]);
+  });
+
+  test('defines every custom property the demo, the page and the not-found page draw with, in each scheme, the dark a script chose and the system’s alike', async () => {
+    for (const { name, sheets, texts } of await skinnedSurfacesOf()) {
+      const declared = declaredOf(sheets);
+      const used = [...new Set(texts.flatMap(usedIn))];
+
+      expect.soft(declared.unread, `${name}: a root in no scheme`).toEqual([]);
+      for (const scheme of SCHEMES) {
+        const tokens = rootTokensOf(declared, scheme);
+
+        expect
+          .soft(
+            used.filter((token) => {
+              return !tokens.has(token) && !declared.local.has(token);
+            }),
+            `${name}: undefined in the ${scheme} scheme`
+          )
+          .toEqual([]);
+      }
+
+      // * a page whose script has not run, or never runs, is dark by the system's query alone
+      const chosen = rootTokensOf(declared, 'chosen');
+      const system = rootTokensOf(declared, 'system');
+
+      expect
+        .soft(
+          [...new Set([...chosen.keys(), ...system.keys()])].filter((token) => {
+            return chosen.get(token) !== system.get(token);
+          }),
+          `${name}: dark as chosen and as the system's apart`
+        )
+        .toEqual([]);
+    }
   });
 
   test('greets the background with its tab, follows DevTools’ theme, and reads the registries as its Metrics view opens', async ({

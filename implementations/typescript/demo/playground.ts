@@ -34,12 +34,13 @@ const STATIC = 'data-bead-transport="worker"';
 /** How the page loads its script, which this build names. */
 const SCRIPT = 'src="./page.js"';
 
-/** Penumbra's two sheets, the DevTools panel's copy, and Bead's overrides of them, which the page
- * links under its skin. */
+/** Penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them and Bead's skin, which
+ * the page links under its own styles. */
 const SHEETS: readonly string[] = Object.freeze([
   'penumbra/tokens.system.css',
   'penumbra/tokens.skin.base.css',
   'penumbra/tokens.system.overrides.css',
+  'penumbra/tokens.skin.css',
 ]);
 
 // helpers

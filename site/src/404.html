@@ -9,7 +9,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
-      /* the page's faces and palette, both schemes, as src/styles.css has them */
+{{stack}}
+
+      /* the page's two faces this one draws with; its scheme the system's, since it runs no script */
       @font-face {
         font-family: 'Geist';
         font-weight: 400 600;
@@ -22,21 +24,6 @@
         font-display: swap;
         src: url('/fonts/newsreader.woff2') format('woff2');
       }
-      :root {
-        color-scheme: light dark;
-        --paper: #fdfcfe;
-        --text: #17111d;
-        --text-secondary: #4a4055;
-        --accent: #c13584;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #15111c;
-          --text: #f2ecf5;
-          --text-secondary: #b2a7bf;
-          --accent: #ff8bc4;
-        }
-      }
       body {
         margin: 0;
         min-height: 100vh;
@@ -45,20 +32,20 @@
         gap: 2.5rem;
         padding: 2rem 1rem;
         box-sizing: border-box;
-        background: var(--paper);
-        color: var(--text);
-        font: 1rem/1.6 Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: 1rem/1.6 var(--app-font-body);
       }
       h1 {
         margin: 0 0 0.25rem;
-        font: 600 1.75rem/1.2 Newsreader, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+        font: 600 1.75rem/1.2 var(--app-font-display);
       }
       p {
         margin: 0;
-        color: var(--text-secondary);
+        color: var(--app-text-secondary);
       }
       a {
-        color: var(--accent);
+        color: var(--app-accent);
       }
     </style>
   </head>

@@ -76,10 +76,14 @@ const FILES = Object.freeze({
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
   '/over-mqtt.js': { path: new URL('./over-mqtt.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
-  // penumbra's two sheets, the DevTools panel's copy, and Bead's overrides of them, under the
-  // page's skin
+  // penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them and Bead's skin,
+  // under the page's own styles
   '/penumbra/tokens.skin.base.css': {
     path: new URL('../../devtools/penumbra/tokens.skin.base.css', import.meta.url),
+    type: 'text/css',
+  },
+  '/penumbra/tokens.skin.css': {
+    path: new URL('../../devtools/penumbra/tokens.skin.css', import.meta.url),
     type: 'text/css',
   },
   '/penumbra/tokens.system.css': {

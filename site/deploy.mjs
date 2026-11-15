@@ -3,7 +3,7 @@
 // uploads it by the Wrangler `package.json` pins, to the Worker `wrangler.jsonc` names, which serves
 // files alone. The page, `dist/index.html`, at `/`; the demo's static build, `demo/dist/playground/`
 // of the TypeScript side, built here from its own sources, at `/playground/`; Bead's mark and the
-// faces the page draws with; the 404 page; and, written here, `_redirects`, `_headers`, `robots.txt`
+// faces the page draws with; the 404 page, `dist/404.html`; and, written here, `_redirects`, `_headers`, `robots.txt`
 // and `sitemap.xml`.
 //
 //   node deploy.mjs              the checks, `out/`, then `wrangler deploy`
@@ -49,7 +49,7 @@ export const TOKEN_VARIABLES = Object.freeze(['CLOUDFLARE_API_TOKEN', 'CLOUDFLAR
 // it is, under this folder
 export const FILES = Object.freeze({
   'index.html': 'dist/index.html',
-  '404.html': 'src/404.html',
+  '404.html': 'dist/404.html',
   'favicon.svg': 'src/favicon.svg',
   'favicon.ico': 'src/favicon.ico',
   'apple-touch-icon.png': 'src/apple-touch-icon.png',
@@ -313,10 +313,15 @@ const main = async () => {
   const commit = git(['rev-parse', '--short', 'HEAD']).trim();
   console.log(`deploy: ${trial ? 'a trial of the tree at' : 'the commit'} ${commit}`);
 
-  // the page, as its build gives it, which check.mjs holds in CI
-  const { OUT: PAGE, build } = await import('./build.mjs');
-  if (readFileSync(PAGE, 'utf8').replaceAll('\r\n', '\n') !== build()) {
-    throw new Error('deploy: dist/index.html is not what the build gives; node build.mjs');
+  // the page and the not-found page, as their build gives them, which check.mjs holds in CI
+  const { NOT_FOUND, OUT: PAGE, build, buildNotFound } = await import('./build.mjs');
+  for (const [path, name, page] of [
+    [PAGE, 'index.html', build()],
+    [NOT_FOUND, '404.html', buildNotFound()],
+  ]) {
+    if (readFileSync(path, 'utf8').replaceAll('\r\n', '\n') !== page) {
+      throw new Error(`deploy: dist/${name} is not what the build gives; node build.mjs`);
+    }
   }
 
   // the demo, from its sources, as CI builds it

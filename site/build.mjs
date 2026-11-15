@@ -8,9 +8,10 @@
 // `docs/support.md`: each row of its Features and Transports in one part of the table or in
 // OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the union of what its
 // rows' cells say for its sides by the token `ahead: <stage>`, a row of the differences of kind
-// open. Node alone, nothing installed, and the same bytes on every machine.
+// open. It writes the not-found page too, `dist/404.html`, its styles over the same skin. Node
+// alone, nothing installed, and the same bytes on every machine.
 //
-//   node build.mjs   writes dist/index.html
+//   node build.mjs   writes dist/index.html and dist/404.html
 //
 // Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, or a table the
 // matrix does not hold: a row in no list or in two, a title the matrix lacks, "ahead" in a cell's
@@ -40,13 +41,20 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
-// penumbra's system half, Bead's copy of it, and Bead's overrides of it, which the demo links too:
-// the page's styles come on top of both
+// penumbra's two sheets, Bead's copy of them, Bead's overrides of them and Bead's skin, which the
+// demo links too: the page's styles come on top of them, and the not-found page's own
 const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
-const SYSTEM = join(PENUMBRA, 'tokens.system.css');
-const OVERRIDES = join(PENUMBRA, 'tokens.system.overrides.css');
+const STACK = [
+  'tokens.system.css',
+  'tokens.skin.base.css',
+  'tokens.system.overrides.css',
+  'tokens.skin.css',
+].map((name) => {
+  return join(PENUMBRA, name);
+});
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
+export const NOT_FOUND = join(HERE, 'dist', '404.html');
 
 export const LANGUAGES = ['en', 'fr'];
 const ADDRESS = 'https://beadproto.dev/';
@@ -773,6 +781,22 @@ const pageOf = (language, known) => {
   return chrome.trim();
 };
 
+// sheets as one, in their order
+const sheetsOf = (paths) => {
+  return paths
+    .map((path) => {
+      return read(path).trim();
+    })
+    .join('\n\n');
+};
+
+// the not-found page: Bead's skin on penumbra's sheets, under its own styles, and no script
+export const buildNotFound = () => {
+  return read(join(SRC, '404.html')).replace('{{stack}}', () => {
+    return sheetsOf(STACK);
+  });
+};
+
 export const build = () => {
   const refusals = tableRefusals();
   if (refusals.length > 0) {
@@ -801,13 +825,8 @@ export const build = () => {
   );
   const page = shell
     .replace('{{style}}', () => {
-      // * penumbra's system half and Bead's overrides of it, as the demo has them, then the page's
-      // styles over them
-      return [SYSTEM, OVERRIDES, join(SRC, 'styles.css')]
-        .map((path) => {
-          return read(path).trim();
-        })
-        .join('\n\n');
+      // * Bead's skin on penumbra's sheets, as the demo has them, then the page's styles over them
+      return sheetsOf([...STACK, join(SRC, 'styles.css')]);
     })
     .replace('{{head-script}}', () => {
       return read(join(SRC, 'head.js')).trim();
@@ -854,9 +873,12 @@ export const diagramsNamed = () => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const page = build();
+    const notFound = buildNotFound();
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, page);
+    writeFileSync(NOT_FOUND, notFound);
     console.log(`build: dist/index.html, ${grouped(Buffer.byteLength(page), 'en')} bytes`);
+    console.log(`build: dist/404.html, ${grouped(Buffer.byteLength(notFound), 'en')} bytes`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
