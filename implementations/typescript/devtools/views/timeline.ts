@@ -1,6 +1,6 @@
 // ── The Timeline view ─────────────────────────────────────────────────────────
 
-// Every call shown, a row each as the Calls list draws its rows, in the order they started: its
+// Every call shown, a row each as the Calls list draws its rows, newest first as it lists them: its
 // status, its id, its procedure, how long it took, and its track on one axis of time, drawn as the
 // Waterfall draws it. The axis is the calls' whole span, or the span dragged across the track,
 // which bounds the Calls list as a brush does and narrows the axis to it; "Show every call" gives
@@ -40,7 +40,7 @@ export interface ITimelineView {
 
 // constants
 
-/** The rows drawn at most: the last calls. */
+/** The rows drawn at most: the newest calls. */
 export const TIMELINE_ROWS = 300;
 
 /** How far a press moves before it is a drag, in CSS pixels: less is a click. */
@@ -170,7 +170,12 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
   }
 
   const axis = view.range ?? span;
-  const shown = calls.slice(-TIMELINE_ROWS);
+  // * newest first, row for row as the Calls list orders them; the time axis runs left to right
+  const shown = calls
+    .toSorted((one, other) => {
+      return other.key - one.key;
+    })
+    .slice(0, TIMELINE_ROWS);
   const focus = shown.some(({ key }) => {
     return key === view.selected;
   })

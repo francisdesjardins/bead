@@ -2216,6 +2216,14 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
           return document.documentElement.scrollHeight <= innerHeight;
         })
       ).toBe(true);
+      // * every column within its pane at 1280 px, none scrolled to
+      if (width === 1280) {
+        expect(
+          await pane.evaluate((node) => {
+            return node.scrollWidth - node.clientWidth;
+          })
+        ).toBeLessThanOrEqual(0);
+      }
       await page.screenshot({
         path: test
           .info()

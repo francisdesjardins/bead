@@ -101,6 +101,38 @@ test.describe('mountPackages', () => {
     );
   });
 
+  test('keeps a package’s removal on its language’s row, and the blueprint’s buttons in a grid, at 390 and 320 px', async ({
+    page,
+  }) => {
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${served?.url ?? ''}#packages`);
+
+      const head = page
+        .getByRole('region', { name: 'gen/typescript-gateway' })
+        .locator('.planner-package-head');
+      const language = await head.getByLabel('Language').boundingBox();
+      const remove = await head.getByRole('button', { name: /^Remove/u }).boundingBox();
+
+      // * the removal beside the language, not on a line of its own
+      expect(remove?.y, `at ${String(width)} px`).toBeLessThan(
+        (language?.y ?? 0) + (language?.height ?? 0)
+      );
+      expect(remove?.x ?? 0).toBeGreaterThan((language?.x ?? 0) + (language?.width ?? 0));
+
+      // * opening one across the row, the two examples side by side, as tall as each other
+      const drop = await page.locator('#planner-drop .buttons').boundingBox();
+      const open = await page.locator('#planner-drop .planner-file').boundingBox();
+      const demo = await page.getByRole('button', { name: "The demo's blueprint" }).boundingBox();
+      const shop = await page.getByRole('button', { name: 'A shop, for example' }).boundingBox();
+
+      expect(open?.width, `at ${String(width)} px`).toBeCloseTo(drop?.width ?? 0, 0);
+      expect(demo?.y).toBe(shop?.y);
+      expect(demo?.height).toBe(shop?.height);
+      expect(demo?.y ?? 0).toBeGreaterThanOrEqual((open?.y ?? 0) + (open?.height ?? 0));
+    }
+  });
+
   test('adds a package in each language', async ({ page }) => {
     await page.goto(`${served?.url ?? ''}#packages`);
 

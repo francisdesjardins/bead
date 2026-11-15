@@ -360,7 +360,10 @@ export const mountPackages = (): void => {
       attributes: { 'data-key': key },
       children: [
         make('summary', {
-          children: [make('span', { className: 'label', text: field }), ` ${shownChosen}`],
+          children: [
+            make('span', { className: 'label', children: [code(field)] }),
+            ` ${shownChosen}`,
+          ],
         }),
         make('div', {
           className: 'planner-pick-body',
@@ -392,7 +395,7 @@ export const mountPackages = (): void => {
               make('div', {
                 className: 'planner-row',
                 children: [
-                  make('span', { className: 'label', text: index === 0 ? 'a selection' : 'or' }),
+                  make('span', { text: index === 0 ? 'A selection' : 'Or' }),
                   make('button', {
                     className: 'quiet',
                     text: 'Remove',
@@ -430,7 +433,7 @@ export const mountPackages = (): void => {
           className: 'planner-checks',
           attributes: { role: 'group', 'aria-label': 'kind' },
           children: [
-            make('span', { className: 'label', text: 'kind' }),
+            make('span', { className: 'label', children: [code('kind')] }),
             ...kinds.map((kind) => {
               return choice(kind, {
                 type: 'checkbox',
@@ -449,7 +452,7 @@ export const mountPackages = (): void => {
           className: 'planner-checks',
           attributes: { role: 'group', 'aria-label': 'idempotencyLevel' },
           children: [
-            make('span', { className: 'label', text: 'idempotencyLevel' }),
+            make('span', { className: 'label', children: [code('idempotencyLevel')] }),
             ...LEVELS.map((level) => {
               const count = pool.filter((each) => {
                 return levelOf(each) === level;
@@ -560,7 +563,7 @@ export const mountPackages = (): void => {
         className: 'planner-package-head',
         children: [
           make('label', {
-            className: 'planner-field',
+            className: 'planner-field planner-language',
             children: [
               make('span', { className: 'label', text: 'Language' }),
               make('select', {
@@ -579,15 +582,12 @@ export const mountPackages = (): void => {
               }),
             ],
           }),
-          make('div', {
-            className: 'planner-field planner-folder',
-            children: [
-              make('span', { className: 'label', text: 'Folder, derived' }),
-              code(output.folder),
-            ],
+          make('p', {
+            className: 'planner-folder note',
+            children: ['Its folder, derived: ', code(output.folder)],
           }),
           make('button', {
-            className: 'quiet',
+            className: 'quiet planner-remove',
             text: 'Remove',
             attributes: {
               type: 'button',
@@ -603,7 +603,7 @@ export const mountPackages = (): void => {
         className: 'planner-writes',
         attributes: { role: 'group', 'aria-label': 'What this package writes' },
         children: [
-          make('span', { className: 'label', text: 'writes' }),
+          make('span', { className: 'label', text: 'Writes' }),
           ...SIDES.map((side) => {
             const isOn = planned[side] !== undefined;
 
@@ -1046,7 +1046,7 @@ export const mountPackages = (): void => {
           className: 'planner-listing',
           children: [
             make('p', {
-              className: 'label',
+              className: 'note',
               text: `${folder} · ${key} · ${String(addresses.length)} ${addresses.length === 1 ? 'address' : 'addresses'}`,
             }),
             make('pre', {
@@ -1085,7 +1085,7 @@ export const mountPackages = (): void => {
           className: 'planner-listing',
           children: [
             make('p', {
-              className: 'label',
+              className: 'note',
               text: `${folder} · ${String(routes.length)} ${routes.length === 1 ? 'route' : 'routes'}`,
             }),
             make('pre', {

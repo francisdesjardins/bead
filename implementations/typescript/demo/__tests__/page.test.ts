@@ -134,6 +134,114 @@ const outlineByTabOf = async (page: Page, selector: string): Promise<string> => 
   return 'none';
 };
 
+/**
+ * The elements shown that are styled as an eyebrow: set in capitals, in small capitals, or spaced
+ * out, each by its tag, its classes and its words. The shared bar is left out: its wordmark is
+ * Bead's name, spaced as the page sets it.
+ */
+const eyebrowsOf = (page: Page): Promise<string[]> => {
+  return page.evaluate(() => {
+    const found: string[] = [];
+
+    for (const element of document.body.querySelectorAll<HTMLElement>(':not(.topbar *)')) {
+      const style = getComputedStyle(element);
+      const { height, width } = element.getBoundingClientRect();
+
+      if (
+        width > 0 &&
+        height > 0 &&
+        element.textContent.trim() !== '' &&
+        (style.textTransform === 'uppercase' ||
+          style.fontVariantCaps.includes('small-caps') ||
+          Number.parseFloat(style.letterSpacing) > 0)
+      ) {
+        found.push(
+          `${element.tagName.toLowerCase()}.${[...element.classList].join('.')} "${element.textContent.trim().slice(0, 24)}"`
+        );
+      }
+    }
+
+    return found;
+  });
+};
+
+/**
+ * The boxes inside a card drawn at the radius of a boxed ancestor in the same card, each by its
+ * tag, its classes and that radius: one radius a level. A control and a tag keep their own.
+ */
+const nestedRadiiOf = (page: Page): Promise<string[]> => {
+  return page.evaluate(() => {
+    const isBoxed = (element: Element): boolean => {
+      const style = getComputedStyle(element);
+
+      return (
+        style.borderRadius !== '0px' &&
+        (style.borderTopWidth !== '0px' ||
+          style.borderLeftWidth !== '0px' ||
+          style.boxShadow !== 'none' ||
+          style.backgroundColor !== 'rgba(0, 0, 0, 0)')
+      );
+    };
+    const nameOf = (element: Element): string => {
+      return `${element.tagName.toLowerCase()}.${[...element.classList].join('.')}`;
+    };
+    const found: string[] = [];
+
+    for (const card of document.querySelectorAll('.card, .fold')) {
+      for (const element of card.querySelectorAll(
+        ':not(button, select, input, textarea, label.planner-file, .chip)'
+      )) {
+        if (element.getBoundingClientRect().width === 0 || !isBoxed(element)) {
+          continue;
+        }
+
+        const { borderRadius } = getComputedStyle(element);
+        let above = element.parentElement;
+
+        while (above !== null) {
+          if (isBoxed(above) && getComputedStyle(above).borderRadius === borderRadius) {
+            found.push(`${nameOf(element)} ${borderRadius} in ${nameOf(above)}`);
+
+            break;
+          }
+
+          if (above === card) {
+            break;
+          }
+
+          above = above.parentElement;
+        }
+      }
+    }
+
+    return found;
+  });
+};
+
+/** The Server view's four figures: where each sits, and how its number is set. */
+const figuresOf = (page: Page) => {
+  return page.locator('#server-scene .figure').evaluateAll((figures) => {
+    return figures.map((figure) => {
+      const box = figure.getBoundingClientRect();
+      const card = figure.closest('.card')?.getBoundingClientRect();
+      const figureStyle = getComputedStyle(figure);
+      const value = getComputedStyle(figure.querySelector('.value') as Element);
+
+      return {
+        top: Math.round(box.top),
+        left: Math.round(box.left),
+        isInCard: card !== undefined && box.left >= card.left && box.right <= card.right,
+        isFlat:
+          figureStyle.boxShadow === 'none' &&
+          figureStyle.borderTopWidth === '0px' &&
+          figureStyle.borderRadius === '0px',
+        face: value.fontFamily.split(',')[0]?.replaceAll('"', ''),
+        size: Number.parseFloat(value.fontSize),
+      };
+    });
+  });
+};
+
 /** The sizes code is set in, by what holds it: each block, and the wire's log. */
 const codeSizesOf = (page: Page): Promise<string[]> => {
   return page.evaluate(() => {
@@ -347,6 +455,102 @@ test.describe('the demo’s page', () => {
     }
 
     expect(reportOf(found)).toEqual([]);
+  });
+
+  test('styles nothing as an eyebrow, and names a field or a control in the body’s face', async ({
+    page,
+  }) => {
+    for (const scene of SCENES) {
+      await page.goto(`${served?.url ?? ''}#${scene}`);
+      await expect(page.locator(`#${scene}-scene`)).toBeVisible();
+
+      // * the Packages view's labels shown whole: a package added, its selection's keys open
+      if (scene === 'packages') {
+        await page
+          .getByRole('group', { name: 'Add a package in' })
+          .getByRole('button', { name: 'Rust', exact: true })
+          .click();
+        await page
+          .getByRole('region', { name: 'gen/rust-client' })
+          .getByRole('radio', { name: 'a selection' })
+          .check();
+      }
+
+      expect(await eyebrowsOf(page), scene).toEqual([]);
+    }
+
+    const labels = await page.locator('.label').evaluateAll((elements) => {
+      return elements.map((element) => {
+        const style = getComputedStyle(element);
+
+        return `${style.fontFamily.split(',')[0]?.replaceAll('"', '') ?? ''} ${style.fontSize}`;
+      });
+    });
+
+    expect(labels.length).toBeGreaterThan(0);
+    expect(new Set(labels)).toEqual(new Set(['Geist 13px']));
+  });
+
+  test('keeps one radius a level inside a card, every fold and selection open', async ({
+    page,
+  }) => {
+    for (const scene of SCENES) {
+      await page.goto(`${served?.url ?? ''}#${scene}`);
+      await expect(page.locator(`#${scene}-scene`)).toBeVisible();
+
+      // * the shop's servers hold transports, each selection open over them
+      if (scene === 'packages') {
+        await page.getByRole('button', { name: 'A shop, for example' }).click();
+
+        for (const radio of await page.getByRole('radio', { name: 'a selection' }).all()) {
+          await radio.check();
+        }
+      }
+
+      await page.evaluate(() => {
+        for (const fold of document.querySelectorAll('details')) {
+          fold.open = true;
+        }
+      });
+      expect(await nestedRadiiOf(page), scene).toEqual([]);
+    }
+  });
+
+  test('sets the Server view’s four figures as one strip in its card, two by two on a phone', async ({
+    page,
+  }) => {
+    for (const [width, rows] of [
+      [1280, 1],
+      [390, 2],
+    ] as const) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${served?.url ?? ''}#server`);
+      await expect(page.locator('#server-scene')).toBeVisible();
+
+      const figures = await figuresOf(page);
+      const tops = new Set(
+        figures.map(({ top }) => {
+          return top;
+        })
+      );
+      const lefts = new Set(
+        figures.map(({ left }) => {
+          return left;
+        })
+      );
+
+      expect(figures, `at ${String(width)} px`).toHaveLength(4);
+      expect(tops.size, `rows at ${String(width)} px`).toBe(rows);
+      expect(lefts.size, `columns at ${String(width)} px`).toBe(4 / rows);
+
+      for (const { isInCard, isFlat, face, size } of figures) {
+        expect(isInCard, `in its card at ${String(width)} px`).toBe(true);
+        expect(isFlat, `flat at ${String(width)} px`).toBe(true);
+        expect(face).toBe('Geist Mono');
+        // * the body's size or one step up: never a hero's
+        expect(size).toBeLessThanOrEqual(18);
+      }
+    }
   });
 
   test('sets every block of code at 13 px', async ({ page }) => {

@@ -150,7 +150,9 @@ test('keeps the Timeline control focused with its current callback and releases 
   await expect(rows.locator('.brush')).toBeHidden();
 });
 
-test('draws the last 300 calls, and says how many it leaves out', async ({ page }) => {
+test('draws the newest 300 calls, newest first, and says how many it leaves out', async ({
+  page,
+}) => {
   const { calls } = trafficBook();
   await loadView(page, 'timeline', { scheme: 'light' });
   const drawn = await page.evaluate(
@@ -184,16 +186,22 @@ test('draws the last 300 calls, and says how many it leaves out', async ({ page 
       return {
         count: rows.length,
         first: rows[0]?.dataset['key'],
+        last: rows[rows.length - 1]?.dataset['key'],
         note: [...timeline.querySelectorAll('p.note')].at(-1)?.textContent,
       };
     },
     { traffic: calls, whole: spanOfCalls(calls) as ISpan }
   );
 
-  expect(drawn).toEqual({ count: 300, first: '1', note: 'The last 300 calls shown, of 301.' });
+  expect(drawn).toEqual({
+    count: 300,
+    first: '300',
+    last: '1',
+    note: 'The last 300 calls shown, of 301.',
+  });
 });
 
-test('draws a call a row, as the Calls list draws its rows', async ({ page }) => {
+test('draws a call a row, as the Calls list draws its rows, in its order', async ({ page }) => {
   const { calls } = trafficBook();
   await page.setViewportSize({ width: 1_600, height: 900 });
   await loadView(page, ['calls', 'dom', 'timeline'], { scheme: 'light' });
@@ -251,6 +259,16 @@ test('draws a call a row, as the Calls list draws its rows', async ({ page }) =>
         })
       );
       const legend = timeline.querySelector('.legend')?.textContent ?? '';
+      const keysOf = (root: HTMLElement): string[] => {
+        return rowsOf(root).map((row) => {
+          return row.dataset['key'] ?? '';
+        });
+      };
+
+      // * row for row: the same calls, newest first, in both
+      if (keysOf(timeline).join() !== keysOf(list).join()) {
+        return [{ order: `${keysOf(timeline).join()} against ${keysOf(list).join()}` }];
+      }
 
       return rowsOf(timeline).map((row) => {
         const twin = callRows.get(row.dataset['key']) as HTMLTableRowElement;
@@ -279,9 +297,13 @@ test('draws a call a row, as the Calls list draws its rows', async ({ page }) =>
   );
 
   expect(drawn).toEqual(
-    calls.map(({ key }) => {
-      return { key, name: true, same: true, status: true, looks: true };
-    })
+    calls
+      .toSorted((one, other) => {
+        return other.key - one.key;
+      })
+      .map(({ key }) => {
+        return { key, name: true, same: true, status: true, looks: true };
+      })
   );
 });
 

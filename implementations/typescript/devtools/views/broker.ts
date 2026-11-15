@@ -199,6 +199,12 @@ export const brokerViewOf = (options: {
   const state = make('button', { text: 'Envelope credit → State' });
   listen(state, { type: 'click', handle: onState });
   const parts = partsOf(records, letGo > 0);
+  // * the column cut where it runs long: the row's detail holds its words whole
+  const partsWordsOf = (record: IParticipantRecord): string | undefined => {
+    return record.event === 'parcel' && record.parcelKind === 'DATA'
+      ? `${parts.get(record) ?? `${String(record.carriedBytes ?? 0)} carried`} · ${record.more === true ? 'MORE' : 'final'}`
+      : undefined;
+  };
   const heads = [
     'Time',
     'Participant',
@@ -235,9 +241,7 @@ export const brokerViewOf = (options: {
               record.sequence === undefined ? '·' : String(record.sequence),
               record.topic?.join('/') ?? '·',
               bytesOf(record.bytes ?? 0),
-              record.parcelKind === 'DATA'
-                ? `${parts.get(record) ?? `${String(record.carriedBytes ?? 0)} carried`} · ${record.more === true ? 'MORE' : 'final'}`
-                : '·',
+              partsWordsOf(record) ?? '·',
               record.verdict ?? 'attempt',
             ]
           : undefined;
@@ -263,8 +267,11 @@ export const brokerViewOf = (options: {
                   text: `${clockOf(record.at)} · Participant ${String(record.source)} · ${record.event === 'report' ? `Error: ${record.report ?? ''}` : record.event === 'link' ? `Link ${record.state ?? ''}${record.ended === undefined ? '' : ` · ended ${record.ended.join(', ') || 'none'}`}` : `${record.name ?? ''} ${record.isHeld === true ? 'held' : 'let go'}`}`,
                 }),
               ]
-            : fields.map((text) => {
-                return make('td', { text });
+            : fields.map((text, index) => {
+                return make('td', {
+                  className: heads[index] === 'Carried / parts' ? 'parts' : undefined,
+                  text,
+                });
               }),
       });
       listen(row, {
@@ -276,11 +283,13 @@ export const brokerViewOf = (options: {
       });
       return row;
     });
+  const selectedParts = selected === undefined ? undefined : partsWordsOf(selected);
   const detail = make('aside', {
     className: 'participant-detail',
     attributes: { 'aria-label': 'Parcel detail', tabindex: '0', role: 'region' },
     children: [
       make('h2', { text: 'Recorded fields' }),
+      ...(selectedParts === undefined ? [] : [factsOf([['Carried / parts', selectedParts]])]),
       selected === undefined
         ? make('p', { text: 'Select a row to inspect its recorded fields.' })
         : make('pre', { text: JSON.stringify(selected, null, 2) }),

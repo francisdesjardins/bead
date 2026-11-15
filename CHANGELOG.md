@@ -210,6 +210,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   drawn once.
 - The DevTools panel's Broker view lists a participant's parcels newest first, as the Calls list
   does, a new parcel appearing at the top.
+- The demo labels only what a reader acts on, a field or a control, in sentence case and the
+  body's face; a label that repeated its card's heading is gone, and nothing reads as an eyebrow.
+  A card is a scene's primary unit, what it holds flat: the Server view is one card, its four
+  figures one strip in Geist Mono, two by two on a phone. On a phone a package's Remove sits on its
+  language's row, and the blueprint's buttons form a grid. A focus the page scrolls to stops below
+  its sticky scene tabs, where it could sit under them. The DevTools panel's Broker table fits
+  its pane at 1280 px, its parts cut where they run long and whole in the row's detail, and the
+  Timeline lists its calls newest first, row for row as the Calls list does.
 
 ### Removed
 

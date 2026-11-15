@@ -566,7 +566,8 @@
         white-space: nowrap;
       }
 
-      td.outcome {
+      td.outcome,
+      td.parts {
         width: 100%;
         /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
@@ -1826,6 +1827,12 @@
         overflow: auto;
         overflow-anchor: none;
       }
+      /* * the Calls list's spacing: the parcels' ten columns fit their pane at 1280 px, the parts
+         cut where they run long, whole in the row's detail */
+      .participant-table table.plain td,
+      .participant-table table.plain th {
+        padding-inline: var(--app-space-1);
+      }
       .participant-detail {
         min-width: 0;
         min-height: 0;
@@ -1837,6 +1844,9 @@
         top: 0;
         background: var(--app-paper);
         z-index: 1; /* the header stays above the scrolling rows */
+      }
+      .participant-detail .facts {
+        margin-bottom: var(--app-space-2);
       }
       .participant-detail pre {
         white-space: pre-wrap;

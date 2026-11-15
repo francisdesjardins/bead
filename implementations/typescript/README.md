@@ -2205,10 +2205,10 @@ its tab `Bead ⦿`; the extension's icons are Bead's mark, which `site/icons.mjs
 - **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
   panel's records — its session, the calls in flight, the subscriptions and their credit, the
   transfers and how far they went. It replays nothing, and sends nothing to the page.
-- **Timeline**: every call shown, a row each as in Calls, on one axis of time, a notification a
-  ring, a chunk, a credit or a cancel a tick, a call too short for its bar a diamond on its start;
-  a row opens its call in Calls, and dragging across the axis bounds the Calls list to that span and
-  narrows the axis to it.
+- **Timeline**: every call shown, a row each as in Calls and newest first as it lists them, on one
+  axis of time, a notification a ring, a chunk, a credit or a cancel a tick, a call too short for
+  its bar a diamond on its start; a row opens its call in Calls, and dragging across the axis bounds
+  the Calls list to that span and narrows the axis to it.
 - **Metrics**: what each client's registry counts, a row a procedure, read by
   `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
   median and a p95, its calls a second over the last minute, and its exposition as a scrape reads

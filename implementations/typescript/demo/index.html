@@ -684,12 +684,16 @@
         line-height: var(--app-lh-snug);
       }
 
+      /* * the name of what a reader acts on, a field or a control, in the body's face: never a
+         block's eyebrow, which its heading already names */
       .label {
-        color: var(--app-text-tertiary);
-        font-size: var(--app-text-xs);
-        font-weight: 500;
-        letter-spacing: var(--app-tracking-label);
-        text-transform: uppercase;
+        color: var(--app-text-secondary);
+        font: 500 var(--app-text-sm) / var(--app-lh-snug) var(--app-font-body);
+      }
+
+      /* a key of beadc.yaml, at the label's own size */
+      .label code {
+        font-size: 1em;
       }
 
       /* what a scene's last call said */
@@ -728,7 +732,7 @@
         width: 112px;
         height: 112px;
         flex: none;
-        border-radius: var(--app-radius-md);
+        border-radius: var(--app-radius);
         box-shadow: 0 0 0 1px var(--app-divider);
       }
 
@@ -736,18 +740,13 @@
         display: none;
       }
 
-      /* ── the server: its verdict, four figures, then what folds ──────────── */
+      /* ── the server: one card, its verdict and four figures, then what folds ── */
 
       .server-head {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--app-space-2) var(--app-space-4);
-      }
-
-      .server-head h2 {
-        font: 500 2.125rem / var(--app-lh-tight) var(--app-font-display);
-        letter-spacing: -0.02em;
+        gap: var(--app-space-2) var(--app-space-3);
       }
 
       /* the verdict, coloured as health checks are read */
@@ -771,13 +770,16 @@
         color: var(--app-error);
       }
 
+      /* * one strip of four figures in the server's card, two by two on a phone: the gaps, a
+         pixel wide over the divider's colour, draw the hairlines between them, never around */
       .figures {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--app-space-3);
+        gap: 1px;
+        background: var(--app-divider);
       }
 
-      @media (max-width: 760px) {
+      @media (max-width: 600px) {
         .figures {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
@@ -788,21 +790,31 @@
         align-content: start;
         gap: var(--app-space-1);
         min-width: 0;
-        padding: var(--app-space-4);
-        border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-lg);
+        padding: var(--app-space-2) var(--app-space-4);
         background: var(--app-paper);
       }
 
+      .figure:first-child {
+        padding-left: 0;
+      }
+
+      @media (max-width: 600px) {
+        .figure {
+          padding-block: var(--app-space-3);
+        }
+
+        .figure:nth-child(odd) {
+          padding-left: 0;
+        }
+      }
+
       .figure dt {
-        color: var(--app-text-tertiary);
-        font-size: var(--app-text-xs);
-        letter-spacing: var(--app-tracking-label);
-        text-transform: uppercase;
+        color: var(--app-text-secondary);
+        font: 500 var(--app-text-sm) / var(--app-lh-snug) var(--app-font-body);
       }
 
       .figure .value {
-        font: 500 2.125rem / 1 var(--app-font-display);
+        font: 500 var(--app-text-base) / var(--app-lh-snug) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
       }
@@ -1128,6 +1140,21 @@
         border-radius: var(--app-radius-md);
       }
 
+      @media (max-width: 600px) {
+        .planner-drop .planner-file {
+          grid-column: 1 / -1;
+        }
+
+        .planner-drop {
+          padding: var(--app-space-3);
+        }
+
+        .planner-drop .buttons button {
+          padding: var(--app-space-2) var(--app-space-3);
+          text-wrap: balance;
+        }
+      }
+
       .planner-drop[data-over] {
         border-color: var(--app-accent);
         background: var(--app-flame-wash);
@@ -1180,22 +1207,49 @@
         display: none;
       }
 
+      .planner-package {
+        container: package / inline-size;
+      }
+
+      /* * the language, its folder and its removal on one row; where the card is narrow, the
+         folder on a line of its own, the removal kept on the language's row */
       .planner-package-head {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-areas: 'language folder remove';
+        grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: end;
         gap: var(--app-space-2) var(--app-space-4);
+      }
+
+      @container package (width < 40rem) {
+        .planner-package-head {
+          grid-template-areas:
+            'language remove'
+            'folder folder';
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+      }
+
+      .planner-language {
+        grid-area: language;
+        justify-self: start;
+      }
+
+      .planner-folder {
+        grid-area: folder;
+        min-width: 0;
+        min-height: var(--app-touch);
+        align-content: center;
+      }
+
+      .planner-remove {
+        grid-area: remove;
       }
 
       .planner-field {
         display: grid;
         gap: var(--app-space-1);
         min-width: 0;
-      }
-
-      /* the folder takes its own line where the head has no room for it */
-      .planner-folder {
-        flex: 1 1 14rem;
       }
 
       .planner select {
@@ -1240,7 +1294,9 @@
         background: var(--raised);
       }
 
+      /* one radius a level: a transport inside its server's box, a pick inside either, a step down */
       .planner-transport {
+        border-radius: var(--app-radius);
         background: var(--app-paper);
       }
 
@@ -1308,8 +1364,12 @@
       .planner-pick {
         min-width: 0;
         border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-md);
+        border-radius: var(--app-radius);
         background: var(--app-paper);
+      }
+
+      .planner-transport .planner-pick {
+        border-radius: var(--app-radius-sm);
       }
 
       .planner-pick summary {
@@ -1814,6 +1874,25 @@
           padding: var(--app-space-3) var(--app-space-4);
         }
       }
+
+      /* ! where the scene tabs stay at the top, a focus scrolled to stops under them too, never
+         beneath them: last in the sheet, over the desktop's padding for the bar and the strip */
+      @media (min-height: 700px) {
+        html {
+          scroll-padding-top: calc(
+            var(--app-topbar-height) + var(--app-touch) + var(--app-space-4)
+          );
+        }
+      }
+
+      @media (min-width: 900px) and (min-height: 700px) {
+        html {
+          scroll-padding-top: calc(
+            var(--app-topbar-height) + var(--strip-height) + 1px + var(--app-touch) +
+              var(--app-space-4)
+          );
+        }
+      }
     </style>
   </head>
   <body data-bead-pathname="%BEAD_PATHNAME%">
@@ -2002,7 +2081,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Identity</p>
               <p id="identity-who">logged out</p>
               <p id="identity-session" class="detail"></p>
               <p id="identity-outcome" class="outcome note" data-outcome role="status">—</p>
@@ -2026,10 +2104,9 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Counter</p>
               <span id="counter">—</span>
               <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
-              <p class="detail"><span class="label">Last burst</span> <span id="burst">—</span></p>
+              <p class="detail">Last burst: <span id="burst">—</span></p>
               <p id="counter-outcome" class="outcome note" data-outcome role="status">—</p>
             </div>
           </section>
@@ -2046,7 +2123,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Glyph</p>
               <div class="glyph">
                 <canvas
                   id="glyph"
@@ -2075,7 +2151,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Result</p>
               <p id="calls-outcome" class="outcome" data-outcome role="status">—</p>
             </div>
           </section>
@@ -2214,9 +2289,9 @@
                 cannot</span
               >.
             </p>
-            <p class="label">Its request, as it is filled</p>
+            <p class="note">Its request, as it is filled:</p>
             <pre id="sign-up-http-request" class="code" tabindex="0"></pre>
-            <p class="label">What the gateway answers</p>
+            <p class="note">What the gateway answers:</p>
             <pre id="sign-up-http-answer" class="code" tabindex="0">
 What it answers shows once the sign-up is sent.</pre>
           </section>
@@ -2242,41 +2317,43 @@ What it answers shows once the sign-up is sent.</pre>
         </div>
 
         <div id="server-scene" class="scene" role="tabpanel" aria-labelledby="scene-server" hidden>
-          <div class="server-head">
-            <h2 id="server-h">The server, every second</h2>
-            <span id="health">—</span>
-          </div>
-          <p class="note">
-            Read every second, its health and what each layer holds by a <code>stats</code> call,
-            the calls it answered by the <code>metrics</code> call beside, over Bead itself, both
-            left out of the wire and of these counts.
-          </p>
-          <p class="note" id="tabs" hidden>
-            Open this page in a second tab: each tab is a client of this one server, which counts
-            them, and they share its counter.
-          </p>
-          <dl class="figures">
-            <div class="figure">
-              <dt>Calls answered</dt>
-              <dd id="answered" class="value">—</dd>
-              <dd class="note">by the server, the reads aside</dd>
+          <section class="card" aria-labelledby="server-h">
+            <div class="server-head">
+              <h2 id="server-h">The server, every second</h2>
+              <span id="health">—</span>
             </div>
-            <div class="figure">
-              <dt>Median</dt>
-              <dd id="median" class="value">—</dd>
-              <dd id="mean" class="note">estimated within its bucket</dd>
-            </div>
-            <div class="figure">
-              <dt>Connections</dt>
-              <dd id="connections" class="value">—</dd>
-              <dd class="note">a client a tab</dd>
-            </div>
-            <div class="figure">
-              <dt>Subscriptions</dt>
-              <dd id="subscriptions" class="value">—</dd>
-              <dd class="note">the server notifies</dd>
-            </div>
-          </dl>
+            <p class="note">
+              Read every second, its health and what each layer holds by a <code>stats</code> call,
+              the calls it answered by the <code>metrics</code> call beside, over Bead itself, both
+              left out of the wire and of these counts.
+            </p>
+            <p class="note" id="tabs" hidden>
+              Open this page in a second tab: each tab is a client of this one server, which counts
+              them, and they share its counter.
+            </p>
+            <dl class="figures">
+              <div class="figure">
+                <dt>Calls answered</dt>
+                <dd id="answered" class="value">—</dd>
+                <dd class="note">by the server, the reads aside</dd>
+              </div>
+              <div class="figure">
+                <dt>Median</dt>
+                <dd id="median" class="value">—</dd>
+                <dd id="mean" class="note">estimated within its bucket</dd>
+              </div>
+              <div class="figure">
+                <dt>Connections</dt>
+                <dd id="connections" class="value">—</dd>
+                <dd class="note">a client a tab</dd>
+              </div>
+              <div class="figure">
+                <dt>Subscriptions</dt>
+                <dd id="subscriptions" class="value">—</dd>
+                <dd class="note">the server notifies</dd>
+              </div>
+            </dl>
+          </section>
 
           <details class="fold" open>
             <summary>Per procedure, what the server answered</summary>

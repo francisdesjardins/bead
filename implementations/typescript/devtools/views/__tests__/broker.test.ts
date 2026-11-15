@@ -197,6 +197,10 @@ test('draws pulled participant levels, parcel columns, link separators and repor
   await expect(data.nth(2)).toContainText('incomplete capture');
   await data.last().click();
   await expect(page.locator('.participant-detail pre')).toContainText('"sequence": 10');
+  // * the parts' column, cut where it runs long, whole in the row's detail
+  await expect(page.locator('.participant-detail .facts dd')).toHaveText(
+    (await data.last().locator('td.parts').textContent()) ?? ''
+  );
   await page.getByLabel('Parcel kind', { exact: true }).selectOption('DATA');
   await expect(page.locator('tr[data-event="parcel"]')).toHaveCount(3);
   await expect(page.locator('.participant-transition')).toHaveCount(1);
