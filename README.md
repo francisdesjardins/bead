@@ -655,8 +655,15 @@ covers every view, and each view counts what it hides
 ```sh
 cd implementations/typescript
 yarn devtools:build   # unpacked, into devtools/dist/: chrome://extensions, then Load unpacked
+yarn devtools:package # the zip the Chrome Web Store takes, into devtools/release/, and its SHA-256
 yarn test:devtools    # its tests, once it and the demo's static build are built
 ```
+
+`yarn devtools:package` builds the extension, then zips `devtools/dist/` from its own list of files:
+a file the build leaves that the list does not know is a refusal. The zip is the same bytes for the
+same commit, its entries sorted and stored at one fixed time, and it refuses a tree with changes
+(`--trial` packages the tree as it is, a zip never to upload). The extension's privacy policy is the
+page's [`/privacy/`](https://beadproto.dev/privacy/), in English and in French.
 
 Where a broker is given, `BEAD_MQTT_URL` and `BEAD_MQTT_WS_URL`, its tests also follow the demo's
 client over MQTT 5 to the panel, as CI's job `mqtt` runs them (`yarn test:devtools --grep "over

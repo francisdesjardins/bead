@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Bead DevTools",
+  "name": "__MSG_name__",
   "version": "%VERSION%",
-  "description": "Bead's calls, envelopes and metrics, in a DevTools panel.",
+  "description": "__MSG_description__",
+  "default_locale": "en",
   "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon-16.png",

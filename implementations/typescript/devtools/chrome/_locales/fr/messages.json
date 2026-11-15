@@ -1,0 +1,10 @@
+{
+  "name": {
+    "message": "Bead DevTools",
+    "description": "The extension's name, in chrome://extensions and in the Chrome Web Store."
+  },
+  "description": {
+    "message": "Les appels, les enveloppes, la chronologie, les métriques et les colis du courtier de Bead, dans un panneau des DevTools.",
+    "description": "The extension's summary, 132 characters at most: the Chrome Web Store shows it under the name."
+  }
+}

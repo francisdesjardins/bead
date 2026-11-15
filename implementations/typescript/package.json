@@ -52,6 +52,7 @@
     "comment-budget": "node tools/check-comment-budget.mjs",
     "demo": "node demo/serve.ts",
     "devtools:build": "node devtools/build.ts",
+    "devtools:package": "node devtools/package.ts",
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
