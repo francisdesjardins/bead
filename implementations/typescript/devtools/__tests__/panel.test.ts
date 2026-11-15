@@ -1492,15 +1492,29 @@ test.describe('the panel', () => {
     await expect(page.locator('#live')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  test('draws every call on a time axis, and bounds the list to the span dragged across it', async ({
+  test('draws every call a row on a time axis, opens one in Calls, and bounds the list to the span dragged across it', async ({
     page,
   }) => {
     await openWithTraffic(page);
     await page.click('[data-tab="timeline"]');
 
-    await expect(page.locator('#timeline .hit')).toHaveCount(10);
+    const rows = page.locator('#timeline tbody tr[data-key]');
 
-    const box = await page.locator('#timeline svg').boundingBox();
+    await expect(rows).toHaveCount(10);
+
+    const key = await rows.nth(1).getAttribute('data-key');
+
+    await rows.nth(1).locator('td.name').click();
+    await expect(page.locator('[data-tab="calls"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(`#calls tr[data-key="${String(key)}"]`)).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.locator('#detail')).toBeFocused();
+    await page.click('[data-tab="timeline"]');
+    await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+    const box = await page.locator('#timeline thead .track').boundingBox();
 
     if (box === null) {
       throw new Error('the timeline has no box');
@@ -1510,6 +1524,7 @@ test.describe('the panel', () => {
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.99, box.y + 40, { steps: 4 });
     await page.mouse.up();
+    await expect(rows).not.toHaveCount(10);
     await page.click('[data-tab="calls"]');
     await expect(page.locator('#range .chip')).toBeVisible();
     await expect(page.locator('#calls tr.call')).not.toHaveCount(10);

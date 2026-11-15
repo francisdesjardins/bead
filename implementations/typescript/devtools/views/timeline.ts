@@ -1,19 +1,21 @@
 // ── The Timeline view ─────────────────────────────────────────────────────────
 
-// Every call shown, on one axis of time, in SVG with nothing to load: a row a call, in the order
-// they started, its bar from its start to its end, a subscription a line with a ring a
-// notification, a tick for each chunk, credit or cancel; a bubble on hover. Dragging across it
-// bounds the Calls list to that span, as a brush does.
+// Every call shown, a row each as the Calls list draws its rows, in the order they started: its
+// status, its id, its procedure, how long it took, and its track on one axis of time, drawn as the
+// Waterfall draws it. The axis is the calls' whole span, or the span dragged across the track,
+// which bounds the Calls list as a brush does and narrows the axis to it; "Show every call" gives
+// the whole back. A click or Enter on a row opens its call's detail, and ↑ and ↓ move through the
+// rows.
 
 // dependencies
 
-import { EnvelopeKind } from '../../src/router/shared/constants';
 import type { ICall } from '../model/calls';
-import { endOf, outcomeOf, startOf, statusOf } from '../model/facts';
-import { type ISpan, scaleOf, ticksOf } from '../model/scale';
+import { type CallStatus, outcomeOf, startOf, statusOf } from '../model/facts';
+import { type ISpan, tickStepOf, ticksOf } from '../model/scale';
 import { clockOf, spanOf } from '../model/words';
 import { callLabelOf, durationWordsOf, typeWordsOf } from './calls';
-import { currentOf, listen, make, svgOf } from './dom';
+import { currentOf, listen, make, STATUS_NAMES, statusIconOf } from './dom';
+import { trackOf } from './track';
 
 // interfaces
 
@@ -23,234 +25,345 @@ export interface ITimelineView {
   isAllClients: boolean;
   nameOf: (call: ICall) => string;
   now: number;
+  /** Opens a call's detail, as a click on its row or Enter asks. */
+  onOpen: (key: number) => void;
   /** Bounds the Calls list to a span, or lets it be whole again. */
   onRange: (range: ISpan | undefined) => void;
-  /** The span the Calls list is bounded to, if any. */
+  /** Selects a call, as ↑ and ↓ move through the rows. */
+  onSelect: (key: number) => void;
+  /** The span the Calls list is bounded to, if any: the axis, when there is one. */
   range: ISpan | undefined;
+  selected: number | undefined;
+  /** The span of every call shown. */
   span: ISpan | undefined;
-  /** The width it is drawn at, in CSS pixels: the view's own, so a pixel of the drawing is one of the page. */
-  width?: number;
 }
 
 // constants
 
-/** The width drawn at where none is given, and the least any is drawn at: past it, the view scrolls. */
-const WIDTH = 1_000;
-const LEAST_WIDTH = 560;
-const LEFT = 170;
-const RIGHT = 16;
-const ROW = 20;
-const TOP = 22;
-
 /** The rows drawn at most: the last calls. */
 export const TIMELINE_ROWS = 300;
 
-const TICKED = Object.freeze<number[]>([
-  EnvelopeKind.CHUNK,
-  EnvelopeKind.CREDIT,
-  EnvelopeKind.CANCEL,
+/** How far a press moves before it is a drag, in CSS pixels: less is a click. */
+const DRAG = 4;
+
+/** The statuses the legend names, a bar each. */
+const LEGEND = Object.freeze<CallStatus[]>([
+  'answered',
+  'failed',
+  'ended',
+  'flight',
+  'open',
+  'closed',
 ]);
 
-const FILLS = Object.freeze({
-  answered: 'var(--app-info)',
-  closed: 'var(--app-text-secondary)',
-  ended: 'none',
-  failed: 'var(--app-error)',
-  flight: 'var(--app-info-wash)',
-  heard: 'var(--app-info)',
-  open: 'var(--app-text-secondary)',
-});
+/** The keys that move through the rows. */
+const MOVES = Object.freeze<string[]>(['ArrowDown', 'ArrowUp', 'End', 'Home']);
+
+// helpers
+
+/** One key of the legend: a swatch drawn as the tracks draw, and its words. */
+const keyOf = (marks: readonly HTMLElement[], words: string): HTMLElement => {
+  return make('span', {
+    children: [
+      make('span', {
+        attributes: { 'aria-hidden': 'true' },
+        children: marks,
+        className: 'wf swatch',
+      }),
+      words,
+    ],
+    className: 'key',
+  });
+};
+
+const legendOf = (): HTMLElement => {
+  return make('span', {
+    children: [
+      ...LEGEND.map((status) => {
+        return keyOf(
+          [
+            make('span', {
+              attributes: { style: 'left:0;width:100%' },
+              className: `extent ${status}`,
+            }),
+          ],
+          STATUS_NAMES[status]
+        );
+      }),
+      keyOf(
+        [
+          make('span', {
+            attributes: { style: 'left:50%;width:0' },
+            children: [make('span', { className: 'instant' })],
+            className: 'extent answered',
+          }),
+        ],
+        'a call too short for its bar, at its start'
+      ),
+      keyOf(
+        [make('span', { attributes: { style: 'left:50%' }, className: 'ring' })],
+        'a notification'
+      ),
+      keyOf(
+        [make('span', { attributes: { style: 'left:50%' }, className: 'tick' })],
+        'a chunk, credit or cancel'
+      ),
+    ],
+    className: 'legend',
+  });
+};
+
+/** The head of the track's column: the axis's labels at their places, in percent. */
+const axisOf = (axis: ISpan): HTMLElement => {
+  const width = Math.max(axis.to - axis.from, 1);
+
+  return make('div', {
+    children: ticksOf(axis).map((tick) => {
+      return make('span', {
+        attributes: { style: `left:${String((tick / width) * 100)}%` },
+        text: spanOf(tick),
+      });
+    }),
+    className: 'axis',
+  });
+};
+
+const rowOf = (
+  call: ICall,
+  { axis, isFocus, view }: { axis: ISpan; isFocus: boolean; view: ITimelineView }
+): HTMLElement => {
+  const status = statusOf(call);
+
+  return make('tr', {
+    attributes: {
+      'aria-selected': String(call.key === view.selected),
+      'data-key': String(call.key),
+      'data-status': status,
+      // * one row in the tab order, the selected one: ↑ and ↓ move from it
+      tabindex: isFocus ? '0' : '-1',
+      title: [
+        `${view.nameOf(call)} ${callLabelOf(call, view.isAllClients)} · ${typeWordsOf(call)}`,
+        `started ${clockOf(startOf(call))}`,
+        `${durationWordsOf(call, view.now)} · ${outcomeOf(call)}`,
+      ].join('\n'),
+    },
+    children: [
+      make('td', { children: [statusIconOf(status)] }),
+      make('td', { text: callLabelOf(call, view.isAllClients) }),
+      make('td', { className: 'name', text: view.nameOf(call) }),
+      make('td', { className: 'num', text: durationWordsOf(call, view.now) }),
+      make('td', { children: [trackOf(call, axis, { now: view.now })], className: 'track' }),
+    ],
+    className: status === 'failed' ? 'call failed' : 'call',
+  });
+};
 
 // definition
 
-/** The Timeline, its legend and its brush. */
+/** The Timeline: its legend and its reset, then its rows, under the axis, and its brush. */
 export const timelineViewOf = (view: ITimelineView): Node[] => {
-  const { calls, nameOf, span } = view;
-  // ! drawn at the view's own width, one unit a CSS pixel: a fixed width stretched to the view
-  // scaled its text and its rows with it, zoomed on a wide panel
-  const width = Math.max(Math.round(view.width ?? WIDTH), LEAST_WIDTH);
+  const { calls, span } = view;
 
   if (span === undefined) {
     return [make('p', { className: 'note', text: 'No call yet.' })];
   }
 
+  const axis = view.range ?? span;
   const shown = calls.slice(-TIMELINE_ROWS);
-  const height = TOP + shown.length * ROW + 8;
-  const scale = scaleOf(span, { left: LEFT, right: width - RIGHT });
-  const parts: SVGElement[] = ticksOf(span).flatMap((tick) => {
-    const x = scale.xOf(span.from + tick);
-
-    return [
-      svgOf('line', { attributes: { class: 'grid', x1: x, x2: x, y1: TOP - 4, y2: height } }),
-      svgOf('text', {
-        attributes: { class: 'axis', 'text-anchor': 'middle', x, y: 12 },
-        text: spanOf(tick),
-      }),
-    ];
+  const focus = shown.some(({ key }) => {
+    return key === view.selected;
+  })
+    ? view.selected
+    : shown[0]?.key;
+  const head = axisOf(axis);
+  const brush = make('div', { attributes: { hidden: '' }, className: 'brush' });
+  const body = make('tbody', {
+    children: shown.map((call) => {
+      return rowOf(call, { axis, isFocus: call.key === focus, view });
+    }),
   });
-
-  shown.forEach((call, index) => {
-    const y = TOP + index * ROW;
-    const status = statusOf(call);
-    const start = startOf(call);
-    const end = endOf(call) ?? view.now;
-    const isLine = status === 'open' || status === 'closed';
-    const tip = [
-      `${nameOf(call)} ${callLabelOf(call, view.isAllClients)} · ${typeWordsOf(call)}`,
-      `started ${clockOf(start)}`,
-      `${durationWordsOf(call, view.now)} · ${outcomeOf(call)}`,
-    ].join('\n');
-
-    parts.push(
-      svgOf('text', { attributes: { class: 'row-name', x: 8, y: y + 13 }, text: nameOf(call) }),
-      svgOf('text', {
-        attributes: { class: 'row-id', 'text-anchor': 'end', x: LEFT - 8, y: y + 13 },
-        text: callLabelOf(call, view.isAllClients),
-      }),
-      isLine
-        ? svgOf('line', {
-            attributes: {
-              stroke: FILLS[status],
-              'stroke-dasharray': status === 'closed' ? '3 2' : undefined,
-              'stroke-width': 2,
-              x1: scale.xOf(start),
-              x2: scale.xOf(end),
-              y1: y + 10,
-              y2: y + 10,
-            },
-          })
-        : svgOf('rect', {
-            attributes: {
-              fill: FILLS[status],
-              height: 10,
-              rx: 2,
-              stroke:
-                status === 'ended'
-                  ? 'var(--ended)'
-                  : status === 'flight'
-                    ? 'var(--app-info)'
-                    : undefined,
-              'stroke-dasharray': status === 'ended' ? '3 2' : undefined,
-              width: Math.max(scale.xOf(end) - scale.xOf(start), 2),
-              x: scale.xOf(start),
-              y: y + 5,
-            },
-          }),
-      ...call.notifications.map(({ at }) => {
-        return svgOf('circle', {
-          attributes: {
-            cx: scale.xOf(at),
-            cy: y + 10,
-            fill: 'var(--app-paper)',
-            r: 3,
-            stroke: 'var(--app-text)',
-            'stroke-width': 1.2,
-          },
-        });
-      }),
-      ...call.envelopes
-        .filter((envelope) => {
-          return TICKED.includes(Number(envelope.header['kind']));
-        })
-        .map(({ at }) => {
-          return svgOf('line', {
-            attributes: {
-              stroke: 'var(--app-text)',
-              'stroke-width': 1.1,
-              x1: scale.xOf(at),
-              x2: scale.xOf(at),
-              y1: y + 2,
-              y2: y + 18,
-            },
-          });
-        }),
-      svgOf('rect', {
-        attributes: {
-          class: 'hit',
-          'data-key': String(call.key),
-          height: ROW,
-          width,
-          x: 0,
-          y,
-        },
-        children: [svgOf('title', { text: tip })],
-      })
-    );
-  });
-
-  const brush = svgOf('rect', {
-    attributes: { class: 'brush', height: height - TOP, visibility: 'hidden', y: TOP - 4 },
-  });
-  const svg = svgOf('svg', {
+  const rows = make('div', {
     attributes: {
-      'aria-label': 'Every call shown, on the time axis',
-      role: 'img',
-      viewBox: `0 0 ${String(width)} ${String(height)}`,
+      id: 'timeline-rows',
+      // the grid: a line at each tick, a step of the axis apart
+      style: `--grid:${String((tickStepOf(axis) / Math.max(axis.to - axis.from, 1)) * 100)}%`,
     },
-    children: [...parts, brush],
+    children: [
+      make('table', {
+        children: [
+          make('thead', {
+            children: [
+              make('tr', {
+                children: [
+                  make('th', {
+                    attributes: { scope: 'col' },
+                    children: [make('span', { className: 'status' })],
+                  }),
+                  make('th', { attributes: { scope: 'col' }, text: 'Call' }),
+                  make('th', { attributes: { scope: 'col' }, text: 'Procedure' }),
+                  make('th', { attributes: { scope: 'col' }, className: 'num', text: 'Duration' }),
+                  make('th', {
+                    attributes: { scope: 'col' },
+                    children: [head],
+                    className: 'track',
+                  }),
+                ],
+              }),
+            ],
+          }),
+          body,
+        ],
+      }),
+      brush,
+    ],
+    className: 'tl-rows',
   });
-  // where a drag started, in the drawing's own units
-  let from: number | undefined;
-  const xOfEvent = (event: PointerEvent): number => {
-    const box = currentOf(svg).getBoundingClientRect();
 
-    return ((event.clientX - box.left) / Math.max(box.width, 1)) * width;
+  // where a press started, its pointer, and whether it became a drag
+  let press: { isDrag: boolean; pointer: number; x: number } | undefined;
+  const release = (): void => {
+    press = undefined;
+    delete currentOf(rows).dataset['dragging'];
+    currentOf(brush).hidden = true;
+  };
+  /** Where `x` falls on the axis's column, from 0 at its start to 1 at its end. */
+  const fractionOf = (x: number): number => {
+    const box = currentOf(head).getBoundingClientRect();
+
+    return Math.min(1, Math.max(0, (x - box.left) / Math.max(box.width, 1)));
   };
 
-  listen(svg, {
+  listen(rows, {
     type: 'pointerdown',
     handle: (event) => {
-      from = xOfEvent(event);
-      currentOf(svg).dataset['dragging'] = 'true';
-      currentOf(svg).setPointerCapture(event.pointerId);
-    },
-  });
-  listen(svg, {
-    type: 'pointermove',
-    handle: (event) => {
-      if (from === undefined) {
+      const isOnTrack = event.target instanceof Element && event.target.closest('.track') !== null;
+
+      if (event.button !== 0 || !isOnTrack) {
         return;
       }
 
-      const x = xOfEvent(event);
-
-      currentOf(brush).setAttribute('x', String(Math.min(from, x)));
-      currentOf(brush).setAttribute('width', String(Math.abs(x - from)));
-      currentOf(brush).setAttribute('visibility', 'visible');
+      press = { isDrag: false, pointer: event.pointerId, x: event.clientX };
+      // * a press holds the drawing still: the panel redraws nothing that is being dragged
+      currentOf(rows).dataset['dragging'] = 'true';
     },
   });
-  listen(svg, {
+  listen(rows, {
+    type: 'pointermove',
+    handle: (event) => {
+      // ! a press let go outside the rows, before its capture, sends them no pointerup: a move
+      // with no button held ends it
+      if (press !== undefined && event.buttons === 0) {
+        release();
+
+        return;
+      }
+
+      if (press === undefined || (!press.isDrag && Math.abs(event.clientX - press.x) <= DRAG)) {
+        return;
+      }
+
+      // ! captured past the threshold alone: a capture from the press would aim its click at the
+      // rows' box, never at the row pressed
+      if (!press.isDrag) {
+        press.isDrag = true;
+        currentOf(rows).setPointerCapture(press.pointer);
+      }
+
+      const box = currentOf(head).getBoundingClientRect();
+      const origin = currentOf(rows).getBoundingClientRect().left;
+      const [one, other] = [fractionOf(press.x), fractionOf(event.clientX)].sort((a, b) => {
+        return a - b;
+      }) as [number, number];
+
+      currentOf(brush).style.left = `${String(box.left - origin + one * box.width)}px`;
+      currentOf(brush).style.width = `${String((other - one) * box.width)}px`;
+      currentOf(brush).hidden = false;
+    },
+  });
+  listen(rows, {
     type: 'pointerup',
     handle: (event) => {
-      const x = xOfEvent(event);
-      const started = from;
+      const started = press;
 
-      from = undefined;
-      delete currentOf(svg).dataset['dragging'];
-      currentOf(brush).setAttribute('visibility', 'hidden');
+      release();
 
-      // a click is no span
-      if (started !== undefined && Math.abs(x - started) > 4) {
-        view.onRange({
-          from: scale.timeOf(Math.min(started, x)),
-          to: scale.timeOf(Math.max(started, x)),
-        });
+      if (started?.isDrag === true) {
+        const [one, other] = [fractionOf(started.x), fractionOf(event.clientX)].sort((a, b) => {
+          return a - b;
+        }) as [number, number];
+        const width = axis.to - axis.from;
+
+        view.onRange({ from: axis.from + one * width, to: axis.from + other * width });
       }
     },
   });
-
-  listen(svg, {
+  listen(rows, {
     type: 'pointercancel',
+    handle: release,
+  });
+  listen(rows, {
+    type: 'pointerleave',
     handle: () => {
-      from = undefined;
-      delete currentOf(svg).dataset['dragging'];
-      currentOf(brush).setAttribute('visibility', 'hidden');
+      // a press that leaves the rows before it is a drag is no drag, and holds nothing still
+      if (press?.isDrag === false) {
+        release();
+      }
+    },
+  });
+  listen(rows, {
+    type: 'click',
+    handle: (event) => {
+      const row =
+        event.target instanceof Element ? event.target.closest<HTMLElement>('tr[data-key]') : null;
+
+      if (row !== null) {
+        view.onOpen(Number(row.dataset['key']));
+      }
+    },
+  });
+  listen(rows, {
+    type: 'keydown',
+    handle: (event) => {
+      const all = [...currentOf(body).querySelectorAll<HTMLElement>('tr[data-key]')];
+      const at = all.findIndex((row) => {
+        return row === document.activeElement;
+      });
+      const row = all[at];
+
+      if (row === undefined) {
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        view.onOpen(Number(row.dataset['key']));
+
+        return;
+      }
+
+      if (!MOVES.includes(event.key)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const next =
+        event.key === 'Home'
+          ? all[0]
+          : event.key === 'End'
+            ? all.at(-1)
+            : all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))];
+
+      if (next !== undefined && next !== row) {
+        next.focus();
+        view.onSelect(Number(next.dataset['key']));
+      }
     },
   });
 
   const whole = make('button', {
     attributes: { 'aria-pressed': String(view.range === undefined), type: 'button' },
-    text: 'All',
+    text: 'Show every call',
   });
 
   listen(whole, {
@@ -264,21 +377,12 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
     make('div', {
       children: [
         whole,
-        make('span', {
-          className: 'legend',
-          children: [
-            make('span', { text: '■ answered' }),
-            make('span', { text: '■ failed, in red' }),
-            make('span', { text: '▭ ended without an answer, dashed' }),
-            make('span', { text: '─ subscription, ○ a notification' }),
-            make('span', { text: '| chunk, credit or cancel' }),
-          ],
-        }),
+        legendOf(),
         make('span', {
           className: 'note',
           text:
             view.range === undefined
-              ? 'Drag across it to show the calls of a span alone.'
+              ? 'Drag across the time axis to see a span alone: the Calls list shows its calls, and the axis narrows to it.'
               : `Calls shows ${clockOf(view.range.from)} to ${clockOf(view.range.to)}, ${spanOf(view.range.to - view.range.from)}.`,
         }),
       ],
@@ -292,6 +396,6 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
           }),
         ]
       : []),
-    svg,
+    rows,
   ];
 };

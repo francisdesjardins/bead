@@ -850,13 +850,25 @@ export const startPanel = (host: IPanelHost): void => {
             isAllClients: isEveryClient(),
             nameOf,
             now: Date.now(),
+            // * the detail is the Calls view's: a row opened shows it there, its row in sight
+            onOpen: (key) => {
+              state.view = 'calls';
+              select(key);
+              requestAnimationFrame(() => {
+                shown.calls
+                  .querySelector(`tr[data-key="${String(key)}"]`)
+                  ?.scrollIntoView({ block: 'nearest' });
+                shown.detail.focus({ preventScroll: true });
+              });
+            },
             onRange: (range) => {
               state.range = range;
               draw();
             },
+            onSelect: select,
             range: state.range,
+            selected: state.selected,
             span: spanOfCalls(calls),
-            width: shown.timeline.clientWidth,
           }),
         ]);
       } else if (state.view === 'broker') {
@@ -1429,16 +1441,6 @@ export const startPanel = (host: IPanelHost): void => {
     layOut();
   });
   window.addEventListener('resize', layOut);
-  // the Timeline is drawn at its view's width: a panel resized redraws it at the new one
-  let resized = 0;
-  new ResizeObserver(() => {
-    cancelAnimationFrame(resized);
-    resized = requestAnimationFrame(() => {
-      if (state.view === 'timeline') {
-        draw();
-      }
-    });
-  }).observe(shown.timeline);
 
   // * the splitter is WAI-ARIA APG's Window Splitter, the list its primary pane: a separator
   // whose value is the list's share, moved by its arrows, sent to its limits by Home and End.

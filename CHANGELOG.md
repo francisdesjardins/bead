@@ -189,6 +189,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   language kept for the next visit. Its code is coloured as the page colours it. On a phone the
   file runs down the page, and the demo counts what crossed on the wire's sheet, whose bar stays in
   view.
+- The DevTools panel's Timeline draws a call a row, as the Calls list draws its rows, in its
+  typography, each status an icon with its name. A click or Enter on a row opens the call's detail in Calls,
+  and ↑ and ↓ move through the rows. The span dragged across the axis also narrows it, and "Show
+  every call" gives the whole back. The Timeline and the Waterfall draw a call by one track, its
+  places percentages, so a resized panel redraws nothing. A call too short for a bar of 6 px is an
+  instant, a diamond on its start, and the ticks and rings within one percent of the track are
+  drawn once.
 
 ### Removed
 
@@ -210,8 +217,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side tells the `tx` step of a call made within a notification's callback once
   its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
   told it with no id, and the DevTools panel showed that call twice, once never answered.
-- The DevTools panel's Timeline is drawn at its view's own width, a unit a pixel, and redrawn as
-  the panel is resized, where a drawing 1,000 wide stretched to the view zoomed its text and rows.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
 - A gateway mounted behind what reads a request's body, a framework's body parser or a
