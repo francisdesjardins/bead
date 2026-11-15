@@ -314,10 +314,10 @@ describe('the seeds', () => {
     const vectors = hexUnder(specOf('vectors.json'), ['bytes', 'record']);
 
     // * the count and the digest every side's envelope fuzz test asserts of its seeds
-    assert.equal(vectors.length, 264);
+    assert.equal(vectors.length, 273);
     assert.equal(
       digestOf(inSeedOrder(vectors)),
-      '4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48'
+      'da5504c90e2f128e857c8111daf89b83a499ba58178644a2136b429900b6d702'
     );
     assert.deepEqual(SEEDS.envelope.slice(0, vectors.length), vectors);
   });

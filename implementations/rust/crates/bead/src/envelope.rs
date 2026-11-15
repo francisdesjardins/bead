@@ -415,8 +415,8 @@ impl Envelope {
 pub struct ReadEnvelopeOptions {
     /// The bytes a whole envelope holds at most; `MAXIMUM_ENVELOPE_BYTES`, 16,778,240, when none.
     pub maximum_envelope_bytes: Option<usize>,
-    /// The bytes a request holds at most, whole or a transfer's opening, as its requester sends
-    /// one (spec 12.2); the envelope's bound when none.
+    /// The bytes a request and a result hold at most, whole or a transfer's opening, as their
+    /// sender sends one (spec 12.2); the envelope's bound when none.
     pub chunk_bytes: Option<usize>,
     /// The bytes of a failure's detail kept; [`MAXIMUM_DETAIL_BYTES`] when none.
     pub maximum_detail_bytes: Option<usize>,
@@ -989,8 +989,10 @@ pub fn read_failure(
     })
 }
 
-/// An envelope, as a router of `side` reads it from `bytes`: none for an advisory kind. Its bound
-/// is the envelope's, and `chunk_bytes`, when given, for a request, whole or a transfer's opening.
+/// An envelope, as a router of `side` reads it from `bytes`: none for an advisory kind.
+///
+/// Its bound is the envelope's, and `chunk_bytes`, when given, for a request and a result, whole
+/// or a transfer's opening, as their sender sends one (spec 12.2).
 ///
 /// # Errors
 ///
@@ -1006,18 +1008,18 @@ pub fn read_envelope(
     let maximum_envelope_bytes = options
         .maximum_envelope_bytes
         .unwrap_or(MAXIMUM_ENVELOPE_BYTES);
-    let bound = match options.chunk_bytes {
-        Some(chunk_bytes) if prefix.kind == EnvelopeKind::Request.byte() => chunk_bytes,
-        Some(_) | None => maximum_envelope_bytes,
+    // the noun names the kind whose bound held, never the bound's value
+    let (bound, what) = match options.chunk_bytes {
+        Some(chunk_bytes) if prefix.kind == EnvelopeKind::Request.byte() => {
+            (chunk_bytes, "a request")
+        }
+        Some(chunk_bytes) if prefix.kind == EnvelopeKind::Result.byte() => {
+            (chunk_bytes, "a result")
+        }
+        Some(_) | None => (maximum_envelope_bytes, "an envelope"),
     };
 
     if bytes.len() > bound {
-        let what = if bound == maximum_envelope_bytes {
-            "an envelope"
-        } else {
-            "a request"
-        };
-
         return Err(
             Failure::protocol(ProtocolCode::ENVELOPE_TOO_LARGE, side).saying(format!(
                 "{what} is {bound} bytes at most, not {}",

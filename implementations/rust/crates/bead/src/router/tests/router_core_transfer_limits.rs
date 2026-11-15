@@ -1,7 +1,10 @@
-//! Peers with different chunk sizes refuse the opening or the first short chunk on the wire.
+//! Peers with different chunk sizes refuse the opening or the first short chunk on the wire, and a
+//! result past the requester's own `chunk_bytes` ends its call.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
 
 use super::locked;
 use super::router_core_transfer_edges::serving;
@@ -10,8 +13,10 @@ use crate::constants::{EnvelopeKind, ProtocolCode, RouterSide};
 use crate::envelope::Envelope;
 use crate::errors::CallError;
 use crate::failure::FailureOrigin;
-use crate::router::types::RouterLimitsOptions;
+use crate::router::core::{self as router_core, Handler};
+use crate::router::types::{RouterAnswer, RouterLimitsOptions};
 use crate::testing::core_port::{Peer, completed, request_of};
+use crate::testing::pair::echo;
 use crate::testing::scripted;
 
 type Queue = Arc<Mutex<VecDeque<(bool, Envelope)>>>;
@@ -99,5 +104,91 @@ async fn refuses_the_opening_of_a_sender_whose_chunk_bytes_is_larger_than_its_ow
             assert_eq!(*kind, EnvelopeKind::Failure);
             assert!(locked(&handed).is_empty());
         }
+    }
+}
+
+#[tokio::test]
+async fn ends_envelope_too_large_the_call_of_a_server_whose_chunk_bytes_is_larger_than_its_own_its_result_whole_or_an_opening_and_cancels_it_both_ends_setting_their_limits_alike()
+ {
+    // a whole result of 108 bytes, then a transfer's opening of 108, 128 less an announcement's 20
+    for total in [100, 300] {
+        let requester = Peer::new(RouterSide::Client, &limits(64));
+        let receiver = Peer::new(RouterSide::Server, &limits(128));
+        let handler = Handler {
+            resolve: Arc::new(move |props| {
+                Box::pin(async move {
+                    props
+                        .answerer
+                        .respond(RouterAnswer::Result(pattern((total, false))))
+                        .await
+                        .ok();
+                    Ok(())
+                })
+            }),
+            admit: None,
+            maximum_payload_bytes: None,
+            forwards_credentials: false,
+            notifies: false,
+        };
+        receiver
+            .owner
+            .run(move |state| {
+                router_core::register_resolver(&state.core.resolvers, (&echo(), handler, None))
+                    .expect("echo registered");
+            })
+            .await
+            .expect("the port ready");
+        let queue = Queue::default();
+        connect(Arc::clone(&queue), (&requester, true)).await;
+        connect(Arc::clone(&queue), (&receiver, false)).await;
+        let asking = requester.request((Bytes::new(), request_of("a")));
+        requester.settle().await;
+        let mut traffic = Vec::new();
+        loop {
+            let next = { locked(&queue).pop_front() };
+            let Some((to_server, envelope)) = next else {
+                break;
+            };
+            assert!(traffic.len() < 100, "the wire settles");
+            traffic.push((
+                to_server,
+                envelope.kind(),
+                scripted::bytes_of(&envelope).len(),
+            ));
+            let peer = if to_server { &receiver } else { &requester };
+            peer.receive((envelope, Arc::from("a")));
+            peer.settle().await;
+            receiver.settle().await;
+        }
+        let outcome = completed(asking).await;
+        let Err(CallError::Failure(failure)) = outcome else {
+            panic!("the requester refuses the result: {outcome:?}");
+        };
+        assert_eq!(
+            failure.code(),
+            ProtocolCode::ENVELOPE_TOO_LARGE.get(),
+            "{total}"
+        );
+        assert_eq!(
+            failure.detail(),
+            "a result is 64 bytes at most, not 108",
+            "{total}"
+        );
+        assert_eq!(failure.origin(), FailureOrigin::Local, "{total}");
+        // the result refused, its call cancelled, nothing credited
+        let kinds: Vec<_> = traffic
+            .iter()
+            .map(|&(to_server, kind, _)| (to_server, kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (true, EnvelopeKind::Request),
+                (false, EnvelopeKind::Result),
+                (true, EnvelopeKind::Cancel),
+            ],
+            "{total}"
+        );
+        assert_eq!(traffic[1].2, 108, "{total}");
     }
 }

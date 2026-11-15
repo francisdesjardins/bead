@@ -143,6 +143,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only where it has two words or more (decision 0047).
 - **Breaking:** the Rust side's `check_records` is `check_proto_records`, the other sides'
   `checkProtoRecords` and `ProtoRecords.Check` (decisions 0044, 0047).
+- A result, whole or an opening, past `chunkBytes` ends its call `ENVELOPE_TOO_LARGE`, and is
+  cancelled, as a request past it is answered: a whole one was taken, an opening refused
+  `CHUNK_INVALID`. 12.2 says a chunk is held to `chunkBytes` within its transfer, and one for no
+  transfer judged as 12.9's table says, as every side does; step 2's detail names a request or a
+  result whenever `chunkBytes` held it. A server that joins HTTP with another transport, its
+  `chunkBytes` its own, refuses an HTTP client's answer to its command past it, as it refuses that
+  client's request (decisions 0001, 0033).
 
 ### Removed
 

@@ -324,6 +324,8 @@ def chunk_out(call_id, offset, data, last):
 
 ECHOED = json_string(100).encode('utf-8')
 LONG = json_string(300).encode('utf-8')
+# a command's answer that comes whole in 64 bytes, its result's header the 8 others
+ANSWER_56 = json_string(56).encode('utf-8')
 # a payload of 176 bytes: an opening of 44 under chunks of 64, then two full chunks and the last 36
 ECHOED_176 = json_string(176).encode('utf-8')
 # the result bytes answers to a length of 35: 37 bytes, past what an envelope of 64 holds behind a
@@ -1212,6 +1214,10 @@ conversations = [
         raw('A1 13 00 02  00 00 00 03'), report(KIND_UNSUPPORTED)]),
     ('a chunk for no call is reported CALL_UNKNOWN', ['12.9.4'], None, [
         raw('A1 14 00 04  00 00 00 03  00 00 00 00 00 00 00 00 | 01'), report(CALL_UNKNOWN)]),
+    # 12.2: a chunk is held to chunkBytes within its transfer; one for no transfer under way, of any
+    # size, is judged as 12.9's table says, 65 bytes here past chunkBytes of 64
+    ('a chunk past chunkBytes for no call is reported CALL_UNKNOWN', ['12.2', '12.9.4'], CHUNKED, [
+        chunk_in(3, 0, LONG[:49], False), report(CALL_UNKNOWN)]),
     ('a chunk on a call open without a transfer is reported ENVELOPE_MALFORMED', ['12.9.4'], None, [
         json_request(1, 'slow', SLOW), raw('A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 00 | 01'),
         report(MALFORMED), cancel(1)]),
@@ -1240,6 +1246,11 @@ conversations = [
         chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
         chunk_in(1, 44, LONG[44:92], False),
         chunk_in(1, 172, LONG[172:220], False), report(CREDIT_EXCEEDED)]),
+    # the second chunk 65 bytes, 49 of its payload from 140, running to 189 past the credit of 172
+    ('a chunk past chunkBytes on a call abandoned, past its credit, is reported CREDIT_EXCEEDED', ['12.2', '12.9.4'], CHUNKED, [
+        opening(1, 'echo', LONG[:44], 300), credited(1, 172),
+        chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
+        chunk_in(1, 140, LONG[140:189], False), report(CREDIT_EXCEEDED)]),
     ('a chunk before the last that is not full is answered CHUNK_INVALID', ['12.6.1'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:60], False), failure(1, CHUNK_INVALID)]),
@@ -1271,6 +1282,18 @@ conversations = [
     ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
         result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
+    # 12.2: a result, whole or an opening, held to chunkBytes, of 64 here, and one of 64 taken: its 56
+    # bytes go back to ask's caller as a transfer, past what a result's header and an announcement's 20
+    # bytes leave whole
+    ('a result past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it, where one of chunkBytes is taken', ['9.6.3', '12.2'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        answer(2, json_string(56)), result_opening(1, ANSWER_56[:28], 56),
+        credit_in(1, 56), chunk_out(1, 28, ANSWER_56[28:], True),
+        json_request(3, 'ask', 'null'), command(4, 'clock', QUESTION),
+        answer(4, json_string(57)), cancelled(4), failure(3, PROCEDURE_FAILED), report(TOO_LARGE)]),
+    ('a result\'s opening past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it', ['9.6.3', '12.2', '12.3'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:49], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(TOO_LARGE)]),
     ('an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 0), failure(1, PAYLOAD_TOO_LARGE)]),
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
@@ -1815,9 +1838,10 @@ for name, _, _, *rest in conversations:
 
         tokens |= {step['token']} if 'token' in step else set()
 
-# ! a request, whole or an opening, past its chunkBytes is answered ENVELOPE_TOO_LARGE (12.2): one sent
-# so is the conversation's point, its next expect on its connection that refusal, or it would be
-# refused in silence of its intent
+# ! a request or a result, whole or an opening, past its chunkBytes is refused ENVELOPE_TOO_LARGE
+# (12.2): one sent so is the conversation's point, its next expect on its connection that refusal, a
+# request's failure on its call id, a result's cancel on its call id, or it would be refused in
+# silence of its intent
 for name, _, limits, *rest in conversations:
     chunk_bytes = (limits or {}).get('chunkBytes', 1_048_576)
     steps = rest[-1]
@@ -1825,15 +1849,20 @@ for name, _, limits, *rest in conversations:
     for index, step in enumerate(steps):
         octets = step.get('send', '').replace('|', ' ').split()
 
-        if len(octets) < 8 or octets[1] != '10' or len(octets) <= chunk_bytes:
+        if len(octets) < 8 or octets[1] not in ('10', '11') or len(octets) <= chunk_bytes:
             continue
 
         call_id = int(''.join(octets[4:8]), 16)
         answer_ = next((later['expect'] for later in steps[index + 1:]
                         if 'expect' in later and later.get('on') == step.get('on')), None)
-        assert answer_ is not None and answer_.get('callId') == call_id and \
-            answer_.get('failure', {}).get('code') == TOO_LARGE, \
-            f'{name}: sends a request of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
+
+        if octets[1] == '10':
+            assert answer_ is not None and answer_.get('callId') == call_id and \
+                answer_.get('failure', {}).get('code') == TOO_LARGE, \
+                f'{name}: sends a request of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
+        else:
+            assert answer_ is not None and answer_.get('callId') == call_id and answer_.get('kind') == CANCEL, \
+                f'{name}: sends a result of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
 
 document = {
     '$schema': 'schemas/conversations.schema.json',

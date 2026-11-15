@@ -4900,6 +4900,66 @@ test.describe('createRouterCore', () => {
         loop.server[Symbol.dispose]();
       }
     });
+
+    test('ends ENVELOPE_TOO_LARGE the call of a server whose chunkBytes is larger than its own, its result whole or an opening, and cancels it, both ends setting their limits alike', async () => {
+      const loop = createLoopback({
+        limits: { chunkBytes: 64, windowBytes: 128 },
+        serverLimits: { chunkBytes: 128, windowBytes: 256 },
+      });
+      const answered: Promise<unknown>[] = [];
+
+      // a result of 100 bytes goes whole, one of 300 opens a transfer: each envelope is 108 bytes
+      loop.server.registerResolver(
+        Object.assign((props: IRequestResolverProps<'a'>) => {
+          const responding = loop.server
+            .respond({ payload: patternOf(answered.length === 0 ? 100 : 300) }, props)
+            .catch((error: unknown) => {
+              return error;
+            });
+
+          answered.push(responding);
+
+          return responding.then(noop);
+        }, echo)
+      );
+
+      for (const [index, total] of [100, 300].entries()) {
+        const from = loop.traffic.sent.length;
+        const failed = loop.client
+          .request(new Uint8Array(0), { connectionHandle: 'server', options, procedure: echo })
+          .catch((error: unknown) => {
+            return error;
+          });
+
+        await loop.flush();
+
+        const label = `a result of ${String(total)} bytes`;
+
+        // the requester's own refusal, its call ended and the peer told
+        expect(await failed, label).toMatchObject({
+          code: ProtocolCode.ENVELOPE_TOO_LARGE,
+          detail: 'a result is 64 bytes at most, not 108',
+          origin: 'local',
+        });
+        expect(
+          loop.traffic.sent.slice(from).map(({ bytes, to }) => {
+            return [to, bytes[1], bytes.length];
+          }),
+          label
+        ).toEqual([
+          ['server', EnvelopeKind.REQUEST, 12],
+          ['client', EnvelopeKind.RESULT, 108],
+          ['server', EnvelopeKind.CANCEL, 8],
+        ]);
+        expect(answered, label).toHaveLength(index + 1);
+      }
+
+      // the server's answers settle, the transfer it opened among them, once its call is cancelled
+      await Promise.all(answered);
+
+      loop.client[Symbol.dispose]();
+      loop.server[Symbol.dispose]();
+    });
   });
 
   test.describe('the transfers it sends', () => {

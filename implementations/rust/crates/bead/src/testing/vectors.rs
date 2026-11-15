@@ -143,6 +143,8 @@ pub struct RefusalVector {
     pub detail: Option<String>,
     /// The bound a whole envelope is read with, where the vector is about it.
     pub maximum_envelope_bytes: Option<usize>,
+    /// The bound a request and a result are read with, where the vector is about it.
+    pub chunk_bytes: Option<usize>,
 }
 
 /// A failure's record as the vectors write it.
@@ -175,7 +177,7 @@ pub struct VectorEnvelope {
 
 /// An envelope's bytes and what they say.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct EnvelopeVector {
     /// Its name.
     pub name: String,
@@ -183,6 +185,8 @@ pub struct EnvelopeVector {
     pub clauses: Vec<String>,
     /// Its bytes, in hexadecimal.
     pub bytes: String,
+    /// The bound a request and a result are read with, where the vector is about it.
+    pub chunk_bytes: Option<usize>,
     /// What they say.
     pub envelope: VectorEnvelope,
 }

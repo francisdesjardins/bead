@@ -132,15 +132,17 @@ smaller than 100" advises a number announced to a peer that then never passes it
 queue past the number, as an HTTP/2 client queues streams, would make each call's timeout count a
 wait it cannot see.
 
-**A request, whole or an opening, is held to `chunkBytes`** (spec 12.2), the measure of what 12.1
-has an honest requester send whole, answered `ENVELOPE_TOO_LARGE` at 9.6's gate before anything of
-it is held, as `SETTINGS_MAX_FRAME_SIZE` bounds a frame. Any other envelope keeps
-`maximumEnvelopeBytes`: a result answers the receiver's own call, and a notification and a failure
-go whole whatever their size. HTTP, whose `chunkBytes` is its `maximumEnvelopeBytes`, takes what it
-took. What Bead itself holds of a connection's calls is then bounded in bytes: over a WebSocket or a
-Web Worker, 64 × 1 MiB = 64 MiB at the defaults while their credentials resolve and before they are
-dispatched, and the transfers' share of `bufferedBytesBudget`, 256 MiB for the side; over HTTP, the
-bodies `bodyBytesBudget` bounds.
+**A request and a result, whole or an opening, are held to `chunkBytes`** (spec 12.2), the
+measure of what 12.1 has an honest sender send whole, refused `ENVELOPE_TOO_LARGE` at 9.6's gate as
+they are read, as `SETTINGS_MAX_FRAME_SIZE` bounds a frame: a request before anything of it is
+held, a result before it reaches its caller. Any other envelope keeps `maximumEnvelopeBytes`: a
+notification and a failure go whole whatever their size, and a chunk is held to `chunkBytes` within
+its transfer ([0001](0001-the-envelope-sits-at-fixed-offsets.md#on-a-chunks-bound-and-a-results)).
+HTTP, whose `chunkBytes` is its `maximumEnvelopeBytes`, takes what it took. What Bead itself holds
+of a connection's calls is then bounded in bytes: over a WebSocket or a Web Worker, 64 × 1 MiB = 64
+MiB at the defaults while their credentials resolve and before they are dispatched, and the
+transfers' share of `bufferedBytesBudget`, 256 MiB for the side; over HTTP, the bodies
+`bodyBytesBudget` bounds.
 
 **A WebSocket server bounds its connections by an HTTP server's two bounds**,
 `maximumConnections`, 10,000, and `maximumConnectionsPerAddress`, 64, the client's address read as
