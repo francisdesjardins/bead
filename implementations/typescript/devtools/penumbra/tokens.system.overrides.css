@@ -1,7 +1,11 @@
 /* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
    to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
-   links it under the two sheets, and Bead's page inlines it ahead of its own styles. */
+   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
+   skin. */
 
 :root {
-  /* none today: the page and the demo share penumbra's content width as it is */
+  /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
+  --app-touch: 44px;
+  /* a block of code, on the page and the demo alike; code inline in prose is 0.875em of its text */
+  --app-text-code: var(--app-text-sm);
 }

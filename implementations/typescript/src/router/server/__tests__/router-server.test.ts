@@ -1543,6 +1543,8 @@ test.describe('createRouterServer', () => {
       );
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its connection closes
+      await sleep(0);
       close(first);
       onClosed();
       await answered;
@@ -1723,6 +1725,8 @@ test.describe('createRouterServer', () => {
       );
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its connection closes
+      await sleep(0);
       close(first);
       onClosed();
       await sleep(0);
@@ -1835,6 +1839,8 @@ test.describe('createRouterServer', () => {
       });
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its cancel comes
+      await sleep(0);
       deliver(first, cancelOf(1));
       onCancelled();
       await sleep(0);
@@ -2096,7 +2102,9 @@ test.describe('createRouterServer', () => {
         sending.reject(new Error('gone'));
         await sleep(0);
 
-        expect(reportedOf(errors)).toEqual([['gone', first]]);
+        // * its resolver, which outlived its call, was told as its connection closed (spec 9.10):
+        // what it fails with after is its connection's, reported by none
+        expect(reportedOf(errors)).toEqual([]);
         expect(router.notifications.subscriptions()).toEqual([]);
         router[Symbol.dispose]();
       });
@@ -4925,7 +4933,14 @@ test.describe('createRouterServer, relaying', () => {
       },
       { limits: { maximumPayloadBytes: 2 * past }, relay: admitting }
     );
-    const opening = requestOf(1, { destinationId: 9, payload: new Uint8Array(16) });
+    const { header } = requestOf(1, { destinationId: 9 });
+    const openingHeader = { ...header, total: past };
+    // full, as its sender places it: a chunk's envelope less its header
+    const opening = {
+      header: openingHeader,
+      kind: EnvelopeKind.REQUEST,
+      payload: new Uint8Array(LIMIT_DEFAULTS.chunkBytes - headerBytesOf(openingHeader)),
+    } as OutgoingEnvelope;
 
     for (const connectionHandle of [first, second, third]) {
       open(connectionHandle);
@@ -4935,7 +4950,7 @@ test.describe('createRouterServer, relaying', () => {
     router.registerDestination({ connectionHandle: third }, { destinationId: 11 });
 
     // a transfer's opening past the default, credited; nothing goes on before it is whole
-    deliver(first, { ...opening, header: { ...opening.header, total: past } } as OutgoingEnvelope);
+    deliver(first, opening);
     deliver(first, requestOf(3, { destinationId: 11 }));
     await sleep(0);
 
@@ -4990,7 +5005,10 @@ test.describe('createRouterServer, its gauges', () => {
         closedDestinations: 1,
         connections: 1,
         destinations: 1,
+        largestTrackedCalls: 1,
         notifiedSubscriptions: 0,
+        outlivingResolvers: 0,
+        outlivingTransfers: 0,
         pendingCalls: 0,
         subscriptionsInFlight: 0,
         subscriptionsWaiting: 0,
@@ -5002,7 +5020,14 @@ test.describe('createRouterServer, its gauges', () => {
     // the destination stays, on purpose, for no connection
     expect(router.gauges()).toMatchObject({
       connectionHandles: new Set(),
-      counts: { answeringCalls: 0, closedDestinations: 1, connections: 0, destinations: 1 },
+      counts: {
+        answeringCalls: 0,
+        closedDestinations: 1,
+        connections: 0,
+        destinations: 1,
+        largestTrackedCalls: 0,
+        outlivingResolvers: 0,
+      },
     });
   });
 });
@@ -6584,6 +6609,8 @@ test.describe('createRouterServer, within a telling', () => {
     );
     open(first);
     deliver(first, requestOf(5));
+    // its resolver handed it in a later turn, before its cancel comes
+    await sleep(0);
     deliver(first, cancelOf(5));
     await sleep(0);
     sent.length = 0;

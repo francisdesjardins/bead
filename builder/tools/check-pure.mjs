@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // ── What reads beadc.yaml touches no platform ─────────────────────────────────
 // A page builds its `beadc.yaml` in a browser with the builder's own code: the selection of
-// procedures (`src/model/selection.ts`) and the reading of `beadc.yaml` (`src/config.ts`), with the
-// finding a refusal throws. This walks their imports, the relative ones to the end, and fails on
+// procedures (`src/model/selection.ts`), the reading of `beadc.yaml` (`src/config.ts`), with the
+// finding a refusal throws, and what the Rust target refuses of a gateway
+// (`src/model/check-rust.ts`). This walks their imports, the relative ones to the end, and fails on
 // any that reaches the platform (`node:` and every package but those `ALLOWED` names), with the
 // chain that brought it in. A type-only import (`import type`, `export type`) is erased, so it
 // passes; `import { type X }` is kept as an import of its module, so it does not.
@@ -16,7 +17,7 @@ import { dirname, relative, resolve } from 'node:path';
 const ROOT = process.cwd();
 
 /** The modules a page takes, and everything they import. */
-const ENTRIES = ['src/config.ts', 'src/model/selection.ts'];
+const ENTRIES = ['src/config.ts', 'src/model/selection.ts', 'src/model/check-rust.ts'];
 
 /** The packages a page bundles with them: plain JavaScript, no platform. */
 const ALLOWED = new Set(['yaml']);

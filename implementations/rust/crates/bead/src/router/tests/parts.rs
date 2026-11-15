@@ -12,7 +12,7 @@ use crate::duration::{LONGEST_TIMER, NEVER};
 use crate::failure::ProcedureAddress;
 use crate::router::parts::{
     Abandoned, Answering, AnsweringCalls, PendingCalls, PendingRequest, RequestReceiving,
-    Reservation,
+    Reservation, ResolverRun,
 };
 use crate::router::types::{CallAddress, ConnectionHandle, Gauges, Signal, SignalReason};
 use crate::server::{
@@ -501,6 +501,7 @@ fn answering_of(dispatched: u64) -> Answering {
     Answering {
         dispatched,
         signal: Signal::new(),
+        run: ResolverRun::default(),
         is_answered: false,
         is_ended: false,
         receiving: None,
@@ -579,7 +580,9 @@ fn count_the_calls_answered_and_those_abandoned_and_the_connections_they_belong_
         BTreeMap::from([
             ("abandonedCalls", 1),
             ("answeringCalls", 1),
-            ("largestAnsweringCalls", 1)
+            ("largestAnsweringCalls", 1),
+            ("largestTrackedCalls", 1),
+            ("outlivingResolvers", 0)
         ]),
         "counted"
     );
@@ -595,7 +598,9 @@ fn count_the_calls_answered_and_those_abandoned_and_the_connections_they_belong_
         BTreeMap::from([
             ("abandonedCalls", 0),
             ("answeringCalls", 0),
-            ("largestAnsweringCalls", 0)
+            ("largestAnsweringCalls", 0),
+            ("largestTrackedCalls", 0),
+            ("outlivingResolvers", 0)
         ]),
         "nothing"
     );
@@ -665,6 +670,165 @@ fn gauges_largest_answering_calls_under_its_ceiling_maximum_answering_calls_whic
     calls.answering.remove(&handle("a"));
 
     assert_eq!(calls.gauges().counts.get("largestAnsweringCalls"), Some(&1));
+}
+
+// a call opened on `name` whose resolver runs, and its dispatch: one of its own on each connection
+fn running_on(calls: &mut AnsweringCalls, (call_id, name): (u32, &str)) -> (ResolverRun, u64) {
+    let dispatched = u64::from(call_id).saturating_add(if name == "a" { 0 } else { 100 });
+    let answering = answering_of(dispatched);
+    let run = answering.run.clone();
+
+    assert!(run.start(), "its turn came");
+    calls
+        .answering
+        .entry(handle(name))
+        .or_default()
+        .insert(call_id, answering);
+
+    (run, dispatched)
+}
+
+// the call ends, answered or cancelled, as the core ends it: a resolver that runs on outlives it
+fn end_on(calls: &mut AnsweringCalls, (call_id, name): (u32, &str)) {
+    let answering = calls
+        .forget(&call_of((call_id, name)), None)
+        .expect("a call");
+
+    if answering.run.end() {
+        calls.outlive((&handle(name), &answering));
+    }
+}
+
+// the resolver settles, as the core settles it: one that outlived its call gives its place back
+fn settle_on(calls: &mut AnsweringCalls, ((run, dispatched), name): (&(ResolverRun, u64), &str)) {
+    if run.settle() {
+        calls.settle((&handle(name), *dispatched));
+    }
+}
+
+// spec 9.2
+#[test]
+fn gauges_largest_tracked_calls_under_its_ceiling_twice_maximum_answering_calls_which_health_warns_at_and_outliving_resolvers()
+ {
+    let mut calls = AnsweringCalls {
+        most: 5,
+        ..AnsweringCalls::default()
+    };
+    let check_of = |calls: &AnsweringCalls, name: &str| {
+        let router = layer_gauges_of(calls.gauges(), &BTreeSet::from([handle("a"), handle("b")]));
+        let health = health_of(&ServerGauges {
+            router,
+            server: LayerGauges::default(),
+            sessions: LayerGauges::default(),
+            transport: LayerGauges::default(),
+        });
+
+        health
+            .checks
+            .get(&format!("router:{name}"))
+            .and_then(|checks| checks.first())
+            .map(|check| (check.output.clone(), check.status))
+    };
+    let counts_of = |calls: &AnsweringCalls| {
+        let counts = calls.gauges().counts;
+
+        [
+            "answeringCalls",
+            "largestAnsweringCalls",
+            "largestTrackedCalls",
+            "outlivingResolvers",
+        ]
+        .map(|name| counts.get(name).copied().unwrap_or(0))
+    };
+    // a's: three calls answered, then three whose resolvers outlive their cancel
+    let on_a: Vec<(ResolverRun, u64)> = [1, 3, 5, 7, 9, 11]
+        .into_iter()
+        .map(|call_id| running_on(&mut calls, (call_id, "a")))
+        .collect();
+
+    for call_id in [7, 9, 11] {
+        end_on(&mut calls, (call_id, "a"));
+    }
+
+    // b's: one whose resolver outlives its answer
+    let on_b = running_on(&mut calls, (1, "b"));
+
+    end_on(&mut calls, (1, "b"));
+
+    // the busiest connection's two counts together, never the sum of them, and the resolvers that
+    // outlive their call over the whole side, under no ceiling
+    let gauges = calls.gauges();
+
+    assert_eq!(
+        gauges.ceilings,
+        BTreeMap::from([("largestAnsweringCalls", 5), ("largestTrackedCalls", 10)])
+    );
+    assert_eq!(handles_of(&gauges), ["a", "b"]);
+    assert_eq!(counts_of(&calls), [3, 3, 6, 4]);
+    assert_eq!(
+        [
+            calls.count_on(&handle("a")),
+            calls.tracked_on(&handle("a")),
+            calls.tracked_on(&handle("b"))
+        ],
+        [3, 6, 1]
+    );
+    assert_eq!(
+        check_of(&calls, "largestTrackedCalls"),
+        Some((Some("6 of 10".to_owned()), HealthStatus::Pass))
+    );
+    assert_eq!(check_of(&calls, "outlivingResolvers"), None);
+
+    // two more whose resolvers outlive their answer: 8 of 10 warns
+    for call_id in [13, 15] {
+        running_on(&mut calls, (call_id, "a"));
+        end_on(&mut calls, (call_id, "a"));
+    }
+
+    assert_eq!(
+        check_of(&calls, "largestTrackedCalls"),
+        Some((Some("8 of 10".to_owned()), HealthStatus::Warn))
+    );
+
+    // one that settles gives its place back; one whose call is open runs no more, and its call's
+    // end leaves nothing behind
+    settle_on(&mut calls, (&on_a[3], "a"));
+    settle_on(&mut calls, (&on_a[0], "a"));
+    end_on(&mut calls, (1, "a"));
+
+    assert_eq!(counts_of(&calls), [2, 2, 6, 5]);
+    assert_eq!(
+        check_of(&calls, "largestTrackedCalls"),
+        Some((Some("6 of 10".to_owned()), HealthStatus::Pass))
+    );
+
+    // a's connection closes: what still runs there counts by no connection until it settles
+    for (_, answering) in calls.take_all(Some(&handle("a"))) {
+        if answering.run.end() {
+            calls.outlive_closed(answering.dispatched);
+        }
+    }
+
+    drop(calls.close_outliving(Some(&handle("a"))));
+
+    let gauges = calls.gauges();
+
+    assert_eq!(handles_of(&gauges), ["b"]);
+    assert_eq!(
+        [
+            gauges.counts.get("largestTrackedCalls").copied(),
+            gauges.counts.get("outlivingResolvers").copied()
+        ],
+        [Some(1), Some(7)]
+    );
+
+    for running in &on_a {
+        settle_on(&mut calls, (running, "a"));
+    }
+
+    settle_on(&mut calls, (&on_b, "b"));
+
+    assert_eq!(counts_of(&calls), [0, 0, 0, 2]);
 }
 
 // ── The calls a side answers, found by their dispatch ────────────────────────────────────────

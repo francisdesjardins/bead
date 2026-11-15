@@ -25,6 +25,7 @@ import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '..
 import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
+import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
 import {
   getReadyState,
   ReadyState,
@@ -33,7 +34,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
-import type { Data, ITransportMessage } from '../shared/types';
+import type { Data, ITlsOptions, ITransportMessage } from '../shared/types';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -52,6 +53,7 @@ import type {
 
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
+export type { ITlsOptions } from '../shared/types';
 export type {
   ICloseEventLike,
   IMessageEventLike,
@@ -123,6 +125,25 @@ const isWsShaped = (WebSocket: IWebSocketConstructor): boolean => {
     typeof prototype.terminate === 'function' &&
     typeof prototype.on === 'function'
   );
+};
+
+/**
+ * Holds `tls` as its client is built (spec 15.39), in the order every side holds it: in a page;
+ * beside a `WebSocket` without `ws`'s shape, which keeps a TLS of its own; then as
+ * {@link assertTls} does.
+ */
+const assertWebSocketTls = (WebSocket: IWebSocketConstructor, tls: ITlsOptions): void => {
+  if (!isNode()) {
+    throw new ProgrammerError(NO_TLS_IN_A_PAGE);
+  }
+
+  if (!isWsShaped(WebSocket)) {
+    throw new ProgrammerError(
+      "tls is refused beside a WebSocket without ws's shape, which keeps a TLS of its own"
+    );
+  }
+
+  assertTls(tls);
 };
 
 /** The URL a connect reaches, an IPv6 literal bracketed, or its colons would read as the port's. */
@@ -203,6 +224,14 @@ export const createWebSocketTransportClient = (
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
+  const tls = tlsOf(options?.tls);
+
+  if (tls !== undefined) {
+    assertWebSocketTls(WebSocket, tls);
+  }
+
+  // * given to `ws` under `wss` alone: in the clear, `tls` is held unused
+  const nodeTls = nodeTlsOf(tls);
 
   return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
     (client, { report, tell }) => {
@@ -378,6 +407,7 @@ export const createWebSocketTransportClient = (
                           // ! no permessage-deflate offer, as the C# client offers none: a third-party
                           // server must not negotiate compression on this side alone (RFC 7692)
                           perMessageDeflate: false,
+                          ...(url.startsWith('wss:') ? nodeTls : {}),
                           ...(written === undefined ? {} : { headers: { authorization: written } }),
                         });
                   } catch (reason) {

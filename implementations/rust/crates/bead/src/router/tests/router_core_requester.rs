@@ -401,6 +401,185 @@ async fn oversized_result(source_payload: bool) {
     }
 }
 
+// a peer of `side` whose budget of 256 bytes a first result of 200 holds, and a second call whose
+// result of 100 waits for it; each call's id, and the second's call
+fn budget_held(
+    side: RouterSide,
+) -> (
+    Peer,
+    [u32; 2],
+    crate::testing::core_port::Completion<crate::router::types::RouterResult>,
+) {
+    let peer = Peer::new(
+        side,
+        &RouterLimitsOptions {
+            buffered_bytes_budget: Some(256),
+            maximum_payload_bytes: Some(256),
+            transfer_inactivity_timeout: Some(Duration::from_millis(2_000)),
+            ..limits()
+        },
+    );
+    let (first_id, second_id) = if side == RouterSide::Server {
+        (2, 4)
+    } else {
+        (1, 3)
+    };
+    let mut first = request_of("a");
+    let mut second = request_of("a");
+    first.options.timeout = Duration::from_secs(10);
+    second.options.timeout = Duration::from_secs(10);
+    // the first is never awaited: its result holds the budget until the test ends it
+    drop(peer.request((Bytes::new(), first)));
+    let asked = peer.request((Bytes::new(), second));
+    peer.receive((opening(first_id, (pattern(28), 200)), Arc::from("a")));
+    peer.receive((opening(second_id, (pattern(28), 100)), Arc::from("a")));
+
+    (peer, [first_id, second_id], asked)
+}
+
+// spec 8.2, 12.4
+#[tokio::test]
+async fn end_a_call_whose_result_s_transfer_waits_for_the_budget_past_half_its_inactivity_capacity_exceeded_and_cancel_it()
+ {
+    for side in [RouterSide::Server, RouterSide::Client] {
+        let (peer, [first, second], mut asked) = budget_held(side);
+        peer.settle().await;
+        // held by its wait alone, half the inactivity allowed: not its call's timeout
+        peer.clock.advance(Duration::from_millis(999)).await;
+        assert!(matches!(
+            asked.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        peer.clock.advance(Duration::from_millis(1)).await;
+        let CallError::Failure(failure) = completed(asked).await.expect_err("refused") else {
+            panic!("a failure expected");
+        };
+        assert_eq!(
+            (
+                failure.code(),
+                failure.detail(),
+                failure.origin(),
+                failure.side(),
+                matches!(
+                    failure.header(),
+                    Some(crate::envelope::EnvelopeHeader::Result(_))
+                )
+            ),
+            (
+                ProtocolCode::CAPACITY_EXCEEDED.get(),
+                "a total of 100 bytes waited 1000 milliseconds for the budget",
+                FailureOrigin::Local,
+                Some(side),
+                true
+            )
+        );
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer).await,
+            [
+                (EnvelopeKind::Request, first, None, 0),
+                (EnvelopeKind::Request, second, None, 0),
+                (EnvelopeKind::Credit, first, Some(156), 0),
+                (EnvelopeKind::Cancel, second, None, 0)
+            ]
+        );
+        quiet(&peer).await;
+    }
+}
+
+// spec 12.4, 12.8
+#[tokio::test]
+async fn credit_a_result_s_transfer_once_the_budget_admits_it_setting_its_call_s_inactivity_going_again()
+ {
+    for side in [RouterSide::Server, RouterSide::Client] {
+        let (peer, [first, second], mut asked) = budget_held(side);
+        peer.settle().await;
+        peer.clock.advance(Duration::from_millis(500)).await;
+        peer.owner
+            .run(move |state| {
+                requester::cancel(
+                    state,
+                    (
+                        &CallAddress {
+                            call_id: first,
+                            connection_handle: Arc::from("a"),
+                        },
+                        None,
+                    ),
+                );
+            })
+            .await
+            .expect("the first cancelled");
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer).await,
+            [
+                (EnvelopeKind::Request, first, None, 0),
+                (EnvelopeKind::Request, second, None, 0),
+                (EnvelopeKind::Credit, first, Some(156), 0),
+                (EnvelopeKind::Credit, second, Some(100), 0),
+                (EnvelopeKind::Cancel, first, None, 0)
+            ]
+        );
+        // past its wait, and past the inactivity counted from its opening, short of the one its
+        // credit set going
+        peer.clock.advance(Duration::from_millis(1_999)).await;
+        assert!(matches!(
+            asked.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        peer.clock.advance(Duration::from_millis(1)).await;
+        let error = completed(asked).await.expect_err("its inactivity ends it");
+        assert!(
+            matches!(error, CallError::TimedOut(timeout) if timeout == Duration::from_millis(2_000)),
+            "{error:?}"
+        );
+        quiet(&peer).await;
+    }
+}
+
+// spec 12.3
+#[tokio::test]
+async fn reject_a_result_whose_opening_carries_other_than_its_sender_places_in_it_chunk_invalid_and_cancel_its_call()
+ {
+    for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {
+        let peer = Peer::new(side, &limits());
+        let asked = peer.request((Bytes::new(), request_of("a")));
+        peer.receive((opening(call_id, (pattern(27), 300)), Arc::from("a")));
+        let CallError::Failure(failure) = completed(asked).await.expect_err("refused") else {
+            panic!("a failure expected");
+        };
+        assert_eq!(
+            (
+                failure.code(),
+                failure.detail(),
+                failure.origin(),
+                failure.side(),
+                matches!(
+                    failure.header(),
+                    Some(crate::envelope::EnvelopeHeader::Result(_))
+                )
+            ),
+            (
+                ProtocolCode::CHUNK_INVALID.get(),
+                "an opening carries 28 bytes of its payload, not 27",
+                FailureOrigin::Local,
+                Some(side),
+                true
+            )
+        );
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer).await,
+            [
+                (EnvelopeKind::Request, call_id, None, 0),
+                (EnvelopeKind::Cancel, call_id, None, 0)
+            ]
+        );
+        quiet(&peer).await;
+    }
+}
+
 // spec 9.1
 #[tokio::test]
 async fn fails_before_it_goes_a_call_past_the_calls_its_peer_answers_at_once_and_sends_one_once_a_call_is_answered()
@@ -516,19 +695,19 @@ async fn credited_result() {
             },
             request_of("a"),
         ));
-        peer.receive((opening(call_id, (payload.slice(..32), 300)), Arc::from("a")));
+        peer.receive((opening(call_id, (payload.slice(..28), 300)), Arc::from("a")));
         peer.settle().await;
         assert_eq!(
             pieces(&peer).await.last(),
-            Some(&(EnvelopeKind::Credit, call_id, Some(160), 0))
+            Some(&(EnvelopeKind::Credit, call_id, Some(156), 0))
         );
         for (start, end) in [
-            (80, 128),
-            (80, 128),
-            (32, 80),
-            (128, 176),
-            (176, 224),
-            (224, 272),
+            (76, 124),
+            (76, 124),
+            (28, 76),
+            (124, 172),
+            (172, 220),
+            (220, 268),
         ] {
             peer.receive((
                 chunk(
@@ -549,7 +728,7 @@ async fn credited_result() {
                 .iter()
                 .filter_map(|(kind, _, end, _)| (*kind == EnvelopeKind::Credit).then_some(*end))
                 .collect::<Vec<_>>(),
-            [Some(160), Some(256), Some(300)]
+            [Some(156), Some(252), Some(300)]
         );
         assert!(matches!(
             asked.try_recv(),
@@ -561,7 +740,7 @@ async fn credited_result() {
             })
             .await
             .expect("still receiving");
-        for (start, end) in [(272, 300), (272, 300), (224, 272)] {
+        for (start, end) in [(268, 300), (268, 300), (220, 268)] {
             peer.receive((
                 chunk(
                     call_id,
@@ -594,8 +773,8 @@ async fn credited_result() {
                     None,
                     usize::from(side == RouterSide::Client)
                 ),
-                (EnvelopeKind::Credit, call_id, Some(160), 0),
-                (EnvelopeKind::Credit, call_id, Some(256), 0),
+                (EnvelopeKind::Credit, call_id, Some(156), 0),
+                (EnvelopeKind::Credit, call_id, Some(252), 0),
                 (EnvelopeKind::Credit, call_id, Some(300), 0)
             ]
         );
@@ -626,13 +805,13 @@ async fn broken_result(source_payload: bool) {
             Bytes::new()
         };
         let asked = peer.request((request_payload.clone(), request_of("a")));
-        peer.receive((opening(call_id, (pattern(32), total)), Arc::from("a")));
+        peer.receive((opening(call_id, (pattern(28), total)), Arc::from("a")));
         peer.receive((
             chunk(
                 call_id,
                 (
                     pattern(if total == 150 { 48 } else { 20 }),
-                    32,
+                    28,
                     total == 150,
                 ),
             ),
@@ -641,7 +820,7 @@ async fn broken_result(source_payload: bool) {
         peer.receive((
             chunk(
                 call_id,
-                (pattern(48), if total == 150 { 80 } else { 32 }, false),
+                (pattern(48), if total == 150 { 76 } else { 28 }, false),
             ),
             Arc::from("a"),
         ));
@@ -670,7 +849,7 @@ async fn broken_result(source_payload: bool) {
                 (
                     EnvelopeKind::Credit,
                     call_id,
-                    Some(if total == 150 { 150 } else { 160 }),
+                    Some(if total == 150 { 150 } else { 156 }),
                     0
                 ),
                 (EnvelopeKind::Cancel, call_id, None, 0)
@@ -700,7 +879,7 @@ async fn failed_result_transfer() {
         );
         let first = peer.request((request_payload.clone(), request_of("a")));
         peer.receive((
-            opening(first_id, (Bytes::from(vec![0; 32]), 200)),
+            opening(first_id, (Bytes::from(vec![0; 28]), 200)),
             Arc::from("a"),
         ));
         peer.receive((
@@ -715,13 +894,13 @@ async fn failed_result_transfer() {
             ),
             Arc::from("a"),
         ));
-        peer.receive((chunk(first_id, (pattern(48), 32, false)), Arc::from("a")));
+        peer.receive((chunk(first_id, (pattern(48), 28, false)), Arc::from("a")));
         assert!(
             matches!(completed(first).await, Err(CallError::Failure(failure)) if failure.code() == ProtocolCode::TRANSFER_STALLED.get() && failure.origin() == FailureOrigin::Peer)
         );
         let second = peer.request((request_payload.clone(), request_of("a")));
         peer.receive((
-            opening(second_id, (Bytes::from(vec![0; 32]), 200)),
+            opening(second_id, (Bytes::from(vec![0; 28]), 200)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -729,14 +908,14 @@ async fn failed_result_transfer() {
             pieces(&peer).await,
             [
                 (EnvelopeKind::Request, first_id, None, request_payload.len()),
-                (EnvelopeKind::Credit, first_id, Some(160), 0),
+                (EnvelopeKind::Credit, first_id, Some(156), 0),
                 (
                     EnvelopeKind::Request,
                     second_id,
                     None,
                     request_payload.len()
                 ),
-                (EnvelopeKind::Credit, second_id, Some(160), 0)
+                (EnvelopeKind::Credit, second_id, Some(156), 0)
             ]
         );
         quiet(&peer).await;
@@ -781,7 +960,7 @@ async fn duplicate_result(source_payload: bool) {
             peer.receive((
                 opening(
                     call_id,
-                    (payload.slice(..32), u64::try_from(total).expect("a total")),
+                    (payload.slice(..28), u64::try_from(total).expect("a total")),
                 ),
                 Arc::from("a"),
             ));
@@ -796,7 +975,7 @@ async fn duplicate_result(source_payload: bool) {
                 },
                 Arc::from("a"),
             ));
-            for offset in (32..total).step_by(48) {
+            for offset in (28..total).step_by(48) {
                 let end = offset.saturating_add(48).min(total);
                 peer.receive((
                     chunk(
@@ -1032,9 +1211,9 @@ async fn result_inactivity() {
         request.options.timeout =
             Duration::from_secs(if side == RouterSide::Server { 1 } else { 5 });
         let mut asked = peer.request((Bytes::new(), request));
-        peer.receive((opening(call_id, (pattern(32), total)), Arc::from("a")));
+        peer.receive((opening(call_id, (pattern(28), total)), Arc::from("a")));
         peer.settle().await;
-        let part = chunk(call_id, (pattern(48), 32, false));
+        let part = chunk(call_id, (pattern(48), 28, false));
         if side == RouterSide::Client {
             peer.clock.advance(Duration::from_millis(1_500)).await;
         }

@@ -1,5 +1,5 @@
-// At the end of the body: the language swapped in, its head, the table of contents, the menu, the
-// theme's toggle, and a folded block opened when a link lands in it.
+// At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
+// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
 (() => {
   // each language's title and description, which the build writes beside this script
   const HEADS = JSON.parse(document.getElementById('heads').textContent);
@@ -113,7 +113,7 @@
     { passive: true }
   );
 
-  // ── Menu and theme ──────────────────────────────────────────────────────────
+  // ── Menu ────────────────────────────────────────────────────────────────────
 
   const menu = (open) => {
     const button = page.querySelector('[data-action="menu"]');
@@ -122,18 +122,8 @@
     button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
-  const themeLabel = () => {
-    const button = page.querySelector('[data-action="theme"]');
-    const isDark = root.getAttribute('data-color-scheme') === 'dark';
-    button.setAttribute(
-      'aria-label',
-      button.getAttribute(isDark ? 'data-to-light' : 'data-to-dark')
-    );
-  };
-
   const settle = () => {
     menu(false);
-    themeLabel();
     mark();
   };
 
@@ -145,15 +135,6 @@
       const action = control.getAttribute('data-action');
       if (action === 'menu') {
         menu(!root.hasAttribute('data-menu-open'));
-      } else if (action === 'theme') {
-        const dark = root.getAttribute('data-color-scheme') !== 'dark';
-        root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
-        try {
-          window.localStorage.setItem('theme-preference', JSON.stringify(dark));
-        } catch {
-          // a refused storage keeps the choice for this page alone
-        }
-        themeLabel();
       } else if (action === 'language') {
         event.preventDefault();
         const next = shown() === 'en' ? 'fr' : 'en';

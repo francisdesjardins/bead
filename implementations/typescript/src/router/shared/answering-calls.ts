@@ -59,6 +59,12 @@ export interface IAnsweringCalls<
   answer(request: IDispatchedRequest<Handle>): void;
   /** Gives a call what it receives of its payload, until the call leaves. */
   attach(call: ICallAddress<Handle>, receiving: Receiving): void;
+  /**
+   * Sets the run of `connectionHandle`'s refusals past the calls it has this side answer and those
+   * its resolvers outlive back to none: a request reached step 3 of spec 9.2 and was not refused
+   * there past both.
+   */
+  admitted(connectionHandle: Handle): void;
   /** Takes out the call `controller` is for — none that took its call id since. */
   close(call: ICallAddress<Handle>, controller: AbortController): void;
   /** The controller of the request dispatched with `header`; `undefined` for one never dispatched. */
@@ -71,8 +77,10 @@ export interface IAnsweringCalls<
    */
   end(request: IDispatchedRequest<Handle>, ending: CallEnding): void;
   /**
-   * The calls answered and those abandoned, counted, and their connections; and the busiest
-   * connection's calls, under their ceiling, `maximumAnsweringCalls`.
+   * The calls answered and those abandoned, counted, and their connections; the resolvers that
+   * outlive their call, those of connections closed among them; the busiest connection's calls,
+   * under their ceiling, `maximumAnsweringCalls`; and the busiest connection's calls with the
+   * resolvers that outlive its calls, under theirs, twice as many.
    */
   gauges(): IGauges<Handle>;
   /** Whether the peer's call is open on `call`'s call id, whichever request opened it. */
@@ -92,14 +100,35 @@ export interface IAnsweringCalls<
   open(request: IDispatchedRequest<Handle>, series?: IProcedureSeries): AbortController;
   /** What a call receives of its payload; `undefined` for a call that receives none. */
   receivingOf(call: ICallAddress<Handle>): Receiving | undefined;
+  /**
+   * Adds one to the run of `connectionHandle`'s refusals past the calls it has this side answer and
+   * those its resolvers outlive, and gives the run, as it is now.
+   */
+  refusedPast(connectionHandle: Handle): number;
+  /**
+   * Marks the resolver of the call `controller` is for running — or its verifier, while its
+   * credential resolves — and whether it may: `false` for a call that ended before its turn came,
+   * whose resolver is handed nothing (spec 9.2, step 9).
+   */
+  run(controller: AbortController): boolean;
+  /**
+   * The resolver of the call `controller` is for settled: one that outlived its call gives its
+   * place back, on its connection or among those of connections closed; one whose call is open
+   * runs no more. Settling one not running does nothing.
+   */
+  settle(controller: AbortController): void;
   /** Takes a call out, and gives its controller. */
   take(call: ICallAddress<Handle>): AbortController | undefined;
   /**
    * Takes out every call — `connectionHandle`'s alone, when given — and gives their controllers,
-   * for the caller to abort; the calls abandoned go with them, and none is abandoned. Each call is
-   * counted closed once all are out.
+   * for the caller to abort, with those of the resolvers that outlive their call there and are not
+   * aborted yet (spec 9.10); the calls abandoned go with them, and none is abandoned. Each call is
+   * counted closed once all are out; the resolvers still running there are counted among those of
+   * connections closed until they settle, and the connection's run of refusals ends.
    */
   takeAll(connectionHandle?: Handle): AbortController[];
+  /** The calls `connectionHandle`'s peer has this side answer now, and those its resolvers outlive. */
+  trackedOn(connectionHandle: Handle): number;
 }
 
 // definition
@@ -119,6 +148,14 @@ export interface IAnsweringCalls<
  * the peer send may still come, a copy or out of order; the oldest of a connection's yields once it
  * keeps `maximumTransfers`, one at least, and the inactivity runs on `clock`. A call that goes with
  * its connection is abandoned by none.
+ *
+ * A resolver marked running whose call ends, answered or cancelled, outlives it: it keeps a place
+ * on its connection until it settles, as Go's HTTP/2 server counts a handler until it returns, so
+ * a peer that cancels each request it sends has no more resolvers run on a connection than twice
+ * `maximumAnsweringCalls` (spec 9.2, step 3). What its call received then outlives it with it:
+ * `onOutlive` hears it in place of `onRemove`, and `onSettle` once that resolver settles. Once its
+ * connection closes, it counts among the resolvers of connections closed, by no connection, until
+ * it settles.
  */
 export const createAnsweringCalls = <
   Handle extends string,
@@ -129,7 +166,9 @@ export const createAnsweringCalls = <
     | (Pick<IRouterLimits, 'maximumTransfers' | 'transferInactivityTimeout'> &
         Partial<Pick<IRouterLimits, 'maximumAnsweringCalls'>>)
     | undefined;
+  onOutlive?: ((receiving: Receiving) => void) | undefined;
   onRemove?: ((receiving: Receiving) => void) | undefined;
+  onSettle?: ((receiving: Receiving) => void) | undefined;
 }): IAnsweringCalls<Handle, Receiving> => {
   const { clock } = options;
   const {
@@ -141,6 +180,20 @@ export const createAnsweringCalls = <
   // the controller of each request dispatched, by its header
   const dispatched = new WeakMap<IHandedRequestHeader, AbortController>();
   const abandoned = new Map<Handle, Map<CallId, IAbandoned>>();
+  // ! each by its controller, never by its handle: a connection opened again under the same handle
+  // — a client's, reconnected — holds nothing a resolver of the one before gives back
+  // the controllers whose call is open, and the connection of each controller opened
+  const opened = new WeakSet<AbortController>();
+  const connectionOf = new WeakMap<AbortController, Handle>();
+  // the controllers whose resolver, or verifier, runs
+  const running = new WeakSet<AbortController>();
+  // by connection, the resolvers that outlive their call, each with what its call received
+  const outliving = new Map<Handle, Map<AbortController, Receiving | undefined>>();
+  // the resolvers that outlive a connection closed, and how many
+  const outlivingClosed = new WeakSet<AbortController>();
+  let closedCount = 0;
+  // by connection, its refusals in a row past what it answers and its resolvers outlive
+  const runs = new Map<Handle, number>();
 
   // forgets a call abandoned, and its timer
   const forgetAbandoned = ({ callId, connectionHandle }: ICallAddress<Handle>): void => {
@@ -209,22 +262,48 @@ export const createAnsweringCalls = <
     }
 
     calls.delete(callId);
+    opened.delete(entry.controller);
 
     if (calls.size === 0) {
       answering.delete(connectionHandle);
     }
 
-    if (entry.receiving !== undefined) {
-      abandon({ callId, connectionHandle }, entry.receiving.creditEnd);
-      options.onRemove?.(entry.receiving);
+    const { controller, receiving } = entry;
+
+    // * its resolver still running, it outlives the call, and keeps its place until it settles,
+    // with what the call received (spec 9.2, step 3)
+    if (running.has(controller)) {
+      const resolvers =
+        outliving.get(connectionHandle) ?? new Map<AbortController, Receiving | undefined>();
+
+      resolvers.set(controller, receiving);
+      outliving.set(connectionHandle, resolvers);
+    }
+
+    if (receiving !== undefined) {
+      abandon({ callId, connectionHandle }, receiving.creditEnd);
+
+      if (running.has(controller)) {
+        options.onOutlive?.(receiving);
+      } else {
+        options.onRemove?.(receiving);
+      }
     }
 
     return entry;
   };
 
+  // the resolvers that outlive their call on `connectionHandle`
+  const outlivingOn = (connectionHandle: Handle): number => {
+    return outliving.get(connectionHandle)?.size ?? 0;
+  };
+
   return {
     abandonedEndOf: ({ callId, connectionHandle }) => {
       return abandoned.get(connectionHandle)?.get(callId)?.creditEnd;
+    },
+    admitted: (connectionHandle) => {
+      runs.delete(connectionHandle);
     },
     answer: ({ connectionHandle, header }) => {
       const entry = answering.get(connectionHandle)?.get(header.callId);
@@ -263,19 +342,32 @@ export const createAnsweringCalls = <
     },
     gauges: () => {
       let largestAnsweringCalls = 0;
+      let largestTrackedCalls = 0;
 
       // * the busiest connection's, under its ceiling: the health warns before its first refusal
       for (const { size } of answering.values()) {
         largestAnsweringCalls = Math.max(largestAnsweringCalls, size);
       }
 
+      for (const handle of new Set([...answering.keys(), ...outliving.keys()])) {
+        largestTrackedCalls = Math.max(
+          largestTrackedCalls,
+          (answering.get(handle)?.size ?? 0) + outlivingOn(handle)
+        );
+      }
+
       return gaugesOf({
-        ceilings: { largestAnsweringCalls: maximumAnsweringCalls },
-        connectionHandles: [...answering.keys(), ...abandoned.keys()],
+        ceilings: {
+          largestAnsweringCalls: maximumAnsweringCalls,
+          largestTrackedCalls: 2 * maximumAnsweringCalls,
+        },
+        connectionHandles: [...answering.keys(), ...abandoned.keys(), ...outliving.keys()],
         counts: {
           abandonedCalls: entriesOf(abandoned),
           answeringCalls: entriesOf(answering),
           largestAnsweringCalls,
+          largestTrackedCalls,
+          outlivingResolvers: entriesOf(outliving) + closedCount,
         },
       });
     },
@@ -303,12 +395,66 @@ export const createAnsweringCalls = <
         startedAt: series === undefined ? 0 : clock.performance.now(),
       });
       dispatched.set(header, controller);
+      opened.add(controller);
+      connectionOf.set(controller, connectionHandle);
       answering.set(connectionHandle, calls);
 
       return controller;
     },
     receivingOf: ({ callId, connectionHandle }) => {
       return answering.get(connectionHandle)?.get(callId)?.receiving;
+    },
+    refusedPast: (connectionHandle) => {
+      const run = (runs.get(connectionHandle) ?? 0) + 1;
+
+      runs.set(connectionHandle, run);
+
+      return run;
+    },
+    // ! checked and marked in one step, at the head of the later turn: a call that ended before it
+    // hands its resolver nothing, as Go's HTTP/2 server starts no handler for a stream reset first
+    run: (controller) => {
+      if (!opened.has(controller)) {
+        return false;
+      }
+
+      running.add(controller);
+
+      return true;
+    },
+    settle: (controller) => {
+      if (!running.has(controller)) {
+        return;
+      }
+
+      running.delete(controller);
+
+      const handle = connectionOf.get(controller);
+      const resolvers = handle === undefined ? undefined : outliving.get(handle);
+
+      // one whose connection closed counts by none, and gives its place back there alone
+      if (outlivingClosed.has(controller)) {
+        outlivingClosed.delete(controller);
+        closedCount -= 1;
+
+        return;
+      }
+
+      if (handle === undefined || resolvers?.has(controller) !== true) {
+        return;
+      }
+
+      const receiving = resolvers.get(controller);
+
+      resolvers.delete(controller);
+
+      if (resolvers.size === 0) {
+        outliving.delete(handle);
+      }
+
+      if (receiving !== undefined) {
+        options.onSettle?.(receiving);
+      }
     },
     take: (call) => {
       const entry = forget(call);
@@ -322,11 +468,15 @@ export const createAnsweringCalls = <
     takeAll: (connectionHandle) => {
       const connections =
         connectionHandle === undefined
-          ? new Set([...answering.keys(), ...abandoned.keys()])
+          ? new Set([...answering.keys(), ...abandoned.keys(), ...outliving.keys(), ...runs.keys()])
           : [connectionHandle];
       const taken: IAnswering<Receiving>[] = [];
+      // the resolvers that outlived their call there before, its signal not aborted yet
+      const told: AbortController[] = [];
 
       for (const handle of connections) {
+        const before = [...(outliving.get(handle)?.keys() ?? [])];
+
         for (const [callId, entry] of answering.get(handle)?.entries() ?? []) {
           forget({ callId, connectionHandle: handle });
           taken.push(entry);
@@ -336,6 +486,22 @@ export const createAnsweringCalls = <
         for (const callId of abandoned.get(handle)?.keys() ?? []) {
           forgetAbandoned({ callId, connectionHandle: handle });
         }
+
+        // * every resolver still running there counts by no connection until it settles, and the
+        // connection's counts end with it (spec 9.10)
+        for (const controller of outliving.get(handle)?.keys() ?? []) {
+          outlivingClosed.add(controller);
+          closedCount += 1;
+        }
+
+        for (const controller of before) {
+          if (!controller.signal.aborted) {
+            told.push(controller);
+          }
+        }
+
+        outliving.delete(handle);
+        runs.delete(handle);
       }
 
       // each counted once every one is out, so none is counted while another is still held
@@ -343,9 +509,15 @@ export const createAnsweringCalls = <
         ended(entry, CallEnding.CLOSED);
       }
 
-      return taken.map(({ controller }) => {
-        return controller;
-      });
+      return [
+        ...taken.map(({ controller }) => {
+          return controller;
+        }),
+        ...told,
+      ];
+    },
+    trackedOn: (connectionHandle) => {
+      return (answering.get(connectionHandle)?.size ?? 0) + outlivingOn(connectionHandle);
     },
   };
 };

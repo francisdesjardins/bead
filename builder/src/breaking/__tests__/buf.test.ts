@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fromBinary, toBinary } from '@bufbuild/protobuf';
@@ -9,6 +9,7 @@ import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 
 import { compile } from '../../compile.ts';
+import { BEADC_FOLDER } from '../../config.ts';
 import { type IDiagnostic, InputError } from '../../diagnostics.ts';
 import { BEADC_FILES, displayOf, OPTIONS_FILE } from '../../roots.ts';
 import { Category } from '../../rules.ts';
@@ -27,6 +28,27 @@ import {
 const PAIR = fileURLToPath(new URL('../../../test/breaking/buf/', import.meta.url));
 const EARLIER = join(PAIR, 'earlier');
 const CURRENT = join(PAIR, 'current');
+
+// ! each case compiles its own copy of the fixture: a compile against a folder holds its work area
+// in it, which buf, compiling the same folder for another case, trips on; a copy takes the
+// fixture's .proto alone
+const copyFixture = (from: string, to: string): void => {
+  cpSync(from, to, {
+    recursive: true,
+    filter: (source) => {
+      return basename(source) !== BEADC_FOLDER;
+    },
+  });
+};
+
+// the earlier, copied into the running case's own folder
+const earlierOfCase = (): string => {
+  const earlier = test.info().outputPath('earlier');
+
+  copyFixture(EARLIER, earlier);
+
+  return earlier;
+};
 
 // buf's breaking rules at its pin, as `buf config ls-breaking-rules` lists them
 const bufRules = (): { id: string; deprecated: boolean; categories: string[] }[] => {
@@ -61,9 +83,10 @@ test("buf's rules run once over the pair that breaks a field, by category, at th
     Category,
     unknown[]
   >;
+  const earlier = earlierOfCase();
 
   for (const category of Object.values(Category)) {
-    const run = breaking({ proto: [CURRENT] }, { against: EARLIER, category });
+    const run = breaking({ proto: [CURRENT] }, { against: earlier, category });
 
     expect(
       run.diagnostics.map((diagnostic) => {
@@ -113,8 +136,8 @@ test('bead/options.proto and an import dropped are never compared', () => {
   const earlierRoot = join(pair, 'earlier');
   const currentRoot = join(pair, 'current');
 
-  cpSync(EARLIER, earlierRoot, { recursive: true });
-  cpSync(CURRENT, currentRoot, { recursive: true });
+  copyFixture(EARLIER, earlierRoot);
+  copyFixture(CURRENT, currentRoot);
 
   const earlier = compile([earlierRoot], { image: true });
   const current = fromBinary(FileDescriptorSetSchema, compile([currentRoot], { image: true }));
@@ -188,10 +211,11 @@ test("BUF_RULES_RUN is what each category's use runs, at buf's pin, WIRE_JSON's 
 test("a buf: waiver waives under its file or its folder, as buf's ignore_only matches one, and names a rule its category runs", () => {
   test.setTimeout(60_000);
 
+  const earlier = earlierOfCase();
   const rulesOf = (except: readonly string[]): string[] => {
     return breaking(
       { proto: [CURRENT] },
-      { against: EARLIER, category: Category.API, except }
+      { against: earlier, category: Category.API, except }
     ).diagnostics.map((diagnostic) => {
       return diagnostic.rule;
     });
@@ -223,10 +247,9 @@ test("a buf: waiver waives under its file or its folder, as buf's ignore_only ma
 test("a file the current lost is placed at the earlier's path, which a buf: scope names", () => {
   test.setTimeout(60_000);
 
-  const earlier = test.info().outputPath('earlier');
+  const earlier = earlierOfCase();
   const lost = join(earlier, 'parcel', 'v1', 'lost.proto');
 
-  cpSync(EARLIER, earlier, { recursive: true });
   writeFileSync(
     lost,
     'syntax = "proto3";\n\npackage parcel.v1;\n\nmessage Lost {\n  string name = 1;\n}\n'

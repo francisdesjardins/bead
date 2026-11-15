@@ -48,10 +48,10 @@ const seeds = seedsOf(
 
 test.describe('the envelope readers, fed mutations of the vectors', () => {
   test('finds the vectors bytes', () => {
-    expect(seeds.length).toBe(264);
+    expect(seeds.length).toBe(273);
     // * the seeds in their order, as every side holds them
     expect(digestOf(seeds)).toBe(
-      '4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48'
+      'da5504c90e2f128e857c8111daf89b83a499ba58178644a2136b429900b6d702'
     );
   });
 
@@ -65,7 +65,7 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
     ).toEqual([369, 689, 461, 695, 233, 504, 482, 210]);
     // * the first eight inputs of a seed of 1, as every side draws them
     expect(digestOf(firstInputs(seeds, { count: 8, seed: 1 }))).toBe(
-      '59e97d7f4c6b6dbd434bf66b5b848289e8903f415a5d075b848ef843c8d2fe28'
+      'a9fdb025bb9eb61a4cd1b1ddb9523fb1edc4d518f9386bfc55ada17b68cb28b8'
     );
   });
 

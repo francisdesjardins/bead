@@ -1,1 +1,16 @@
 #nullable enable
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.Transport.Amqp.AmqpBrokerTlsOptions?
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.<Clone>$() -> Bead.Transport.Amqp.AmqpBrokerTlsOptions!
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.AmqpBrokerTlsOptions() -> void
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.init -> void
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(Bead.Transport.Amqp.AmqpBrokerTlsOptions? other) -> bool
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+*REMOVED*Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.init -> void
+*REMOVED*override Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.Transport.Amqp.AmqpBrokerTlsOptions.GetHashCode() -> int
+*REMOVED*override Bead.Transport.Amqp.AmqpBrokerTlsOptions.ToString() -> string!
+*REMOVED*static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator !=(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool
+*REMOVED*static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator ==(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.TlsOptions?

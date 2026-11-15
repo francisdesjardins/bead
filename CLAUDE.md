@@ -100,6 +100,12 @@ standard it follows.
 Comments are written in the voice of the code around them. Keep each implementation's inside as it
 is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder.
 
+**Plain prose.** A sentence of a document or a comment says one thing a reader needs, plainly: no
+chain of appositives and asides hung on it, no reason a reader does not need ("a character, since
+Chrome draws no image on a panel's tab"), and another project named only where it is the standard
+followed or the reader's own reference, never as an aside that a detail is like it. Two sentences
+over one tangled one.
+
 **Comment tags**, as the Better Comments extension (`aaron-bond.better-comments`) shows them: a
 comment that a reader must not miss opens with its tag, after its marker (`//`, `#`):
 

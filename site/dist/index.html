@@ -22,7 +22,8 @@
     <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <script>
-// Before the first paint: the language, as the page chooses it, and the theme, as the page keeps it.
+// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// which the build inlines beside this script.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
@@ -69,21 +70,67 @@
     root.setAttribute('data-swapping', '');
   }
   root.setAttribute('data-language', language);
+})();
+    </script>
+    <script>
+// Before the first paint, on Bead's page and its demo alike: the theme, as the page keeps it, and
+// its toggle, each button `data-action="theme"`, its label its `data-to-dark` or `data-to-light`.
+// A classic script in the head: the page's build inlines it and hashes it, the demo loads it from
+// its own origin.
+(() => {
+  const root = document.documentElement;
+  const KEY = 'theme-preference';
 
   // `theme-preference`, a JSON boolean, true for dark; else the system's preference
-  var dark = null;
+  let dark = null;
   try {
-    var saved = window.localStorage.getItem('theme-preference');
+    const saved = window.localStorage.getItem(KEY);
     if (saved !== null) {
       dark = Boolean(JSON.parse(saved));
     }
-  } catch (error) {
+  } catch {
     dark = null;
   }
   if (dark === null) {
     dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
   root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
+
+  // ! every toggle, a template's included: a page that swaps its content in from a template, as
+  // the page does its language, shows each one labelled for the scheme it is in
+  const label = () => {
+    const isDark = root.getAttribute('data-color-scheme') === 'dark';
+    const toggles = [
+      ...document.querySelectorAll('[data-action="theme"]'),
+      ...[...document.querySelectorAll('template')].flatMap((template) => {
+        return [...template.content.querySelectorAll('[data-action="theme"]')];
+      }),
+    ];
+    for (const toggle of toggles) {
+      toggle.setAttribute(
+        'aria-label',
+        toggle.getAttribute(isDark ? 'data-to-light' : 'data-to-dark') ?? ''
+      );
+    }
+  };
+
+  document.addEventListener('click', (event) => {
+    const toggle =
+      event.target instanceof Element ? event.target.closest('[data-action="theme"]') : null;
+    if (toggle === null) {
+      return;
+    }
+    const next = root.getAttribute('data-color-scheme') !== 'dark';
+    root.setAttribute('data-color-scheme', next ? 'dark' : 'light');
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(next));
+    } catch {
+      // a refused storage keeps the choice for this page alone
+    }
+    label();
+  });
+
+  document.addEventListener('DOMContentLoaded', label);
 })();
     </script>
     <style>
@@ -185,19 +232,140 @@
   --app-scrollbar-width: 10px;
 }
 
-/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
-   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
-   links it under the two sheets, and Bead's page inlines it ahead of its own styles. */
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
+ *
+ * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
+ * nothing that says which product is being painted. What it carries is the part every project needs
+ * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
+ * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
+ * lift that stands in for elevation.
+ *
+ * Import it after `tokens.system.css` and write the brand over it:
+ *
+ * ```css
+ * @import 'penumbra/tokens.system.css';
+ * @import 'penumbra/tokens.skin.base.css';
+ * @import './tokens.skin.css';       // yours: a typeface, and eight colours
+ * ```
+ *
+ * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
+ * names a project paints itself with, and refuses any token the system half already declares. The
+ * complementary rule guards the system file, which refuses colour.
+ *
+ * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
+ * reads as chosen, where an alpha ladder reads as whatever is behind it.
+ */
 
 :root {
-  /* none today: the page and the demo share penumbra's content width as it is */
+  /* ── Surfaces ─────────────────────────────────────────────────────────────── */
+  --app-bg: #f4f6fa;
+  --app-paper: #ffffff;
+
+  /* The mark's own body and its edge — a shape drawn in ink rather than in the brand. */
+  --app-body: #1e293b;
+  --app-body-edge: #475569;
+
+  /* ── Text, in three ranks ─────────────────────────────────────────────────── */
+  --app-text: #0b1120;
+  --app-text-secondary: #4a5568;
+  /* Tertiary is spent on *text* — counts, hints, placeholders — so it clears 4.5:1 rather than
+     sitting at the inactive-control tone a component library would give it. */
+  --app-text-tertiary: #5f6b7e;
+
+  /* ── Edges ────────────────────────────────────────────────────────────────── */
+  --app-divider: rgb(15 23 42 / 0.1);
+  /* A control's edge says where the control is, so WCAG 1.4.11 asks 3:1 of it. The divider above is
+     a layout hairline and owes nothing. */
+  --app-control-border: #6b788c;
+
+  /* ── States ───────────────────────────────────────────────────────────────── */
+  --app-hover: rgb(15 23 42 / 0.05);
+  --app-selected: rgb(15 23 42 / 0.09);
+
+  /* ── The four semantics ───────────────────────────────────────────────────── */
+  --app-error: #b91c1c;
+  --app-error-ink: #ffffff;
+  --app-error-hover: #991b1b;
+
+  --app-ok: #047857;
+  --app-ok-wash: rgb(4 120 87 / 0.1);
+  --app-info: #0369a1;
+  --app-info-wash: rgb(3 105 161 / 0.1);
+  --app-warn: #92400e;
+  --app-warn-wash: rgb(146 64 14 / 0.1);
+
+  /* ── Furniture ────────────────────────────────────────────────────────────── */
+  /* Black in both schemes on purpose: a scrim is an absence of light rather than a colour, and
+     tinting it slate makes it read as a surface. */
+  --app-scrim: rgb(0 0 0 / 0.5);
+  --app-scrollbar-thumb: rgb(15 23 42 / 0.16);
+  --app-scrollbar-track: transparent;
+
+  /* Edges, not elevation: one hairline and one soft shadow instead of a three-layer stack imitating
+     paper height. A brand's own glow goes in the skin over this. */
+  --app-lift: 0 1px 1px rgb(15 23 42 / 0.05), 0 18px 44px -30px rgb(15 23 42 / 0.45);
 }
 
-/* The site's skin, as its home has it, over penumbra's system half and Bead's overrides of it, which
-   the build puts ahead of this sheet; and the page's own tokens on top: the code, the byte roles and
-   the diagrams', each of the site's. The light scheme is the root's; the dark one answers to
-   `data-color-scheme`, or to the system where no script set it. */
+/* Slate dusk, not black: a saturated accent on #000 is a hazard label, on slate it is light. */
+:root[data-color-scheme='dark'] {
+  --app-bg: #0b1120;
+  --app-paper: #111a2b;
 
+  --app-body: #0b1120;
+  --app-body-edge: #334155;
+
+  --app-text: #eef2f8;
+  --app-text-secondary: #a3b0c4;
+  --app-text-tertiary: #8494ab;
+
+  --app-divider: rgb(148 163 184 / 0.16);
+  --app-control-border: #7d8ba1;
+
+  --app-hover: rgb(238 242 248 / 0.07);
+  --app-selected: rgb(238 242 248 / 0.12);
+
+  /* The bright red cannot carry white, so it takes a dark ink — the same fill/ink split a brand's
+     primary makes. */
+  --app-error: #f87171;
+  --app-error-ink: #0b1120;
+  --app-error-hover: #fca5a5;
+
+  --app-ok: #34d399;
+  --app-ok-wash: rgb(52 211 153 / 0.14);
+  --app-info: #38bdf8;
+  --app-info-wash: rgb(56 189 248 / 0.14);
+  --app-warn: #fbbf24;
+  --app-warn-wash: rgb(251 191 36 / 0.14);
+
+  --app-scrim: rgb(0 0 0 / 0.62);
+  --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+
+  --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+}
+
+/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
+   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
+   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
+   skin. */
+
+:root {
+  /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
+  --app-touch: 44px;
+  /* a block of code, on the page and the demo alike; code inline in prose is 0.875em of its text */
+  --app-text-code: var(--app-text-sm);
+}
+
+/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+   its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
+   on, and the colours of code. The page, the demo and the not-found page take this one copy; the
+   DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
+   answers to `data-color-scheme`, or to the system where no script set it. */
+
+/* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
+   static build serve the same files there */
 @font-face {
   font-family: 'Geist';
   font-style: normal;
@@ -233,8 +401,10 @@
   --app-primary-ink: #ffffff;
   --app-primary-hover: #9d2a6b;
   --app-accent: #c13584;
+  --app-flame: #c13584;
   --app-flame-wash: rgb(193 53 132 / 0.1);
   --app-ring: #ff69b4;
+  --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
 
   --app-bg: #f5f2f8;
   --app-paper: #fdfcfe;
@@ -242,23 +412,271 @@
   --app-text-secondary: #4a4055;
   --app-text-tertiary: #6d6278;
   --app-divider: rgb(23 17 29 / 0.12);
-  --app-control-border: #6b788c;
-  --app-hover: rgb(15 23 42 / 0.05);
 
-  --app-ok: #047857;
-  --app-ok-wash: rgb(4 120 87 / 0.1);
-  --app-info: #0369a1;
-  --app-info-wash: rgb(3 105 161 / 0.1);
-  --app-warn: #92400e;
-  --app-warn-wash: rgb(146 64 14 / 0.1);
+  /* the ground of what is code, an inset in a card; and a refusal's wash */
+  --raised: #f1ecf5;
+  --bad-soft: rgb(185 28 28 / 0.1);
 
-  /* the page's own, each of the site's */
-  --focus: var(--app-accent);
-  --code-bg: #f1ecf5;
+  /* what went well, in the green of code's strings, at 4.5:1 on its own wash over the page */
+  --app-ok: #04694c;
+  --app-ok-wash: rgb(4 105 76 / 0.1);
+
+  /* code's colours, a token's kind each, at 4.5:1 or more on a card and on an inset */
   --tok-comment: #625770;
   --tok-keyword: #a62b70;
   --tok-string: #04694c;
   --tok-number: #035f91;
+}
+
+/* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+:root[data-color-scheme='dark'] {
+  color-scheme: dark;
+  --app-primary: #ff8bc4;
+  --app-primary-ink: #3d0b28;
+  --app-primary-hover: #ffaed5;
+  --app-accent: #ff8bc4;
+  --app-flame: #ff8bc4;
+  --app-flame-wash: rgb(255 139 196 / 0.14);
+  --app-ring: #ffaed5;
+  --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+  --app-bg: #0c0910;
+  --app-paper: #15111c;
+  --app-text: #f2ecf5;
+  --app-text-secondary: #b2a7bf;
+  --app-text-tertiary: #8d8199;
+  --app-divider: rgb(242 236 245 / 0.14);
+
+  --raised: #1c1625;
+  --bad-soft: rgb(248 113 113 / 0.12);
+
+  --tok-comment: #9d91a9;
+  --tok-keyword: #ff8bc4;
+  --tok-string: #34d399;
+  --tok-number: #38bdf8;
+}
+
+/* the system's dark, where no script chose: the not-found page runs none */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme]) {
+    color-scheme: dark;
+    --app-primary: #ff8bc4;
+    --app-primary-ink: #3d0b28;
+    --app-primary-hover: #ffaed5;
+    --app-accent: #ff8bc4;
+    --app-flame: #ff8bc4;
+    --app-flame-wash: rgb(255 139 196 / 0.14);
+    --app-ring: #ffaed5;
+    --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+    --app-bg: #0c0910;
+    --app-paper: #15111c;
+    --app-text: #f2ecf5;
+    --app-text-secondary: #b2a7bf;
+    --app-text-tertiary: #8d8199;
+    --app-divider: rgb(242 236 245 / 0.14);
+
+    --raised: #1c1625;
+    --bad-soft: rgb(248 113 113 / 0.12);
+
+    --tok-comment: #9d91a9;
+    --tok-keyword: #ff8bc4;
+    --tok-string: #34d399;
+    --tok-number: #38bdf8;
+
+    /* ! base's dark values, which base keys on the attribute alone: each as its dark block has it,
+       which the DevTools panel's tests hold */
+    --app-body: #0b1120;
+    --app-body-edge: #334155;
+    --app-control-border: #7d8ba1;
+    --app-hover: rgb(238 242 248 / 0.07);
+    --app-selected: rgb(238 242 248 / 0.12);
+    --app-error: #f87171;
+    --app-error-ink: #0b1120;
+    --app-error-hover: #fca5a5;
+    --app-ok: #34d399;
+    --app-ok-wash: rgb(52 211 153 / 0.14);
+    --app-info: #38bdf8;
+    --app-info-wash: rgb(56 189 248 / 0.14);
+    --app-warn: #fbbf24;
+    --app-warn-wash: rgb(251 191 36 / 0.14);
+    --app-scrim: rgb(0 0 0 / 0.62);
+    --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+    --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+  }
+}
+
+/* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
+   the name, a link to the page, a context word where there is one, and a row of tools at the right,
+   each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
+   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
+   demo links it. */
+
+:root {
+  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  --frame-gutter: max(var(--app-space-4), 3vw);
+}
+
+html {
+  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
+}
+
+body {
+  padding-top: var(--app-topbar-height);
+}
+
+.topbar,
+.topbar * {
+  box-sizing: border-box;
+}
+
+/* ! a height, never a least one: a bar that grows on a narrow screen covers what follows it */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--app-z-topbar);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--app-space-3);
+  height: var(--app-topbar-height);
+  /* its ends on the frame's edges */
+  padding-inline: max(
+    var(--frame-gutter),
+    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+  );
+  background: var(--app-paper);
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-2);
+  min-width: var(--app-touch);
+  min-height: var(--app-touch);
+  color: var(--app-text);
+  font-family: var(--app-font-mono);
+  font-weight: 500;
+  font-size: var(--app-text-md);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand:hover {
+  color: var(--app-text);
+}
+
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the accent */
+.mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
+}
+
+/* what part of Bead this is, after its name */
+.context {
+  flex: none;
+  color: var(--app-text-tertiary);
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+}
+
+.tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-1);
+  margin-inline-start: auto;
+}
+
+/* * a finger's square at least; the pill it shows is 40 px, inside a transparent edge of 2 px */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--app-touch);
+  height: var(--app-touch);
+  min-height: var(--app-touch);
+  margin: 0;
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
+}
+
+.tool:hover {
+  border-color: transparent;
+  background-color: var(--app-hover);
+  color: var(--app-text);
+}
+
+/* a tool drawn as a glyph: the theme, the page's menu */
+.tool[data-action='theme'],
+.tool[data-action='menu'] {
+  width: var(--app-touch);
+  padding: 0;
+  font-size: 1.25rem;
+}
+
+/* under 360 px, the bar keeps the mark and leaves the name to the heading under it */
+@media (max-width: 359px) {
+  .brand {
+    font-size: 0;
+  }
+
+  .context {
+    display: none;
+  }
+
+  .topbar {
+    gap: var(--app-space-2);
+    padding-inline: var(--app-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool {
+    transition: none;
+  }
+}
+
+/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
+   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
+
+:root {
+  /* the page's own, each of the site's */
+  --focus: var(--app-accent);
   /* the accent on its own wash is 4.33:1 in light: the deeper hover carries it */
   --seg-prefix: var(--app-primary-hover);
   --seg-prefix-wash: var(--app-flame-wash);
@@ -282,66 +700,14 @@
 
 /* the dark scheme, chosen; and the system's, where no script chose */
 :root[data-color-scheme='dark'] {
-  color-scheme: dark;
-  --app-primary: #ff8bc4;
-  --app-primary-ink: #3d0b28;
-  --app-primary-hover: #ffaed5;
-  --app-accent: #ff8bc4;
-  --app-flame-wash: rgb(255 139 196 / 0.14);
-  --app-ring: #ffaed5;
-  --app-bg: #0c0910;
-  --app-paper: #15111c;
-  --app-text: #f2ecf5;
-  --app-text-secondary: #b2a7bf;
-  --app-text-tertiary: #8d8199;
-  --app-divider: rgb(242 236 245 / 0.14);
-  --app-control-border: #7d8ba1;
-  --app-hover: rgb(238 242 248 / 0.07);
-  --app-ok: #34d399;
-  --app-ok-wash: rgb(52 211 153 / 0.14);
-  --app-info: #38bdf8;
-  --app-info-wash: rgb(56 189 248 / 0.14);
-  --app-warn: #fbbf24;
-  --app-warn-wash: rgb(251 191 36 / 0.14);
   --focus: var(--app-ring);
   --seg-prefix: var(--app-accent);
-  --code-bg: #1c1625;
-  --tok-comment: #9d91a9;
-  --tok-keyword: #ff8bc4;
-  --tok-string: #34d399;
-  --tok-number: #38bdf8;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme]) {
-    color-scheme: dark;
-    --app-primary: #ff8bc4;
-    --app-primary-ink: #3d0b28;
-    --app-primary-hover: #ffaed5;
-    --app-accent: #ff8bc4;
-    --app-flame-wash: rgb(255 139 196 / 0.14);
-    --app-ring: #ffaed5;
-    --app-bg: #0c0910;
-    --app-paper: #15111c;
-    --app-text: #f2ecf5;
-    --app-text-secondary: #b2a7bf;
-    --app-text-tertiary: #8d8199;
-    --app-divider: rgb(242 236 245 / 0.14);
-    --app-control-border: #7d8ba1;
-    --app-hover: rgb(238 242 248 / 0.07);
-    --app-ok: #34d399;
-    --app-ok-wash: rgb(52 211 153 / 0.14);
-    --app-info: #38bdf8;
-    --app-info-wash: rgb(56 189 248 / 0.14);
-    --app-warn: #fbbf24;
-    --app-warn-wash: rgb(251 191 36 / 0.14);
     --focus: var(--app-ring);
     --seg-prefix: var(--app-accent);
-    --code-bg: #1c1625;
-    --tok-comment: #9d91a9;
-    --tok-keyword: #ff8bc4;
-    --tok-string: #34d399;
-    --tok-number: #38bdf8;
   }
 }
 
@@ -355,7 +721,6 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -371,7 +736,6 @@ html {
 
 body {
   margin: 0;
-  padding-top: var(--app-topbar-height);
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--app-font-body);
@@ -396,12 +760,20 @@ a:hover {
   text-decoration-thickness: 2px;
 }
 
+/* a link's code stands on an inset, where the accent falls under 4.5:1: it takes the darker ink */
+a code {
+  color: var(--app-primary-hover);
+}
+
 .skip {
   position: absolute;
   top: var(--app-space-2);
   left: var(--app-space-2);
   z-index: 50;
-  padding: var(--app-space-2) var(--app-space-3);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
   background: var(--app-paper);
   border-radius: var(--app-radius);
   transform: translateY(-200%);
@@ -413,97 +785,7 @@ a:hover {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-.topbar {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: var(--app-z-topbar);
-  display: flex;
-  align-items: center;
-  gap: var(--app-space-3);
-  height: var(--app-topbar-height);
-  /* its ends on the frame's edges, the demo's bar's alike */
-  padding-inline: max(
-    var(--frame-gutter),
-    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
-  );
-  background: var(--app-paper);
-  border-bottom: 1px solid var(--app-divider);
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--app-space-2);
-  margin-inline: 0 auto;
-  color: var(--app-text);
-  font-family: var(--app-font-mono);
-  font-weight: 500;
-  font-size: var(--app-text-md);
-  letter-spacing: 0.01em;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
-   edge in beads; the disc dark in either theme, its edge a hairline, the light the page's accent */
-.mark {
-  flex: none;
-  width: 22px;
-  height: 22px;
-}
-
-.mark .moon {
-  fill: var(--app-body);
-  stroke: var(--app-text-tertiary);
-  stroke-width: 1;
-}
-
-.mark .rim {
-  fill: none;
-  stroke: var(--app-primary);
-  stroke-width: 0.9;
-  stroke-opacity: 0.6;
-}
-
-.mark .bead {
-  fill: var(--app-primary);
-}
-
-.tools {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--app-space-1);
-}
-
-.tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--app-space-10);
-  height: var(--app-space-10);
-  padding: 0 var(--app-space-2);
-  border: none;
-  border-radius: var(--app-radius-pill);
-  background: transparent;
-  color: var(--app-text);
-  font: 500 var(--app-text-md) / 1 var(--app-font-body);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color var(--app-quick) var(--app-ease);
-}
-
-.tool:hover {
-  background: var(--app-hover);
-}
-
-.tool[data-action='theme'],
-.tool[data-action='menu'] {
-  width: var(--app-space-10);
-  padding: 0;
-  font-size: 1.25rem;
-}
-
+/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
 .language .short {
   display: none;
 }
@@ -522,23 +804,7 @@ a:hover {
   }
 }
 
-/* under 360 px, the bar keeps the mark and leaves the name to the page's heading */
-@media (max-width: 359px) {
-  .brand {
-    font-size: 0;
-  }
-  .topbar {
-    gap: var(--app-space-2);
-    padding-inline: var(--app-space-3);
-  }
-}
-
 /* ── Layout and contents ──────────────────────────────────────────────────── */
-
-/* the frame the demo shares: penumbra's content width, and the same gutter at its sides */
-:root {
-  --frame-gutter: max(var(--app-space-4), 3vw);
-}
 
 .layout {
   display: grid;
@@ -631,7 +897,21 @@ main:focus {
     box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
   }
   :root[data-menu-open] .toc a {
-    padding-block: var(--app-space-2);
+    display: flex;
+    align-items: center;
+    min-height: var(--app-touch);
+  }
+}
+
+/* the menu's sheet comes in at once, or a short fade where motion is welcome */
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  :root[data-menu-open] .toc {
+    transition: opacity var(--app-quick) var(--app-ease);
+  }
+  @starting-style {
+    :root[data-menu-open] .toc {
+      opacity: 0;
+    }
   }
 }
 
@@ -701,7 +981,7 @@ h3 code,
 .gist code {
   padding: 1px var(--app-space-1);
   border-radius: var(--app-radius-sm);
-  background: var(--code-bg);
+  background: var(--raised);
   overflow-wrap: anywhere;
 }
 
@@ -780,6 +1060,13 @@ h3 code,
 
 .invite a {
   color: inherit;
+}
+
+/* the invite's second way out, a link a finger reaches beside its button */
+.invite .actions a:not(.button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
 }
 
 .invite :focus-visible {
@@ -870,7 +1157,7 @@ h3 code,
 }
 
 .seg-block {
-  --seg-bg: var(--code-bg);
+  --seg-bg: var(--raised);
   --seg-ink: var(--app-text);
   --seg-line: var(--app-divider);
 }
@@ -1042,6 +1329,11 @@ th[scope='row'] {
   white-space: nowrap;
 }
 
+/* a table scrolls sideways on a narrow screen, so a name of code in it stays whole */
+.table-wrap td code {
+  overflow-wrap: normal;
+}
+
 .code-num {
   font: 500 0.875rem/1.4 var(--app-font-mono);
   font-variant-numeric: tabular-nums;
@@ -1077,7 +1369,7 @@ th[scope='row'] {
 }
 
 .fate-rejected {
-  background: var(--code-bg);
+  background: var(--raised);
   color: var(--app-text);
 }
 
@@ -1224,8 +1516,8 @@ pre.snippet {
   padding: var(--app-space-4);
   overflow-x: auto;
   border-radius: var(--app-radius-md);
-  background: var(--code-bg);
-  font: 400 13.5px/1.55 var(--app-font-mono);
+  background: var(--raised);
+  font: 400 var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
   tab-size: 2;
 }
 
@@ -1452,7 +1744,7 @@ footer {
     <li>12 bytes for a request</li>
     <li>payloads past one envelope</li>
     <li>23 failure codes</li>
-    <li>409 units in the spec</li>
+    <li>410 units in the spec</li>
     <li>no required dependency on the TypeScript side</li>
   </ul>
   <p class="space">
@@ -1474,7 +1766,7 @@ footer {
     nothing. A payload is bounded only by the limits of both ends. A refusal says how far the
     request got.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="compare">
       <thead>
         <tr>
@@ -1589,8 +1881,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     (<code>0x20</code>) and MORE (<code>0x40</code>). The bits <code>0x01</code> and
     <code>0x80</code> are reserved. A header holds 1,020 bytes at most (§2 to §4).
   </p>
-  <div class="bitmap" role="img" aria-label="The 32-bit words of a REQUEST that carries DESTINATION, TRANSFER and CREDENTIAL, here OPAQUE"><div class="word"><code class="word-name">bytes 0-3</code><div class="word-bits"><span class="bits" style="--w:8"><b>layout</b><i>8</i></span><span class="bits" style="--w:8"><b>kind</b><i>8</i></span><span class="bits" style="--w:8"><b>flags</b><i>8</i></span><span class="bits" style="--w:8"><b>headerWords</b><i>8</i></span></div></div><div class="word"><code class="word-name">bytes 4-7</code><div class="word-bits"><span class="bits" style="--w:32"><b>callId</b><i>32</i></span></div></div><div class="word"><code class="word-name">bytes 8-11</code><div class="word-bits"><span class="bits" style="--w:16"><b>serviceId</b><i>16</i></span><span class="bits" style="--w:16"><b>procedureId</b><i>16</i></span></div></div><div class="word"><code class="word-name">DESTINATION</code><div class="word-bits"><span class="bits" style="--w:32"><b>destinationId</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 1/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, high</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 2/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, low</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 1/5</code><div class="word-bits"><span class="bits" style="--w:16"><b>scheme: OPAQUE</b><i>16</i></span><span class="bits" style="--w:16"><b>length: 16</b><i>16</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 2/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 0-31</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 3/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 32-63</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 4/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 64-95</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 5/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 96-127</b><i>32</i></span></div></div></div>
-  <div class="table-wrap">
+  <div class="bitmap" role="img" tabindex="0" aria-label="The 32-bit words of a REQUEST that carries DESTINATION, TRANSFER and CREDENTIAL, here OPAQUE"><div class="word"><code class="word-name">bytes 0-3</code><div class="word-bits"><span class="bits" style="--w:8"><b>layout</b><i>8</i></span><span class="bits" style="--w:8"><b>kind</b><i>8</i></span><span class="bits" style="--w:8"><b>flags</b><i>8</i></span><span class="bits" style="--w:8"><b>headerWords</b><i>8</i></span></div></div><div class="word"><code class="word-name">bytes 4-7</code><div class="word-bits"><span class="bits" style="--w:32"><b>callId</b><i>32</i></span></div></div><div class="word"><code class="word-name">bytes 8-11</code><div class="word-bits"><span class="bits" style="--w:16"><b>serviceId</b><i>16</i></span><span class="bits" style="--w:16"><b>procedureId</b><i>16</i></span></div></div><div class="word"><code class="word-name">DESTINATION</code><div class="word-bits"><span class="bits" style="--w:32"><b>destinationId</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 1/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, high</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 2/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, low</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 1/5</code><div class="word-bits"><span class="bits" style="--w:16"><b>scheme: OPAQUE</b><i>16</i></span><span class="bits" style="--w:16"><b>length: 16</b><i>16</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 2/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 0-31</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 3/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 32-63</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 4/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 64-95</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 5/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>token, bits 96-127</b><i>32</i></span></div></div></div>
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -1691,7 +1983,9 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
     refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything past
-    its prefix (§9.2).
+    its prefix (§9.2). A resolver still running once its call was answered or cancelled keeps a
+    place apart until it settles, as many again as the bound, so a peer that cancels all it sends
+    piles up no work.
   </p>
   <p>
     An answer goes once, and only while its call is open. One that arrives after a cancel or a
@@ -1732,7 +2026,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
       reported otherwise
     </li>
   </ul>
-  <div class="table-wrap"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Stage</th><th scope="col">Fate</th><th scope="col">When</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>The bytes do not form an envelope this layout reads.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>A layout to come, 0xA2 to 0xAF; the detail says the ones read.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-reported">reported</span></td><td>A kind to come, 0x17 to 0x7F; a NOTIFICATION a server received, or a credit of notifications a client received.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>A request past chunkBytes, or another envelope past maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>A destination the relay does not have, or a peer that relays nothing.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The request could not leave for its destination: nothing was tried.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>No procedure is registered for this service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>The service exists, not the procedure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">reported</span></td><td>A RESULT, a FAILURE or a CHUNK no call awaits.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">reported</span></td><td>A NOTIFICATION under no subscription.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>A subscription on a path with no notification: a relay, an HTTP connection that does not listen.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The credential does not hold, or the procedure wants a session the call lacks; also sent when a session ends.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span></td><td>The admission refuses the call, on its header and its session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The payload, or a transfer’s total, is past its procedure’s or its router’s limit, 16 MiB by default.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>Too many calls at once, no free callId left, or a full queue or budget.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span></td><td>A credential scheme this peer does not take; the detail names its own.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>A chunk outside the rules: empty, misplaced, of the wrong size or past the total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>A chunk past the credit granted.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>The procedure’s codec refuses the payload.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>Nothing came for a transfer for 30 s, by default.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The payload reads, but breaks a rule of its message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procedure</span></td><td><span class="fate fate-answered">answered</span></td><td>The procedure, its admission or a credential’s verifier failed.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procedure</span></td><td><span class="fate fate-answered">answered</span></td><td>The relay lost its destination after sending: the procedure may have run.</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Stage</th><th scope="col">Fate</th><th scope="col">When</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>The bytes do not form an envelope this layout reads.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>A layout to come, 0xA2 to 0xAF; the detail says the ones read.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-reported">reported</span></td><td>A kind to come, 0x17 to 0x7F; a NOTIFICATION a server received, or a credit of notifications a client received.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">envelope</span></td><td><span class="fate fate-gate">gate</span></td><td>A request or a result past chunkBytes, whole or an opening, or another envelope past maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>A destination the relay does not have, or a peer that relays nothing.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The request could not leave for its destination: nothing was tried.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>No procedure is registered for this service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>The service exists, not the procedure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">reported</span></td><td>A RESULT, a FAILURE or a CHUNK no call awaits.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">reported</span></td><td>A NOTIFICATION under no subscription.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">answered</span></td><td>A subscription on a path with no notification: a relay, an HTTP connection that does not listen.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The credential does not hold, or the procedure wants a session the call lacks; also sent when a session ends.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span></td><td>The admission refuses the call, on its header and its session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The payload, or a transfer’s total, is past its procedure’s or its router’s limit, 16 MiB by default.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>Too many calls at once, no free callId left, or a full queue or budget.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">answered</span></td><td>A credential scheme this peer does not take; the detail names its own.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>A chunk outside the rules: empty, misplaced, of the wrong size or past the total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>A chunk past the credit granted.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>The procedure’s codec refuses the payload.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span></td><td>Nothing came for a transfer for 30 s, by default.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">payload</span></td><td><span class="fate fate-answered">answered</span> <span class="fate fate-rejected">rejected</span></td><td>The payload reads, but breaks a rule of its message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procedure</span></td><td><span class="fate fate-answered">answered</span></td><td>The procedure, its admission or a credential’s verifier failed.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procedure</span></td><td><span class="fate fate-answered">answered</span></td><td>The relay lost its destination after sending: the procedure may have run.</td></tr></tbody></table></div>
   <h3 id="echecs-code">In the code</h3>
   <p>
     On the TypeScript side, the requester receives a <code>FailureError</code>:
@@ -1935,7 +2229,7 @@ message CountDownRequest {
     A request presents a credential in its CREDENTIAL block. Its scheme names a format, as HTTP
     names an authentication scheme: a peer knows what the bytes are without reading them.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="schemes">
       <thead>
         <tr>
@@ -2127,7 +2421,7 @@ message CountDownRequest {
       Nothing announces the limits: both ends of a connection set them alike, but the last row’s,
       which each side sets for itself.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -2140,12 +2434,12 @@ message CountDownRequest {
           <tr>
             <td><code>maximumEnvelopeBytes</code></td>
             <td class="code-num">16,778,240</td>
-            <td>Any envelope other than a request</td>
+            <td>Any envelope other than a request or a result</td>
           </tr>
           <tr>
             <td><code>chunkBytes</code></td>
             <td class="code-num">1,048,576</td>
-            <td>A chunk, and a request, whole or a transfer’s opening</td>
+            <td>A request or a result, whole or a transfer’s opening, and a chunk within its transfer</td>
           </tr>
           <tr>
             <td><code>windowBytes</code></td>
@@ -2229,7 +2523,7 @@ message CountDownRequest {
     <figcaption>A relayed call, then a refusal at the opening</figcaption>
     <div class="figure-scroll" tabindex="0"><svg id="d-relay-en" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 906 760" role="graphics-document document" aria-roledescription="sequence" width="906" height="760" style="--w:906px"><g><line id="actor16" x1="731" y1="65" x2="731" y2="2000" class="actor-line 200" stroke-width="0.5px" name="A" data-et="life-line" data-id="A" style="stroke:var(--diagram-edge)"></line><g id="root-16" data-et="participant" data-type="participant" data-id="A"><rect x="656" y="0" width="150" height="65" name="A" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="731" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="731" dy="0">Destination 7</tspan></text></g></g><g><line id="actor15" x1="407" y1="65" x2="407" y2="2000" class="actor-line 200" stroke-width="0.5px" name="R" data-et="life-line" data-id="R" style="stroke:var(--diagram-edge)"></line><g id="root-15" data-et="participant" data-type="participant" data-id="R"><rect x="330" y="0" width="154" height="65" name="R" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="407" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="407" dy="0">Gateway, the relay</tspan></text></g></g><g><line id="actor14" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-14" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-relay-en{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-relay-en .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-relay-en .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-relay-en .error-icon{fill:var(--diagram-surface);}#d-relay-en .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-relay-en .edge-thickness-normal{stroke-width:1px;}#d-relay-en .edge-thickness-thick{stroke-width:3.5px;}#d-relay-en .edge-pattern-solid{stroke-dasharray:0;}#d-relay-en .edge-thickness-invisible{stroke-width:0;fill:none;}#d-relay-en .edge-pattern-dashed{stroke-dasharray:3;}#d-relay-en .edge-pattern-dotted{stroke-dasharray:2;}#d-relay-en .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-en .marker.cross{stroke:var(--diagram-edge);}#d-relay-en svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-relay-en p{margin:0;}#d-relay-en .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-relay-en text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-en .actor-line{stroke:var(--diagram-edge);}#d-relay-en .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-relay-en .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-relay-en .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-relay-en [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-en .sequenceNumber{fill:var(--diagram-surface);}#d-relay-en [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-relay-en [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-en .messageText{fill:var(--diagram-ink);stroke:none;}#d-relay-en .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-relay-en .labelText,#d-relay-en .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-en .loopText,#d-relay-en .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-en .sectionTitle,#d-relay-en .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-en .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-relay-en .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-relay-en .noteText,#d-relay-en .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-en .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-en .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-en .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-en .actorPopupMenu{position:absolute;}#d-relay-en .actor-man circle,#d-relay-en line{fill:var(--diagram-actor);stroke-width:2px;}#d-relay-en .node .neo-node{stroke:var(--diagram-node-line);}#d-relay-en [data-look="neo"].swimlane.cluster rect{filter:none;}#d-relay-en [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-relay-en [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-relay-en :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-relay-en-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-relay-en-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-relay-en-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-relay-en-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-relay-en-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-relay-en-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-relay-en-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-relay-en-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-relay-en-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-relay-en-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-relay-en-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i1"><rect x="306.5" y="148" width="201" height="104" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="407" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">admitted on its scheme,</tspan></text><text x="407" y="174" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">7 registered, its audience</tspan></text><text x="407" y="195" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">named by aud,</tspan></text><text x="407" y="216" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">under both limits</tspan></text></g><g data-et="note" data-id="i3"><rect x="656" y="335" width="150" height="83" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="731" y="340" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="731">verifies the JWT:</tspan></text><text x="731" y="361" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="731">the call runs</tspan></text><text x="731" y="382" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="731">in its session</tspan></text></g><g data-et="note" data-id="i8"><rect x="50" y="678" width="706" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="403" y="683" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="403">8 verifies another audience:</tspan></text><text x="403" y="704" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="403">refused at the opening, nothing leaves for the destination</tspan></text></g><text x="240" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 3 · DESTINATION 7</text><text x="240" y="101" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT</text><line x1="76" y1="138" x2="403" y2="138" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="fill: none;"></line><text x="568" y="267" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 1 · leg B</text><text x="568" y="288" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT: the same bytes</text><line x1="408" y1="325" x2="727" y2="325" class="messageLine0" data-et="message" data-id="i2" data-from="R" data-to="A" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="fill: none;"></line><text x="571" y="433" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">RESULT · callId 1</text><line x1="730" y1="470" x2="411" y2="470" class="messageLine1" data-et="message" data-id="i4" data-from="A" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="243" y="485" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">RESULT · callId 3</text><line x1="406" y1="522" x2="79" y2="522" class="messageLine1" data-et="message" data-id="i5" data-from="R" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="240" y="537" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 5 · DESTINATION 8</text><text x="240" y="558" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT</text><line x1="76" y1="595" x2="403" y2="595" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="fill: none;"></line><text x="243" y="610" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">FAILURE · callId 5</text><text x="243" y="631" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">DESTINATION_UNREACHABLE</text><line x1="406" y1="668" x2="79" y2="668" class="messageLine1" data-et="message" data-id="i7" data-from="R" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-relay-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
   </figure>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -2547,7 +2841,7 @@ offerHello(server);
     the failure’s detail. The status depends on where the code arose: what the caller can fix
     gives a 4xx, what happens between the gateway and its server a 5xx.
   </p>
-  <div class="table-wrap"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE, a reading refused; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, and what is said only between the gateway and its server</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE, a reading refused; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, and what is said only between the gateway and its server</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
   <p class="space">
     A <code>PAYLOAD_INVALID</code> gives a 422 whose <code>errors</code> place each violation:
     <code>pointer</code> into the body, or <code>parameter</code> for a variable of the path or of
@@ -2646,7 +2940,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     Encryption is no gate of Bead’s. It is TLS’s job, under the transport, set up by the
     deployment. Of its own, Bead only refuses to send a bearer credential in clear off the machine.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -2866,7 +3160,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       A peer that holds on to a server costs it memory, sockets and time. Each side therefore bounds
       what a peer holds of it, on the model of HTTP/2 and Kestrel, and each bound can be set.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -3044,7 +3338,7 @@ FailureError {
     variable: <code>*</code> for any run of characters, <code>-</code> to leave a name out. It adds
     three selectors.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -3187,7 +3481,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     its gateway and <code>beadc</code>’s Rust target, and each part it lacks is a row of the support
     matrix, ahead.
   </p>
-  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. Its WebSocket,
     HTTP and MQTT 5 transports and its gateway meet the other two sides in the interop, both
@@ -3237,13 +3531,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more">
     <summary>The conformance files, in figures</summary>
     <ul>
-      <li><strong>The units</strong>: 409 for the specification,
+      <li><strong>The units</strong>: 410 for the specification,
         184 for debugging and 194 for
         transcoding, each held by the sha256 fingerprint of its text.</li>
-      <li><strong>The vectors</strong>: 463, in 17
+      <li><strong>The vectors</strong>: 472, in 17
         groups, each header’s bytes and what a reader refuses, a JWT’s verdicts and a broker’s
         parcels.</li>
-      <li><strong>The conversations</strong>: 190 exchanges between clients
+      <li><strong>The conversations</strong>: 207 exchanges between clients
         and the interop server, relays included.</li>
       <li><strong>The transports’ cases</strong>: 269 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
@@ -3563,7 +3857,7 @@ disallowed-types = [
     <li>12 octets pour une requête</li>
     <li>des charges au-delà d’une enveloppe</li>
     <li>23 codes d’échec</li>
-    <li>409 unités dans la spécification</li>
+    <li>410 unités dans la spécification</li>
     <li>aucune dépendance obligatoire côté TypeScript</li>
   </ul>
   <p class="space">
@@ -3585,7 +3879,7 @@ disallowed-types = [
     rien analyser. Une charge n’est bornée que par les limites des deux bouts. Un refus dit
     jusqu’où la requête est allée.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="compare">
       <thead>
         <tr>
@@ -3702,8 +3996,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>0x01</code> et <code>0x80</code> sont gardés. Un en-tête tient 1 020 octets au plus (§2 à
     §4).
   </p>
-  <div class="bitmap" role="img" aria-label="Les mots de 32 bits d’une REQUEST qui porte DESTINATION, TRANSFER et CREDENTIAL, ici OPAQUE"><div class="word"><code class="word-name">octets 0-3</code><div class="word-bits"><span class="bits" style="--w:8"><b>layout</b><i>8</i></span><span class="bits" style="--w:8"><b>kind</b><i>8</i></span><span class="bits" style="--w:8"><b>flags</b><i>8</i></span><span class="bits" style="--w:8"><b>headerWords</b><i>8</i></span></div></div><div class="word"><code class="word-name">octets 4-7</code><div class="word-bits"><span class="bits" style="--w:32"><b>callId</b><i>32</i></span></div></div><div class="word"><code class="word-name">octets 8-11</code><div class="word-bits"><span class="bits" style="--w:16"><b>serviceId</b><i>16</i></span><span class="bits" style="--w:16"><b>procedureId</b><i>16</i></span></div></div><div class="word"><code class="word-name">DESTINATION</code><div class="word-bits"><span class="bits" style="--w:32"><b>destinationId</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 1/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids fort</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 2/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids faible</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 1/5</code><div class="word-bits"><span class="bits" style="--w:16"><b>schéma : OPAQUE</b><i>16</i></span><span class="bits" style="--w:16"><b>longueur : 16</b><i>16</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 2/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 0-31</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 3/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 32-63</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 4/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 64-95</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 5/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 96-127</b><i>32</i></span></div></div></div>
-  <div class="table-wrap">
+  <div class="bitmap" role="img" tabindex="0" aria-label="Les mots de 32 bits d’une REQUEST qui porte DESTINATION, TRANSFER et CREDENTIAL, ici OPAQUE"><div class="word"><code class="word-name">octets 0-3</code><div class="word-bits"><span class="bits" style="--w:8"><b>layout</b><i>8</i></span><span class="bits" style="--w:8"><b>kind</b><i>8</i></span><span class="bits" style="--w:8"><b>flags</b><i>8</i></span><span class="bits" style="--w:8"><b>headerWords</b><i>8</i></span></div></div><div class="word"><code class="word-name">octets 4-7</code><div class="word-bits"><span class="bits" style="--w:32"><b>callId</b><i>32</i></span></div></div><div class="word"><code class="word-name">octets 8-11</code><div class="word-bits"><span class="bits" style="--w:16"><b>serviceId</b><i>16</i></span><span class="bits" style="--w:16"><b>procedureId</b><i>16</i></span></div></div><div class="word"><code class="word-name">DESTINATION</code><div class="word-bits"><span class="bits" style="--w:32"><b>destinationId</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 1/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids fort</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 2/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids faible</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 1/5</code><div class="word-bits"><span class="bits" style="--w:16"><b>schéma : OPAQUE</b><i>16</i></span><span class="bits" style="--w:16"><b>longueur : 16</b><i>16</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 2/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 0-31</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 3/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 32-63</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 4/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 64-95</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 5/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 96-127</b><i>32</i></span></div></div></div>
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -3804,7 +4098,9 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
     n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> avant d’en lire quoi
-    que ce soit au-delà du préfixe (§9.2).
+    que ce soit au-delà du préfixe (§9.2). Un résolveur qui tourne encore une fois son appel
+    répondu ou annulé garde une place à part jusqu’à ce qu’il se règle, autant encore que la
+    borne : un pair qui annule tout ce qu’il envoie n’empile pas de travail.
   </p>
   <p>
     Une réponse ne part qu’une fois, et seulement tant que son appel est ouvert. Celle qui arrive
@@ -3846,7 +4142,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
       signalé sinon
     </li>
   </ul>
-  <div class="table-wrap"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Nom</th><th scope="col">Étape</th><th scope="col">Sort</th><th scope="col">Quand</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Les octets ne forment pas une enveloppe que cette disposition lit.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une disposition à venir, de 0xA2 à 0xAF ; le détail dit celles lues.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un genre à venir, de 0x17 à 0x7F ; une NOTIFICATION reçue par un serveur, ou un crédit de notifications reçu par un client.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une requête au-delà de chunkBytes, ou une autre enveloppe au-delà de maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Une destination que le relais n’a pas, ou un pair qui ne relaie rien.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La requête n’a pas pu partir vers sa destination : rien n’a été tenté.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Aucune procédure n’est enregistrée pour ce service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le service existe, pas la procédure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un RESULT, une FAILURE ou un CHUNK qu’aucun appel n’attend.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Une NOTIFICATION sous aucun abonnement.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un abonnement sur un chemin sans notification : un relais, une connexion HTTP qui n’écoute pas.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Le justificatif ne tient pas, ou la procédure veut une session que l’appel n’a pas ; envoyé aussi quand une session finit.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>L’admission refuse l’appel, sur son en-tête et sa session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un schéma de justificatif que ce pair ne prend pas ; le détail nomme les siens.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un morceau hors des règles : vide, mal placé, de la mauvaise taille ou au-delà du total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un morceau dépasse le crédit accordé.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le codec de la procédure refuse la charge.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Rien n’est venu pour un transfert pendant 30 s, par défaut.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge se lit, mais enfreint une règle de son message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>La procédure, son admission ou le vérificateur d’un justificatif a échoué.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le relais a perdu sa destination après l’envoi : la procédure a peut-être tourné.</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Nom</th><th scope="col">Étape</th><th scope="col">Sort</th><th scope="col">Quand</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Les octets ne forment pas une enveloppe que cette disposition lit.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une disposition à venir, de 0xA2 à 0xAF ; le détail dit celles lues.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un genre à venir, de 0x17 à 0x7F ; une NOTIFICATION reçue par un serveur, ou un crédit de notifications reçu par un client.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une requête ou un résultat au-delà de chunkBytes, entiers ou une ouverture, ou une autre enveloppe au-delà de maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Une destination que le relais n’a pas, ou un pair qui ne relaie rien.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La requête n’a pas pu partir vers sa destination : rien n’a été tenté.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Aucune procédure n’est enregistrée pour ce service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le service existe, pas la procédure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un RESULT, une FAILURE ou un CHUNK qu’aucun appel n’attend.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Une NOTIFICATION sous aucun abonnement.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un abonnement sur un chemin sans notification : un relais, une connexion HTTP qui n’écoute pas.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Le justificatif ne tient pas, ou la procédure veut une session que l’appel n’a pas ; envoyé aussi quand une session finit.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>L’admission refuse l’appel, sur son en-tête et sa session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un schéma de justificatif que ce pair ne prend pas ; le détail nomme les siens.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un morceau hors des règles : vide, mal placé, de la mauvaise taille ou au-delà du total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un morceau dépasse le crédit accordé.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le codec de la procédure refuse la charge.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Rien n’est venu pour un transfert pendant 30 s, par défaut.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge se lit, mais enfreint une règle de son message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>La procédure, son admission ou le vérificateur d’un justificatif a échoué.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le relais a perdu sa destination après l’envoi : la procédure a peut-être tourné.</td></tr></tbody></table></div>
   <h3 id="echecs-code">Côté code</h3>
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
@@ -4058,7 +4354,7 @@ message CountDownRequest {
     HTTP nomme le schéma d’une authentification : un pair sait ce que sont les octets sans les
     lire.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="schemes">
       <thead>
         <tr>
@@ -4254,7 +4550,7 @@ message CountDownRequest {
       Rien n’annonce les limites : les deux bouts d’une connexion les règlent pareil, sauf celles
       de la dernière ligne, que chaque côté règle pour lui-même.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -4267,12 +4563,12 @@ message CountDownRequest {
           <tr>
             <td><code>maximumEnvelopeBytes</code></td>
             <td class="code-num">16 778 240</td>
-            <td>Toute enveloppe autre qu’une requête</td>
+            <td>Toute enveloppe autre qu’une requête ou un résultat</td>
           </tr>
           <tr>
             <td><code>chunkBytes</code></td>
             <td class="code-num">1 048 576</td>
-            <td>Un morceau, et une requête, entière ou l’ouverture d’un transfert</td>
+            <td>Une requête ou un résultat, entiers ou l’ouverture d’un transfert, et un morceau dans son transfert</td>
           </tr>
           <tr>
             <td><code>windowBytes</code></td>
@@ -4357,7 +4653,7 @@ message CountDownRequest {
     <figcaption>Un appel relayé, puis un refus à l’ouverture</figcaption>
     <div class="figure-scroll" tabindex="0"><svg id="d-relay-fr" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 927 760" role="graphics-document document" aria-roledescription="sequence" width="927" height="760" style="--w:927px"><g><line id="actor39" x1="752" y1="65" x2="752" y2="2000" class="actor-line 200" stroke-width="0.5px" name="A" data-et="life-line" data-id="A" style="stroke:var(--diagram-edge)"></line><g id="root-39" data-et="participant" data-type="participant" data-id="A"><rect x="677" y="0" width="150" height="65" name="A" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="752" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="752" dy="0">Destination 7</tspan></text></g></g><g><line id="actor38" x1="407" y1="65" x2="407" y2="2000" class="actor-line 200" stroke-width="0.5px" name="R" data-et="life-line" data-id="R" style="stroke:var(--diagram-edge)"></line><g id="root-38" data-et="participant" data-type="participant" data-id="R"><rect x="327.5" y="0" width="159" height="65" name="R" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="407" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="407" dy="0">Passerelle, le relais</tspan></text></g></g><g><line id="actor37" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-37" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-relay-fr{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-relay-fr .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-relay-fr .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-relay-fr .error-icon{fill:var(--diagram-surface);}#d-relay-fr .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-relay-fr .edge-thickness-normal{stroke-width:1px;}#d-relay-fr .edge-thickness-thick{stroke-width:3.5px;}#d-relay-fr .edge-pattern-solid{stroke-dasharray:0;}#d-relay-fr .edge-thickness-invisible{stroke-width:0;fill:none;}#d-relay-fr .edge-pattern-dashed{stroke-dasharray:3;}#d-relay-fr .edge-pattern-dotted{stroke-dasharray:2;}#d-relay-fr .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-fr .marker.cross{stroke:var(--diagram-edge);}#d-relay-fr svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-relay-fr p{margin:0;}#d-relay-fr .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-relay-fr text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .actor-line{stroke:var(--diagram-edge);}#d-relay-fr .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-relay-fr .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-relay-fr .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-relay-fr [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-fr .sequenceNumber{fill:var(--diagram-surface);}#d-relay-fr [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-relay-fr [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-relay-fr .messageText{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-relay-fr .labelText,#d-relay-fr .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .loopText,#d-relay-fr .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .sectionTitle,#d-relay-fr .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-relay-fr .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-relay-fr .noteText,#d-relay-fr .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-relay-fr .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-fr .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-fr .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-relay-fr .actorPopupMenu{position:absolute;}#d-relay-fr .actor-man circle,#d-relay-fr line{fill:var(--diagram-actor);stroke-width:2px;}#d-relay-fr .node .neo-node{stroke:var(--diagram-node-line);}#d-relay-fr [data-look="neo"].swimlane.cluster rect{filter:none;}#d-relay-fr [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-relay-fr [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-relay-fr :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-relay-fr-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-relay-fr-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-relay-fr-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-relay-fr-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-relay-fr-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-relay-fr-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-relay-fr-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-relay-fr-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-relay-fr-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-relay-fr-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-relay-fr-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i1"><rect x="312" y="148" width="190" height="104" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="407" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">admis par son schéma,</tspan></text><text x="407" y="174" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">7 inscrite, son audience</tspan></text><text x="407" y="195" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">nommée par aud,</tspan></text><text x="407" y="216" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="407">sous les deux limites</tspan></text></g><g data-et="note" data-id="i3"><rect x="677" y="335" width="150" height="83" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="752" y="340" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="752">vérifie le JWT :</tspan></text><text x="752" y="361" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="752">l'appel tourne</tspan></text><text x="752" y="382" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="752">dans sa session</tspan></text></g><g data-et="note" data-id="i8"><rect x="50" y="678" width="727" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="414" y="683" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="414">8 vérifie une autre audience :</tspan></text><text x="414" y="704" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="414">refusée à l'ouverture, rien ne part vers la destination</tspan></text></g><text x="240" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 3 · DESTINATION 7</text><text x="240" y="101" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT</text><line x1="76" y1="138" x2="403" y2="138" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="fill: none;"></line><text x="578" y="267" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 1 · la jambe B</text><text x="578" y="288" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT : les mêmes octets</text><line x1="408" y1="325" x2="748" y2="325" class="messageLine0" data-et="message" data-id="i2" data-from="R" data-to="A" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="fill: none;"></line><text x="581" y="433" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">RESULT · callId 1</text><line x1="751" y1="470" x2="411" y2="470" class="messageLine1" data-et="message" data-id="i4" data-from="A" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="243" y="485" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">RESULT · callId 3</text><line x1="406" y1="522" x2="79" y2="522" class="messageLine1" data-et="message" data-id="i5" data-from="R" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="240" y="537" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">REQUEST · callId 5 · DESTINATION 8</text><text x="240" y="558" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">CREDENTIAL JWT</text><line x1="76" y1="595" x2="403" y2="595" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="R" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="fill: none;"></line><text x="243" y="610" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">FAILURE · callId 5</text><text x="243" y="631" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">DESTINATION_UNREACHABLE</text><line x1="406" y1="668" x2="79" y2="668" class="messageLine1" data-et="message" data-id="i7" data-from="R" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-relay-fr-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
   </figure>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -4692,7 +4988,7 @@ offerHello(server);
     détail de l’échec. Le statut dépend de là où le code est né : ce que l’appelant peut réparer
     donne un 4xx, ce qui se passe entre la passerelle et son serveur un 5xx.
   </p>
-  <div class="table-wrap"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE, une lecture refusée ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE, une lecture refusée ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
   <p class="space">
     Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
     <code>pointer</code> dans le corps, ou <code>parameter</code> pour une variable du chemin ou de
@@ -4793,7 +5089,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     déploiement pose. De lui-même, Bead refuse seulement d’envoyer un justificatif porteur en clair
     hors de la machine.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -5020,7 +5316,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       borne donc ce qu’un pair tient de lui, sur le modèle de HTTP/2 et de Kestrel, et chaque borne
       se règle.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -5201,7 +5497,7 @@ FailureError {
     <code>debug</code> : <code>*</code> pour toute suite de caractères, <code>-</code> pour écarter
     un nom. Il y ajoute trois sélecteurs.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -5347,7 +5643,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     sa passerelle et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une
     ligne de la matrice de support, à venir.
   </p>
-  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     Côté Rust, vient ensuite la liaison sur AMQP 1.0, par une décision à elle. Ses transports
     WebSocket, HTTP et MQTT 5 et sa passerelle rencontrent les deux autres côtés dans l’interop,
@@ -5400,13 +5696,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
     <ul>
-      <li><strong>Les unités</strong> : 409 pour la spécification,
+      <li><strong>Les unités</strong> : 410 pour la spécification,
         184 pour le débogage et 194 pour le
         transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
-      <li><strong>Les vecteurs</strong> : 463, en 17
+      <li><strong>Les vecteurs</strong> : 472, en 17
         groupes, les octets de chaque en-tête et ce qu’un lecteur refuse, les verdicts d’un JWT et
         les parcelles d’un courtier.</li>
-      <li><strong>Les conversations</strong> : 190 échanges entre des clients
+      <li><strong>Les conversations</strong> : 207 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
       <li><strong>Les cas des transports</strong> : 269 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>
@@ -5661,8 +5957,8 @@ disallowed-types = [
     </template>
     <script type="application/json" id="heads">{"en":{"title":"Bead: a binary protocol for calls between a client and a server","description":"Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding."},"fr":{"title":"Bead : un protocole binaire pour les appels entre un client et un serveur","description":"Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP et sa liaison MQTT 5."}}</script>
     <script>
-// At the end of the body: the language swapped in, its head, the table of contents, the menu, the
-// theme's toggle, and a folded block opened when a link lands in it.
+// At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
+// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
 (() => {
   // each language's title and description, which the build writes beside this script
   const HEADS = JSON.parse(document.getElementById('heads').textContent);
@@ -5776,7 +6072,7 @@ disallowed-types = [
     { passive: true }
   );
 
-  // ── Menu and theme ──────────────────────────────────────────────────────────
+  // ── Menu ────────────────────────────────────────────────────────────────────
 
   const menu = (open) => {
     const button = page.querySelector('[data-action="menu"]');
@@ -5785,18 +6081,8 @@ disallowed-types = [
     button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
-  const themeLabel = () => {
-    const button = page.querySelector('[data-action="theme"]');
-    const isDark = root.getAttribute('data-color-scheme') === 'dark';
-    button.setAttribute(
-      'aria-label',
-      button.getAttribute(isDark ? 'data-to-light' : 'data-to-dark')
-    );
-  };
-
   const settle = () => {
     menu(false);
-    themeLabel();
     mark();
   };
 
@@ -5808,15 +6094,6 @@ disallowed-types = [
       const action = control.getAttribute('data-action');
       if (action === 'menu') {
         menu(!root.hasAttribute('data-menu-open'));
-      } else if (action === 'theme') {
-        const dark = root.getAttribute('data-color-scheme') !== 'dark';
-        root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
-        try {
-          window.localStorage.setItem('theme-preference', JSON.stringify(dark));
-        } catch {
-          // a refused storage keeps the choice for this page alone
-        }
-        themeLabel();
       } else if (action === 'language') {
         event.preventDefault();
         const next = shown() === 'en' ? 'fr' : 'en';

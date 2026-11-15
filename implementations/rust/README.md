@@ -113,7 +113,9 @@ it beside the core's `gateway`.
 
 Each of `websocket`, `http`, `mqtt` and `gateway` brings TLS on rustls over aws-lc-rs, a client
 verifying by the platform's own verifier, and `bead::rustls`, the rustls it builds, for an
-application's `ServerConfig` or `ClientConfig`. What judges a request, a head, a target, a host, an
+application's `ServerConfig`, or a client's `tls` or its `client_config`. A client's `tls`, a
+`TlsOptions`, names in PEM the authorities it trusts in place of the platform's roots and the
+certificate it presents with its key (spec 15.39); an MQTT 5 adapter takes it alone. What judges a request, a head, a target, a host, an
 origin and a WebSocket's handshake, is always built, as is the HTTP policy, so the fuzz targets
 reach it with no feature.
 
@@ -164,7 +166,7 @@ round of its own, ahead.
 `<Service>HttpClient` over it: `say_hello(&request, &options)` on a procedure's default route, and
 `subscribe_count_down(&request, &options)`, a `Stream` of its result, then each notification, then
 the failure that ends it, never reconnecting. It follows no redirect and keeps no cookie, and sends
-no credential in the clear.
+no credential in the clear. Its TLS is its `client_config`, an application's own rustls config.
 
 ## Listening and proxies
 

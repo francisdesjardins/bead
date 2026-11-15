@@ -76,10 +76,18 @@ const FILES = Object.freeze({
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
   '/over-mqtt.js': { path: new URL('./over-mqtt.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
-  // penumbra's two sheets, the DevTools panel's copy, and Bead's overrides of them, under the
-  // page's skin
+  // penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them, Bead's skin and
+  // Bead's top bar, under the page's own styles
+  '/penumbra/chrome.css': {
+    path: new URL('../../devtools/penumbra/chrome.css', import.meta.url),
+    type: 'text/css',
+  },
   '/penumbra/tokens.skin.base.css': {
     path: new URL('../../devtools/penumbra/tokens.skin.base.css', import.meta.url),
+    type: 'text/css',
+  },
+  '/penumbra/tokens.skin.css': {
+    path: new URL('../../devtools/penumbra/tokens.skin.css', import.meta.url),
     type: 'text/css',
   },
   '/penumbra/tokens.system.css': {
@@ -89,6 +97,24 @@ const FILES = Object.freeze({
   '/penumbra/tokens.system.overrides.css': {
     path: new URL('../../devtools/penumbra/tokens.system.overrides.css', import.meta.url),
     type: 'text/css',
+  },
+  // the theme as the page keeps it, before the first paint
+  '/penumbra/theme.js': {
+    path: new URL('../../devtools/penumbra/theme.js', import.meta.url),
+    type: 'text/javascript',
+  },
+  // the page's faces, where beadproto.dev serves them
+  '/fonts/geist.woff2': {
+    path: new URL('../../../../site/src/fonts/geist.woff2', import.meta.url),
+    type: 'font/woff2',
+  },
+  '/fonts/geist-mono.woff2': {
+    path: new URL('../../../../site/src/fonts/geist-mono.woff2', import.meta.url),
+    type: 'font/woff2',
+  },
+  '/fonts/newsreader.woff2': {
+    path: new URL('../../../../site/src/fonts/newsreader.woff2', import.meta.url),
+    type: 'font/woff2',
   },
 });
 
@@ -122,10 +148,15 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
     return (reply.end(), undefined);
   }
 
-  const content = await readFile(file.path, 'utf8');
+  const content = await readFile(file.path);
 
+  // ! the page alone is filled in: a face is bytes, which a reading as text would break
   reply.writeHead(200, { 'content-type': file.type });
-  reply.end(content.replaceAll('%BEAD_PATHNAME%', BEAD_PATHNAME));
+  reply.end(
+    pathname === '/'
+      ? content.toString('utf8').replaceAll('%BEAD_PATHNAME%', BEAD_PATHNAME)
+      : content
+  );
 };
 
 // definition

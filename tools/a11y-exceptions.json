@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "text-spacing",
+    "selector": "#calls td.outcome",
+    "reason": "The Calls list's outcome column ends a long outcome in an ellipsis at any spacing, by design, to keep one call a row at the panel's density; the whole outcome is the call's detail, its Overview and its Payload, a click or Enter on the row away."
+  }
+]

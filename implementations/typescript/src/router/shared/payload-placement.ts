@@ -33,6 +33,13 @@ export interface IPayloadPlacement {
   chunkEnvelopeOf: (callId: CallId, chunk: IChunk) => OutgoingEnvelope;
   /** The bytes of a payload a chunk carries. */
   readonly payloadBytesPerChunk: number;
+  /**
+   * The bytes of its payload an opening of `header` carries, as its sender places them: the largest
+   * envelope a payload goes whole in, less the opening's header — and a result's less an
+   * announcement's 20 bytes too, its header counted without the one it may carry, which goes on as
+   * the answer goes out (spec 12.3).
+   */
+  openingBytesOf: (header: (IRequestHeader | IResultHeader) & { total: number }) => number;
   /** The bytes a payload of `procedure` holds at most: its own limit, within the router's. */
   payloadLimitOf: (procedure: Pick<IProcedure, 'maximumPayloadBytes'> | undefined) => number;
   /** The failure of a payload of `length` bytes, past `limit`. */
@@ -103,6 +110,17 @@ export const createPayloadPlacement = (
     };
   };
 
+  // the bytes of its payload an opening of `header` carries, a result's counted with an
+  // announcement in place of any it carries; the sender places by it, and the receiver holds an
+  // opening to it, so the two never drift
+  const openingBytesOf = (header: (IRequestHeader | IResultHeader) & { total: number }): number => {
+    return header.kind === EnvelopeKind.RESULT
+      ? wholeBytes -
+          unboundedHeaderBytesOf({ ...header, credential: undefined }) -
+          ANNOUNCEMENT_BYTES
+      : wholeBytes - unboundedHeaderBytesOf(header);
+  };
+
   // how a payload goes after `header`: whole — `undefined` — or as a transfer, a result's header
   // counted with the announcement it may carry; or not at all, and the failure says why
   const transferOf = (
@@ -129,8 +147,9 @@ export const createPayloadPlacement = (
       };
     }
 
-    const openingHeaderBytes = unboundedHeaderBytesOf({ ...header, total: payload.length });
-    const openingBytes = wholeBytes - openingHeaderBytes - announcementBytes;
+    const openingHeader = { ...header, total: payload.length };
+    const openingHeaderBytes = unboundedHeaderBytesOf(openingHeader);
+    const openingBytes = openingBytesOf(openingHeader);
 
     // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
     // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
@@ -158,6 +177,7 @@ export const createPayloadPlacement = (
 
   return {
     chunkEnvelopeOf,
+    openingBytesOf,
     payloadBytesPerChunk,
     payloadLimitOf,
     tooLargeOf,

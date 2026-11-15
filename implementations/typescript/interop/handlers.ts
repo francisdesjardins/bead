@@ -193,7 +193,8 @@ const INTEROP_PROCEDURES = Object.freeze({
 
 /**
  * The interop service, served on `server`, its resolvers registered and offered there. The calls to
- * `slow` each connection cancelled are counted per connection, for `cancellations` to answer; a
+ * `slow` each connection cancelled are counted per connection, for `cancellations` to answer, but
+ * those of a `slow` deaf to its signal, `heeds: false`, or answered first, `answersFirst: true`; a
  * connection's session holds the name its `login` gave, whatever its call presents, and `whoami`
  * answers the name its call's session holds, a credential's `sub`; `ticks` and `tick` hold per
  * connection and per session, its connection's or a credential's; the destinations it registered
@@ -247,31 +248,54 @@ export const offerInterop = (
   });
 
   // cancelled first, it answers all the same, an answer its router must not send; it waits on its
-  // server's clock, which its router runs on
+  // server's clock, which its router runs on. Deaf, `heeds: false`, it waits on its timer alone and
+  // counts no cancellation; `answersFirst`, it answers at once, then waits before it settles, its
+  // resolver outliving its call (spec 9.2, step 3); any other member is ignored
   interop.on('slow', async (request, response) => {
-    const { milliseconds } = request.payload as { milliseconds: number };
+    const { answersFirst, heeds, milliseconds } = request.payload as {
+      answersFirst?: unknown;
+      heeds?: unknown;
+      milliseconds: number;
+    };
     const { clock: serverClock } = router;
+    const isHeeding = heeds !== false;
+    const isAnsweringFirst = answersFirst === true;
+
+    if (isAnsweringFirst) {
+      await response(milliseconds);
+    }
 
     await new Promise((resolve) => {
       const timer = serverClock.setTimeout(() => {
         resolve(undefined);
       }, milliseconds);
 
+      if (!isHeeding) {
+        return;
+      }
+
       request.signal.addEventListener(
         'abort',
         () => {
           serverClock.clearTimeout(timer);
-          cancellations.set(
-            request.connectionHandle,
-            (cancellations.get(request.connectionHandle) ?? 0) + 1
-          );
+
+          // answered first, its call ended before: nothing was cancelled
+          if (!isAnsweringFirst) {
+            cancellations.set(
+              request.connectionHandle,
+              (cancellations.get(request.connectionHandle) ?? 0) + 1
+            );
+          }
+
           resolve(undefined);
         },
         { once: true }
       );
     });
 
-    return response(milliseconds);
+    if (!isAnsweringFirst) {
+      await response(milliseconds);
+    }
   });
 
   interop.on('cancellations', (request, response) => {

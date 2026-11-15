@@ -17,6 +17,9 @@ public sealed class WebSocketClientTests : IAsyncLifetime
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // a procedure of no service the interop server offers, which a test resolves itself
+    private static readonly Procedure Held = new() { ServiceId = 2, ProcedureId = 1, ProcedureName = "held", ServiceRevision = 1 };
+
     private readonly WebSocketTransportServer _transport = new();
     private readonly Server<string> _server;
     private WebSocketClient _client = new();
@@ -158,27 +161,36 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     public async Task Cancels_a_call_at_the_server_when_its_token_is_cancelled()
     {
         using var source = new CancellationTokenSource();
-        var sent = RequestSent();
-        var slow = RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token });
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var text = new TextSerializer();
 
-        // ! cancelled once the request went out: a token cancelled before cancels nothing at the server
-        await sent;
+        // a resolver of its own, which says it started and settles once its call is cancelled
+        _server.Services.GetRequestResolver(Held, new RequestResolverDependencies<string, string> { Serializer = text })((request, _) =>
+        {
+            var stopped = new TaskCompletionSource();
+
+            request.Signal.Register(() =>
+            {
+                cancelled.TrySetResult();
+                stopped.TrySetResult();
+            });
+            entered.TrySetResult();
+
+            return stopped.Task;
+        });
+
+        var held = _client.Services.GetRequest(Held, new RequestDependencies<string, string> { Serializer = text })("held")(new RequestOptions { CancellationToken = source.Token });
+
+        // ! cancelled once its resolver started, as the TypeScript twin waits: a cancel that comes
+        // before its turn starts none, and cancels nothing it would hear
+        await entered.Task.WaitAsync(Patience, Cancelled);
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return slow.WaitAsync(Patience, Cancelled);
+            return held.WaitAsync(Patience, Cancelled);
         });
-
-        // the server counts it once its resolver heard the cancel, which comes after the cancel itself
-        var counted = 0;
-
-        for (var tries = 0; tries < 200 && counted != 1; tries += 1)
-        {
-            counted = (await RequesterOf("cancellations")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetInt32();
-            await Task.Delay(50, Cancelled);
-        }
-
-        Assert.Equal(1, counted);
+        await cancelled.Task.WaitAsync(Patience, Cancelled);
     }
 
     [Fact]
@@ -400,7 +412,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         Assert.Equal("a payload is 8 bytes at most, not 13", refused.Detail);
     }
 
-    private sealed class TextSerializer : IRequestSerializerClient<string, string>
+    private sealed class TextSerializer : IRequestSerializerClient<string, string>, IRequestSerializerServer<string, string>
     {
         public ReadOnlyMemory<byte> Encode(string request)
         {

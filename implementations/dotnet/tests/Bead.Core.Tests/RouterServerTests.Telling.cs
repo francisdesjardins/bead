@@ -139,6 +139,9 @@ public sealed partial class RouterServerTests
             return new TaskCompletionSource().Task;
         }));
         Deliver(First, RequestOf(5));
+
+        // its resolver handed it in a later turn, before its cancel comes
+        await Settle();
         Deliver(First, CancelOf(5));
         await Settle();
         _transport.Sent.Clear();

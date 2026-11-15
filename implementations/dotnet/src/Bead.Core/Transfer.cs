@@ -212,13 +212,12 @@ internal sealed class IncomingTransfer
 
     /// <summary>
     /// The end of a credit to grant now, and granted: a window past the bytes received, once its
-    /// sender has used half of the last — or the rest, when less is left — and no more than
-    /// <paramref name="available"/> bytes past the last end granted. None when there is none to grant.
+    /// sender has used half of the last — or the rest, when less is left. None when there is none to
+    /// grant.
     /// </summary>
-    public long? CreditToGrant(long available)
+    public long? CreditToGrant()
     {
-        var reach = Math.Min(Total, Contiguous + _limits.WindowBytes);
-        var next = _creditEnd + Math.Min(reach - _creditEnd, available);
+        var next = Math.Min(Total, Contiguous + _limits.WindowBytes);
 
         // a credit waits until half a window can go at once — or the rest of the payload, when less;
         // doubled, so an odd window halves as exactly as it does in JavaScript

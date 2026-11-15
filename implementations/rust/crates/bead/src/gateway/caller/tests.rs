@@ -1008,3 +1008,64 @@ fn frames_events_across_chunks_by_any_line_end_and_refuses_a_line_of_no_utf_8() 
         "an end with no failure"
     );
 }
+
+// ── Its TLS ──────────────────────────────────────────────────────────────────────────────────
+
+// the service's gateway on its own listener, in the clear, and the port it listens on
+async fn gateway_in_the_clear(service: &Service) -> (Server, ServiceServer, HttpGateway, u16) {
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .expect("the in-memory transport");
+    let server =
+        Server::new(Arc::new(memory.clone()), &ServerOptions::default()).expect("the server");
+    let offered = offered_on(service, &server);
+
+    memory.start().await.expect("started");
+
+    let gateway =
+        HttpGateway::new(&HttpGatewayOptions::new(memory, service.routes())).expect("the gateway");
+    let start = HttpGatewayStartOptions {
+        address: Some(HOST.to_owned()),
+        port: Some(0),
+        find_open_port: Some(true),
+        ..HttpGatewayStartOptions::default()
+    };
+    let port = gateway.start(&start).await.expect("listening").port;
+
+    (server, offered, gateway, port)
+}
+
+#[tokio::test]
+async fn calls_its_gateway_over_the_client_config_it_is_given() {
+    use crate::net::tls::{client_config_of, read_tls};
+    use crate::testing::tls::{PkiServerOptions, TlsFront, pki_client};
+
+    let service = Service::new();
+    let (server, _offered, gateway, port) = gateway_in_the_clear(&service).await;
+    let front = TlsFront::to(port, &PkiServerOptions::default())
+        .await
+        .expect("the front");
+    // * the application's own config: the PKI's root its authority, its client's certificate
+    // presented
+    let read = read_tls(&pki_client().expect("the PKI's client")).expect("read");
+    let caller = caller_of(
+        &format!("https://127.0.0.1:{}", front.port()),
+        &HttpCallerOptions {
+            client_config: Some(Arc::new(client_config_of(&read).expect("a config"))),
+            ..HttpCallerOptions::default()
+        },
+    );
+    let echo = caller
+        .requester_of(&service.routes()[0], &service.echo)
+        .expect("echo's requester");
+
+    assert_eq!(
+        settled(echo.call(&"hi".to_owned(), &HttpCallOptions::default()))
+            .await
+            .expect("echo's result"),
+        "hi!",
+        "called over the TLS of its config"
+    );
+    front.dispose();
+    gateway.dispose().await.expect("the gateway disposed");
+    server.dispose().await.expect("the server disposed");
+}

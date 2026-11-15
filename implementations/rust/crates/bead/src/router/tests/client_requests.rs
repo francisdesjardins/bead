@@ -236,18 +236,30 @@ async fn reserved_timeout() {
     assert_eq!(scripted.codes(), ["CALL_UNKNOWN"]);
 }
 
+// chunks of 64 bytes: a result's opening carries 28, and a chunk 48
+fn small_chunks() -> Scripted {
+    Scripted::with(&RouterClientOptions {
+        limits: Some(RouterLimitsOptions {
+            chunk_bytes: Some(64),
+            window_bytes: Some(128),
+            ..RouterLimitsOptions::default()
+        }),
+        ..RouterClientOptions::default()
+    })
+}
+
 #[tokio::test]
 async fn learns_the_session_from_a_results_opening_before_the_rest_of_its_transfer_comes() {
-    let scripted = Scripted::new();
+    let scripted = small_chunks();
     let mut asking = Box::pin(request(&scripted, &[]));
     scripted.settle().await;
     scripted.transport.deliver(&Envelope::Result {
         header: ResultHeader {
             call_id: 1,
-            total: Some(100),
+            total: Some(76),
             credential: Some(Credential::Opaque(token())),
         },
-        payload: Bytes::from(vec![0; 16]),
+        payload: Bytes::from(vec![0; 28]),
     });
     scripted.settle().await;
     assert_eq!(scripted.router.session_token(), Some(token()));
@@ -261,17 +273,105 @@ async fn learns_the_session_from_a_results_opening_before_the_rest_of_its_transf
     scripted.transport.deliver(&Envelope::Chunk {
         header: ChunkHeader {
             call_id: 1,
-            offset: 16,
+            offset: 28,
             is_last: true,
         },
-        payload: Bytes::from(vec![0; 84]),
+        payload: Bytes::from(vec![0; 48]),
     });
     let result = crate::testing::patience(super::PATIENCE, asking)
         .await
         .expect("the transfer settles")
         .expect("the result");
-    assert_eq!(result.payload.as_ref(), [0; 100]);
+    assert_eq!(result.payload.as_ref(), [0; 76]);
     assert_eq!(scripted.codes(), Vec::<String>::new());
+}
+
+// spec 12.3
+#[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
+async fn take_a_result_s_opening_that_carries_an_announcement_opaque_or_none_counted_as_its_sender_placed_it()
+ {
+    let scripted = small_chunks();
+    let payload: Bytes = (0..76_u8).collect();
+    // its sender places 28 bytes in it, and attaches what it announces as it goes: an OPAQUE fills
+    // its 64 bytes, a NONE falls short by 16, and none by 20
+    for (call_id, credential) in [
+        (1, Some(Credential::Opaque(token()))),
+        (3, Some(Credential::None)),
+        (5, None),
+    ] {
+        let asking = request(&scripted, &[]);
+        scripted.settle().await;
+        scripted.transport.deliver(&Envelope::Result {
+            header: ResultHeader {
+                call_id,
+                total: Some(76),
+                credential,
+            },
+            payload: payload.slice(..28),
+        });
+        scripted.transport.deliver(&Envelope::Chunk {
+            header: ChunkHeader {
+                call_id,
+                offset: 28,
+                is_last: true,
+            },
+            payload: payload.slice(28..),
+        });
+        let result = crate::testing::patience(super::PATIENCE, asking)
+            .await
+            .expect("the transfer settles")
+            .expect("the result");
+        assert_eq!(result.payload, payload, "call {call_id}");
+    }
+    // one that fills its envelope without an announcement carries 20 bytes more than its sender
+    // places
+    let filled = request(&scripted, &[]);
+    scripted.settle().await;
+    scripted.transport.deliver(&Envelope::Result {
+        header: ResultHeader {
+            call_id: 7,
+            total: Some(76),
+            credential: None,
+        },
+        payload: payload.slice(..48),
+    });
+    let CallError::Failure(failure) = crate::testing::patience(super::PATIENCE, filled)
+        .await
+        .expect("the call settles")
+        .expect_err("refused")
+    else {
+        panic!("a failure expected")
+    };
+    assert_eq!(
+        (
+            failure.code(),
+            failure.detail(),
+            failure.origin(),
+            matches!(
+                failure.header(),
+                Some(crate::envelope::EnvelopeHeader::Result(_))
+            )
+        ),
+        (
+            ProtocolCode::CHUNK_INVALID.get(),
+            "an opening carries 28 bytes of its payload, not 48",
+            FailureOrigin::Local,
+            true
+        )
+    );
+    scripted.settle().await;
+    let credited: Vec<u32> = scripted
+        .transport
+        .calls()
+        .into_iter()
+        .filter(|(kind, _)| *kind == EnvelopeKind::Credit)
+        .map(|(_, call_id)| call_id)
+        .collect();
+    assert_eq!(credited, [1, 3, 5]);
 }
 
 async fn request_destinations() {

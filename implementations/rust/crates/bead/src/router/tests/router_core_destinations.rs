@@ -108,6 +108,8 @@ async fn takes_a_request_for_a_destination_to_the_handler_its_port_gives_and_ans
                 session: Mutex::new(None),
                 answered: Mutex::new(None),
                 origin: (None, None),
+                run: crate::router::parts::ResolverRun::default(),
+                is_failed_answered: std::sync::atomic::AtomicBool::new(false),
             });
             router_core::respond(
                 state,

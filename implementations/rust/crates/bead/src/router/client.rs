@@ -538,6 +538,17 @@ impl Side for ClientState {
         self.report_error(&error);
     }
 
+    // ! the application's transport, asked within the turn: what it panics is reported (spec 15.1)
+    fn close(&mut self, _connection_handle: &ConnectionHandle) {
+        let Some(transport) = self.transport.upgrade() else {
+            return;
+        };
+
+        if let Err(panicked) = caught(("a transport", || transport.disconnect())) {
+            self.report_error(&panicked.into());
+        }
+    }
+
     // ! the application's transport, called within the turn: what it panics is its throw, the
     // transport's error, as the other sides' writers take a send that throws (spec 15.1)
     fn transmit(

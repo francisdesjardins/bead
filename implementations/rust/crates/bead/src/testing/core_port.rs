@@ -77,6 +77,7 @@ pub(crate) struct State {
     pub(crate) two_way: bool,
     pub(crate) one_way: Vec<ConnectionHandle>,
     pub(crate) two_way_asked: Mutex<Vec<ConnectionHandle>>,
+    pub(crate) closed: Vec<ConnectionHandle>,
 }
 
 impl core::fmt::Debug for State {
@@ -208,6 +209,11 @@ impl Side for State {
 
     fn report(&mut self, error: RouterError, handle: &ConnectionHandle) {
         self.reports.push((Arc::clone(handle), error));
+    }
+
+    // kept, as a test reads it
+    fn close(&mut self, handle: &ConnectionHandle) {
+        self.closed.push(Arc::clone(handle));
     }
 
     fn transmit(
@@ -349,6 +355,7 @@ impl Peer {
             two_way: true,
             one_way: Vec::new(),
             two_way_asked: Mutex::new(Vec::new()),
+            closed: Vec::new(),
         });
         Ok(Self {
             clock,
@@ -393,6 +400,8 @@ impl Peer {
                 session: Mutex::new(None),
                 answered: Mutex::new(None),
                 origin: (None, None),
+                run: crate::router::parts::ResolverRun::default(),
+                is_failed_answered: std::sync::atomic::AtomicBool::new(false),
             });
             // * opened as a request dispatched opens it: a call abandoned on its call id forgotten
             state.core.answering.open(
@@ -400,6 +409,7 @@ impl Peer {
                 Answering {
                     dispatched: id,
                     signal: Signal::new(),
+                    run: crate::router::parts::ResolverRun::default(),
                     is_answered: false,
                     is_ended: false,
                     receiving: None,

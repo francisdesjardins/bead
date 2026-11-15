@@ -21,7 +21,7 @@ namespace Bead.Protobuf;
 /// TypeScript side's twin is the walk of <c>protoCodecOf</c>, of
 /// <c>@francisdesjardins/bead/proto</c>.
 /// </summary>
-public static class ProtoRequired
+internal static class ProtoRequired
 {
     // a map's keys in spec 18.5's order: integers ascending, false before true, strings by code points
     private static readonly Comparer<object> ByKey = Comparer<object>.Create((one, other) =>
@@ -45,7 +45,7 @@ public static class ProtoRequired
     /// <c>nested past 100</c>, the walk going no deeper.
     /// </summary>
     /// <exception cref="FormatException">The message leaves a field of <c>LEGACY_REQUIRED</c> presence unset, or nests past the bound.</exception>
-    public static void Check(IMessage message)
+    internal static void Check(IMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
 

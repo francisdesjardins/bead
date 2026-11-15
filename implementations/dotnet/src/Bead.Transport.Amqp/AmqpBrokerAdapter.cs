@@ -37,6 +37,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     private readonly AmqpBrokerAdapterOptions _options;
     private readonly bool _isSecure;
+    // what its TLS holds, its key among it, read once and let go of at its dispose
+    private readonly TlsCredentials? _tls;
     private readonly Lock _gate = new();
     private Incarnation? _link;
 
@@ -75,10 +77,14 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException($"an AMQP 1.0 broker is reached by amqp or amqps, not {options.Uri.Scheme}", nameof(options));
         }
 
-        if (options.Tls?.ClientCertificates is not null && options.Uri.Scheme != "amqps")
+        // * its URL and its TLS are one record: a TLS given over a URL that is not TLS is refused
+        // (spec 15.39)
+        if (Tls.IsGiven(options.Tls) && options.Uri.Scheme != "amqps")
         {
-            throw new ArgumentException("a TLS client certificate is carried over amqps, never in the clear", nameof(options));
+            throw new ArgumentException($"a TLS client certificate is carried over amqps, not {options.Uri.OriginalString}", nameof(options));
         }
+
+        var tls = Tls.Assert(options.Tls, nameof(options));
 
         if (options.Id.Length == 0)
         {
@@ -95,7 +101,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(options), string.Create(CultureInfo.InvariantCulture, $"{nameof(AmqpBrokerAdapterOptions.LinkCredit)} is a whole number from 1 to {int.MaxValue}, not {options.LinkCredit}"));
         }
 
-        var hasCertificate = options.Tls?.ClientCertificates is not null;
+        var hasCertificate = tls?.Certificate is not null;
 
         if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), hasCertificate) is { } refusal)
         {
@@ -110,11 +116,13 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         _options = options with
         {
+            Tls = tls,
             // ! never without end: a link that counts nothing lost waits on a dead connection forever
             IdleTimeout = Clocks.AssertHeldWithin((nameof(AmqpBrokerAdapterOptions.IdleTimeout), nameof(AmqpBrokerAdapterOptions.IdleTimeout)), (options.IdleTimeout, LongestIdleTimeout)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(AmqpBrokerAdapterOptions.ConnectTimeout), nameof(AmqpBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme == "amqps", options.Uri.Host));
+        _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
 
     /// <inheritdoc/>
@@ -963,6 +971,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 disposing.SetException(reason);
             }
+            finally
+            {
+                _tls?.Dispose();
+            }
         }
 
         await disposed;
@@ -1147,7 +1159,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var (link, password) = linking;
         var uri = _options.Uri;
         var isTls = uri.Scheme == "amqps";
-        var certificates = _options.Tls?.ClientCertificates;
+        var certificates = _tls?.Certificates;
         var factory = new ConnectionFactory();
 
         factory.AMQP.ContainerId = Id;
@@ -1162,6 +1174,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 return IsTrusted((certificate, errors));
             };
 
+            // ! a collection, which the platform presents as its leaf alone, or none, where it builds
+            // no chain to the authorities its broker names: its intermediates are its store's
+            // (docs/support.md)
             if (certificates is not null)
             {
                 factory.SSL.ClientCertificates.AddRange(certificates);
@@ -1219,7 +1234,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     {
         var (certificate, errors) = presented;
 
-        if (_options.Tls?.TrustChain is not { } trusted)
+        if (_tls?.Authorities is not { } trusted)
         {
             return errors == SslPolicyErrors.None;
         }

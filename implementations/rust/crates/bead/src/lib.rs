@@ -52,6 +52,8 @@ mod violations;
 #[cfg(feature = "websocket")]
 mod websocket;
 
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+pub use net::tls::TlsOptions;
 /// The TLS a socket transport speaks, re-exported so that the config an application gives one is
 /// of the version Bead builds on.
 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]

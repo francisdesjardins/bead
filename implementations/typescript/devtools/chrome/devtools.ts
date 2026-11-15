@@ -9,12 +9,10 @@ import { chromeOf } from './api';
 // constants
 
 /**
- * The panel's tab: Bead's mark, then its name, as React's tabs carry theirs. Chrome draws no image
- * on a panel's tab, so the mark is a character, ⦿, the Moon's disc in the light at its edge, where
- * Baily's beads break through, in the tab's own text colour: no emoji presentation, and drawn by
- * Windows' default fonts.
+ * The panel's tab: its name, then Bead's mark as a character, ⦿, since a panel's tab holds text
+ * alone; no emoji presentation, so it takes the tab's own colour.
  */
-export const PANEL_TITLE = '⦿ Bead';
+export const PANEL_TITLE = 'Bead ⦿';
 
 /** The icon `panels.create` names, the extension's 16 px one, for the browsers that draw it. */
 const PANEL_ICON = 'icons/icon-16.png';

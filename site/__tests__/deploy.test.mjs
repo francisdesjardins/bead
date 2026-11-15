@@ -37,16 +37,18 @@ const gitOf = ({ status = '', remotes = '  origin/develop\n' } = {}) => {
   };
 };
 
-// a demo's static build, its files by their names
+// a demo's static build, its files by their names, and its copy of the faces
 const demoOf = (names) => {
   const folder = mkdtempSync(join(TEMPORARY, 'demo-'));
   for (const name of names) {
     writeFileSync(join(folder, name), name);
   }
+  mkdirSync(join(folder, 'fonts'));
+  writeFileSync(join(folder, 'fonts', 'geist.woff2'), 'a face');
   return folder;
 };
 
-const BUILT = ['index.html', 'page-JNDJCHZM.js', 'worker-67FCRBOE.js'];
+const BUILT = ['index.html', 'page-JNDJCHZM.js', 'theme-JEK7UMQ7.js', 'worker-67FCRBOE.js'];
 
 // ── Refusals ──────────────────────────────────────────────────────────────────
 
@@ -80,8 +82,12 @@ describe('the tree a deploy ships', () => {
 // ── Assembly ──────────────────────────────────────────────────────────────────
 
 describe('the demo’s build', () => {
-  test('is its page and its two scripts', () => {
+  test('is its page and its three scripts', () => {
     assert.deepEqual(demoFilesOf(BUILT), BUILT);
+  });
+
+  test('leaves out its copy of the faces, which the page serves', () => {
+    assert.deepEqual(demoFilesOf([...BUILT, 'fonts']), BUILT);
   });
 
   test('refuses a file the list does not know, a source map among them', () => {

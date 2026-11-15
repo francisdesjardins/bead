@@ -377,8 +377,8 @@ export const FAILURES = Object.freeze([
     4,
     'gate',
     [
-      'A request past chunkBytes, or another envelope past maximumEnvelopeBytes.',
-      'Une requête au-delà de chunkBytes, ou une autre enveloppe au-delà de maximumEnvelopeBytes.',
+      'A request or a result past chunkBytes, whole or an opening, or another envelope past maximumEnvelopeBytes.',
+      'Une requête ou un résultat au-delà de chunkBytes, entiers ou une ouverture, ou une autre enveloppe au-delà de maximumEnvelopeBytes.',
     ],
   ],
   [
@@ -716,7 +716,7 @@ export const PARTS = Object.freeze([
       'What an application does with a side from within a telling, taken in a later turn behind what that turn sends and among what it defers, in one queue of turns per router; a call made before a dispose goes, one made after fails unsent',
       "A request handed to its resolver in a later turn than the one it came in, whether its resolver waits or not, so a later request's refusal in its own turn goes before an answer its resolver gives at once",
       "A connection's reads paused once what its router has not taken reaches `maximumUntakenEnvelopes` or `maximumUntakenBytes`, what its transport received meanwhile held in order, and resumed at half; the envelope that reached the bound taken, the router's own jobs never counted; a broker's participant holding to `maximumHeldEnvelopeBytes`",
-      "The calls a peer has a side answer at once, `maximumAnsweringCalls`: a request past them refused before anything else of it is read, a requester's call past them failed before it goes, and a request that came whole held to `chunkBytes`",
+      "The calls a peer has a side answer at once, `maximumAnsweringCalls`: a request past them refused before anything else of it is read, a requester's call past them failed before it goes, and a request that came whole held to `chunkBytes`, and, with them, the resolvers that outlive their call, twice as many, a connection refused past them in a row closed",
       'Cancel and reservation',
       'Subscriptions and their pacing',
       'Transfers under credit',
@@ -849,6 +849,8 @@ export const PARTS = Object.freeze([
 // and tells of its refusals, its policy, beadc's outputs and each side's public surface
 export const OFF_THE_PAGE = Object.freeze([
   'A `Retry-After` on a refused upgrade or exchange, which a client may wait for',
+  'A client certificate and the authorities trusted over WebSocket (`tls`)',
+  'A client certificate and the authorities trusted over HTTP (`tls`)',
   "A server's tell of each refusal it judges of its own, and a client naming the one it reads",
   "An access a server refuses, told: its stage, its code, its reason, what was called, the connection and the request's address and port, never the credential",
   "A request's field values in visible ASCII, spaces and tabs, none at either end of a value, 400 unmarked or a stream reset otherwise",

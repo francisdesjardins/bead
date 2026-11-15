@@ -71,6 +71,10 @@ impl RouterClientTransport for RecordedClient {
         self.memory.pause();
     }
 
+    fn disconnect(&self) {
+        RouterClientTransport::disconnect(&self.memory);
+    }
+
     fn resume(&self) {
         self.memory.resume();
     }

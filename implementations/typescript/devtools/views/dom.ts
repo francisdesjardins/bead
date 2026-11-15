@@ -264,7 +264,12 @@ export const factsOf = (facts: readonly [string, Node | string | undefined][]): 
 export const statusIconOf = (status: CallStatus): SVGElement => {
   const icon = (children: SVGElement[]): SVGElement => {
     return svgOf('svg', {
-      attributes: { 'aria-label': status, class: 'status', role: 'img', viewBox: '0 0 12 12' },
+      attributes: {
+        'aria-label': STATUS_NAMES[status],
+        class: 'status',
+        role: 'img',
+        viewBox: '0 0 12 12',
+      },
       children: [svgOf('title', { text: STATUS_NAMES[status] }), ...children],
     });
   };
@@ -349,13 +354,13 @@ export const statusIconOf = (status: CallStatus): SVGElement => {
   }
 };
 
-/** Each status, as the panel names it. */
+/** Each status, as the panel names it: its icon's name, and the Timeline's legend. */
 export const STATUS_NAMES: Readonly<Record<CallStatus, string>> = Object.freeze({
   answered: 'answered',
   closed: 'subscription ended',
   ended: 'ended without an answer',
   failed: 'failed',
-  flight: 'in flight',
+  flight: 'waiting',
   heard: 'a notification heard',
-  open: 'subscription open',
+  open: 'open subscription',
 });

@@ -165,15 +165,42 @@ test('draws pulled participant levels, parcel columns, link separators and repor
     'Verdict',
   ]);
   await expect(page.locator('.participant-transition td')).toHaveAttribute('colspan', '10');
+  // labels in sentence case, and the detail's heading at the size of the participant's
+  await expect(page.locator('.participant-controls label')).toHaveText([
+    /^Kind/u,
+    /^Connection/u,
+    /^Verdict/u,
+  ]);
+  const sizes = await page.locator('#broker h2').evaluateAll((headings) => {
+    return headings.map((heading) => {
+      return getComputedStyle(heading).font;
+    });
+  });
+  expect(new Set(sizes).size, sizes.join(' | ')).toBe(1);
   await expect(page.locator('.participant-report')).toContainText('maximumUnsentBytes, 64 bytes');
   await expect(page.locator('pre')).toHaveCount(0);
   await expect(page.locator('tbody tr[title]')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Parcels, newest first' })).toBeVisible();
+  expect(
+    await page.locator('tbody tr').evaluateAll((rows) => {
+      return rows.map((row) => {
+        return row.getAttribute('data-event');
+      });
+    })
+  ).toEqual(['report', 'parcel', 'parcel', 'parcel', 'parcel', 'link']);
   const data = page.locator('tr[data-event="parcel"]').filter({ hasText: 'DATA' });
   await expect(data.nth(0)).toContainText('part 1');
+  await expect(data.nth(0)).not.toContainText('incomplete capture');
+  await expect(data.nth(1)).toContainText('part 2');
   await expect(data.nth(1)).toContainText('incomplete capture');
-  await expect(data.nth(2)).not.toContainText('incomplete capture');
-  await data.first().click();
+  await expect(data.nth(2)).toContainText('part 1');
+  await expect(data.nth(2)).toContainText('incomplete capture');
+  await data.last().click();
   await expect(page.locator('.participant-detail pre')).toContainText('"sequence": 10');
+  // * the parts' column, cut where it runs long, whole in the row's detail
+  await expect(page.locator('.participant-detail .facts dd')).toHaveText(
+    (await data.last().locator('td.parts').textContent()) ?? ''
+  );
   await page.getByLabel('Parcel kind', { exact: true }).selectOption('DATA');
   await expect(page.locator('tr[data-event="parcel"]')).toHaveCount(3);
   await expect(page.locator('.participant-transition')).toHaveCount(1);

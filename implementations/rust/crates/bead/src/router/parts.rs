@@ -2,8 +2,9 @@
 //! the call ids it reserved, the calls it answers and those abandoned, the transfers it sends and
 //! receives, and what its answers announced.
 
+use core::sync::atomic::{AtomicU8, Ordering};
 use core::time::Duration;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -61,6 +62,15 @@ pub(crate) struct Placement {
 // what an answer's announcement adds to its header: a credential's head, then a session's token
 const ANNOUNCEMENT_BYTES: u64 = 20;
 
+// the bytes an announcement may add to `header`: a result's, none to a request's
+fn announcement_of(header: &EnvelopeHeader) -> u64 {
+    if matches!(header, EnvelopeHeader::Result(_)) {
+        ANNOUNCEMENT_BYTES
+    } else {
+        0
+    }
+}
+
 /// How a payload goes: whole, or as a transfer.
 #[derive(Debug)]
 pub(crate) enum Placed {
@@ -99,6 +109,36 @@ impl Placement {
             .saying(format!("a payload is {limit} bytes at most, not {length}"))
     }
 
+    /// The bytes of its payload a transfer's opening carries after `opening`, its header with its
+    /// total: `chunkBytes` less that header, a result's counted with the 20 bytes of an
+    /// announcement in place of any it carries; 0 when none fits. Its sender places that many, and
+    /// its receiver holds it to as many (spec 12.3).
+    pub(crate) fn opening_bytes_of(&self, opening: &EnvelopeHeader) -> u64 {
+        // ! the sender places before any announcement, which goes on as the answer goes out: a
+        // result's header is counted without the credential it may carry, its 20 bytes in its place
+        let counted = match opening {
+            EnvelopeHeader::Result(result) if result.credential.is_some() => {
+                let mut bare = result.clone();
+
+                bare.credential = None;
+                EnvelopeHeader::Result(bare)
+            }
+            EnvelopeHeader::Request(_)
+            | EnvelopeHeader::Result(_)
+            | EnvelopeHeader::Failure(_)
+            | EnvelopeHeader::Notification(_)
+            | EnvelopeHeader::Chunk(_)
+            | EnvelopeHeader::Credit(_)
+            | EnvelopeHeader::Cancel(_) => opening.clone(),
+        };
+        let header_bytes = unbounded_header_bytes_of(&counted).map_or(u64::MAX, count_of);
+
+        self.whole_bytes
+            .checked_sub(header_bytes)
+            .and_then(|left| left.checked_sub(announcement_of(opening)))
+            .unwrap_or(0)
+    }
+
     /// How a payload goes after `header`, a request's or a result's: whole or as a transfer, a
     /// result's header counted with the announcement it may carry; or not at all.
     pub(crate) fn transfer_of(
@@ -107,11 +147,7 @@ impl Placement {
         (header, maximum_payload_bytes): (&EnvelopeHeader, u64),
     ) -> Result<Placed, Failure> {
         let length = length_of(payload);
-        let announcement = if matches!(header, EnvelopeHeader::Result(_)) {
-            ANNOUNCEMENT_BYTES
-        } else {
-            0
-        };
+        let announcement = announcement_of(header);
         let too_large = |detail: String| {
             Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, self.side).saying(detail)
         };
@@ -139,11 +175,7 @@ impl Placement {
         let opening_header = with_total(header, length);
         let opening_header_bytes =
             unbounded_header_bytes_of(&opening_header).map_or(u64::MAX, count_of);
-        let opening_bytes = self
-            .whole_bytes
-            .checked_sub(opening_header_bytes)
-            .and_then(|left| left.checked_sub(announcement))
-            .unwrap_or(0);
+        let opening_bytes = self.opening_bytes_of(&opening_header);
 
         // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
         // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
@@ -343,27 +375,70 @@ impl SendingTransfers {
 
 // ── Receiving transfers ────────────────────────────────────────────────────────────────────
 
+/// How long an opening waits for the budget: half the transfer's inactivity, in whole milliseconds
+/// rounded down (spec 12.4).
+pub(crate) fn budget_wait_of(limits: &RouterLimits) -> Duration {
+    let half = limits.transfer_inactivity_timeout.as_millis() / 2;
+
+    Duration::from_millis(u64::try_from(half).unwrap_or(u64::MAX))
+}
+
 /// A transfer this side receives: its id, the call it belongs to, its bytes as they come.
 #[derive(Debug)]
 pub(crate) struct Receiving {
     pub(crate) call: CallAddress,
     pub(crate) incoming: IncomingTransfer,
     pub(crate) is_complete: bool,
-    // the bytes of the budget it holds: its opening's, then each credit's
+    // admitted to the budget, or waiting for it in the order it opened
+    admitted: bool,
+    total: u64,
+    // the bytes of its payload received and held: its opening's, then each chunk's placed
+    received: u64,
+    // the bytes of the budget it reserves: its total, once admitted
     reserved: u64,
     pub(crate) timer: HeldTimer,
 }
 
-/// The transfers a router receives, on every connection: the bytes they hold of its budget, the
-/// places they take on their connection, the credit they grant.
+/// What opens a transfer: the call it is on, its total, and the bytes of its payload its sender
+/// places in its opening.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OpeningOf<'a> {
+    pub(crate) call: &'a CallAddress,
+    pub(crate) total: u64,
+    pub(crate) opening_bytes: u64,
+}
+
+/// A transfer opened: its id, and whether the budget admitted it, or it waits for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Opened {
+    pub(crate) id: u64,
+    pub(crate) admitted: bool,
+}
+
+/// A transfer that waited, admitted as the budget freed: its id, its call, and its first credit's
+/// end, granted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Admitted {
+    pub(crate) id: u64,
+    pub(crate) call: CallAddress,
+    pub(crate) credit_end: Option<u64>,
+}
+
+/// The transfers a router receives, on every connection: the bytes of its budget they reserve,
+/// the places they take on their connection, the openings that wait for that budget, the credit
+/// they grant; and, by connection, those whose call ended while its resolver outlives it, by the
+/// dispatch of that call.
 #[derive(Debug)]
 pub(crate) struct ReceivingTransfers {
     limits: RouterLimits,
     bounds: IncomingBounds,
-    // the transfers open, by their id, in the order they opened
+    // the transfers open, admitted or waiting, by their id, in the order they opened
     held: BTreeMap<u64, Receiving>,
     connections: HashMap<ConnectionHandle, u64>,
+    outliving: HashMap<ConnectionHandle, BTreeSet<u64>>,
+    reserved: u64,
     buffered: u64,
+    waiting: u64,
     next: u64,
 }
 
@@ -382,31 +457,63 @@ impl ReceivingTransfers {
             },
             held: BTreeMap::new(),
             connections: HashMap::new(),
+            outliving: HashMap::new(),
+            reserved: 0,
             buffered: 0,
+            waiting: 0,
             next: 0,
         }
     }
 
-    /// The bytes of the budget no transfer holds.
+    fn outliving_on(&self, handle: &ConnectionHandle) -> u64 {
+        self.outliving
+            .get(handle)
+            .map_or(0, |dispatches| count_of(dispatches.len()))
+    }
+
+    /// Keeps the place of the transfer a call received, its call ended while the resolver of the
+    /// dispatch `dispatched` outlives it, until that resolver settles (spec 12.3).
+    pub(crate) fn outlive(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        self.outliving
+            .entry(Arc::clone(handle))
+            .or_default()
+            .insert(dispatched);
+    }
+
+    /// Gives back the place the resolver of the dispatch `dispatched` kept, as it settles: nothing
+    /// for one that kept none, or whose connection closed since.
+    pub(crate) fn settle(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        if let Some(dispatches) = self.outliving.get_mut(handle) {
+            dispatches.remove(&dispatched);
+
+            if dispatches.is_empty() {
+                self.outliving.remove(handle);
+            }
+        }
+    }
+
+    /// The bytes of the budget no transfer reserves.
     pub(crate) fn available(&self) -> u64 {
         self.limits
             .buffered_bytes_budget
-            .saturating_sub(self.buffered)
+            .saturating_sub(self.reserved)
     }
 
-    /// Opens a transfer on `call` from its opening, or gives the failure that refuses it.
-    pub(crate) fn open(
-        &mut self,
-        opening: &Bytes,
-        (call, total): (&CallAddress, u64),
-    ) -> Result<u64, Failure> {
+    /// Opens a transfer from its opening, checked in spec 12.3's order: its total, its places, its
+    /// opening's bytes; then admitted to the budget by its total, or waiting for it behind every
+    /// opening before it. It gives the failure that refuses it, at once only for a wait of 0.
+    pub(crate) fn open(&mut self, opening: &Bytes, of: OpeningOf<'_>) -> Result<Opened, Failure> {
+        let OpeningOf {
+            call,
+            total,
+            opening_bytes,
+        } = of;
         let side = self.bounds.side;
         let transfers = self
             .connections
             .get(&call.connection_handle)
             .copied()
             .unwrap_or(0);
-        let available = self.available();
         let too_large = |detail: String| {
             Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, side).saying(detail)
         };
@@ -429,6 +536,16 @@ impl ReceivingTransfers {
             )));
         }
 
+        // * the transfers whose resolvers outlive their calls keep a place too, within twice the
+        // bound, checked first (spec 12.3, item 3)
+        let tracked_most = self.limits.maximum_transfers.saturating_mul(2);
+
+        if transfers.saturating_add(self.outliving_on(&call.connection_handle)) >= tracked_most {
+            return Err(exceeded(format!(
+                "the transfers a connection receives and those its resolvers outlive are {tracked_most} at most"
+            )));
+        }
+
         if transfers >= self.limits.maximum_transfers {
             return Err(exceeded(format!(
                 "the transfers a connection receives at once are {} at most",
@@ -436,13 +553,29 @@ impl ReceivingTransfers {
             )));
         }
 
-        if length_of(opening) > available {
+        let incoming = IncomingTransfer::new(opening, (total, self.bounds))?;
+        let carried = length_of(opening);
+
+        // an opening carries what its sender places in it, no byte more or less (spec 12.3)
+        if carried != opening_bytes {
+            return Err(
+                Failure::protocol(ProtocolCode::CHUNK_INVALID, side).saying(format!(
+                    "an opening carries {opening_bytes} bytes of its payload, not {carried}"
+                )),
+            );
+        }
+
+        // * admitted at once only when no opening waits before it: none is passed (spec 12.4)
+        let admitted = self.waiting == 0 && total <= self.available();
+        let wait = budget_wait_of(&self.limits);
+
+        if !admitted && wait.is_zero() {
             return Err(exceeded(format!(
-                "the transfers received hold the budget but {available} bytes"
+                "a total of {total} bytes waited {} milliseconds for the budget",
+                wait.as_millis()
             )));
         }
 
-        let incoming = IncomingTransfer::new(opening, (total, self.bounds))?;
         let id = self.next;
 
         self.next = self.next.saturating_add(1);
@@ -452,7 +585,10 @@ impl ReceivingTransfers {
                 call: call.clone(),
                 incoming,
                 is_complete: false,
-                reserved: length_of(opening),
+                admitted,
+                total,
+                received: carried,
+                reserved: if admitted { total } else { 0 },
                 timer: None,
             },
         );
@@ -460,9 +596,15 @@ impl ReceivingTransfers {
             Arc::clone(&call.connection_handle),
             transfers.saturating_add(1),
         );
-        self.buffered = self.buffered.saturating_add(length_of(opening));
+        self.buffered = self.buffered.saturating_add(carried);
 
-        Ok(id)
+        if admitted {
+            self.reserved = self.reserved.saturating_add(total);
+        } else {
+            self.waiting = self.waiting.saturating_add(1);
+        }
+
+        Ok(Opened { id, admitted })
     }
 
     pub(crate) fn get(&self, id: u64) -> Option<&Receiving> {
@@ -473,42 +615,77 @@ impl ReceivingTransfers {
         self.held.get_mut(&id)
     }
 
-    /// The credit transfer `id` may grant now, within the budget left, reserved; none for none.
+    /// Whether transfer `id` waits for the budget still.
+    pub(crate) fn is_waiting(&self, id: u64) -> bool {
+        self.held
+            .get(&id)
+            .is_some_and(|receiving| !receiving.admitted)
+    }
+
+    /// The credit transfer `id` may grant now; none for none, and none while it waits.
     pub(crate) fn grant(&mut self, id: u64) -> Option<(CallAddress, u64)> {
-        let available = self.available();
         let receiving = self.held.get_mut(&id)?;
 
-        if receiving.is_complete {
+        if receiving.is_complete || !receiving.admitted {
             return None;
         }
 
-        let previous = receiving.incoming.credit_end();
-        let credit_end = receiving.incoming.credit_to_grant(available)?;
-        let granted = credit_end.saturating_sub(previous);
-
-        receiving.reserved = receiving.reserved.saturating_add(granted);
-        self.buffered = self.buffered.saturating_add(granted);
+        let credit_end = receiving.incoming.credit_to_grant()?;
 
         Some((receiving.call.clone(), credit_end))
     }
 
-    /// The credits the budget gave back lets the transfers it starved grant, in the order they
-    /// opened.
-    #[expect(
-        clippy::needless_collect,
-        reason = "the ids taken before the grants, each of which changes what holds them"
-    )]
-    pub(crate) fn grant_starved(&mut self) -> Vec<(CallAddress, u64)> {
-        let ids: Vec<u64> = self.held.keys().copied().collect();
+    /// Admits the openings that wait, in the order they opened, while the budget left holds each
+    /// one's total: the first it does not hold stops the walk, so none passes another (spec 12.4).
+    /// Each one admitted reserves its total, its wait stopped, and grants its first credit.
+    pub(crate) fn admit_waiting(&mut self) -> Vec<Admitted> {
+        let mut admitted = Vec::new();
 
-        ids.into_iter().filter_map(|id| self.grant(id)).collect()
+        while self.waiting > 0 {
+            let available = self.available();
+            let Some((&id, receiving)) = self
+                .held
+                .iter_mut()
+                .find(|(_, receiving)| !receiving.admitted)
+            else {
+                break;
+            };
+
+            if receiving.total > available {
+                break;
+            }
+
+            receiving.admitted = true;
+            receiving.reserved = receiving.total;
+            cancel_timer(&mut receiving.timer);
+
+            let credit_end = receiving.incoming.credit_to_grant();
+
+            admitted.push(Admitted {
+                id,
+                call: receiving.call.clone(),
+                credit_end,
+            });
+            self.reserved = self.reserved.saturating_add(receiving.total);
+            self.waiting = self.waiting.saturating_sub(1);
+        }
+
+        admitted
     }
 
-    // ends a transfer, and gives back what it holds: its bytes, its place, its timer
+    // ends a transfer, and gives back what it holds: its bytes, its place, its timer, its wait
     fn end(&mut self, id: u64) {
         if let Some(mut receiving) = self.held.remove(&id) {
             cancel_timer(&mut receiving.timer);
-            self.buffered = self.buffered.saturating_sub(receiving.reserved);
+            self.reserved = self.reserved.saturating_sub(receiving.reserved);
+
+            if !receiving.is_complete {
+                self.buffered = self.buffered.saturating_sub(receiving.received);
+            }
+
+            if !receiving.admitted {
+                self.waiting = self.waiting.saturating_sub(1);
+            }
 
             let handle = receiving.call.connection_handle;
 
@@ -522,22 +699,33 @@ impl ReceivingTransfers {
         }
     }
 
-    /// Ends a transfer, and gives the credits the transfers it starved may grant now.
-    pub(crate) fn close(&mut self, id: u64) -> Vec<(CallAddress, u64)> {
+    /// Ends transfer `id` while it waits still, its refusal gone out or not, and gives the openings
+    /// behind it the budget admits; nothing for one ended or admitted since (spec 12.4).
+    pub(crate) fn refuse_waiting(&mut self, id: u64) -> Vec<Admitted> {
+        if !self.is_waiting(id) {
+            return Vec::new();
+        }
+
+        self.end(id);
+        self.admit_waiting()
+    }
+
+    /// Ends a transfer, admitted or waiting, and gives the openings the budget it gave back admits.
+    pub(crate) fn close(&mut self, id: u64) -> Vec<Admitted> {
         if !self.held.contains_key(&id) {
             return Vec::new();
         }
 
         self.end(id);
-        self.grant_starved()
+        self.admit_waiting()
     }
 
-    /// Ends every transfer, `connection_handle`'s alone when given, then gives the credits the
-    /// transfers it starved may grant.
+    /// Ends every transfer, admitted or waiting, `connection_handle`'s alone when given, then gives
+    /// the openings the budget given back admits.
     pub(crate) fn close_all(
         &mut self,
         connection_handle: Option<&ConnectionHandle>,
-    ) -> Vec<(CallAddress, u64)> {
+    ) -> Vec<Admitted> {
         let ids: Vec<u64> = self
             .held
             .iter()
@@ -551,52 +739,85 @@ impl ReceivingTransfers {
             self.end(id);
         }
 
-        self.grant_starved()
+        // the places its resolvers kept end with their connection
+        match connection_handle {
+            Some(handle) => {
+                self.outliving.remove(handle);
+            }
+            None => self.outliving.clear(),
+        }
+
+        self.admit_waiting()
     }
 
-    /// The payload of a transfer placed whole: its bytes leave the budget, its timer stops.
-    pub(crate) fn complete(&mut self, id: u64) -> (Bytes, Vec<(CallAddress, u64)>) {
+    /// The payload of a transfer placed whole: its bytes and its total leave the budget, its timer
+    /// stops, and the openings the budget given back admits come with it.
+    pub(crate) fn complete(&mut self, id: u64) -> (Bytes, Vec<Admitted>) {
         let Some(receiving) = self.held.get_mut(&id) else {
             return (Bytes::new(), Vec::new());
         };
         let payload = receiving.incoming.payload();
 
-        receiving.is_complete = true;
         cancel_timer(&mut receiving.timer);
+
+        if !core::mem::replace(&mut receiving.is_complete, true) {
+            self.buffered = self.buffered.saturating_sub(receiving.received);
+        }
 
         let reserved = core::mem::take(&mut receiving.reserved);
 
-        self.buffered = self.buffered.saturating_sub(reserved);
+        self.reserved = self.reserved.saturating_sub(reserved);
 
-        (payload, self.grant_starved())
+        (payload, self.admit_waiting())
     }
 
-    /// Places a chunk on transfer `id`.
+    /// Places a chunk on transfer `id`, its bytes held until its payload is whole.
     pub(crate) fn place(&mut self, id: u64, chunk: &Chunk) -> Result<ChunkOutcome, Failure> {
         let Some(receiving) = self.held.get_mut(&id) else {
             return Ok(ChunkOutcome::Duplicate);
         };
-
-        receiving
+        let outcome = receiving
             .incoming
-            .place(&chunk.bytes, (chunk.is_last, chunk.offset))
+            .place(&chunk.bytes, (chunk.is_last, chunk.offset))?;
+
+        if matches!(outcome, ChunkOutcome::Placed | ChunkOutcome::Complete) {
+            let length = length_of(&chunk.bytes);
+
+            receiving.received = receiving.received.saturating_add(length);
+            self.buffered = self.buffered.saturating_add(length);
+        }
+
+        Ok(outcome)
     }
 
-    /// The transfers received and the bytes of the budget they hold, counted, and their
-    /// connections.
+    /// The transfers received and those of them waiting, the bytes of the budget they reserve
+    /// under its ceiling, the bytes they hold, those whose resolvers outlive their calls, counted,
+    /// and their connections.
     pub(crate) fn gauges(&self) -> Gauges {
         let mut gauges = Gauges::default();
 
         gauges
             .ceilings
-            .insert("bufferedBytes", self.limits.buffered_bytes_budget);
+            .insert("reservedBytes", self.limits.buffered_bytes_budget);
+        gauges.counts.insert("reservedBytes", self.reserved);
         gauges.counts.insert("bufferedBytes", self.buffered);
+        gauges.counts.insert(
+            "outlivingTransfers",
+            self.outliving
+                .values()
+                .map(|dispatches| count_of(dispatches.len()))
+                .sum(),
+        );
         gauges
             .counts
             .insert("receivingTransfers", count_of(self.held.len()));
+        gauges.counts.insert("waitingTransfers", self.waiting);
         gauges
             .connection_handles
             .extend(self.connections.keys().cloned());
+        gauges
+            .connection_handles
+            .extend(self.outliving.keys().cloned());
 
         gauges
     }
@@ -862,12 +1083,70 @@ pub(crate) struct RequestReceiving {
     pub(crate) transfer: u64,
 }
 
-/// A call to answer: the request that opened it, its signal, whether its answer is going out,
-/// what it receives of its payload; and, counted, its series and when it started.
+// where a resolver stands: its turn to come, running, its call ended before its turn, outliving its
+// call, settled
+const QUEUED: u8 = 0;
+const RUNNING: u8 = 1;
+const ENDED: u8 = 2;
+const OUTLIVING: u8 = 3;
+const SETTLED: u8 = 4;
+
+/// Where a request's resolver stands, or its credential's verifier while it resolves, which its
+/// dispatch, its call and the task that runs it share: its turn to come, running, its call ended
+/// before its turn, outliving its call, or settled. The task that runs it and the owner both move
+/// it, so each move is a compare-and-swap (spec 9.2, steps 3 and 9).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ResolverRun(Arc<AtomicU8>);
+
+impl ResolverRun {
+    fn swap(&self, (from, to): (u8, u8)) -> Result<u8, u8> {
+        self.0
+            .compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire)
+    }
+
+    /// Marks it running as its turn comes: `false`, and it is handed nothing, once its call ended
+    /// before its turn came.
+    pub(crate) fn start(&self) -> bool {
+        self.swap((QUEUED, RUNNING)).is_ok()
+    }
+
+    /// Marks its credential's verifier running.
+    pub(crate) fn verify(&self) {
+        self.0.store(RUNNING, Ordering::Release);
+    }
+
+    /// Its verifier settled with its call open: its resolver's turn to come. `true` when its call
+    /// ended meanwhile, the verifier outliving it, so the place it kept is given back.
+    pub(crate) fn verified(&self) -> bool {
+        match self.swap((RUNNING, QUEUED)) {
+            Ok(_) => false,
+            Err(_) => self.settle(),
+        }
+    }
+
+    /// Its call ends: a resolver whose turn has not come never runs; `true` when one runs on,
+    /// outliving its call.
+    pub(crate) fn end(&self) -> bool {
+        match self.swap((QUEUED, ENDED)) {
+            Ok(_) => false,
+            Err(_) => self.swap((RUNNING, OUTLIVING)).is_ok(),
+        }
+    }
+
+    /// It settles: `true` when it outlived its call, so the place it kept is given back.
+    pub(crate) fn settle(&self) -> bool {
+        self.0.swap(SETTLED, Ordering::AcqRel) == OUTLIVING
+    }
+}
+
+/// A call to answer: the request that opened it, its signal, where its resolver stands, whether its
+/// answer is going out, what it receives of its payload; and, counted, its series and when it
+/// started.
 #[derive(Debug)]
 pub(crate) struct Answering {
     pub(crate) dispatched: u64,
     pub(crate) signal: Signal,
+    pub(crate) run: ResolverRun,
     pub(crate) is_answered: bool,
     pub(crate) is_ended: bool,
     pub(crate) receiving: Option<RequestReceiving>,
@@ -900,15 +1179,104 @@ pub(crate) struct Abandoned {
 }
 
 /// The calls the peer opened that this side has not answered yet, by connection, and those
-/// abandoned once their transfer ended.
+/// abandoned once their transfer ended; the resolvers that outlive their call, by connection and
+/// by their dispatch, each with its call's signal, and those of connections closed since; and, by
+/// connection, the requests in a row refused past the calls answered and those outlived together.
 #[derive(Debug, Default)]
 pub(crate) struct AnsweringCalls {
     pub(crate) answering: BTreeMap<ConnectionHandle, BTreeMap<u32, Answering>>,
     pub(crate) abandoned: BTreeMap<ConnectionHandle, BTreeMap<u32, Abandoned>>,
+    pub(crate) outliving: BTreeMap<ConnectionHandle, BTreeMap<u64, Signal>>,
+    // ! keyed by dispatch alone: a connection the transport no longer holds leaves no orphan, and a
+    // name a transport gives again finds none of its own
+    pub(crate) closed: BTreeSet<u64>,
+    pub(crate) refused: BTreeMap<ConnectionHandle, u64>,
     pub(crate) most: u64,
 }
 
 impl AnsweringCalls {
+    /// Keeps a place for the resolver of the call `answering` on `handle`, which outlives that
+    /// call, until it settles: by its dispatch, with its call's signal, aborted should its
+    /// connection close first (spec 9.10).
+    pub(crate) fn outlive(&mut self, (handle, answering): (&ConnectionHandle, &Answering)) {
+        self.outliving
+            .entry(Arc::clone(handle))
+            .or_default()
+            .insert(answering.dispatched, answering.signal.clone());
+    }
+
+    /// Gives back the place of the resolver of the dispatch `dispatched` as it settles, on its
+    /// connection or among those of connections closed since.
+    pub(crate) fn settle(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        if let Some(dispatches) = self.outliving.get_mut(handle)
+            && dispatches.remove(&dispatched).is_some()
+        {
+            if dispatches.is_empty() {
+                self.outliving.remove(handle);
+            }
+
+            return;
+        }
+
+        self.closed.remove(&dispatched);
+    }
+
+    /// Counts, among those of connections closed, a resolver its connection's close found running.
+    pub(crate) fn outlive_closed(&mut self, dispatched: u64) {
+        self.closed.insert(dispatched);
+    }
+
+    /// The calls `handle` has this side answer and those whose resolvers outlive them, together.
+    pub(crate) fn tracked_on(&self, handle: &ConnectionHandle) -> u64 {
+        let outliving = self
+            .outliving
+            .get(handle)
+            .map_or(0, |dispatches| count_of(dispatches.len()));
+
+        self.count_on(handle).saturating_add(outliving)
+    }
+
+    /// Counts a request refused past the calls answered and those outlived together, and gives the
+    /// requests in a row so refused on `handle`.
+    pub(crate) fn refused_past(&mut self, handle: &ConnectionHandle) -> u64 {
+        let run = self.refused.entry(Arc::clone(handle)).or_insert(0);
+
+        *run = run.saturating_add(1);
+
+        *run
+    }
+
+    /// Sets the run of refusals on `handle` back, as a request reaches step 3 and is not refused
+    /// past the calls answered and those outlived together: admitted, or refused at the first
+    /// ceiling.
+    pub(crate) fn admitted(&mut self, handle: &ConnectionHandle) {
+        self.refused.remove(handle);
+    }
+
+    /// The signals of the resolvers that outlive their call on `handle`, or on every connection
+    /// when none, which now count among those of connections closed.
+    pub(crate) fn close_outliving(&mut self, handle: Option<&ConnectionHandle>) -> Vec<Signal> {
+        let taken: Vec<BTreeMap<u64, Signal>> = match handle {
+            Some(handle) => self.outliving.remove(handle).into_iter().collect(),
+            None => core::mem::take(&mut self.outliving).into_values().collect(),
+        };
+        let mut signals = Vec::new();
+
+        for (dispatched, signal) in taken.into_iter().flatten() {
+            self.closed.insert(dispatched);
+            signals.push(signal);
+        }
+
+        match handle {
+            Some(handle) => {
+                self.refused.remove(handle);
+            }
+            None => self.refused.clear(),
+        }
+
+        signals
+    }
+
     pub(crate) fn get(&self, call: &CallAddress) -> Option<&Answering> {
         self.answering
             .get(&call.connection_handle)
@@ -1055,7 +1423,7 @@ impl AnsweringCalls {
     ) -> Vec<(CallAddress, Answering)> {
         let handles: Vec<ConnectionHandle> = handle.map_or_else(
             || {
-                let mut handles: std::collections::BTreeSet<ConnectionHandle> =
+                let mut handles: BTreeSet<ConnectionHandle> =
                     self.answering.keys().cloned().collect();
                 handles.extend(self.abandoned.keys().cloned());
                 handles.into_iter().collect()
@@ -1109,12 +1477,37 @@ impl AnsweringCalls {
                 .sum(),
         );
         gauges.counts.insert("largestAnsweringCalls", largest);
+
+        // * the busiest connection's calls answered and those outlived together, within twice the
+        // bound; and every resolver that outlives its call, those of connections closed among them
+        let tracked = self
+            .answering
+            .keys()
+            .chain(self.outliving.keys())
+            .map(|handle| self.tracked_on(handle))
+            .max()
+            .unwrap_or(0);
+        let outliving = self
+            .outliving
+            .values()
+            .map(|dispatches| count_of(dispatches.len()))
+            .sum::<u64>()
+            .saturating_add(count_of(self.closed.len()));
+
+        gauges
+            .ceilings
+            .insert("largestTrackedCalls", self.most.saturating_mul(2));
+        gauges.counts.insert("largestTrackedCalls", tracked);
+        gauges.counts.insert("outlivingResolvers", outliving);
         gauges
             .connection_handles
             .extend(self.answering.keys().cloned());
         gauges
             .connection_handles
             .extend(self.abandoned.keys().cloned());
+        gauges
+            .connection_handles
+            .extend(self.outliving.keys().cloned());
 
         gauges
     }

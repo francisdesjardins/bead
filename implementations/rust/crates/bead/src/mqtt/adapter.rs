@@ -44,7 +44,6 @@ use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future::{Either, select};
-use rustls::ClientConfig;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -69,6 +68,7 @@ use crate::mqtt::packets::{
 use crate::mqtt::quota::{Queued, SendQuota};
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
 use crate::net::racing::RacingOptions;
+use crate::net::tls::{ClientTls, TlsOptions, read_tls};
 use crate::owner::{Owned, Owner, WeakOwner};
 use crate::platform::{self, Handle};
 use crate::router::types::BoxFuture;
@@ -126,10 +126,11 @@ pub struct MqttBrokerAdapterOptions {
     /// connect timeout, or as a stop meets it, a later answer serving nothing; what it fails with
     /// fails its start, its cause; an answer that is no password fails it, refused.
     pub password_provider: Option<CredentialProvider>,
-    /// The TLS its `mqtts` or `wss` connection speaks, a client certificate its broker ties to its
-    /// id among it where it holds one: rustls's over aws-lc-rs, the platform's verifier judging its
-    /// broker, when none. Refused over `mqtt` and `ws`.
-    pub tls: Option<Arc<ClientConfig>>,
+    /// The authorities its `mqtts` or `wss` connection judges its broker by and the client
+    /// certificate it presents, which its broker ties to its id (spec 15.39), read as it is built:
+    /// rustls's over aws-lc-rs, the platform's verifier judging its broker, when none. Refused over
+    /// `mqtt` and `ws`.
+    pub tls: Option<TlsOptions>,
     /// Its CONNECT's Maximum Packet Size, the largest packet its broker sends it, from 1 to
     /// 268,435,460 (spec 15.30): [`MAXIMUM_PACKET_SIZE`] when none.
     pub maximum_packet_size: Option<u32>,
@@ -207,7 +208,7 @@ struct Shared {
     address: Address,
     secret: Secret,
     has_certificate: bool,
-    tls: Option<Arc<ClientConfig>>,
+    tls: ClientTls,
     maximum_packet_size: u32,
     keep_alive: Duration,
     connect_timeout: Duration,
@@ -313,10 +314,10 @@ impl MqttBrokerAdapter {
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
-    /// IO driver; for an id that is no Client Identifier, a URL none of its four schemes names, TLS
-    /// over `mqtt` or `ws`, a password that is none, a password beside its provider or either beside
-    /// a client certificate, a Maximum Packet Size outside 1 to 268,435,460, or a Keep Alive or a
-    /// connect timeout spec 1.4 does not hold.
+    /// IO driver; for an id that is no Client Identifier, a URL none of its four schemes names, a
+    /// `tls` over `mqtt` or `ws`, or one that does not read (spec 15.39), a password that is none, a
+    /// password beside its provider or either beside a client certificate, a Maximum Packet Size
+    /// outside 1 to 268,435,460, or a Keep Alive or a connect timeout spec 1.4 does not hold.
     pub fn new(options: &MqttBrokerAdapterOptions) -> Result<Self, ProgrammerError> {
         // * in whole seconds rounded up, as its CONNECT announces it and its link runs it (spec
         // 15.26)
@@ -351,19 +352,17 @@ impl MqttBrokerAdapter {
                 "an MQTT 5 adapter's url is mqtt, mqtts, ws or wss, not {url}"
             ))
         })?;
-        let has_certificate = options
-            .tls
-            .as_ref()
-            .is_some_and(|tls| tls.client_auth_cert_resolver.has_certs());
+        // * one given none of its members is none
+        let tls = options.tls.as_ref().filter(|tls| !tls.is_empty());
 
-        if options.tls.is_some() && !address.scheme.is_tls() {
-            return Err(refused(if has_certificate {
-                format!("a TLS client certificate is carried over mqtts or wss, not {url}")
-            } else {
-                format!("TLS is spoken over mqtts or wss, not {url}")
-            }));
+        if tls.is_some() && !address.scheme.is_tls() {
+            return Err(refused(format!(
+                "a TLS client certificate is carried over mqtts or wss, not {url}"
+            )));
         }
 
+        let read = tls.map(read_tls).transpose()?.unwrap_or_default();
+        let has_certificate = tls.is_some_and(|tls| tls.certificate.is_some());
         let secret = secret_of((options, has_certificate))?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an MQTT 5 adapter")?;
         let platform_clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
@@ -389,7 +388,7 @@ impl MqttBrokerAdapter {
             address,
             secret,
             has_certificate,
-            tls: options.tls.clone(),
+            tls: ClientTls::Read(read),
             maximum_packet_size,
             keep_alive,
             connect_timeout,
@@ -1078,7 +1077,7 @@ async fn linking((shared, owner): (Arc<Shared>, WeakOwner<State>), linking: Link
         };
         let options = OpenOptions {
             racing: &shared.racing,
-            tls: shared.tls.as_ref(),
+            tls: &shared.tls,
         };
         let opened = raced(
             open(&shared.address, &options),

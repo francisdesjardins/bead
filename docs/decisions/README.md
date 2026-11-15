@@ -132,9 +132,12 @@ that meets the Tenth Man:
   EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
   the matrix holds its row of MQTT 5 over TLS "not tested";
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
-  keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
-  of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the
-  payload bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
+  keeps against a peer that holds it: a bound on the resolvers that outlive a closed connection,
+  which neither Go, Kestrel nor a standard bounds, kept by the key 15.12 bounds connections by, an
+  address or a participant's id, in the round of 0030's fit; a relay's fairness among the requesters
+  that share a leg B, so the resolvers one requester's cancels leave at a destination refuse no
+  other; a close on a rate of refusals past the first count, as Kestrel's; a bound on the payload
+  bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
 - what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a budget that
@@ -180,6 +183,12 @@ that meets the Tenth Man:
   keeps ahead of a gateway: mounting Bead and its gateway in a host, a framework among them, a round
   of its own; a `Service` that reads its caller's address from an extension of Bead's, beside the
   Rust side's `answer`; and the Rust caller's typed write in place;
+- what [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)
+  keeps ahead of a client's TLS: a server that takes its peer's certificate as an identity at its
+  admission, the C# HTTP server's client-certificate mode, RFC 9440's fields over a WebSocket and
+  over a believed proxy, and RFC 8705 §3's binding between a `JWT` and the certificate; a platform's
+  TLS object for the brokers, on every side at once; and the interop over TLS, each side's client
+  presenting `spec/pki`'s certificate to the others' servers;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
@@ -227,18 +236,19 @@ table.
 
 ### Transports and relays
 
-| #                                                                                                                         | Decision                                                                                                                                                           | Status   |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
-| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
-| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
-| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
-| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
-| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
-| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)         | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
+| #                                                                                                                                 | Decision                                                                                                                                                           | Status   |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                                                      | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                            | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                          | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                                 | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                                    | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
+| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                                     | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
+| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)         | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                                    | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
+| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)                 | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
+| [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md) | A client presents the TLS certificate and trusts the authorities its application names, in one shape on every side                                                 | accepted |
 
 ### Over a broker
 
@@ -298,7 +308,7 @@ table.
 
 ## Writing one
 
-The next decision is 0053. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0054. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

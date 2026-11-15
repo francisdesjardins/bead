@@ -335,6 +335,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       activity: (activity, connectionHandle) => {
         emitter.emit('activity', activity, connectionHandle);
       },
+      // a connection its client has refused past what its resolvers outlive is closed by its
+      // transport, as `closeOnTimeout` closes one (spec 9.2, step 3)
+      close: (connectionHandle) => {
+        return transport.close?.(connectionHandle);
+      },
       // a request of the peer's on a subscription's call id would answer that subscription
       isCallIdInUse: (callId, connectionHandle) => {
         return notifications.has(callId, connectionHandle);

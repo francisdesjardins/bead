@@ -171,6 +171,7 @@ envelopes.
 spec/                         spec.md, debugging.md, transcoding.md, the conformance files every side reads, and check.py
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
+  pki/                        the test PKI every side's TLS tests read, and make.sh, which writes it
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
@@ -213,7 +214,7 @@ procedures, each under a version of its own. Beside them:
 
 | File                                                            | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                             | 463 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
+| [`vectors.json`](spec/vectors.json)                             | 472 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
 | [`transports.json`](spec/transports.json)                       | 269 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
@@ -222,7 +223,7 @@ procedures, each under a version of its own. Beside them:
 | [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                                                                                     |
 | [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                                                                              |
 | [`debug-filters.json`](spec/debug-filters.json)                 | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                                                                                                                                                                                                                                                            |
-| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 54 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
+| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 55 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
 | [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 83 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
@@ -231,8 +232,9 @@ procedures, each under a version of its own. Beside them:
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
 | [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                                                                               |
 
-Every implementation reads these files from `spec/` in its tests; none keeps a copy. Eleven
-generators write them, and regenerating must give the same bytes:
+Every implementation reads these files from `spec/` in its tests; none keeps a copy, nor of
+`spec/pki/`, the test PKI its TLS tests read, whose keys `spec/check.py` holds to `spec/` and the
+tests. Eleven generators write the files, and regenerating must give the same bytes:
 
 ```sh
 python spec/generators/make_vectors.py
@@ -439,21 +441,58 @@ extension's icons, and records the sha256 of the mark and of each in `src/icons.
 three faces, Geist, Geist Mono and Newsreader, are in `src/fonts/`, with their licence, the SIL Open
 Font License.
 
-`build.mjs` and `check.mjs` need Node alone; `render.mjs` and `icons.mjs` need the Yarn project's
-Mermaid and a Chromium, its own from Playwright or one it is given, and `render.mjs` the page's
-faces, so that labels are measured in the face the page draws them with:
+The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over
+penumbra's two sheets and Bead's overrides of them, and share one top bar, `chrome.css`, all five in
+`implementations/typescript/devtools/penumbra/`. The bar holds Bead's name and its navigation alone:
+the mark and the name, a link to the other surface, the language where there are two, the theme. It
+keeps 56 px at every width, on one line. The demo's own state, its transport, its connection, who
+it calls as and the wire, is a strip under it. The demo links the sheets; the build inlines them
+into the page, under `src/styles.css`, and into the not-found page, under the styles of
+`src/404.html`.
+
+`build.mjs` and `check.mjs` need Node alone; `render.mjs`, `icons.mjs` and `layout.mjs` need the
+Yarn project's Playwright and a Chromium, its own or one it is given, `render.mjs` Mermaid too and
+the page's faces, so that labels are measured in the face the page draws them with. `layout.mjs`
+holds the page and the not-found page to their layout: the bar 56 px tall and on one line from 320
+to 1440 px, in both languages and both themes, no page wider than a phone, every control a finger
+reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in a table split
+inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with the focus
+given back, and the theme set before the first paint:
 
 ```sh
 cd site
-node build.mjs     # writes dist/index.html, committed and never edited by hand
-node check.mjs     # each SVG its source's render, each icon the mark's, and dist/index.html the build's
+node build.mjs     # writes dist/index.html and dist/404.html, committed and never edited by hand
+node check.mjs     # each SVG its source's render, each icon the mark's, and both pages the build's
 yarn install --immutable
 node render.mjs --chromium <chrome> --fonts src/fonts
 node icons.mjs --chromium <chrome>
+node layout.mjs --chromium <chrome>
 ```
 
 `render.mjs` renders the diagrams whose SVG is stale, `--all` every one, and fails on a colour left
-that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`.
+that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`; its `site`
+job runs `layout.mjs`.
+
+`tools/check-a11y.mjs` holds the page, the not-found page and the demo's scenes to WCAG 2.2 AA, at
+1280 and 390 px: axe's rules of the `wcag2a`, `wcag2aa`, `wcag21aa` and `wcag22aa` tags and the
+colour of statuses in both themes, with each disclosure and menu open; in the first theme, the
+checks axe cannot make, the reflow at 320 px, the text spacing, the keyboard's order and its focus
+shown and never under a sticky bar, 44 px targets on a coarse pointer, the states of tabs, radios
+and toggles, and motion under reduced motion. Axe and Playwright are the TypeScript side's. It serves a
+folder as the host does, or reads any address, so beadproto.dev after a deploy and
+francisdesjardins.ca are held the same way:
+
+```sh
+node site/deploy.mjs --assemble
+node tools/check-a11y.mjs --serve site/out / "/?lng=fr" /nowhere /playground/ /playground/#calls
+node tools/check-a11y.mjs https://beadproto.dev/ "https://beadproto.dev/?lng=fr" https://beadproto.dev/playground/
+node tools/check-a11y.mjs https://francisdesjardins.ca/ --scheme dark --width 390
+```
+
+It prints each violation by its rule, its element and the pages it is on, and exits 1 on any. An
+exception is a line of `tools/a11y-exceptions.json`, its rule, its selector and its reason. The
+demo's page tests and the DevTools panel's call it for what a test brings about: the served
+transports, a call opened in each of its tabs. CI's `typescript` job runs it over `site/out`.
 
 beadproto.dev is a Cloudflare Worker that serves files alone, `beadproto`, which `wrangler.jsonc`
 configures: no script, no workers.dev address, no preview address, and a path nothing answers a 404. `deploy.mjs` assembles `out/` from the files it lists, and nothing else: the page at `/`, the
@@ -587,7 +626,9 @@ on a desktop and a sheet on a phone, logs the calls and envelopes as the client 
 it: a sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its
 payload rules show each violation under its field; the server, and what the client's and the
 server's metrics registries count; and Packages, a blueprint cut into the outputs of `beadc.yaml`
-by the builder's own selection and reading of it, run in the page, the YAML to copy.
+by the builder's own selection and reading of it, run in the page, the YAML to copy. Its top bar is
+the page's; under it, its own strip holds the transport, the connection, who it calls as and the
+wire.
 
 ```sh
 cd implementations/typescript
@@ -974,9 +1015,11 @@ against each server.
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says
   how one renders, why it is one side's own, or which row of the support matrix's Differences holds
   it; a row gives each name its kind, and a row whose kinds do not render each other fails, as one
-  word for a number, a delegate and an enum would. The names no reading has
-  placed, `alone`, are counted against the pin on the file's first line, which only falls.
-  `--seed` writes the file anew from the lists.
+  word for a number, a delegate and an enum would; a rendering names one of the tool's rules and
+  cites the records that rule names, each writing its tag, `rendered: <rule>`; a C# static class
+  of constants is placed by its row or by its members'. The names no reading has placed, `alone`,
+  are counted against the pin on the file's first line, which only falls. `--seed` writes the file
+  anew from the lists.
 - `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.
@@ -1037,9 +1080,15 @@ against each server.
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
 - `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
-  committed `site/dist/index.html` byte for byte ([The page](#the-page)).
+  committed `site/dist/index.html` and `site/dist/404.html` byte for byte
+  ([The page](#the-page)).
+- `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
+  axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
+  installed, with Playwright's Chromium.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
-  repositories it makes under the system's temporary folder.
+  repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
+  saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
+  fails them there instead.
 
 Two run before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `pre-commit` holds the staged root files to their format, when the TypeScript side is installed,

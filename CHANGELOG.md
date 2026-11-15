@@ -40,6 +40,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   glance".
 - The fuzz target `mqtt-websocket-frames` and its seeded mutations, over the Rust side's reader of
   an MQTT 5 WebSocket's frames (decision 0050).
+- A TLS client certificate and the authorities a client trusts, `tls`, on every side's WebSocket
+  and HTTP transport clients, outside a page; the C# WebSocket client's `Handler`; `spec/pki`, one
+  PKI every side's tests read, its keys held to `spec/` and the tests by `spec/check.py`; undici,
+  an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
+  a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
+  0053).
+- The demo's Packages tab plans Rust packages, beadc's third target, and adds a package in each
+  language from one row. Each language's server is offered the transports its side has, as the
+  support matrix gives them: the Web Worker is the TypeScript side's alone, and AMQP 1.0 is not
+  offered in Rust. A Rust gateway's procedure named as a method its HTTP client holds is refused
+  on the page in beadc's words.
+- The demo's sign-up takes up to 8 guests, each an email. A violation of a guest says its path,
+  `guests[1]`. "Break it past the server's bound" raises more violations than
+  the server's detail of 1,024 bytes holds, and the page says how many its closing line counts. The
+  box that bounds the client's detail to 256 bytes says it bounds the refusals the client writes and
+  the details it reads.
+- `tools/check-a11y.mjs` holds pages to WCAG 2.2 AA in Chromium: axe's rules of the `wcag2a`,
+  `wcag2aa`, `wcag21aa` and `wcag22aa` tags and statuses told by more than colour, in both themes,
+  each disclosure and menu open; and, in one theme, the checks axe cannot make, the reflow at
+  320 px, the text spacing, the keyboard's order and its focus shown and never under a sticky bar,
+  44 px targets on a coarse pointer, the states of tabs, radios and toggles, and motion under
+  reduced motion. It serves a folder
+  or reads any address; its exceptions, each with its reason, are `tools/a11y-exceptions.json`. CI's
+  `typescript` job runs it over the page, the not-found page and every scene of the demo, and the
+  demo's and the DevTools panel's tests over the served transports and each view and tab of a call.
+  `@axe-core/playwright` 4.14.0 is a dev dependency of the TypeScript side.
+- An ended subscription's line in the DevTools panel's Timeline and Waterfall stops on a cap where
+  it ended, and the legend's swatch shows it, so an ended line reads apart from an open one.
 
 ### Changed
 
@@ -47,23 +75,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
   ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
   Bead's mark, Baily's beads at the Moon's edge, is the page's and the demo's icon and the mark
-  beside the name in their top bars, and the DevTools extension's, its panel's tab `⦿ Bead`; the
+  beside the name in their top bars, and the DevTools extension's, its panel's tab `Bead ⦿`; the
   page's footer names its author.
 - **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
   Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway (decision 0044); three more rows of the matrix's differences name where the sides
-  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
-  its connection open, and a password beside TLS that trusts an authority with no client
-  certificate; and an MQTT 5 acknowledgement no request awaits is named in the cells of its two
-  rows (decisions 0041, 0050).
+  with its gateway (decision 0044); two more rows of the matrix's differences name where the sides
+  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, and a DISCONNECT from a broker that
+  keeps its connection open; and an MQTT 5 acknowledgement no request awaits is named in the cells
+  of its two rows (decisions 0041, 0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
   by its build: each row of the matrix's Features and Transports in one part of the table or listed
   as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
   row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
   names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
   side's service manager over a router of the application's own ahead.
+- beadc judges in its model, `builder/src/model/check-rust.ts`, a Rust gateway's procedure whose
+  method its HTTP client holds already. A page that plans an output can run it as the Rust target
+  does, and the target's refusal reads the same.
 - The support matrix names each test it cites as its side declares it: a title cut where its test
   goes on, a renamed Rust function and a C# method's last word among them.
 - `spec/transcoding.md` refuses a body read before the gateway took its request, by the server
@@ -115,6 +145,87 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side keeps its own under a longer one; the C# side loses its link once a PINGREQ
   under a shorter one has no PINGRESP. The matrix's row of a Server Keep Alive of 0, or longer
   than a side's own, closes (decision 0041).
+- A transfer received is admitted to `bufferedBytesBudget` by its whole total, in the order the
+  openings came on any connection. An opening the budget left cannot hold waits for it, holding
+  none of it, and is refused `CAPACITY_EXCEEDED` once half of `transferInactivityTimeout` passed:
+  a request's, or a result's, which ends its call. Transfers no longer hold the budget between
+  them until each ends `TRANSFER_STALLED`, and the credit that admits one sets its inactivity going
+  (spec 8.2, 12.2, 12.3, 12.4, 12.8, 12.10; decision 0001).
+- A transfer's opening carries exactly the bytes its sender places in it, `chunkBytes` less its
+  header, or is answered `CHUNK_INVALID` (spec 12.3; decision 0001).
+- The receiving transfers' gauges: `reservedBytes` holds what `bufferedBytes` held, under the
+  budget's ceiling; `bufferedBytes` counts the bytes received and held; `waitingTransfers` is new.
+- **Breaking:** the broker adapters' `tls` is the same type on every side, `ITlsOptions` and
+  `TlsOptions`, its members `authorities`, `certificate` and `key`, PEM text: the TypeScript
+  side's `ca` and `cert` are renamed, and its members take a `string` alone; a password is taken
+  beside a `tls` that names authorities alone, on every side, and a `tls` over a URL that is not
+  TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
+  client's `client_config`, the gateway caller's among them, and its MQTT 5 adapter takes none
+  (decision 0053).
+- `tools/check-names.mjs` holds a rendering to the records its rule names, each of which writes the
+  rule's tag. It reads a C# static class of constants as one name and as its members, placed by one
+  or the other. It keys a Rust module's item with its module, and a C# static member's bare member
+  only where it has two words or more (decision 0047).
+- **Breaking:** the Rust side's `check_records` is `check_proto_records`, the other sides'
+  `checkProtoRecords` and `ProtoRecords.Check` (decisions 0044, 0047).
+- A result, whole or an opening, past `chunkBytes` ends its call `ENVELOPE_TOO_LARGE`, and is
+  cancelled, as a request past it is answered: a whole one was taken, an opening refused
+  `CHUNK_INVALID`. 12.2 says a chunk is held to `chunkBytes` within its transfer, and one for no
+  transfer judged as 12.9's table says, as every side does; step 2's detail names a request or a
+  result whenever `chunkBytes` held it. A server that joins HTTP with another transport, its
+  `chunkBytes` its own, refuses an HTTP client's answer to its command past it, as it refuses that
+  client's request (decisions 0001, 0033).
+- Bead's page, its demo and its not-found page stand on one skin, `tokens.skin.css`, over
+  penumbra's two sheets and Bead's overrides of them, which add a control's least size on a phone
+  and the size of a block of code. The page and the not-found page inline the whole stack, the
+  latter built into `site/dist/404.html`. The demo's dark scheme takes every one of penumbra's dark
+  values, and a block of code reads at 13 px on the page and on the demo.
+- The demo sets its text in the page's faces, Geist, Geist Mono and Newsreader, which the skin
+  declares once for the three surfaces. It takes the theme the page keeps before its first paint,
+  and a toggle in its bar switches it and keeps the choice for both. One script,
+  `penumbra/theme.js`, holds the theme for the page and the demo.
+- Bead's page, its demo and its not-found page share one top bar, `penumbra/chrome.css`: Bead's mark
+  and name, a link to the other surface, the language where there are two and the theme, fixed and
+  56 px tall at every width, on one line, each tool 44 px. The demo's transport, connection,
+  identity and wire leave it for a strip of the demo's own under it, sticky on a desktop, one
+  compact row on a phone whose chip opens the other transports and whose light opens the
+  connection's sentence and the identity. The demo's scene tabs stay under the bar as the page
+  scrolls, on a screen 700 px tall or more, their end faded while the list runs on. CI's `site` job
+  holds the page and the not-found page to their layout from 320 to 1440 px, `site/layout.mjs`.
+- The page colours its code by the demo's scanner, `demo/highlight.ts`, and its blocks read as they
+  did. TypeScript, `.proto`, TOML and the shell share one set of keywords; C# and Rust have their
+  own. A Rust lifetime stays plain. The colours of code join Bead's skin, each at 4.5:1 or more on
+  a card and on an inset in both themes.
+- The demo's Code view reads `examples/hello` in TypeScript, C# and Rust, one file at a time: the
+  role a tab, the language a segmented control beside it, each choice keeping the other, and the
+  language kept for the next visit. Its code is coloured as the page colours it. On a phone the
+  file runs down the page, and the demo counts what crossed on the wire's sheet, whose bar stays in
+  view.
+- The DevTools panel's Timeline draws a call a row, as the Calls list draws its rows, in its
+  typography, each status an icon with its name. A click or Enter on a row opens the call's detail in Calls,
+  and ↑ and ↓ move through the rows. The span dragged across the axis also narrows it, and "Show
+  every call" gives the whole back. The Timeline and the Waterfall draw a call by one track, its
+  places percentages, so a resized panel redraws nothing. A call too short for a bar of 6 px is an
+  instant, a diamond on its start, and the ticks and rings within one percent of the track are
+  drawn once.
+- The DevTools panel's Broker view lists a participant's parcels newest first, as the Calls list
+  does, a new parcel appearing at the top.
+- The demo labels only what a reader acts on, a field or a control, in sentence case and the
+  body's face; a label that repeated its card's heading is gone, and nothing reads as an eyebrow.
+  A card is a scene's primary unit, what it holds flat: the Server view is one card, its four
+  figures one strip in Geist Mono, two by two on a phone. On a phone a package's Remove sits on its
+  language's row, and the blueprint's buttons form a grid. A focus the page scrolls to stops below
+  its sticky scene tabs, where it could sit under them. The DevTools panel's Broker table fits
+  its pane at 1280 px, its parts cut where they run long and whole in the row's detail, and the
+  Timeline lists its calls newest first, row for row as the Calls list does.
+
+### Removed
+
+- **Breaking:** C#'s `MqttBrokerTlsOptions` and `AmqpBrokerTlsOptions`, whose adapters take
+  `TlsOptions` (decision 0053).
+- **Breaking:** the public required walk, C#'s `ProtoRequired.Check` and Rust's `check_required`.
+  The walk is internal on every side, as the TypeScript side's is, and each codec still runs it on a
+  read and a write (decision 0047).
 
 ### Fixed
 
@@ -124,6 +235,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   alongside its reason, as the TypeScript and C# sides do.
 - Rust's `json` payload codecs normalize `-0` to `0` at every depth on read, including typed
   payloads, as the TypeScript and C# sides do.
+- WCAG 2.2 AA on Bead's page, its demo and the DevTools panel: a link's code and a green outcome on
+  its wash reach 4.5:1, the page's tables and its header's words, which scroll sideways on a phone,
+  take the keyboard's focus, and the focus on a phone is scrolled to above the demo's folded wire.
+  The panel's controls are 24 px tall or more, and its Calls and Envelopes switch is a radio group,
+  chosen by the arrow keys.
+- The DevTools panel's selects centre their selected text on their row, where it sat at the top.
+  Its footer and its Calls list count one subscription or one record in the singular, and the
+  Broker view's labels and its recorded fields' heading read as the rest of the panel.
+- The DevTools extension reads `runtime.lastError` as each of its ports closes, where Chrome
+  reported it unchecked as a page went into the back/forward cache, and the bridge closes its port
+  while the page sits there and opens another once it is shown again, where it scheduled a
+  reconnection from the cached page.
+- On a phone, the page keeps a name of code in a table whole, as REQUEST, where it split inside the
+  word, and the demo's wire, opened as a sheet, lies over its scene tabs.
+- beadc retries its work area's `.beadc` parent's creation too when another run removes it as
+  it is made, which Windows answers with ENOENT, where it failed the run.
+- beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it
+  counted another run's copy of its options, and failed on a file that run removed as it read.
+- beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal
+  with EPERM or EBUSY, as it does while another run removes or holds that folder, where it failed
+  the run.
+- The TypeScript side tells the `tx` step of a call made within a notification's callback once
+  its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
+  told it with no id, and the DevTools panel showed that call twice, once never answered.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
 - A gateway mounted behind what reads a request's body, a framework's body parser or a
@@ -142,6 +277,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's router ends a call whose timer its clock cannot arm before its request goes with
   nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
   cancelled a request its peer never saw.
+- The C# MQTT adapter's stop sends no DISCONNECT once MQTTnet failed an UNSUBSCRIBE of its let-go
+  with its link, a packet it cannot decode among what came, as spec 15.29 states and the other
+  sides do: MQTTnet fails what awaits before it says the link disconnected, and in that moment the
+  stop read it connected and sent one.
+- The C# MQTT adapter hands nothing on of a link once its down was told: a PUBLISH MQTTnet
+  dispatched as the link ended could reach the participant after its down, which the TypeScript
+  and Rust sides never hand on; it is dropped, as theirs is.
+- The C# MQTT adapter's stop sends no DISCONNECT once its client's reads ended, a packet MQTTnet
+  cannot decode among them, in its drain as in its let-go (spec 15.29): MQTTnet says its link
+  connected a moment past that end, and a stop that held no filter read it so and sent one.
+
+### Security
+
+- A call whose resolver, or credential's verifier, outlives it — still running once the call was
+  answered or cancelled — keeps a place on its connection until it settles: a request that comes
+  while the calls a connection answers and those outlived number twice `maximumAnsweringCalls`
+  is answered `CAPACITY_EXCEEDED`, and a connection refused so that many times in a row, nothing
+  settling, is closed and the close reported, so a peer that sends a request then its cancel,
+  again and again, no longer runs as many resolvers on a connection as it likes, HTTP/2's Rapid
+  Reset (CVE-2023-44487) at the layer of calls. A received transfer whose resolver outlives its
+  call keeps a place among twice `maximumTransfers`; a resolver whose call ended before its turn
+  is handed nothing; a connection that closes tells every resolver still running on it. Each side
+  gauges `outlivingResolvers`, `largestTrackedCalls` and `outlivingTransfers`; the interop's
+  `slow` takes `heeds` and `answersFirst`; a conversation's step `closed` expects the server's
+  close (spec 8.2, 9.2, 9.10, 10.2, 12.2, 12.3; decision 0033).
 
 ## [0.13.0] - 2026-11-12
 

@@ -104,7 +104,8 @@ jobs:
     name: TypeScript (Node ${{ matrix.node }})
     needs: playwright
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    # the WCAG 2.2 AA sweeps of the page, the demo and the panel take some five minutes of it
+    timeout-minutes: 20
     # the image of the Playwright the side pins, Chromium in it: no browser to install
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
@@ -170,6 +171,23 @@ jobs:
       # build above, in Chromium.
       - if: matrix.node == '26'
         run: $YARN test:demo
+      # The page, the not-found page and every scene of the demo, as beadproto.dev serves them from
+      # out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its own tests, which fail here
+      # rather than skip.
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the check's own tests
+        working-directory: .
+        env:
+          BEAD_A11Y_REQUIRED: '1'
+        run: node --test tools/__tests__/check-a11y.test.mjs
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the page and the demo as served
+        working-directory: .
+        run: >-
+          node --input-type=module -e "(await import('./site/deploy.mjs')).assemble({ day: '1970-01-01' })"
+          && node tools/check-a11y.mjs --serve site/out / '/?lng=fr' /nowhere /playground/
+          '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
+          '/playground/#code' '/playground/#packages'
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
       # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
@@ -1209,7 +1227,10 @@ jobs:
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
       # job. ! The rules are the registry's, fetched at the run: a rule added there may fail a
-      # commit that changed nothing, which is read as a finding, never as a flake.
+      # commit that changed nothing, which is read as a finding, never as a flake. ! The six private
+      # keys of the test PKI are left out by name, each one alone, never their folder: they are
+      # published test keys, and spec/check.py's TEST_PKI_KEYS holds each file to its own key, so a
+      # key added there or changed fails that gate rather than passing this one unseen.
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
@@ -1217,6 +1238,35 @@ jobs:
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
+          --exclude spec/pki/root.key --exclude spec/pki/intermediate.key --exclude spec/pki/client.key
+          --exclude spec/pki/server.key --exclude spec/pki/stranger-client.key
+          --exclude spec/pki/stranger-server.key
+
+  # ── Site ─────────────────────────────────────────────────────────────────────
+  # The page beadproto.dev serves and its not-found page, as committed, laid out in Chromium by
+  # site/layout.mjs: the top bar on one line at every width, in both languages and both themes, no
+  # page wider than a phone, a finger's targets, the code's size, the menu and the theme. The image
+  # of the Playwright the TypeScript side pins holds the Chromium the site's own `playwright-core`,
+  # the same version, drives.
+  site:
+    name: Site
+    needs: playwright
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: $YARN install --immutable
+      - name: The page's layout
+        run: node layout.mjs
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,
@@ -1239,6 +1289,7 @@ jobs:
         protobuf-conformance,
         protovalidate-differential,
         commits,
+        site,
       ]
     runs-on: ubuntu-26.04
     timeout-minutes: 2

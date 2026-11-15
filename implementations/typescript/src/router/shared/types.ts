@@ -183,8 +183,9 @@ export interface IIntakeLimits {
 /** How much a router reads, writes and holds. */
 export interface IRouterLimits {
   /**
-   * The bytes every transfer this router receives holds together, reserved as its credit grants
-   * them, and given back when the transfer ends.
+   * The bytes the transfers this router receives reserve together: each transfer's whole total,
+   * from its admission until its payload is whole or it ends. An opening it cannot hold waits for
+   * it, in the order the openings came, for half of `transferInactivityTimeout` at most.
    */
   bufferedBytesBudget: number;
   /**
@@ -217,7 +218,8 @@ export interface IRouterLimits {
    * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, from 1
    * to 2³¹ − 1, rounded to the nearest whole one, never 0 nor `Infinity`; and how long, at least, a
    * call that received one keeps its call id once it ends — abandoned by the side that answers,
-   * reserved by the requester.
+   * reserved by the requester. Half of it, rounded down to the millisecond, is how long an opening
+   * waits for the budget.
    */
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
@@ -828,6 +830,12 @@ export interface IRouterCorePort<Handle extends string> {
 
   /** What the router did: sent a request, or took the response to one. */
   activity(activity: RouterActivity, connectionHandle: Handle): void;
+  /**
+   * Closes `connectionHandle`, its peer refused past what its resolvers outlive (spec 9.2, step 3),
+   * in a later turn than the refusal that made the run: what it throws or rejects is reported.
+   * Without it, the connection stays open.
+   */
+  close?(connectionHandle: Handle): unknown;
   /**
    * Whether the side holds `callId` for `connectionHandle` beyond what the core waits on — a
    * subscription, say: the core draws none of these, and refuses a request on one.

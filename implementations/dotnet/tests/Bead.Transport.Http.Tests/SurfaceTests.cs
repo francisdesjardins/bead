@@ -54,7 +54,7 @@ public sealed class SurfaceTests
     // (decisions 0006 and 0007), as bead-house holds the Rust side's crates
     private static readonly Dictionary<string, int> WideTuples = new()
     {
-        ["Bead.Core"] = 35,
+        ["Bead.Core"] = 34,
         ["Bead.Protobuf"] = 2,
         ["Bead.Transcoding"] = 14,
         ["Bead.Transcoding.Http"] = 9,

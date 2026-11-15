@@ -202,6 +202,9 @@ impl RouterClientTransport for Recording {
     // a pause holds nothing here: it hands nothing
     fn pause(&self) {}
 
+    // it holds no connection to close
+    fn disconnect(&self) {}
+
     fn resume(&self) {}
 
     fn ready_state(&self) -> ReadyState {

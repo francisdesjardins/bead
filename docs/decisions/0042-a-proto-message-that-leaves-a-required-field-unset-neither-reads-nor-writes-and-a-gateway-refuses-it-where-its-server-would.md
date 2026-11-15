@@ -124,10 +124,10 @@ TypeScript side throws a `SyntaxError` when it reads and a `TypeError` when it w
 codecs do; the C# side a `FormatException` both ways, its codecs' type; the Rust side a
 `CodecRefusal` both ways; the words are 17.2's, `a required field unset`, and the field's full name,
 of the schema and never a key the peer sent, and its path ride in the refusal's cause
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The public walks, the C#
-side's `ProtoRequired.Check` and the Rust side's `check_required`, refuse past 17.9.3's bound with
-the same refusal. The walk is Bead's own on every side, its facts in the one shape per descriptor
-`ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The walks, internal on every
+side, the C# side's `ProtoRequired.Check` and the Rust side's `checked`, refuse past 17.9.3's bound
+with the same refusal. The walk is Bead's own on every side, its facts in the one shape per
+descriptor `ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
 `ProtoSchema`, read once from its pool: each message's required fields, the message fields that
 reach one, and its singular closed enums, each with the numbers its enum declares. Reachability is
 one search over the descriptor's closure, cycles included, with no flag cached mid-search.

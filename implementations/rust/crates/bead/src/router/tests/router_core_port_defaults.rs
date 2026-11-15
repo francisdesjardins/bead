@@ -34,6 +34,9 @@ impl Side for Plain {
         self.reports.push((Arc::clone(handle), error));
     }
 
+    // a plain port has no connection of its own to close
+    fn close(&mut self, _connection_handle: &ConnectionHandle) {}
+
     fn transmit(
         &mut self,
         message: TransportMessage,

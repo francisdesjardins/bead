@@ -1128,6 +1128,87 @@ test.describe('createRelay', () => {
     ]);
   });
 
+  test('passes on to every requester the CAPACITY_EXCEEDED a destination answers once the resolvers one requester’s cancels leave running fill twice its maximumAnsweringCalls on leg B', async () => {
+    const procedure = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 1 };
+    // behind leg B, a destination's own server, whose resolver is deaf to its signal
+    const pipe = createPipedTransports({ connectionHandle: device });
+    using destination = createRouterServer(pipe.server, { limits: { maximumAnsweringCalls: 2 } });
+    using legB = createRouterClient(pipe.client);
+    let handed = 0;
+
+    destination.registerResolver(
+      Object.assign(() => {
+        handed += 1;
+
+        return new Promise<void>(() => {
+          return undefined;
+        });
+      }, procedure)
+    );
+
+    // leg A: two requesters of the relay's, each on its own connection
+    await using server = createMemoryTransportServer();
+    using relaying = createRouterServer(server, {
+      relay: {
+        beforeRoute: () => {
+          return true;
+        },
+      },
+    });
+    await using requesting = createMemoryTransportClient();
+    await using other = createMemoryTransportClient();
+    using requester = createRouterClient(requesting);
+    using another = createRouterClient(other);
+    const ask = (router: typeof requester, signal?: AbortSignal) => {
+      return router.request(Uint8Array.of(1), {
+        options: { destinationId: 7, signal, timeout: 5_000 },
+        procedure,
+      });
+    };
+
+    relaying.registerDestination(legB, { destinationId: 7 });
+    pipe.open();
+    await server.start();
+    await requesting.connect({ server });
+    await other.connect({ server });
+
+    // * one requester sends, then cancels once the destination's resolver was handed it: each
+    // resolver runs on, past its call, on leg B's one connection
+    for (let round = 1; round <= 4; round += 1) {
+      const controller = new AbortController();
+      const asked = ask(requester, controller.signal);
+
+      await expect
+        .poll(() => {
+          return handed;
+        })
+        .toBe(round);
+      controller.abort();
+      await expect(asked).rejects.toBeInstanceOf(CancelError);
+      await expect
+        .poll(() => {
+          return destination.gauges().counts['answeringCalls'];
+        })
+        .toBe(0);
+    }
+
+    // every requester is refused alike, the destination's failure one relay more
+    for (const router of [requester, another]) {
+      await expect(ask(router)).rejects.toMatchObject({
+        code: ProtocolCode.CAPACITY_EXCEEDED,
+        detail: 'the calls a connection answers and those its resolvers outlive are 4 at most',
+        origin: 'relayed',
+        relays: 1,
+      });
+    }
+
+    expect(handed).toBe(4);
+    expect(destination.gauges().counts).toMatchObject({
+      largestTrackedCalls: 4,
+      outlivingResolvers: 4,
+    });
+  });
+
   test('passes on a limit of leg B’s before the hand-off as its own, and tells a request never tried from one lost after', async () => {
     const { answers, relay, reports } = createTestRelay();
     const { control, target } = createTarget();

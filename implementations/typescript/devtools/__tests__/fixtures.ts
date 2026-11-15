@@ -88,6 +88,79 @@ export const serveFolder = async (
   };
 };
 
+/** How a row of the demo's page is checked: its height, and which of its elements stand in it. */
+export interface IRowOptions {
+  /** The height the row keeps, in pixels; unchecked where none is given. */
+  height?: number;
+  /** Its items, by a selector: the row's own children where none is given. */
+  items?: string;
+}
+
+/**
+ * What breaks a row that must hold on one line, in words: a height other than its own, an item off
+ * its middle, so on a line of its own, an item out of its box or clipped, or the row scrolling.
+ */
+export const rowFaultsOf = (
+  page: Page,
+  row: string,
+  options: IRowOptions = {}
+): Promise<string[]> => {
+  return page.evaluate(
+    ({ height, items, row }) => {
+      const element = document.querySelector(row);
+
+      if (element === null) {
+        return [`no ${row}`];
+      }
+
+      const box = element.getBoundingClientRect();
+      const middle = box.top + box.height / 2;
+      const faults: string[] = [];
+
+      if (height !== undefined && Math.abs(box.height - height) > 0.5) {
+        faults.push(`${row} is ${String(box.height)} px tall`);
+      }
+
+      if (element.scrollWidth > element.clientWidth) {
+        faults.push(
+          `${row} scrolls, ${String(element.scrollWidth)} in ${String(element.clientWidth)}`
+        );
+      }
+
+      for (const item of element.querySelectorAll<HTMLElement>(items)) {
+        const at = item.getBoundingClientRect();
+        const { position } = getComputedStyle(item);
+        const name = `${item.tagName.toLowerCase()}${item.id === '' ? '' : `#${item.id}`} "${item.textContent.trim().slice(0, 20)}"`;
+
+        // what is not drawn, or floats over the page below the row, stands in no line of it
+        if (at.width === 0 || position === 'absolute' || position === 'fixed') {
+          continue;
+        }
+
+        if (Math.abs(at.top + at.height / 2 - middle) > 1) {
+          faults.push(`${name} is off the row's middle`);
+        }
+
+        if (
+          at.left < box.left - 0.5 ||
+          at.right > box.right + 0.5 ||
+          at.top < box.top - 0.5 ||
+          at.bottom > box.bottom + 0.5
+        ) {
+          faults.push(`${name} is out of ${row}`);
+        }
+
+        if (item.scrollWidth > item.clientWidth + 1) {
+          faults.push(`${name} is clipped`);
+        }
+      }
+
+      return faults;
+    },
+    { height: options.height, items: options.items ?? `${row} > *`, row }
+  );
+};
+
 /** Chromium with the extension loaded, its background, and its id. */
 export const launchExtension = async (): Promise<{
   context: BrowserContext;

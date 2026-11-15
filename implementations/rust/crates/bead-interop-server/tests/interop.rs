@@ -689,6 +689,10 @@ impl RouterClientTransport for InOrder {
         self.inner.pause();
     }
 
+    fn disconnect(&self) {
+        RouterClientTransport::disconnect(&*self.inner);
+    }
+
     fn resume(&self) {
         self.inner.resume();
     }

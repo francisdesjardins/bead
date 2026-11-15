@@ -151,7 +151,9 @@ its words on every side:
   `the link of {id} had no OPEN and no sessions within {N} ms, its connectTimeout`.
 
 As it is built, after its id, its URL and its TLS, an adapter refuses as a programmer's error, in
-this order: a password beside its provider; either beside a client certificate; neither, over AMQP
+this order: a password beside its provider; either beside a `tls` that names a certificate, a `tls`
+naming authorities alone being taken beside a password
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)); neither, over AMQP
 1.0, whose PLAIN takes a password of one octet at least ([RFC 4616
 §2](https://www.rfc-editor.org/rfc/rfc4616#section-2)) and whose ANONYMOUS is no mechanism of its
 link; and a password that is empty or holds a NUL, which a provider's answer meets at its start, an

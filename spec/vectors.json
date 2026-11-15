@@ -6,7 +6,7 @@
     "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
     "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
     "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
-    "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
+    "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
     "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
@@ -1680,6 +1680,63 @@
           "kind": 21
         }
       }
+    },
+    {
+      "name": "a chunk past chunkBytes reads, held to it within its transfer",
+      "clauses": [
+        "12.2",
+        "12.2.2",
+        "12.6.1"
+      ],
+      "bytes": "A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 2C | 68 69",
+      "chunkBytes": 17,
+      "envelope": {
+        "kind": 20,
+        "header": {
+          "callId": 7,
+          "isLast": false,
+          "kind": 20,
+          "offset": 44
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a notification past chunkBytes reads",
+      "clauses": [
+        "12.2"
+      ],
+      "bytes": "A1 13 00 02  00 00 00 04 | 68 69",
+      "chunkBytes": 9,
+      "envelope": {
+        "kind": 19,
+        "header": {
+          "callId": 4,
+          "kind": 19
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a failure past chunkBytes reads",
+      "clauses": [
+        "12.2"
+      ],
+      "bytes": "A1 12 00 02  00 00 00 05 | 00 13 00 00",
+      "chunkBytes": 11,
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 5,
+          "kind": 18
+        },
+        "failure": {
+          "code": 19,
+          "detail": "",
+          "relays": 0,
+          "scope": 0
+        }
+      }
     }
   ],
   "envelopeRefusals": [
@@ -1750,6 +1807,78 @@
       "bytes": "B0 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
       "maximumEnvelopeBytes": 13,
       "code": 1
+    },
+    {
+      "name": "a request past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a request's opening past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 00 00 01 00 | 68",
+      "chunkBytes": 20,
+      "code": 4,
+      "detail": "a request is 20 bytes at most, not 21"
+    },
+    {
+      "name": "a result past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 11 00 02  00 00 00 04 | 68 69 6A 6B 6C 6D",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a result is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a result's opening past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 11 04 04  00 00 00 04  00 00 00 00 00 00 01 00 | 68",
+      "chunkBytes": 16,
+      "code": 4,
+      "detail": "a result is 16 bytes at most, not 17"
+    },
+    {
+      "name": "a request of a layout to come past chunkBytes, its kind's bound checked before its layout",
+      "clauses": [
+        "5.1",
+        "5.1.2",
+        "12.2"
+      ],
+      "bytes": "A2 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a request past a chunkBytes as large as the envelope's bound names a request",
+      "clauses": [
+        "5.1.2",
+        "12.2"
+      ],
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "maximumEnvelopeBytes": 13,
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
     }
   ],
   "failures": [

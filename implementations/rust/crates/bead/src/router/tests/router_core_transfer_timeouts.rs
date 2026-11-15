@@ -155,10 +155,10 @@ async fn receiving_inactivity() {
             ..limits()
         };
         let (peer, handed) = serving(false, &options).await;
-        peer.receive((opening(1, (Bytes::from(vec![0; 40]), 200)), Arc::from("a")));
+        peer.receive((opening(1, (Bytes::from(vec![0; 44]), 200)), Arc::from("a")));
         let asking = peer.request((Bytes::new(), request_of("a")));
         peer.receive((
-            result_opening(2, (Bytes::from(vec![0; 32]), 200)),
+            result_opening(2, (Bytes::from(vec![0; 28]), 200)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -171,11 +171,11 @@ async fn receiving_inactivity() {
         );
         assert_eq!(error.to_string(), "no answer came in 250 milliseconds");
         peer.receive((
-            chunk(1, (40, Bytes::from(vec![0; 48]), 200)),
+            chunk(1, (44, Bytes::from(vec![0; 48]), 200)),
             Arc::from("a"),
         ));
         peer.receive((
-            chunk(2, (32, Bytes::from(vec![0; 48]), 200)),
+            chunk(2, (28, Bytes::from(vec![0; 48]), 200)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -191,10 +191,10 @@ async fn receiving_inactivity() {
         );
         let sent = peer.sent().await;
         assert!(
-            matches!(&sent[0].1, Envelope::Credit {header} if header.credit_end == 168 && !header.paced)
+            matches!(&sent[0].1, Envelope::Credit {header} if header.credit_end == 172 && !header.paced)
         );
         assert!(
-            matches!(&sent[2].1, Envelope::Credit {header} if header.credit_end == 160 && !header.paced)
+            matches!(&sent[2].1, Envelope::Credit {header} if header.credit_end == 156 && !header.paced)
         );
         assert!(
             matches!(&sent[3].1, Envelope::Failure {header, failure} if header.call_id == 1 && header.credential.is_none() && failure.code == ProtocolCode::TRANSFER_STALLED.get())
@@ -238,7 +238,7 @@ async fn receiving_inactivity() {
         let mut options = request_of("a");
         options.options.timeout = Duration::MAX;
         let asking = client.request((Bytes::from_static(&[1]), options));
-        client.receive((result_opening(1, (bytes.slice(..32), 300)), Arc::from("a")));
+        client.receive((result_opening(1, (bytes.slice(..28), 300)), Arc::from("a")));
         client.settle().await;
         client.clock.advance(Duration::from_millis(2_000)).await;
         let error = completed(asking)
@@ -254,7 +254,7 @@ async fn receiving_inactivity() {
             [(Request, 1), (Credit, 1), (Cancel, 1)]
         );
         assert!(
-            matches!(&client.sent().await[1].1, Envelope::Credit {header} if header.credit_end == 160 && !header.paced)
+            matches!(&client.sent().await[1].1, Envelope::Credit {header} if header.credit_end == 156 && !header.paced)
         );
         quiet(&client).await;
     }

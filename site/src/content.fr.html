@@ -76,7 +76,7 @@
     rien analyser. Une charge n’est bornée que par les limites des deux bouts. Un refus dit
     jusqu’où la requête est allée.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="compare">
       <thead>
         <tr>
@@ -165,7 +165,7 @@
     §4).
   </p>
   {{header}}
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -266,7 +266,9 @@
     <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
     n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> avant d’en lire quoi
-    que ce soit au-delà du préfixe (§9.2).
+    que ce soit au-delà du préfixe (§9.2). Un résolveur qui tourne encore une fois son appel
+    répondu ou annulé garde une place à part jusqu’à ce qu’il se règle, autant encore que la
+    borne : un pair qui annule tout ce qu’il envoie n’empile pas de travail.
   </p>
   <p>
     Une réponse ne part qu’une fois, et seulement tant que son appel est ouvert. Celle qui arrive
@@ -496,7 +498,7 @@
     HTTP nomme le schéma d’une authentification : un pair sait ce que sont les octets sans les
     lire.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="schemes">
       <thead>
         <tr>
@@ -692,7 +694,7 @@
       Rien n’annonce les limites : les deux bouts d’une connexion les règlent pareil, sauf celles
       de la dernière ligne, que chaque côté règle pour lui-même.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -705,12 +707,12 @@
           <tr>
             <td><code>maximumEnvelopeBytes</code></td>
             <td class="code-num">16 778 240</td>
-            <td>Toute enveloppe autre qu’une requête</td>
+            <td>Toute enveloppe autre qu’une requête ou un résultat</td>
           </tr>
           <tr>
             <td><code>chunkBytes</code></td>
             <td class="code-num">1 048 576</td>
-            <td>Un morceau, et une requête, entière ou l’ouverture d’un transfert</td>
+            <td>Une requête ou un résultat, entiers ou l’ouverture d’un transfert, et un morceau dans son transfert</td>
           </tr>
           <tr>
             <td><code>windowBytes</code></td>
@@ -795,7 +797,7 @@
     <figcaption>Un appel relayé, puis un refus à l’ouverture</figcaption>
     {{diagram of="relay"}}
   </figure>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -1172,7 +1174,7 @@
     déploiement pose. De lui-même, Bead refuse seulement d’envoyer un justificatif porteur en clair
     hors de la machine.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -1382,7 +1384,7 @@
       borne donc ce qu’un pair tient de lui, sur le modèle de HTTP/2 et de Kestrel, et chaque borne
       se règle.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -1505,7 +1507,7 @@
     <code>debug</code> : <code>*</code> pour toute suite de caractères, <code>-</code> pour écarter
     un nom. Il y ajoute trois sélecteurs.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>

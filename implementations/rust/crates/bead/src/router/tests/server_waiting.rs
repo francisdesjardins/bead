@@ -413,7 +413,9 @@ async fn waiting_closed_connection() {
     assert_eq!(held(&holding.served).await, []);
     released.cancel();
     holding.served.settle().await;
-    assert_eq!(holding.served.reported(), ["gone first"]);
+    // * its resolver, which outlived its call, was told as its connection closed (spec 9.10): what
+    // it fails with after is its connection's, reported by none
+    assert_eq!(holding.served.reported(), Vec::<String>::new());
     assert_eq!(held(&holding.served).await, []);
     assert_eq!(
         holding

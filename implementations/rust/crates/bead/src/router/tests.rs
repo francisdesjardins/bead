@@ -14,8 +14,8 @@ use crate::RouterRequest;
 use crate::clock::SharedClock;
 use crate::constants::{FailureScope, ProcedureKind, ProtocolCode};
 use crate::envelope::{
-    Credential, Envelope, FailureHeader, FailureRecord, NotificationHeader, RequestHeader,
-    ResultHeader,
+    Credential, Envelope, EnvelopeHeader, FailureHeader, FailureRecord, NotificationHeader,
+    RequestHeader, ResultHeader,
 };
 use crate::errors::CallError;
 use crate::identity::Procedure;
@@ -69,6 +69,7 @@ mod router_core_hooks;
 mod router_core_incoming;
 mod router_core_lifecycle;
 mod router_core_outcomes;
+mod router_core_outliving;
 mod router_core_peer_calls;
 mod router_core_placement;
 mod router_core_port_defaults;
@@ -134,6 +135,27 @@ const PATIENCE: Duration = Duration::from_secs(10);
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+// places a byte of its payload in each opening of a scripted request the port receives, below
+// what its limits let a chunk be, so a test's openings and chunks stay a byte or a few long
+fn place_a_byte_in_each_opening(state: &mut crate::testing::core_port::State) {
+    let opening = EnvelopeHeader::Request(RequestHeader {
+        total: Some(1),
+        ..crate::testing::core_port::scripted_header(1)
+    });
+    let mut limits = state.core.limits;
+    let header_bytes = crate::envelope::header_bytes_of(&opening).expect("a header");
+
+    limits.chunk_bytes = u64::try_from(header_bytes)
+        .expect("a count")
+        .saturating_add(1);
+    state.core.placement = crate::router::parts::Placement::new(state.core.side, limits);
+    assert_eq!(
+        state.core.placement.opening_bytes_of(&opening),
+        1,
+        "an opening carries a byte"
+    );
 }
 
 fn january_first() -> SystemTime {

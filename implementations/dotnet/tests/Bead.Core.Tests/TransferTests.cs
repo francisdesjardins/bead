@@ -8,9 +8,6 @@ public sealed class TransferTests
 {
     // constants
 
-    // as much as a credit could take: the budget, unbounded
-    private const long Unbounded = long.MaxValue;
-
     // a chunk's header, as long as any: the prefix and its offset
     private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });
 
@@ -110,7 +107,7 @@ public sealed class TransferTests
         Assert.Equal(1_048_576, opening.Length);
         Assert.Equal("A1 10 04 05 00 00 00 07 00 02 00 05 00 00 00 00 01 40 00 00", HexadecimalOf(opening.AsSpan(0, 20)));
 
-        var creditEnd = incoming.CreditToGrant(Unbounded) ?? 0;
+        var creditEnd = incoming.CreditToGrant() ?? 0;
 
         Assert.Equal(5_242_860, creditEnd);
         Assert.Equal(
@@ -258,7 +255,7 @@ public sealed class TransferTests
 
         int[] offsets = [19, 9, 24, 4, 14];
 
-        incoming.CreditToGrant(Unbounded);
+        incoming.CreditToGrant();
 
         Assert.Equal(
             [ChunkOutcome.Placed, ChunkOutcome.Placed, ChunkOutcome.Placed, ChunkOutcome.Placed, ChunkOutcome.Complete],
@@ -285,7 +282,7 @@ public sealed class TransferTests
             return CodeOf(incoming.Place(whole.AsMemory(offset, length), (offset + length == 19, offset)));
         }
 
-        incoming.CreditToGrant(Unbounded);
+        incoming.CreditToGrant();
 
         Assert.Equal(
             [
@@ -327,7 +324,7 @@ public sealed class TransferTests
         var whole = PatternOf(16);
         var incoming = IncomingOf(whole.AsMemory(0, 4), (16, 4, 40, 1_024));
 
-        Assert.Equal(16, incoming.CreditToGrant(Unbounded));
+        Assert.Equal(16, incoming.CreditToGrant());
 
         // a byte past full, before the last and as the last: no CHUNK's envelope passes chunkBytes
         var (_, before) = incoming.Place(PatternOf(5), (false, 4));
@@ -356,7 +353,7 @@ public sealed class TransferTests
     {
         var incoming = IncomingOf(PatternOf(1), (20, 1, 40, 3));
 
-        incoming.CreditToGrant(Unbounded);
+        incoming.CreditToGrant();
 
         Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(new byte[] { 1 }, (false, 2))));
         Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(new byte[] { 1 }, (false, 4))));
@@ -368,21 +365,21 @@ public sealed class TransferTests
     {
         var incoming = IncomingOf(PatternOf(4), (22, 2, 8, 1_024));
 
-        Assert.Equal(12, incoming.CreditToGrant(Unbounded));
+        Assert.Equal(12, incoming.CreditToGrant());
 
         // nothing received since: nothing more to grant
-        Assert.Null(incoming.CreditToGrant(Unbounded));
+        Assert.Null(incoming.CreditToGrant());
         Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(2), (false, 4))));
 
         // 6 received: 14 would grant 2 more, less than half a window
-        Assert.Null(incoming.CreditToGrant(Unbounded));
+        Assert.Null(incoming.CreditToGrant());
 
         foreach (var offset in new[] { 6, 8, 10 })
         {
             Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(2), (false, offset))));
         }
 
-        Assert.Equal(20, incoming.CreditToGrant(Unbounded));
+        Assert.Equal(20, incoming.CreditToGrant());
 
         foreach (var offset in new[] { 12, 14, 16, 18 })
         {
@@ -390,29 +387,32 @@ public sealed class TransferTests
         }
 
         // 2 bytes are left, less than half a window: granted all the same
-        Assert.Equal(22, incoming.CreditToGrant(Unbounded));
-        Assert.Null(incoming.CreditToGrant(Unbounded));
+        Assert.Equal(22, incoming.CreditToGrant());
+        Assert.Null(incoming.CreditToGrant());
         Assert.Equal(ChunkOutcome.Complete, CodeOf(incoming.Place(PatternOf(2), (true, 20))));
-    }
-
-    [Fact]
-    public void Grants_no_more_than_the_bytes_it_is_told_are_available()
-    {
-        var incoming = IncomingOf(PatternOf(4), (30, 1, 8, 1_024));
-
-        // 2 bytes available: less than half a window, so nothing
-        Assert.Null(incoming.CreditToGrant(2));
-        Assert.Equal(9, incoming.CreditToGrant(5));
-        Assert.Equal(9, incoming.CreditEnd);
     }
 
     [Fact]
     public void Halves_an_odd_window_exactly_64_bytes_short_of_half_of_129_and_65_not()
     {
-        var incoming = IncomingOf(PatternOf(1), (1_000, 1, 129, 1_024));
+        var payload = PatternOf(1_000);
+        var incoming = IncomingOf(payload.AsMemory(0, 1), (1_000, 1, 129, 1_024));
 
-        Assert.Null(incoming.CreditToGrant(64));
-        Assert.Equal(66, incoming.CreditToGrant(65));
+        void PlaceTo(long end)
+        {
+            for (var offset = incoming.Contiguous; offset < end; offset += 1)
+            {
+                incoming.Place(payload.AsMemory((int)offset, 1), (false, offset));
+            }
+        }
+
+        Assert.Equal(130, incoming.CreditToGrant());
+
+        // 64 bytes received past the last credit's base: its end moves 64 bytes, short of half
+        PlaceTo(65);
+        Assert.Null(incoming.CreditToGrant());
+        PlaceTo(66);
+        Assert.Equal(195, incoming.CreditToGrant());
     }
 
     [Fact]
@@ -430,7 +430,7 @@ public sealed class TransferTests
 
         while (true)
         {
-            if (incoming.CreditToGrant(Unbounded) is { } granted)
+            if (incoming.CreditToGrant() is { } granted)
             {
                 credits += 1;
                 outgoing.Grant(granted);

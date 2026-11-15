@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bead: not found</title>
+    <meta name="description" content="No page of Bead's at this address." />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the system half of the design system.
+ *
+ * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
+ * point: consumers import this file unchanged and write their own skin beside it. Anything that
+ * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
+ * split has failed and the file has stopped being portable — `yarn check` refuses it.
+ *
+ * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
+ * saying why it is off-scale — a measured geometry, a UA constant.
+ */
+
+:root {
+  /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-space-8: 32px;
+  --app-space-10: 40px;
+  --app-space-12: 48px;
+  --app-space-14: 56px;
+
+  /* ── Type ramp ───────────────────────────────────────────────────────────────────────
+     A ~1.22 ratio off a 15px body: 11 · 13 · 15 · 18 · 22 · 28 · 36 · 46. Body is `-md`, and it
+     is 15px on purpose — larger than the 14px a component library spends its interface on,
+     smaller than a marketing 16px. This is a documentation app; 15 is the reading size. */
+  --app-text-xs: 0.6875rem;
+  --app-text-sm: 0.8125rem;
+  --app-text-md: 0.9375rem;
+  --app-text-base: 1.125rem;
+  --app-text-lg: 1.375rem;
+  --app-text-xl: 1.75rem;
+  --app-text-2xl: 2.25rem;
+  --app-text-3xl: 2.875rem;
+
+  /* Line heights are tokens too, so a new surface stops inventing a decimal. */
+  --app-lh-tight: 1.15;
+  --app-lh-snug: 1.35;
+  --app-lh-body: 1.6;
+  --app-lh-relaxed: 1.7;
+
+  /* Tracking. Display sizes tighten; the mono eyebrow is the one thing that opens up. */
+  --app-tracking-tight: -0.022em;
+  --app-tracking-snug: -0.01em;
+  --app-tracking-label: 0.14em;
+
+  /* ── Radii ───────────────────────────────────────────────────────────────────────── */
+  --app-radius-sm: 3px;
+  --app-radius: 6px;
+  --app-radius-md: 8px;
+  --app-radius-lg: 12px;
+  --app-radius-xl: 16px;
+  --app-radius-pill: 999px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────────────────────
+     The default curve front-loads the movement and settles hard, rather than easing
+     symmetrically in and out. Per element the difference is small; across a page it is what
+     stops the app feeling like it was assembled from a component library. */
+  --app-quick: 110ms;
+  --app-duration: 200ms;
+  --app-slow: 340ms;
+  --app-ease: cubic-bezier(0.2, 0, 0, 1);
+  --app-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ── Layout ──────────────────────────────────────────────────────────────────────────
+     Breakpoints cannot be custom properties (media queries resolve before the cascade), so the
+     two the app uses stay a convention: 600px (sm) and 900px (md), stated here and nowhere
+     re-invented. */
+  --app-topbar-height: 56px;
+  --app-sidebar-width: 248px;
+  --app-content-max-width: 1400px;
+  --app-measure: 68ch;
+  --app-icon-sm: 20px;
+
+  /* ── Stacking ────────────────────────────────────────────────────────────────────────
+     Small numbers, deliberately. The dialog manager assigns 1300+ and a dialog `<dialog>` paints
+     in the top layer where no `z-index` reaches it at all, so the shell only ever has to order
+     itself against itself. */
+  /* The mascot sits below the backdrop, not beside the sidebar. It is fixed, clickable and drifts
+     across the viewport, so a tie with the drawer is not decided by the scale at all — it is
+     decided by document order, and the shells render the mascot last. What that costs is the tap:
+     the drawer's backdrop is `pointer-events: auto` so a tap outside closes it, and a mascot above
+     the backdrop eats that tap while the drawer stays open. Under it, the same tap closes the
+     drawer and the open drawer dims the mascot along with the page. */
+  --app-z-mascot: 10;
+  --app-z-backdrop: 20;
+  --app-z-sidebar: 30;
+  --app-z-topbar: 40;
+
+  --app-scrollbar-width: 10px;
+}
+
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
+ *
+ * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
+ * nothing that says which product is being painted. What it carries is the part every project needs
+ * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
+ * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
+ * lift that stands in for elevation.
+ *
+ * Import it after `tokens.system.css` and write the brand over it:
+ *
+ * ```css
+ * @import 'penumbra/tokens.system.css';
+ * @import 'penumbra/tokens.skin.base.css';
+ * @import './tokens.skin.css';       // yours: a typeface, and eight colours
+ * ```
+ *
+ * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
+ * names a project paints itself with, and refuses any token the system half already declares. The
+ * complementary rule guards the system file, which refuses colour.
+ *
+ * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
+ * reads as chosen, where an alpha ladder reads as whatever is behind it.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────────── */
+  --app-bg: #f4f6fa;
+  --app-paper: #ffffff;
+
+  /* The mark's own body and its edge — a shape drawn in ink rather than in the brand. */
+  --app-body: #1e293b;
+  --app-body-edge: #475569;
+
+  /* ── Text, in three ranks ─────────────────────────────────────────────────── */
+  --app-text: #0b1120;
+  --app-text-secondary: #4a5568;
+  /* Tertiary is spent on *text* — counts, hints, placeholders — so it clears 4.5:1 rather than
+     sitting at the inactive-control tone a component library would give it. */
+  --app-text-tertiary: #5f6b7e;
+
+  /* ── Edges ────────────────────────────────────────────────────────────────── */
+  --app-divider: rgb(15 23 42 / 0.1);
+  /* A control's edge says where the control is, so WCAG 1.4.11 asks 3:1 of it. The divider above is
+     a layout hairline and owes nothing. */
+  --app-control-border: #6b788c;
+
+  /* ── States ───────────────────────────────────────────────────────────────── */
+  --app-hover: rgb(15 23 42 / 0.05);
+  --app-selected: rgb(15 23 42 / 0.09);
+
+  /* ── The four semantics ───────────────────────────────────────────────────── */
+  --app-error: #b91c1c;
+  --app-error-ink: #ffffff;
+  --app-error-hover: #991b1b;
+
+  --app-ok: #047857;
+  --app-ok-wash: rgb(4 120 87 / 0.1);
+  --app-info: #0369a1;
+  --app-info-wash: rgb(3 105 161 / 0.1);
+  --app-warn: #92400e;
+  --app-warn-wash: rgb(146 64 14 / 0.1);
+
+  /* ── Furniture ────────────────────────────────────────────────────────────── */
+  /* Black in both schemes on purpose: a scrim is an absence of light rather than a colour, and
+     tinting it slate makes it read as a surface. */
+  --app-scrim: rgb(0 0 0 / 0.5);
+  --app-scrollbar-thumb: rgb(15 23 42 / 0.16);
+  --app-scrollbar-track: transparent;
+
+  /* Edges, not elevation: one hairline and one soft shadow instead of a three-layer stack imitating
+     paper height. A brand's own glow goes in the skin over this. */
+  --app-lift: 0 1px 1px rgb(15 23 42 / 0.05), 0 18px 44px -30px rgb(15 23 42 / 0.45);
+}
+
+/* Slate dusk, not black: a saturated accent on #000 is a hazard label, on slate it is light. */
+:root[data-color-scheme='dark'] {
+  --app-bg: #0b1120;
+  --app-paper: #111a2b;
+
+  --app-body: #0b1120;
+  --app-body-edge: #334155;
+
+  --app-text: #eef2f8;
+  --app-text-secondary: #a3b0c4;
+  --app-text-tertiary: #8494ab;
+
+  --app-divider: rgb(148 163 184 / 0.16);
+  --app-control-border: #7d8ba1;
+
+  --app-hover: rgb(238 242 248 / 0.07);
+  --app-selected: rgb(238 242 248 / 0.12);
+
+  /* The bright red cannot carry white, so it takes a dark ink — the same fill/ink split a brand's
+     primary makes. */
+  --app-error: #f87171;
+  --app-error-ink: #0b1120;
+  --app-error-hover: #fca5a5;
+
+  --app-ok: #34d399;
+  --app-ok-wash: rgb(52 211 153 / 0.14);
+  --app-info: #38bdf8;
+  --app-info-wash: rgb(56 189 248 / 0.14);
+  --app-warn: #fbbf24;
+  --app-warn-wash: rgb(251 191 36 / 0.14);
+
+  --app-scrim: rgb(0 0 0 / 0.62);
+  --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+
+  --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+}
+
+/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
+   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
+   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
+   skin. */
+
+:root {
+  /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
+  --app-touch: 44px;
+  /* a block of code, on the page and the demo alike; code inline in prose is 0.875em of its text */
+  --app-text-code: var(--app-text-sm);
+}
+
+/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+   its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
+   on, and the colours of code. The page, the demo and the not-found page take this one copy; the
+   DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
+   answers to `data-color-scheme`, or to the system where no script set it. */
+
+/* the faces, at `/fonts/`, where beadproto.dev serves the page's: the demo's launcher and its
+   static build serve the same files there */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/geist.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/newsreader.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light;
+  --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --app-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --app-font-mono:
+    'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  --app-primary: #c13584;
+  --app-primary-ink: #ffffff;
+  --app-primary-hover: #9d2a6b;
+  --app-accent: #c13584;
+  --app-flame: #c13584;
+  --app-flame-wash: rgb(193 53 132 / 0.1);
+  --app-ring: #ff69b4;
+  --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
+
+  --app-bg: #f5f2f8;
+  --app-paper: #fdfcfe;
+  --app-text: #17111d;
+  --app-text-secondary: #4a4055;
+  --app-text-tertiary: #6d6278;
+  --app-divider: rgb(23 17 29 / 0.12);
+
+  /* the ground of what is code, an inset in a card; and a refusal's wash */
+  --raised: #f1ecf5;
+  --bad-soft: rgb(185 28 28 / 0.1);
+
+  /* what went well, in the green of code's strings, at 4.5:1 on its own wash over the page */
+  --app-ok: #04694c;
+  --app-ok-wash: rgb(4 105 76 / 0.1);
+
+  /* code's colours, a token's kind each, at 4.5:1 or more on a card and on an inset */
+  --tok-comment: #625770;
+  --tok-keyword: #a62b70;
+  --tok-string: #04694c;
+  --tok-number: #035f91;
+}
+
+/* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+:root[data-color-scheme='dark'] {
+  color-scheme: dark;
+  --app-primary: #ff8bc4;
+  --app-primary-ink: #3d0b28;
+  --app-primary-hover: #ffaed5;
+  --app-accent: #ff8bc4;
+  --app-flame: #ff8bc4;
+  --app-flame-wash: rgb(255 139 196 / 0.14);
+  --app-ring: #ffaed5;
+  --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+  --app-bg: #0c0910;
+  --app-paper: #15111c;
+  --app-text: #f2ecf5;
+  --app-text-secondary: #b2a7bf;
+  --app-text-tertiary: #8d8199;
+  --app-divider: rgb(242 236 245 / 0.14);
+
+  --raised: #1c1625;
+  --bad-soft: rgb(248 113 113 / 0.12);
+
+  --tok-comment: #9d91a9;
+  --tok-keyword: #ff8bc4;
+  --tok-string: #34d399;
+  --tok-number: #38bdf8;
+}
+
+/* the system's dark, where no script chose: the not-found page runs none */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme]) {
+    color-scheme: dark;
+    --app-primary: #ff8bc4;
+    --app-primary-ink: #3d0b28;
+    --app-primary-hover: #ffaed5;
+    --app-accent: #ff8bc4;
+    --app-flame: #ff8bc4;
+    --app-flame-wash: rgb(255 139 196 / 0.14);
+    --app-ring: #ffaed5;
+    --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
+
+    --app-bg: #0c0910;
+    --app-paper: #15111c;
+    --app-text: #f2ecf5;
+    --app-text-secondary: #b2a7bf;
+    --app-text-tertiary: #8d8199;
+    --app-divider: rgb(242 236 245 / 0.14);
+
+    --raised: #1c1625;
+    --bad-soft: rgb(248 113 113 / 0.12);
+
+    --tok-comment: #9d91a9;
+    --tok-keyword: #ff8bc4;
+    --tok-string: #34d399;
+    --tok-number: #38bdf8;
+
+    /* ! base's dark values, which base keys on the attribute alone: each as its dark block has it,
+       which the DevTools panel's tests hold */
+    --app-body: #0b1120;
+    --app-body-edge: #334155;
+    --app-control-border: #7d8ba1;
+    --app-hover: rgb(238 242 248 / 0.07);
+    --app-selected: rgb(238 242 248 / 0.12);
+    --app-error: #f87171;
+    --app-error-ink: #0b1120;
+    --app-error-hover: #fca5a5;
+    --app-ok: #34d399;
+    --app-ok-wash: rgb(52 211 153 / 0.14);
+    --app-info: #38bdf8;
+    --app-info-wash: rgb(56 189 248 / 0.14);
+    --app-warn: #fbbf24;
+    --app-warn-wash: rgb(251 191 36 / 0.14);
+    --app-scrim: rgb(0 0 0 / 0.62);
+    --app-scrollbar-thumb: rgb(238 242 248 / 0.14);
+    --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
+  }
+}
+
+/* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
+   the name, a link to the page, a context word where there is one, and a row of tools at the right,
+   each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
+   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
+   demo links it. */
+
+:root {
+  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  --frame-gutter: max(var(--app-space-4), 3vw);
+}
+
+html {
+  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
+}
+
+body {
+  padding-top: var(--app-topbar-height);
+}
+
+.topbar,
+.topbar * {
+  box-sizing: border-box;
+}
+
+/* ! a height, never a least one: a bar that grows on a narrow screen covers what follows it */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--app-z-topbar);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--app-space-3);
+  height: var(--app-topbar-height);
+  /* its ends on the frame's edges */
+  padding-inline: max(
+    var(--frame-gutter),
+    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+  );
+  background: var(--app-paper);
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-2);
+  min-width: var(--app-touch);
+  min-height: var(--app-touch);
+  color: var(--app-text);
+  font-family: var(--app-font-mono);
+  font-weight: 500;
+  font-size: var(--app-text-md);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand:hover {
+  color: var(--app-text);
+}
+
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the accent */
+.mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
+}
+
+/* what part of Bead this is, after its name */
+.context {
+  flex: none;
+  color: var(--app-text-tertiary);
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+}
+
+.tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-1);
+  margin-inline-start: auto;
+}
+
+/* * a finger's square at least; the pill it shows is 40 px, inside a transparent edge of 2 px */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--app-touch);
+  height: var(--app-touch);
+  min-height: var(--app-touch);
+  margin: 0;
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
+}
+
+.tool:hover {
+  border-color: transparent;
+  background-color: var(--app-hover);
+  color: var(--app-text);
+}
+
+/* a tool drawn as a glyph: the theme, the page's menu */
+.tool[data-action='theme'],
+.tool[data-action='menu'] {
+  width: var(--app-touch);
+  padding: 0;
+  font-size: 1.25rem;
+}
+
+/* under 360 px, the bar keeps the mark and leaves the name to the heading under it */
+@media (max-width: 359px) {
+  .brand {
+    font-size: 0;
+  }
+
+  .context {
+    display: none;
+  }
+
+  .topbar {
+    gap: var(--app-space-2);
+    padding-inline: var(--app-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool {
+    transition: none;
+  }
+}
+
+      /* its scheme the system's, since it runs no script; under the bar, its two messages centred */
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-content: center;
+        gap: 2.5rem;
+        padding: calc(var(--app-topbar-height) + 2rem) 1rem 2rem;
+        box-sizing: border-box;
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: 1rem/1.6 var(--app-font-body);
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font: 600 1.75rem/1.2 var(--app-font-display);
+      }
+      p {
+        margin: 0;
+        color: var(--app-text-secondary);
+      }
+      a {
+        color: var(--app-accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" title="Bead’s page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+    </header>
+    <section>
+      <h1>Not found</h1>
+      <p>No page of Bead’s is at this address. <a href="/?lng=en" hreflang="en">Bead’s page</a></p>
+    </section>
+    <section lang="fr-CA">
+      <h1>Page introuvable</h1>
+      <p>Aucune page de Bead n’est à cette adresse. <a href="/?lng=fr" hreflang="fr">La page de Bead</a></p>
+    </section>
+  </body>
+</html>

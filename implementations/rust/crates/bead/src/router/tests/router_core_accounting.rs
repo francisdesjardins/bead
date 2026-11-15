@@ -55,11 +55,12 @@ async fn count_what_its_pieces_hold_together_and_nothing_once_its_connections_we
                 assert_eq!(
                     gauges.ceilings,
                     BTreeMap::from([
+                        ("largestAnsweringCalls", 64),
+                        ("largestTrackedCalls", 128),
                         (
-                            "bufferedBytes",
+                            "reservedBytes",
                             crate::router::types::LIMIT_DEFAULTS.buffered_bytes_budget
                         ),
-                        ("largestAnsweringCalls", 64),
                     ])
                 );
                 assert_eq!(
@@ -74,10 +75,15 @@ async fn count_what_its_pieces_hold_together_and_nothing_once_its_connections_we
                         ("answeringCalls", 1),
                         ("bufferedBytes", 0),
                         ("largestAnsweringCalls", 1),
+                        ("largestTrackedCalls", 1),
+                        ("outlivingResolvers", 0),
+                        ("outlivingTransfers", 0),
                         ("pendingCalls", 1),
                         ("receivingTransfers", 0),
+                        ("reservedBytes", 0),
                         ("reservedCallIds", 0),
                         ("sendingTransfers", 0),
+                        ("waitingTransfers", 0),
                     ])
                 );
                 router_core::reject_pending(state, ("all gone", None));

@@ -408,12 +408,19 @@ test.describe('a WebSocket server and client, carrying transfers', () => {
         credited.add(header.callId);
       }
     });
-    // taken whole, then held: its place on the connection stays until its call ends
-    server.services.getRequestResolver(held, { serializer: bytes })(() => {
+    // taken whole, then held: its place on the connection stays until its call ends, with its
+    // connection, which its resolver hears and settles at, so nothing outlives the test
+    server.services.getRequestResolver(held, { serializer: bytes })(({ signal }) => {
       holding.resolve(undefined);
 
-      return new Promise(() => {
-        return undefined;
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            resolve(undefined);
+          },
+          { once: true }
+        );
       });
     });
     server.services.getRequestResolver(refusing, {

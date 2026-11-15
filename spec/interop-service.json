@@ -30,8 +30,8 @@
     },
     {
       "procedureName": "slow",
-      "request": "{\"milliseconds\":n}",
-      "answers": "n, once n milliseconds passed; cancelled first, it counts one cancellation for its connection, then answers n all the same, an answer that must not go out"
+      "request": "{\"milliseconds\":n}, with optionally \"heeds\":false and \"answersFirst\":true among its members; any other member ignored",
+      "answers": "n, once n milliseconds passed; cancelled first, it counts one cancellation for its connection, then answers n all the same, an answer that must not go out. With heeds false it hears no cancel: it answers n once n milliseconds passed on its server's clock, whatever its signal, and counts no cancellation. With answersFirst true it answers n at once, then waits n milliseconds on its server's clock before it settles, ending its wait on its signal unless heeds is false"
     },
     {
       "procedureName": "cancellations",

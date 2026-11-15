@@ -18,6 +18,10 @@ public sealed partial class RouterClientTests
 
     private static readonly SessionToken Token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
 
+    // chunks of 64 bytes, in a window of 128: a result's opening carries 28 bytes, and a chunk 48
+    private static readonly RouterLimits SmallChunks = RouterLimits.Default with { ChunkBytes = 64, WindowBytes = 128 };
+
+
     // another session's, as a server opens one anew
     private static readonly SessionToken OtherToken = SessionToken.Parse("AgICAgICAgICAgICAgICAg");
 
@@ -524,22 +528,69 @@ public sealed partial class RouterClientTests
     [Fact]
     public async Task Learns_the_session_from_a_result_s_opening_before_the_rest_of_its_transfer_comes()
     {
-        using var scripted = new ScriptedRouter();
+        // chunks of 64 bytes: a result's opening carries 28, and a chunk 48
+        using var scripted = new ScriptedRouter(SmallChunks);
         var (router, transport) = (scripted.Router, scripted.Transport);
 
         var asking = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
 
         await scripted.Settle();
-        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Token, Total = 100 }, Payload = new byte[16] });
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Token, Total = 76 }, Payload = new byte[28] });
         await scripted.Settle();
 
         // * learned from the opening, its transfer still under way
         Assert.Equal(Token, router.SessionToken);
         Assert.False(asking.IsCompleted);
 
-        transport.Deliver(new Envelope { Header = new ChunkHeader { CallId = 1, Offset = 16, IsLast = true }, Payload = new byte[84] });
+        transport.Deliver(new Envelope { Header = new ChunkHeader { CallId = 1, Offset = 28, IsLast = true }, Payload = new byte[48] });
 
-        Assert.Equal(new byte[100], (await asking.WaitAsync(Patience, Cancelled)).Payload.ToArray());
+        Assert.Equal(new byte[76], (await asking.WaitAsync(Patience, Cancelled)).Payload.ToArray());
+    }
+
+    // spec 12.1, 12.3
+    [Fact]
+    public async Task Takes_a_result_s_opening_that_carries_an_announcement_OPAQUE_or_NONE_counted_as_its_sender_placed_it()
+    {
+        using var scripted = new ScriptedRouter(SmallChunks);
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var payload = Enumerable.Range(0, 76).Select((index) => { return (byte)index; }).ToArray();
+
+        // its sender places 28 bytes in it, and attaches what it announces as it goes: an OPAQUE
+        // fills its 64 bytes, a NONE falls short by 16, and none by 20
+        foreach (var (callId, credential) in new (uint, Credential?)[] { (1, Credential.Opaque(Token)), (3, Credential.None), (5, null) })
+        {
+            var asking = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+            await scripted.Settle();
+            transport.Deliver(new Envelope { Header = new ResultHeader { CallId = callId, Credential = credential, Total = 76 }, Payload = payload.AsMemory(0, 28) });
+            transport.Deliver(new Envelope { Header = new ChunkHeader { CallId = callId, Offset = 28, IsLast = true }, Payload = payload.AsMemory(28) });
+            Assert.Equal(payload, (await asking.WaitAsync(Patience, Cancelled)).Payload.ToArray());
+        }
+
+        // one that fills its envelope without an announcement carries 20 bytes more than its sender
+        // places
+        var filled = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 7, Total = 76 }, Payload = payload.AsMemory(0, 48) });
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return filled.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.ChunkInvalid, "an opening carries 28 bytes of its payload, not 48", FailureOrigin.Local, (EnvelopeKind?)EnvelopeKind.Result),
+            (refused.Code, refused.Detail, refused.Origin, refused.Header?.Kind));
+        Assert.Equal(
+            [1u, 3u, 5u],
+            transport.Envelopes.Where((envelope) =>
+            {
+                return envelope.Header is CreditHeader;
+            }).Select((envelope) =>
+            {
+                return envelope.Header.CallId;
+            }));
     }
 
     [Fact]
@@ -1588,6 +1639,9 @@ public sealed partial class RouterClientTests
             return stopped.Task;
         }));
         transport.Deliver(new Envelope { Header = RequestHeaderOf(30), Payload = new byte[] { 3 } });
+
+        // its resolver handed it in a later turn, before its cancel comes
+        await scripted.Settle();
         transport.Deliver(new Envelope { Header = new CancelHeader { CallId = 30 } });
         await scripted.Settle();
         Assert.Equal([30u], cancelled);
@@ -1625,6 +1679,53 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         Assert.Equal(3, held.Count);
         Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
+    public async Task Closes_a_connection_that_it_refused_twice_maximumAnsweringCalls_requests_in_a_row_past_the_resolvers_that_outlive_its_calls_nothing_settling_between_and_reports_it()
+    {
+        using var scripted = new ScriptedRouter(RouterLimits.Default with { MaximumAnsweringCalls = 1 });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        // what its disconnect throws is reported
+        transport.DisconnectFailure = new IOException("the transport would not disconnect");
+        router.RegisterResolver(new ScriptedResolver(Service, (_) =>
+        {
+            // deaf to its signal, it never settles
+            return new TaskCompletionSource().Task;
+        }));
+
+        // one whose resolver outlives its cancel, one open beside it: twice the bound
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(30) });
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = new CancelHeader { CallId = 30 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(32) });
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(34) });
+        await scripted.Settle();
+        Assert.Equal(0, transport.Disconnects);
+        Assert.Empty(scripted.Errors);
+
+        // * the second refusal in a row: reported, then its transport disconnected in a later turn
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(36) });
+        await scripted.Settle();
+        Assert.Equal(
+            [
+                (34u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"),
+                (36u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"),
+            ],
+            transport.Envelopes.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code, envelope.Failure.Detail);
+            }));
+        Assert.Equal(2, scripted.Errors.Count);
+        var closing = Assert.IsType<FailureException>(scripted.Errors[0]);
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed"),
+            (closing.Code, closing.Detail));
+        Assert.Equal("the transport would not disconnect", Assert.IsType<IOException>(scripted.Errors[1]).Message);
+        Assert.Equal(1, transport.Disconnects);
     }
 
     [Fact]
@@ -1931,6 +2032,66 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
 
         Assert.Equal(["first news"], heard);
+        Assert.Empty(scripted.Errors);
+    }
+
+    // debugging 4.4; spec 9.0
+    [Fact]
+    public async Task A_request_made_inside_a_notification_callback_names_its_call_id_on_its_tx_step()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var notification = services.GetNotification(Service, new NotificationDependencies<string, string, string> { Serializer = Text });
+        var asking = services.GetRequest(Service, new RequestDependencies<string, string> { Serializer = Text });
+        var steps = new List<(DebugDirection Direction, uint? CallId)>();
+        var requests = new List<uint>();
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reading = new TaskCompletionSource<Task<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        services.Debug += (_, step) =>
+        {
+            if (step.Type == DebugType.Request && (Equals(step.Tx, "read") || Equals(step.Rx, "counter at 1")))
+            {
+                lock (steps)
+                {
+                    steps.Add((step.Direction, step.CallId));
+                }
+            }
+        };
+        router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader { CallId: var callId })
+            {
+                lock (requests)
+                {
+                    requests.Add(callId);
+                }
+
+                (callId == 1 ? subscribed : requested).TrySetResult();
+            }
+        };
+
+        var registering = notification.Register("subscribe", (_) =>
+        {
+            // * made from within the notification's callback
+            reading.TrySetResult(asking("read")());
+
+            return Task.CompletedTask;
+        })();
+
+        await subscribed.Task.WaitAsync(Patience, Cancelled);
+        transport.Deliver(ResultOf(1));
+        await using var registration = await registering.WaitAsync(Patience, Cancelled);
+        transport.Deliver(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = Text.Encode("changed") });
+        await requested.Task.WaitAsync(Patience, Cancelled);
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 3 }, Payload = Text.Encode("counter at 1") });
+
+        Assert.Equal("counter at 1", await (await reading.Task.WaitAsync(Patience, Cancelled)).WaitAsync(Patience, Cancelled));
+        await scripted.Settle();
+        Assert.Equal([1u, 3u], requests);
+        Assert.Equal<(DebugDirection, uint?)>([(DebugDirection.Tx, 3), (DebugDirection.Rx, 3)], steps);
         Assert.Empty(scripted.Errors);
     }
 
@@ -2262,6 +2423,12 @@ public sealed partial class RouterClientTests
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
 
+        // how many times its router closed its connection
+        public int Disconnects { get; private set; }
+
+        // what its close throws with, once set
+        public Exception? DisconnectFailure { get; set; }
+
         // its state: a send in any but Open refused before it is recorded, by the refusal every
         // client transport gives (debugging 9.7)
         public ReadyState ReadyState { get; set; } = ReadyState.Open;
@@ -2402,6 +2569,18 @@ public sealed partial class RouterClientTests
                     }
                 });
             }
+        }
+
+        public Task CloseConnection(TransportClientDisconnectOptions? options = null)
+        {
+            Disconnects += 1;
+
+            if (DisconnectFailure is not null)
+            {
+                throw DisconnectFailure;
+            }
+
+            return Task.CompletedTask;
         }
 
         public void Deliver(byte[] bytes)

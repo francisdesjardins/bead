@@ -227,9 +227,13 @@ export const createServiceRequester = <Handle extends string>(
           subscribes: subscribes?.(),
         });
 
-        // ! told as `request` returns, before the await, on every path: with the id its router
-        // drew, or none for a call refused first; a listener never runs in its router's turn
+        // ! told once its router drew its id, or settled the call with none, before its answer
+        // (debugging 4.4): one made within a telling has its id drawn a turn later (spec 9.0)
         if (traced !== undefined) {
+          if (traced.callId === undefined) {
+            await traced.whenDrawn(requested);
+          }
+
           trace(procedure, { ...traced.step, callId: traced.callId, direction: 'tx' });
         }
 

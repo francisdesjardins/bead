@@ -69,6 +69,8 @@ export interface IStep {
   /** Beside an open, false for a connection whose transport carries no credential. */
   carries?: false;
   close?: true;
+  /** The server under test closing the connection the step names, or the only one, of its own accord. */
+  closed?: true;
   /**
    * An exit's: the line of every series that moved since the case began or the last counted, as
    * the registry's exposition writes it, in its order.
@@ -159,6 +161,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
   'carried',
   'carries',
   'close',
+  'closed',
   'counted',
   'expect',
   'on',
@@ -206,6 +209,8 @@ const createScriptedConnections = (namesProcedures: boolean) => {
   const inTheClear = new Set<TransportServerConnectionHandle>();
   const taken = new Map<TransportServerConnectionHandle, IProceduresTaken>();
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
+  // the connections the server closed of its own accord
+  const closedByServer = new Set<TransportServerConnectionHandle>();
   // the handle of the connection `name` opened last, its ordinal how many it opened: the first
   // named on the port 50001, the next on 50002
   const handleOf = (name: string): TransportServerConnectionHandle => {
@@ -236,8 +241,20 @@ const createScriptedConnections = (namesProcedures: boolean) => {
     carriesCredential: (connectionHandle) => {
       return !carryingNone.has(connectionHandle);
     },
-    close: () => {
-      return Promise.resolve(false);
+    // * a connection the server closes of its own accord is told closed in a later turn, as every
+    // transport tells it
+    close: (connectionHandle) => {
+      if (!opened.has(connectionHandle)) {
+        return Promise.resolve(false);
+      }
+
+      opened.delete(connectionHandle);
+      closedByServer.add(connectionHandle);
+      queueMicrotask(() => {
+        emitter.emit('close', false, connectionHandle);
+      });
+
+      return Promise.resolve(true);
     },
     isSecure: (connectionHandle) => {
       return !inTheClear.has(connectionHandle);
@@ -283,6 +300,10 @@ const createScriptedConnections = (namesProcedures: boolean) => {
       }
 
       opened.clear();
+    },
+    /** Whether the server closed the connection `name` of its own accord. */
+    closedByServer: (name: string): boolean => {
+      return closedByServer.has(handleOf(name));
     },
     /** How many envelopes were sent and are not taken yet, on every connection. */
     count: (): number => {
@@ -375,6 +396,9 @@ const createMemoryConnections = (
   // the handle the server drew for each name's connection, the one it opened last
   const handles = new Map<string, TransportServerConnectionHandle>();
   const heard = new Map<string, ISent[]>();
+  // the names whose connection closed while the test did not close it: the server did
+  const closedByServer = new Set<string>();
+  const closing = new Set<string>();
   const queueOf = (name: string): ISent[] => {
     const queue = heard.get(name) ?? [];
 
@@ -395,13 +419,21 @@ const createMemoryConnections = (
   return {
     // unclean, as the scripted connections close
     close: async (name: string): Promise<void> => {
+      closing.add(name);
       await clientOf(name).disconnect({ isClean: false });
     },
     /** Closes every connection still open. */
     closeAll: async (): Promise<void> => {
+      for (const name of clients.keys()) {
+        closing.add(name);
+      }
+
       for (const client of clients.values()) {
         await client[Symbol.asyncDispose]();
       }
+    },
+    closedByServer: (name: string): boolean => {
+      return closedByServer.has(name);
     },
     count: (): number => {
       return [...heard.values()].reduce((total, queue) => {
@@ -430,7 +462,14 @@ const createMemoryConnections = (
         client.on('message', ({ credential, data }) => {
           queueOf(name).push({ bytes: bytesOf(data), credential });
         });
+        client.on('close', () => {
+          if (!closing.delete(name)) {
+            closedByServer.add(name);
+          }
+        });
       }
+
+      closedByServer.delete(name);
 
       ports.set(name, port);
       clients.set(name, client);
@@ -482,6 +521,9 @@ const createBrokerConnections = (
   const clients = new Map<string, BrokerTransportClient>();
   const handles = new Map<string, TransportServerConnectionHandle>();
   const heard = new Map<string, ISent[]>();
+  // the names whose connection closed while the test did not close it: the server did
+  const closedByServer = new Set<string>();
+  const closing = new Set<string>();
   const queueOf = (name: string): ISent[] => {
     const queue = heard.get(name) ?? [];
 
@@ -506,9 +548,14 @@ const createBrokerConnections = (
   return {
     // unclean, as the scripted connections close
     close: async (name: string): Promise<void> => {
+      closing.add(name);
       await clientOf(name).disconnect({ isClean: false });
     },
     closeAll: async (): Promise<void> => {
+      for (const name of clients.keys()) {
+        closing.add(name);
+      }
+
       for (const client of clients.values()) {
         await client[Symbol.asyncDispose]();
       }
@@ -516,6 +563,9 @@ const createBrokerConnections = (
       for (const participant of [...participants.values(), server]) {
         await participant.stop();
       }
+    },
+    closedByServer: (name: string): boolean => {
+      return closedByServer.has(name);
     },
     count: (): number => {
       return [...heard.values()].reduce((total, queue) => {
@@ -550,7 +600,14 @@ const createBrokerConnections = (
         client.on('message', ({ credential, data }) => {
           queueOf(name).push({ bytes: bytesOf(data), credential });
         });
+        client.on('close', () => {
+          if (!closing.delete(name)) {
+            closedByServer.add(name);
+          }
+        });
       }
+
+      closedByServer.delete(name);
 
       participants.set(name, participant);
       clients.set(name, client);
@@ -931,6 +988,23 @@ export const playConversation = async (
         if (step.on !== undefined) {
           expect(report?.connectionHandle, at).toBe(connections.handleOf(step.on));
         }
+      }
+
+      // * the server closed it of its own accord, within the player's patience, and nothing more came
+      // on it
+      if (step.closed === true) {
+        await expect
+          .poll(
+            () => {
+              return connections.closedByServer(on);
+            },
+            { message: `${at}: the server closed ${on}`, timeout: PATIENCE }
+          )
+          .toBe(true);
+        await settled();
+        expect(connections.untaken()[on], `${at}: what came on ${on} before its close`).toBe(
+          undefined
+        );
       }
 
       if (step.until !== undefined) {

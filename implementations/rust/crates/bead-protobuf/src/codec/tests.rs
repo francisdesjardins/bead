@@ -25,7 +25,7 @@ use buffa_descriptor::{DescriptorPool, FieldKind, MessageIndex};
 use bytes::Bytes;
 
 use super::{DynamicCodec, ProtoCodec};
-use crate::records::{ProtoSchema, check_records};
+use crate::records::{ProtoSchema, check_proto_records};
 use crate::required::{Place, unset_of};
 use crate::testing::codecs::{self, Probe, Shade};
 use crate::testing::test::__buffa::ext::INNER;
@@ -431,7 +431,7 @@ fn refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_e
     let probe = ProtoCodec::<Probe>::new().expect("its codec");
     let bytes = bytes_of("0A 01 FF");
 
-    check_records(&bytes, probe.schema()).expect("past the records' check");
+    check_proto_records(&bytes, probe.schema()).expect("past the records' check");
 
     let refusal: CodecRefusal = probe.decode(&bytes).expect_err("a text that is not UTF-8");
 

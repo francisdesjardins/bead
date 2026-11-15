@@ -209,7 +209,10 @@ fetched as the platform fetches them (RFC 5280). Where the platform checks revoc
 macOS, it checks the end certificate's, and rustls calls the verifier within its handshake, so a
 slow OCSP responder or CRL holds a thread of the runtime while it fetches, up to 10 s on Windows;
 neither other side's HTTP or WebSocket transport sets a revocation mode, leaving its platform's
-default. An application's own `ClientConfig` is taken in its place when given; a server's `tls` is
+default. A client takes `tls`, a `TlsOptions`
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), from which Bead builds its config: webpki over the authorities given, the platform's
+verifier otherwise, the certificate by `with_client_auth_cert`; an application's own `ClientConfig`
+is its `client_config`, refused beside `tls`. A server's `tls` is
 the application's `ServerConfig`, Bead's copy of it offering `h2` and `http/1.1` by ALPN. A client's
 trust roots per platform are a row of Differences, `A client's trust roots`.
 
@@ -253,7 +256,7 @@ The transports' surface takes one name a concept on every side, in its language'
 `TransportServerStartOptions`, whatever its transport, the C# side's in `Bead.Core`; a WebSocket or
 HTTP client's connect names its `host` and its `port`, required on every side; and a WebSocket
 client's `pathname` is `/` by default. The HTTP client's facade keeps its three names, one row of
-`tools/names.tsv` rendered by its platform: `HTTPClient`, `BeadHttpClient` beside .NET's own
+`tools/names.tsv`, `rendered: platform`: `HTTPClient`, `BeadHttpClient` beside .NET's own
 `System.Net.Http.HttpClient`, and `HttpClient`.
 
 ### A text message reaches its router

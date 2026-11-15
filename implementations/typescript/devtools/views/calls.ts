@@ -1,9 +1,9 @@
 // ── The Calls view ────────────────────────────────────────────────────────────
 
 // One row a call, newest first, with headed columns: its status by an icon, its call id, its
-// procedure, its type, when it started, how long it took, how it ended in words, and its bar on the
-// waterfall. A row unfolds into its envelopes, a line each, in words. Its other mode, Envelopes,
-// lists every envelope on its own, for whoever reads the wire.
+// procedure, its type, when it started, how long it took, how it ended in words, and its track on
+// the waterfall, as the Timeline draws it. A row unfolds into its envelopes, a line each, in words.
+// Its other mode, Envelopes, lists every envelope on its own, for whoever reads the wire.
 
 // dependencies
 
@@ -23,6 +23,7 @@ import {
 import type { ISpan } from '../model/scale';
 import { bytesOf, clockOf, envelopeLineOf, numberOf, spanOf } from '../model/words';
 import { keyOfRecord, make, statusIconOf } from './dom';
+import { trackOf } from './track';
 
 // interfaces
 
@@ -104,39 +105,6 @@ export const durationWordsOf = (call: ICall, now: number): string => {
   return spanOf(Math.max(0, duration));
 };
 
-const waterfallOf = (
-  call: ICall,
-  { now, span }: { now: number; span: ISpan | undefined }
-): HTMLElement => {
-  const box = make('div', { className: 'wf' });
-
-  if (span === undefined) {
-    return box;
-  }
-
-  const width = Math.max(span.to - span.from, 1);
-  const percent = (at: number): number => {
-    return Math.min(100, Math.max(0, ((at - span.from) / width) * 100));
-  };
-  const status = statusOf(call);
-  const start = startOf(call);
-  const end = endOf(call) ?? now;
-
-  box.append(
-    make('i', {
-      attributes: {
-        style: `left:${String(percent(start))}%;width:${String(Math.max(percent(end) - percent(start), 0.5))}%`,
-      },
-      className: status,
-    }),
-    ...call.notifications.map(({ at }) => {
-      return make('b', { attributes: { style: `left:${String(percent(at))}%` } });
-    })
-  );
-
-  return box;
-};
-
 const envelopeRowsOf = (
   call: ICall,
   { nameOf }: { nameOf: (call: ICall) => string }
@@ -198,7 +166,7 @@ const markerRowOf = (marker: IMarker): HTMLElement => {
         attributes: { colspan: '8' },
         text:
           marker.kind === 'gap'
-            ? `${numberOf(marker.count ?? 0)} records let go here, in a burst: the hook holds 5,000 at most between two batches`
+            ? `${numberOf(marker.count ?? 0)} ${marker.count === 1 ? 'record' : 'records'} let go here, in a burst: the hook holds 5,000 at most between two batches`
             : `Page reloaded at ${clockOf(marker.at)}`,
       }),
     ],
@@ -273,7 +241,14 @@ export const callRowsOf = (list: ICallList): HTMLElement[] => {
         make('td', { className: 'mid', text: clockOf(startOf(call)) }),
         make('td', { className: 'num', text: durationWordsOf(call, list.now) }),
         make('td', { className: 'outcome', text: outcomeOf(call) }),
-        make('td', { children: [waterfallOf(call, list)], className: 'wide' }),
+        make('td', {
+          children: [
+            list.span === undefined
+              ? make('div', { className: 'wf' })
+              : trackOf(call, list.span, { now: list.now }),
+          ],
+          className: 'wide',
+        }),
       ],
       className: status === 'failed' ? 'call failed' : 'call',
     });

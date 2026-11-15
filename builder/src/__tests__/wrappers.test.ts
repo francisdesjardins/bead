@@ -1443,9 +1443,13 @@ test('an execution policy that refuses beadc.ps1 stops PowerShell before its fir
       { cwd, env, encoding: 'utf8' }
     );
 
+    // ! Windows PowerShell breaks its error at the console's width, inside a word where the path
+    // falls: the text is read with its lines joined
+    const said = (run.stdout + run.stderr).replaceAll(/\r?\n/gu, '');
+
     expect(run.status, `${shell} under ${policy}`).toBe(1);
-    expect(run.stdout + run.stderr).not.toContain('beadc:');
-    expect(run.stdout + run.stderr).toContain('beadc.ps1');
+    expect(said).not.toContain('beadc:');
+    expect(said).toContain('beadc.ps1');
   }
 
   expect(callsOf(test.info().outputPath('calls.log'))).toEqual([]);

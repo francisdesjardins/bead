@@ -618,6 +618,8 @@ async fn forgets_a_call_its_requester_cancels_then_cancels_its_signal_nothing_an
     served
         .transport
         .deliver(&request_of((5, &echo(), "")), &first());
+    // its resolver handed it in a later turn, before its cancel comes
+    served.settle().await;
     served.transport.deliver(&cancel_of(5), &first());
     served.settle().await;
 

@@ -40,6 +40,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     private readonly MqttBrokerAdapterOptions _options;
     private readonly bool _isSecure;
+    // what its TLS holds, its key among it, read once and let go of at its dispose
+    private readonly TlsCredentials? _tls;
     private readonly Lock _gate = new();
     private Link? _link;
 
@@ -75,10 +77,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException($"an MQTT broker's IPv6 address is followed by its port or by nothing, not {options.Uri.OriginalString}", nameof(options));
         }
 
-        if (options.Tls?.ClientCertificates is not null && options.Uri.Scheme is not ("mqtts" or "wss"))
+        // * its URL and its TLS are one record: a TLS given over a URL that is not TLS is refused
+        // (spec 15.39)
+        if (Tls.IsGiven(options.Tls) && options.Uri.Scheme is not ("mqtts" or "wss"))
         {
-            throw new ArgumentException("a TLS client certificate is carried over mqtts or wss, never in the clear", nameof(options));
+            throw new ArgumentException($"a TLS client certificate is carried over mqtts or wss, not {options.Uri.OriginalString}", nameof(options));
         }
+
+        var tls = Tls.Assert(options.Tls, nameof(options));
 
         if (options.Id.Length == 0)
         {
@@ -88,19 +94,21 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         AssertPacketSize((nameof(MqttBrokerAdapterOptions.MaximumPacketSize), options.MaximumPacketSize));
 
         // * what its link authenticates by, held in one order on every side; with neither a password
-        // nor a provider, its User Name alone, or its certificate
-        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), options.Tls?.ClientCertificates is not null) is { } refusal)
+        // nor a provider, its User Name alone, or its certificate; its authorities beside any
+        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), tls?.Certificate is not null) is { } refusal)
         {
             throw new ArgumentException(refusal, nameof(options));
         }
 
         _options = options with
         {
+            Tls = tls,
             // ! never without end: a broker never counts a link of Keep Alive 0 lost, and its will never goes
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
+        _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
 
     /// <inheritdoc/>
@@ -232,7 +240,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Start(BrokerStart? start = null)
     {
         Link? guarded = null;
-        var client = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
+        var made = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
         {
             MaximumPacketSize = _options.MaximumPacketSize,
             PastMaximum = (size) =>
@@ -243,7 +251,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     PastMaximum((guarded, size));
                 }
             },
+            ReadsEnded = () =>
+            {
+                if (guarded is not null)
+                {
+                    ReadsEnded(guarded);
+                }
+            },
         }));
+        var client = _options.ClientOf?.Invoke(made) ?? made;
         var link = guarded = new Link(client);
 
         lock (_gate)
@@ -706,6 +722,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return;
         }
 
+        // whether an UNSUBSCRIBE of its let-go failed other than by its bound: its link lost
+        var isLost = false;
+
         try
         {
             // * one connectTimeout from its call: what it was handed, then its broker's let-go; and
@@ -724,7 +743,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // peer reading no subscriber before its 1001; one filter each, since one packet of
             // every filter may pass its broker's Maximum Packet Size, a Protocol Error that
             // publishes its will
-            if (link.IsUp && link.Client.IsConnected && !IsEnded(link))
+            if (link.IsUp && IsReading(link))
             {
                 List<string> filters;
 
@@ -736,22 +755,33 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     }).Distinct(StringComparer.Ordinal)];
                 }
 
-                await Quietly(Task.WhenAll(filters.Select((filter) =>
+                try
                 {
-                    // ! its link's client itself: LinkUp refuses a link stopping
-                    return Sent(() =>
+                    await Task.WhenAll(filters.Select((filter) =>
                     {
-                        return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
-                    });
-                })).WaitAsync(letting.Token));
+                        // ! its link's client itself: LinkUp refuses a link stopping
+                        return Sent(() =>
+                        {
+                            return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
+                        });
+                    })).WaitAsync(letting.Token);
+                }
+                // ! MQTTnet fails what awaits a link whose reads it cannot go on with before it says
+                // that link disconnected, a packet it cannot decode among them (spec 15.29): an
+                // UNSUBSCRIBE failed so, or refused as its link is down, is its link lost; one failed
+                // as its bound is spent, or its link ended, MQTTnet's timeout, is what follows reads
+                catch (Exception reason) when (reason is not OutOfMemoryException)
+                {
+                    isLost = !letting.IsCancellationRequested;
+                }
             }
 
             // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
             // broker would read no DISCONNECT and publish its will; sent once MQTTnet says it
             // connected, its CONNACK read, even before its start's continuation counted it up, and
-            // never once its link ended, a packet its client cannot read ending it, which MQTTnet
-            // may say connected a moment more
-            if (link.Client.IsConnected && !IsEnded(link))
+            // never once its link ended or was lost, a packet its client cannot read ending it,
+            // which MQTTnet may say connected a moment more
+            if (!isLost && IsReading(link))
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
 
@@ -789,6 +819,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             catch (Exception reason)
             {
                 disposing.SetException(reason);
+            }
+            finally
+            {
+                _tls?.Dispose();
             }
         }
 
@@ -990,12 +1024,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 tls.UseTls(true).WithTargetHost(host);
 
-                if (_options.Tls?.ClientCertificates is { } certificates)
+                // ! a collection, which the platform presents as its leaf alone, or none, where it
+                // builds no chain to the authorities its broker names: its intermediates are its
+                // store's (docs/support.md)
+                if (_tls?.Certificates is { } certificates)
                 {
                     tls.WithClientCertificates(certificates);
                 }
 
-                if (_options.Tls?.TrustChain is { } trusted)
+                if (_tls?.Authorities is { } trusted)
                 {
                     tls.WithTrustChain(trusted);
                 }
@@ -1004,7 +1041,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // * its User Name its id, with its Password where it has one; neither under its certificate,
         // which a password never stands beside
-        if (_options.Tls?.ClientCertificates is null)
+        if (_options.Tls?.Certificate is null)
         {
             builder = builder.WithCredentials(Id, password);
         }
@@ -1100,24 +1137,59 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
+    // its client's reads ended, told before MQTTnet fails what awaits on that end: a stop then sends
+    // no DISCONNECT, MQTTnet saying it connected a moment more
+    private void ReadsEnded(Link link)
+    {
+        lock (_gate)
+        {
+            link.IsReadEnded = true;
+        }
+    }
+
+    // whether its link still reads: MQTTnet says it connected, its reads did not end, and it did not
+    // end
+    private bool IsReading(Link link)
+    {
+        lock (_gate)
+        {
+            return link.Client.IsConnected && !link.IsReadEnded && !link.IsEnded;
+        }
+    }
+
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
-    // on the link it came by alone
+    // on the link it came by alone; one MQTTnet dispatches once its link ended is dropped
     private void Take((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken)
     {
         var (link, received) = taken;
-
-        if (link.IsEnded)
-        {
-            return;
-        }
-
         var message = received.ApplicationMessage;
         var isAcknowledged = message.QualityOfServiceLevel != MqttQualityOfServiceLevel.AtMostOnce;
 
-        if (isAcknowledged)
+        // ! handed on under its link's hand-on, which its end awaits before it tells its down
+        lock (link.Handing)
         {
-            Interlocked.Increment(ref _unsettled);
+            lock (_gate)
+            {
+                if (link.IsEnded)
+                {
+                    return;
+                }
+
+                if (isAcknowledged)
+                {
+                    Interlocked.Increment(ref _unsettled);
+                }
+            }
+
+            HandOn((link, received), isAcknowledged);
         }
+    }
+
+    // a message taken, to its participant
+    private void HandOn((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken, bool isAcknowledged)
+    {
+        var (link, received) = taken;
+        var message = received.ApplicationMessage;
 
         Message?.Invoke(new BrokerMessage(
             new BrokerPublication { Topic = message.Topic.Split('/'), Payload = message.Payload.ToArray() },
@@ -1280,6 +1352,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             Interlocked.Exchange(ref _unsettled, 0);
         }
 
+        // ! a hand-on under way finishes first, and none starts after: nothing of its link reaches
+        // its participant once it heard it down, as on the other sides
+        lock (link.Handing)
+        {
+        }
+
         // * told first, so that its participant hears its link down before what failed of it
         if (wasUp && down is not null && !link.IsStopping)
         {
@@ -1322,6 +1400,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         public int IsPinging;
 
         public IMqttClient Client { get; } = client;
+
+        // what a message's hand-on holds, its end awaiting it
+        public Lock Handing { get; } = new();
+
+        // whether its client's reads ended, which MQTTnet tells after it failed what awaits on it
+        public bool IsReadEnded { get; set; }
 
         public CancellationTokenSource Life { get; } = new();
 

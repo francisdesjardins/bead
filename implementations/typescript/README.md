@@ -37,6 +37,18 @@ on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite 
 server has no global to fall back on, so it always takes `ws`'s `WebSocketServer`, and its suite
 talks to it through the client, on both.
 
+In Node, the client takes its TLS as `tls: { authorities, certificate, key }`, each PEM text (spec
+15.39). The authorities are the roots it judges its server by, in place of the platform's. The
+certificate, its intermediates after it, is presented with its key when the server asks for one.
+Only `ws`'s `WebSocket` takes `tls`, on a connect under `wss`; under `ws`, the client holds it
+unused. The client is refused as it is built, with a `ProgrammerError`, given `tls` in a page or
+beside a `WebSocket` without `ws`'s shape, Node's global among them. It is refused too given a
+certificate without its key or a key without its certificate, a key of another certificate, an
+encrypted key, or authorities or a certificate that read as none. A handshake the server refuses
+fails the connect, the platform's error its cause. The certificate authenticates the client to what
+terminates TLS, and the credential authenticates its calls to the router: the client takes both, and
+binds neither to the other.
+
 Each WebSocket end beats: every `heartbeat` milliseconds — 30,000 by default, `Infinity` for none —
 it sends WebSocket's own PING control frame (RFC 6455 §5.5.2), and drops a connection that left the
 one before unanswered, whose `close` then says it was not clean. A peer gone without a word — a
@@ -290,42 +302,44 @@ goes nowhere, since it would settle a call it does not belong to.
 A requester that ends a call it holds open — its timeout passed, its signal aborted, its answer
 unreadable, a transfer refused, a subscription unregistered — sends a cancel: the prefix alone, on
 that call id, never answered. The other end forgets the call, takes away what it subscribed, then
-aborts the signal its resolver holds, so nothing more goes out on that call id; a cancel for no call
-has crossed its answer, and is dropped in silence. The requester reserves the call id as long as the
-call was given, 5 s when it was given no time or waited without end — and, once a result came to it
-as a transfer, as long as the other end keeps the call abandoned, should that be longer: its draws
-skip it, and what comes late on it is dropped in silence.
+aborts the signal its resolver holds — one whose turn had not come is never called, and one that
+runs on keeps a place apart until it settles (spec 9.2, step 3) — so nothing more goes out on that
+call id; a cancel for no call has crossed its answer, and is dropped in silence. The requester
+reserves the call id as long as the call was given, 5 s when it was given no time or waited without
+end — and, once a result came to it as a transfer, as long as the other end keeps the call
+abandoned, should that be longer: its draws skip it, and what comes late on it is dropped in
+silence.
 
 A failure travels once, in a failure's payload: its code on two bytes, the relays it crossed, whether
 the code is the procedure's own, and a readable detail — `maximumDetailBytes` at most, 1,024 by
 default, and never past what its envelope holds. The protocol's codes come in blocks of 16, by how
 far a request went:
 
-| Code | Name                       | Raised when                                                                                                                                                                               |
-| ---- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | `ENVELOPE_MALFORMED`       | the bytes are not an envelope this layout reads                                                                                                                                           |
-| 2    | `LAYOUT_UNSUPPORTED`       | the layout is one to come                                                                                                                                                                 |
-| 3    | `KIND_UNSUPPORTED`         | the kind is one to come, or one this side does not take                                                                                                                                   |
-| 4    | `ENVELOPE_TOO_LARGE`       | the envelope is larger than this peer reads                                                                                                                                               |
-| 16   | `DESTINATION_UNKNOWN`      | the request names a destination its relay has none of — or its router relays nothing                                                                                                      |
-| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination, or a transport cannot carry its credential — leg B's, or the requester's own: nothing was tried                                  |
-| 18   | `SERVICE_UNKNOWN`          | no resolver is registered for the service among those its connection's transport takes                                                                                                    |
-| 19   | `PROCEDURE_UNKNOWN`        | the service is known there, the procedure is not                                                                                                                                          |
-| 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                    |
-| 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                        |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                |
-| 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                      |
-| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                 |
-| 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
-| 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place or the budget                                                                                 |
-| 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                 |
-| 48   | `CHUNK_INVALID`            | a chunk runs past the total or past full, is empty, does not read, is short with MORE set, says wrongly if it is the last, overlaps bytes received in part, or leaves too many runs apart |
-| 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
-| 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
-| 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                |
-| 52   | `PAYLOAD_INVALID`          | the payload reads, and its procedure's rules refuse it: its violations in its detail (spec 18)                                                                                            |
-| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries         |
-| 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                    |
+| Code | Name                       | Raised when                                                                                                                                                                                                                                         |
+| ---- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `ENVELOPE_MALFORMED`       | the bytes are not an envelope this layout reads                                                                                                                                                                                                     |
+| 2    | `LAYOUT_UNSUPPORTED`       | the layout is one to come                                                                                                                                                                                                                           |
+| 3    | `KIND_UNSUPPORTED`         | the kind is one to come, or one this side does not take                                                                                                                                                                                             |
+| 4    | `ENVELOPE_TOO_LARGE`       | the envelope is larger than this peer reads                                                                                                                                                                                                         |
+| 16   | `DESTINATION_UNKNOWN`      | the request names a destination its relay has none of — or its router relays nothing                                                                                                                                                                |
+| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination, or a transport cannot carry its credential — leg B's, or the requester's own: nothing was tried                                                                                            |
+| 18   | `SERVICE_UNKNOWN`          | no resolver is registered for the service among those its connection's transport takes                                                                                                                                                              |
+| 19   | `PROCEDURE_UNKNOWN`        | the service is known there, the procedure is not                                                                                                                                                                                                    |
+| 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                                                                              |
+| 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                                                                                  |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                                                                          |
+| 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                                                                                |
+| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                                                                           |
+| 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                                                                                     |
+| 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place, or an opening waited for the budget past half `transferInactivityTimeout`: a request's, or a result's, after its procedure ran                         |
+| 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                                                                           |
+| 48   | `CHUNK_INVALID`            | a chunk runs past the total or past full, is empty, does not read, is short with MORE set, says wrongly if it is the last, overlaps bytes received in part, or leaves too many runs apart, or an opening carries other than its sender places in it |
+| 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                                                                                |
+| 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                                                                                  |
+| 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                                                                          |
+| 52   | `PAYLOAD_INVALID`          | the payload reads, and its procedure's rules refuse it: its violations in its detail (spec 18)                                                                                                                                                      |
+| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries                                                                   |
+| 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                                                                              |
 
 A requester catches a `FailureError`: `isProtocol(codes, side?)` for the protocol's codes,
 `isApplication(codes?)` for the procedure's own, so a service's code 19 never passes for
@@ -774,14 +788,21 @@ A1 14 00 04  00 00 00 07  00 00 00 00 01 3F FE BC | <324 bytes>
 A transfer is refused before its bulk crosses. Its opening is routed, its credential resolved,
 admitted — `beforeRequest` sees the header and the call's session, never the payload — and held to
 its procedure's limit and the router's before anything is granted: a refusal falls on the opening,
-and no chunk follows it. An opening carries one byte of its payload at least, and one that holds its
-whole total needed no transfer: either is refused with `CHUNK_INVALID`. A requester whose header,
-its TRANSFER block added, passes 1,020 bytes or leaves its opening no byte fails the call before it
+and no chunk follows it. An opening carries exactly the bytes of its payload its sender places in
+it, `chunkBytes` less its header, a result's less the 20 bytes of an announcement too; one with no
+byte, one that holds its whole total, which needed no transfer, and one short of that count are
+refused with `CHUNK_INVALID`; one past `chunkBytes` is too large. A requester whose header, its
+TRANSFER block added, passes 1,020 bytes or leaves its opening no byte fails the call before it
 goes, with `PAYLOAD_TOO_LARGE`: a `JWT` of 997 bytes or more, 993 beside a destination, goes whole
 only. A receiver holds `maximumTransfers` transfers per connection at once, each until its call
-ends, and all of them together hold at most `bufferedBytesBudget` bytes, reserved as each credit
-grants them; an opening past either is refused with `CAPACITY_EXCEEDED`, and a transfer the budget
-cannot credit waits until the budget frees, or its inactivity ends it.
+ends; an opening past them is refused with `CAPACITY_EXCEEDED`. All of them together reserve at most
+`bufferedBytesBudget` bytes, each its whole total, from its admission until its payload is whole or
+it ends. An opening is admitted at once when no opening waits and the budget left holds its total;
+otherwise it waits, behind every opening before it on any connection, holding its place and none of
+the budget, and is granted nothing. The openings that wait are admitted in the order they came as
+the budget frees, and one still waiting at half `transferInactivityTimeout` is refused with
+`CAPACITY_EXCEEDED`: a request's is answered with it, a result's ends its call with it, which is
+cancelled. No credit waits on the budget, so no transfer waits on another's.
 
 The requester ends a transfer with a cancel, the side that answers with a failure:
 `TRANSFER_STALLED` when nothing came for `transferInactivityTimeout`, `CHUNK_INVALID` or
@@ -796,13 +817,13 @@ that opens a subscription always go in one envelope.
 | Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                                   |
 | --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWebSocketServer` and `createWebSocketClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                                      |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, within its transfer, and the largest a payload goes whole in: a request or a result that comes past it, whole or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of a request held                                                                              |
 | `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                                           |
 | `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                                    |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                                |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes the transfers a router receives reserve together, each its whole total from its admission, in the order their openings came                                                                                                                                                    |
 | `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                                |
 | `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                                     |
-| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                                           |
+| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id; half of it, how long an opening waits for the budget                                                                                                                     |
 | `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                                       |
 | `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                                |
 
@@ -1010,6 +1031,14 @@ status 0, "the server drew no connection: a redirect", or, from another origin, 
 preflight failing. A `fetch` given follows no redirect; one that follows all the same says so in its
 answer's `redirected`, and is caught there: the connect fails, "the server drew no connection: a
 redirect followed", and a send or a listen loses its connection, nothing of the answer read.
+
+In Node, the HTTP client takes the same `tls`. It goes through undici's own `fetch` and an `Agent` of
+the client's, on each exchange under `https`; under `http`, the global `fetch` goes and `tls` is
+held unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
+loaded on the first connect under `https`, and never enters a page's bundle. The agent closes as the
+client drops its connection, and a new one is drawn at the next. The client is refused as it is
+built as the WebSocket client is, and also beside a `fetch` given or where undici does not resolve.
+A handshake the server refuses fails the connect, never a connection drawn and then lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1385,11 +1414,14 @@ await transport.start();
 Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry Interval
 of 0 — its Client Identifier the participant's id, authenticated by a Password under its id as User
 Name, `password` as given or what `passwordProvider` hands at each link's start, or by a TLS client
-certificate, `tls: { cert, key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the
-adapter refuses one there; with neither, its CONNECT carries its User Name alone. A password is
-UTF-8 text, never empty and holding no NUL; the adapter is refused as it is built given one that is
-not, a password and a provider both, or either beside a certificate, and its start fails on an
-answer that is not. Its provider is asked with a signal its start's own signal, its stop and its
+certificate, `tls: { certificate, key }`, over `mqtts` or `wss` in Node alone: a page chooses none,
+and the adapter refuses one there; with neither, its CONNECT carries its User Name alone. The
+`authorities` of `tls` judge the broker in place of the platform's roots, beside a password or a
+certificate. A password is UTF-8 text, never empty and holding no NUL. The adapter is refused as it
+is built given one that is not, a password and a provider both, or either beside a certificate; a
+password beside the authorities alone is taken. It is refused too given a `tls` over `mqtt` or
+`ws`, or one the WebSocket client would refuse. Its start fails on an answer that is not a password.
+Its provider is asked with a signal its start's own signal, its stop and its
 `connectTimeout` abort, and that is aborted once its start ends, linked or not: an ask that outlives
 the `connectTimeout`, or that a stop meets, fails that start whether or not it hears its signal, a
 later answer serving nothing; what it throws fails it, its cause. Its CONNECT says a Receive Maximum
@@ -1466,8 +1498,9 @@ Each link is one fresh network connection, its OPEN's container-id the participa
 `hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`,
 30 s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its
 id, `password` as given or what `passwordProvider` hands at each link's start, or by SASL EXTERNAL
-under a TLS client certificate, `tls: { cert, key }`, over `amqps`, never ANONYMOUS: the adapter is
-refused as it is built given neither, and its password is given, asked and refused as an MQTT 5
+under a TLS client certificate, `tls: { certificate, key }`, over `amqps`, never ANONYMOUS: the
+adapter is refused as it is built given neither, the authorities alone counting as neither. Its
+password is given, asked and refused as an MQTT 5
 link's is. Its start waits `connectTimeout`, 30 s by default, for its password, where it asks its
 provider, its broker's OPEN and its sessions, and its inbox's subscription as long for its
 declaration, its binding and its receiver. On it a session holds its inbox's receiver, one each name
@@ -1618,9 +1651,11 @@ reconnected.
 — and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read, over
 a WebSocket what waits for its sockets, `largestUnsentBytes` the most one holds, and on both the
 connections its busiest address holds, `largestAddressConnections` — the router's calls waited on
-and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its
-transfers and the bytes they hold, its subscriptions in flight, waiting or notified, those paced
-whose credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
+and answered, the busiest connection's, `largestAnsweringCalls`, and with the resolvers that outlive
+its calls, `largestTrackedCalls`, those resolvers over the whole side, `outlivingResolvers`, the
+call ids it reserved, its transfers and the bytes they hold, those whose resolvers outlive their
+call, `outlivingTransfers`, its subscriptions in flight, waiting or notified, those paced whose
+credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
 destinations, and the credentials' sessions it keeps and those of them timed, `credentialSessions`
 and `timedCredentialSessions` — and the connections' sessions.
 Nothing of it names a connection: no handle, token or address leaves the process. Each layer also
@@ -2096,11 +2131,15 @@ A form signs up for a workshop through a service of its own, `SignUpService`, wh
 from the demo's `.proto`, [`demo/proto/demo/v1/sign_up.proto`](demo/proto/demo/v1/sign_up.proto),
 as [`demo/beadc.yaml`](demo/beadc.yaml) says, into `demo/gen/`: its request holds protovalidate's
 rules — a name of 1 to 63 characters in a DNS label's shape, 1 to 10 seats, an email or a phone,
-exactly one — which every server judges before its resolver, answering a request they refuse
-`PAYLOAD_INVALID` (spec 18). The page reads the detail with `violationsOf`: each violation under the
-field its path names, the field marked `aria-invalid` and described by it, the first focused, one of
-no field above the form. "Validate before sending" calls through a client side whose options say
-`validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
+exactly one, up to 8 guests, each an email — which every server judges before its resolver,
+answering a request they refuse `PAYLOAD_INVALID` (spec 18). The page reads the detail with
+`violationsOf`: each violation under the field its path names, the field marked `aria-invalid` and
+described by it, the first focused, one of no field above the form. A violation of a guest says its
+path, `guests[1]`. "Validate before sending" calls through a client side whose options say
+`validates`, which refuses the same request before anything goes on the wire. Twelve guests none of
+which is an email raise more violations than the server's detail of 1,024 bytes holds, and its
+closing line counts the rest; a box bounds the client's detail to 256 bytes, both the refusals it
+writes and the details it reads. `yarn test:demo` runs
 the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
 joined in memory, and over MQTT 5 where `BEAD_MQTT_URL` names a broker, skipped, saying so, where
 none does; and the form in Chromium, against the static build `yarn playground:build:file` makes.
@@ -2114,8 +2153,14 @@ HTTP form, the sign-up's OpenAPI document, the server and its metrics, and `exam
 sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fragment names the
 scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
 Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
-and radii are penumbra's, the DevTools panel's copy of its two sheets, which the internal demo
-serves and the static build writes into the page.
+and radii are penumbra's, the DevTools panel's copy of its two sheets, and its colours and faces
+are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. Its top
+bar is the page's, `devtools/penumbra/chrome.css`: Bead's mark and name, a link to the page, the
+theme. Under it, the demo's own strip, as `demo/strip.ts` mounts it: the transport in use among the
+others, the connection's light, who the calls are made as, and the wire; on a phone, one compact
+row whose chip opens the other transports and whose light opens the connection's sentence and the
+identity. The internal demo serves the five sheets, and the static build writes them into the
+page.
 
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
@@ -2140,8 +2185,7 @@ first.
 ([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
 `chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools,
-its tab `⦿ Bead`, Bead's mark before its name, as a character, since Chrome draws no image on a
-panel's tab; the extension's icons are the mark's, which `site/icons.mjs` rasterizes:
+its tab `Bead ⦿`; the extension's icons are Bead's mark, which `site/icons.mjs` rasterizes:
 
 - **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
   tell them, its steps and its envelopes met by its call id on its connection — its status by an
@@ -2161,22 +2205,24 @@ panel's tab; the extension's icons are the mark's, which `site/icons.mjs` raster
 - **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
   panel's records — its session, the calls in flight, the subscriptions and their credit, the
   transfers and how far they went. It replays nothing, and sends nothing to the page.
-- **Timeline**: every call shown on one axis of time, a notification a ring, a chunk, a credit or a
-  cancel a tick; dragging across it bounds the Calls list to that span.
+- **Timeline**: every call shown, a row each as in Calls and newest first as it lists them, on one
+  axis of time, a notification a ring, a chunk, a credit or a cancel a tick, a call too short for
+  its bar a diamond on its start; a row opens its call in Calls, and dragging across the axis bounds
+  the Calls list to that span and narrows the axis to it.
 - **Metrics**: what each client's registry counts, a row a procedure, read by
   `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
   median and a p95, its calls a second over the last minute, and its exposition as a scrape reads
   it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Broker**: each broker participant the page announced, a header each, its levels — its inbox, its
   incarnation, the names it holds and its gauges against their bounds — read while the view is shown
-  and folded into a disclosure; a table of its parcels, oldest first, its link's transitions and its
+  and folded into a disclosure; a table of its parcels, newest first, its link's transitions and its
   reports among them, a DATA's parts counted by connection and direction, an incomplete capture
   named, with filters of its own by kind, connection and verdict; and a row's recorded fields beside
   it, once it is selected. No row holds a payload, a credential or the acceptor's half, and the last
   1,000 records of the page's participants, all together, are kept, those let go counted. Its
   envelope credit is the State view's, which a button opens. It keeps its selection, its focus and
-  its panes' scroll across readings, follows new parcels only while its list stands at its end with
-  no row selected, and its list and the recorded fields scroll in panes of their own.
+  its panes' scroll across readings, a new parcel appearing at the top, and its list and the
+  recorded fields scroll in panes of their own.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
   procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
@@ -2225,7 +2271,8 @@ model they draw from in `model/` and their views in `views/`, which ask of the b
 `host.ts` names; `records.ts`, `preview.ts` and `stack.ts`, which make each event plain before it
 leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each other, in
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
-extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
+extension's world, which alone may open a runtime port, and closes it while the page sits in the
+back/forward cache; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
 panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its type scale
 and spacing are penumbra's, its two sheets copied whole into `devtools/penumbra/` with the commit
@@ -2242,6 +2289,7 @@ in it, the demo's client followed over MQTT 5,
 `demo/serve.ts` beside a broker of the run's own, its page at `?transport=mqtt`, its one WebSocket
 the broker's — `node ../../tools/mqtt-broker.mjs run -- yarn test:devtools` plays it, CI's job
 `mqtt` runs it, `--grep "over MQTT 5"`, and where `BEAD_MQTT_URL` and `BEAD_MQTT_WS_URL` name no
-broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; and the panel as a page on
-a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
+broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; the panel as a page on
+a fake DevTools API, for what only DevTools gives it; and the bridge and the background on a fake of
+Chrome's runtime, in `chrome/__tests__/`, each disconnect's `runtime.lastError` read. `yarn devtools:build` and
 `yarn playground:build:file` make what they load.

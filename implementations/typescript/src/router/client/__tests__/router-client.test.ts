@@ -101,6 +101,9 @@ const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
 const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
 
+// chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
+const SMALL_CHUNKS = Object.freeze({ chunkBytes: 64, windowBytes: 128 });
+
 /** A request header of the server's, for procedure 1 of service 2. */
 const requestHeaderOf = (callId: number): IRequestHeader => {
   return { callId, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 };
@@ -598,24 +601,82 @@ test.describe('createRouterClient', () => {
 
     test('learns the session from a result’s opening, before the rest of its transfer comes', async () => {
       const { deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      // chunks of 64 bytes: a result's opening carries 28, and a chunk 48
+      using router = createRouterClient(transport, { limits: SMALL_CHUNKS });
       const asking = router.request(new Uint8Array(0), { options, procedure: service });
 
       deliver({
-        header: { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT, total: 100 },
+        header: { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT, total: 76 },
         kind: EnvelopeKind.RESULT,
-        payload: new Uint8Array(16),
+        payload: new Uint8Array(28),
       });
 
       expect(router.sessionToken).toBe(TOKEN);
 
       deliver({
-        header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 16 },
+        header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 28 },
         kind: EnvelopeKind.CHUNK,
-        payload: new Uint8Array(84),
+        payload: new Uint8Array(48),
       });
 
-      await expect(asking).resolves.toMatchObject({ payload: new Uint8Array(100) });
+      await expect(asking).resolves.toMatchObject({ payload: new Uint8Array(76) });
+    });
+
+    test('take a result’s opening that carries an announcement, OPAQUE or NONE, counted as its sender placed it', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { limits: SMALL_CHUNKS });
+      const payload = new Uint8Array(76).map((_, index) => {
+        return index;
+      });
+
+      // its sender places 28 bytes in it, and attaches what it announces as it goes: an OPAQUE
+      // fills its 64 bytes, a NONE falls short by 16, and none by 20
+      for (const [callId, credential] of [
+        [1, OPAQUE],
+        [3, ENDED],
+        [5, undefined],
+      ] as const) {
+        const asking = router.request(new Uint8Array(0), { options, procedure: service });
+
+        deliver({
+          header: { callId, credential, kind: EnvelopeKind.RESULT, total: 76 },
+          kind: EnvelopeKind.RESULT,
+          payload: payload.subarray(0, 28),
+        });
+        deliver({
+          header: { callId, isLast: true, kind: EnvelopeKind.CHUNK, offset: 28 },
+          kind: EnvelopeKind.CHUNK,
+          payload: payload.subarray(28),
+        });
+
+        await expect(asking, String(callId)).resolves.toMatchObject({ payload });
+      }
+
+      // one that fills its envelope without an announcement carries 20 bytes more than its sender
+      // places
+      const filled = router.request(new Uint8Array(0), { options, procedure: service });
+
+      deliver({
+        header: { callId: 7, kind: EnvelopeKind.RESULT, total: 76 },
+        kind: EnvelopeKind.RESULT,
+        payload: payload.subarray(0, 48),
+      });
+
+      await expect(filled).rejects.toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        detail: 'an opening carries 28 bytes of its payload, not 48',
+        header: { kind: EnvelopeKind.RESULT },
+        origin: 'local',
+      });
+      expect(
+        sent
+          .filter((envelope) => {
+            return envelope?.kind === EnvelopeKind.CREDIT;
+          })
+          .map((envelope) => {
+            return envelope.header.callId;
+          })
+      ).toEqual([1, 3, 5]);
     });
 
     test('learns the session from every answer, paired or not, keeps it, loses it, and presents it on no call that does not ask for it', async () => {
@@ -2517,6 +2578,78 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    test('closes a connection that it refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls, nothing settling between, and reports it', async () => {
+      const scripted = createScriptedTransport();
+      const { deliver, sent } = scripted;
+      let disconnects = 0;
+      const transport: IRouterClientTransportLike = {
+        ...scripted.transport,
+        // what its disconnect throws is reported
+        disconnect: () => {
+          disconnects += 1;
+
+          throw new Error('the transport would not disconnect');
+        },
+      };
+      using router = createRouterClient(transport, { limits: { maximumAnsweringCalls: 1 } });
+      const errors = recordErrors(router);
+      const commandOn = (callId: number) => {
+        deliver({
+          header: requestHeaderOf(callId),
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        });
+      };
+
+      router.registerResolver(
+        Object.assign(() => {
+          // deaf to its signal, it never settles
+          return new Promise<void>(() => {
+            return undefined;
+          });
+        }, service)
+      );
+
+      // one whose resolver outlives its cancel, one open beside it: twice the bound
+      commandOn(30);
+      await sleep(0);
+      deliver({ header: { callId: 30, kind: EnvelopeKind.CANCEL }, kind: EnvelopeKind.CANCEL });
+      commandOn(32);
+      await sleep(0);
+      commandOn(34);
+      await sleep(0);
+
+      expect(disconnects).toBe(0);
+      expect(errors).toEqual([]);
+
+      // * the second refusal in a row: reported, then its transport disconnected in a later turn
+      commandOn(36);
+
+      expect(disconnects).toBe(0);
+
+      await sleep(0);
+
+      expect(sent).toMatchObject([
+        { failure: { code: ProtocolCode.CAPACITY_EXCEEDED }, header: { callId: 34 } },
+        {
+          failure: {
+            code: ProtocolCode.CAPACITY_EXCEEDED,
+            detail: 'the calls a connection answers and those its resolvers outlive are 2 at most',
+          },
+          header: { callId: 36 },
+        },
+      ]);
+      expect(codesOf(errors)).toEqual([
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the transport would not disconnect',
+      ]);
+      expect(errors[0]).toMatchObject({
+        detail:
+          'the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed',
+      });
+      expect(disconnects).toBe(1);
+    });
+
     test('of the client’s own parity are reported, and never answered', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -3066,6 +3199,50 @@ test.describe('createRouterClient', () => {
       await registering;
 
       expect(heard).toEqual(['first news']);
+      expect(errors).toEqual([]);
+    });
+
+    // debugging 4.4; spec 9.0
+    test('a request made inside a notification callback names its call id on its tx step', async () => {
+      const { deliver, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const errors = recordErrors(router);
+      const services = createServiceManager(router);
+      const notification = services.getNotification(service, { serializer: text });
+      const asking = services.getRequest(service, { serializer: text });
+      const steps: [direction: string, callId: CallId | undefined][] = [];
+      const requests: CallId[] = [];
+      let reading: Promise<string> | undefined;
+
+      services.on('debug', (_error, { callId, direction, rx, tx, type }) => {
+        if (type === 'request' && (tx === 'read' || rx === 'counter at 1')) {
+          steps.push([direction, callId]);
+        }
+      });
+      router.on('debug', ({ direction, header }) => {
+        if (direction === 'tx' && header.kind === EnvelopeKind.REQUEST) {
+          requests.push(header.callId);
+        }
+      });
+
+      const registering = notification('subscribe', () => {
+        // * made within the router's telling: its router takes it, and draws its id, a turn later
+        reading = asking('read')(options);
+      })(options);
+
+      await sleep(0);
+      deliver(resultOf(1));
+      await registering;
+      deliver(notificationEnvelopeOf(1, text.encode('changed')));
+      await sleep(0);
+      deliver(resultOf(3, { payload: text.encode('counter at 1') }));
+
+      await expect(reading).resolves.toBe('counter at 1');
+      expect(requests).toEqual([1, 3]);
+      expect(steps).toEqual([
+        ['tx', 3],
+        ['rx', 3],
+      ]);
       expect(errors).toEqual([]);
     });
   });

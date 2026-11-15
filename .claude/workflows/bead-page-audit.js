@@ -69,7 +69,7 @@ const audit = (batch) => {
   return agent(
     `${COMMON}${READ_ONLY}
 # Your task: audit batch ${batch.key} (effort ${EFFORT})
-In both languages, the sections ${batch.sections}${batch.extra ? `; and ${batch.extra}` : ''}. Check every factual claim, one by one, against the repository, and say what you checked and found true, so that silence means something. For each finding: an id (\`${batch.key}-<n>\`), its section and lines (content.en.html:N, content.fr.html:N), what the page says, what holds with its evidence (file:line), its kind (false, stale, misleading, missing, the French apart from the English, a typo), and its fix in both languages, in the page's own voice.
+In both languages, the sections ${batch.sections}${batch.extra ? `; and ${batch.extra}` : ''}. Check every factual claim, one by one, against the repository, and say what you checked and found true, so that silence means something. Read the prose itself too, as CLAUDE.md's Style asks (plain prose): a sentence that chains appositives and asides, gives a reason no reader needs, or names another project only as an aside, is a finding of its own kind, with its rewrite. For each finding: an id (\`${batch.key}-<n>\`), its section and lines (content.en.html:N, content.fr.html:N), what the page says, what holds with its evidence (file:line), its kind (false, stale, misleading, missing, the French apart from the English, a typo), and its fix in both languages, in the page's own voice.
 Write ${OUT}/audit-${batch.key}.md and return at most eight lines: what you covered, the findings by kind, that path.`,
     { label: `audit:${batch.key}`, phase: 'Audit', effort: EFFORT }
   );
