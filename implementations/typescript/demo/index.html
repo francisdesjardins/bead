@@ -15,81 +15,24 @@
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
+    <link rel="stylesheet" href="penumbra/tokens.skin.css" />
     <style>
-      /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
-         declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
-         the demo draws with of its own; the faces are the site's, on the system's fallbacks, since
-         the page fetches no font file */
+      /* the demo's own, over Bead's skin and penumbra's sheets: a write's mark, and the shadow the
+         wire's sheet casts over the page */
       :root {
-        color-scheme: light dark;
-        --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-        --app-font-body:
-          'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-        --app-font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
         /* a board of rows reads denser than a page of prose */
         --app-lh-body: 1.45;
-
-        --app-primary: #c13584;
-        --app-primary-ink: #ffffff;
-        --app-primary-hover: #9d2a6b;
-        --app-accent: #c13584;
-        --app-flame: #c13584;
-        --app-flame-wash: rgb(193 53 132 / 0.1);
-        --app-ring: #ff69b4;
-        --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
-
-        --app-bg: #f5f2f8;
-        --app-paper: #fdfcfe;
-        --app-text: #17111d;
-        --app-text-secondary: #4a4055;
-        --app-text-tertiary: #6d6278;
-        --app-divider: rgb(23 17 29 / 0.12);
-        --app-error: #b91c1c;
-        --app-ok: #047857;
-        --app-ok-wash: rgb(4 120 87 / 0.1);
-        --app-info: #0369a1;
-        --app-warn: #92400e;
-        --app-warn-wash: rgb(146 64 14 / 0.1);
-
-        /* the demo's own: the ground of what is code, a refusal's wash, a write's mark, and the
-           shadow the wire's sheet casts over the page */
-        --raised: #f1ecf5;
-        --bad-soft: rgb(185 28 28 / 0.1);
         --write: #b4460f;
         --sheet-shadow: 0 -8px 24px rgb(23 17 29 / 0.12);
-        /* code reads a step under the body, between penumbra's two smallest */
-        --text-code: 0.75rem;
-        /* what a finger is sure to hit, on a phone */
-        --touch: 44px;
+      }
+
+      :root[data-color-scheme='dark'] {
+        --write: #f0a45b;
+        --sheet-shadow: 0 -8px 24px rgb(0 0 0 / 0.5);
       }
 
       @media (prefers-color-scheme: dark) {
-        :root {
-          /* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
-          --app-primary: #ff8bc4;
-          --app-primary-ink: #3d0b28;
-          --app-primary-hover: #ffaed5;
-          --app-accent: #ff8bc4;
-          --app-flame: #ff8bc4;
-          --app-flame-wash: rgb(255 139 196 / 0.14);
-          --app-ring: #ffaed5;
-          --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
-
-          --app-bg: #0c0910;
-          --app-paper: #15111c;
-          --app-text: #f2ecf5;
-          --app-text-secondary: #b2a7bf;
-          --app-text-tertiary: #8d8199;
-          --app-divider: rgb(242 236 245 / 0.14);
-          --app-error: #f87171;
-          --app-ok: #34d399;
-          --app-ok-wash: rgb(52 211 153 / 0.14);
-          --app-info: #38bdf8;
-          --app-warn: #fbbf24;
-          --app-warn-wash: rgb(251 191 36 / 0.14);
-
-          --raised: #1c1625;
-          --bad-soft: rgb(248 113 113 / 0.12);
+        :root:not([data-color-scheme]) {
           --write: #f0a45b;
           --sheet-shadow: 0 -8px 24px rgb(0 0 0 / 0.5);
         }
@@ -132,7 +75,7 @@
       }
 
       code {
-        font: var(--text-code) var(--app-font-mono);
+        font: 0.875em var(--app-font-mono);
         overflow-wrap: anywhere;
       }
 
@@ -315,7 +258,7 @@
         border-radius: var(--app-radius-pill);
         background: var(--app-primary);
         color: var(--app-primary-ink);
-        font: 500 var(--text-code) var(--app-font-mono);
+        font: 500 var(--app-text-sm) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         text-align: center;
       }
@@ -331,7 +274,7 @@
       /* ── the controls: a button, a field, a tab ─────────────────────────── */
 
       button {
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-4);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
@@ -409,7 +352,8 @@
         font-weight: 600;
       }
 
-      .field input {
+      .field input,
+      .field textarea {
         width: 100%;
         min-height: 36px;
         padding: var(--app-space-1) var(--app-space-2);
@@ -420,14 +364,19 @@
         font: var(--app-text-sm) var(--app-font-mono);
       }
 
-      .field input[aria-invalid='true'] {
+      .field textarea {
+        resize: vertical;
+      }
+
+      .field input[aria-invalid='true'],
+      .field textarea[aria-invalid='true'] {
         border-color: var(--app-error);
         background: var(--bad-soft);
       }
 
       .hint {
         color: var(--app-text-secondary);
-        font-size: var(--text-code);
+        font-size: var(--app-text-sm);
       }
 
       /* a violation, under the input its path names, or above the form when it names none */
@@ -436,7 +385,7 @@
         gap: 2px;
         padding: 0;
         color: var(--app-error);
-        font-size: var(--text-code);
+        font-size: var(--app-text-sm);
         font-weight: 550;
         list-style: none;
         overflow-wrap: anywhere;
@@ -464,7 +413,7 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         font-weight: 600;
         cursor: pointer;
       }
@@ -483,8 +432,9 @@
 
       /* a phone zooms into a field whose text is smaller than 16px */
       @media (max-width: 600px) {
-        .field input {
-          min-height: var(--touch);
+        .field input,
+        .field textarea {
+          min-height: var(--app-touch);
           font-size: 16px;
         }
       }
@@ -603,7 +553,7 @@
         border-radius: var(--app-radius-pill);
         background: var(--raised);
         color: var(--app-text-secondary);
-        font: 500 var(--text-code) var(--app-font-mono);
+        font: 500 var(--app-text-sm) var(--app-font-mono);
       }
 
       .steps li[aria-current] {
@@ -682,7 +632,7 @@
 
       .detail {
         color: var(--app-text-tertiary);
-        font: var(--text-code) / 1.5 var(--app-font-mono);
+        font: var(--app-text-sm) / 1.5 var(--app-font-mono);
         overflow-wrap: anywhere;
       }
 
@@ -805,7 +755,7 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: var(--app-space-2) var(--app-space-5);
         font-weight: 500;
         cursor: pointer;
@@ -891,7 +841,7 @@
         border-radius: var(--app-radius-md);
         background: var(--raised);
         box-shadow: 0 0 0 1px var(--app-divider);
-        font: var(--app-text-xs) / 1.5 var(--app-font-mono);
+        font: var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
       }
 
       .exposition pre {
@@ -923,7 +873,7 @@
 
       @media (max-width: 600px) {
         .sides-tabs [role='tab'] {
-          min-height: var(--touch);
+          min-height: var(--app-touch);
         }
       }
 
@@ -987,6 +937,23 @@
         gap: var(--app-space-2) var(--app-space-4);
       }
 
+      /* a button a language, each as wide as the others */
+      .planner-add {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      .planner-add-buttons {
+        display: grid;
+        grid-auto-columns: minmax(0, 1fr);
+        grid-auto-flow: column;
+        gap: var(--app-space-2);
+      }
+
+      .planner-add-buttons button {
+        text-align: center;
+      }
+
       .planner-drop {
         display: grid;
         gap: var(--app-space-3);
@@ -1006,7 +973,7 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-4);
         border-radius: var(--app-radius-md);
         background: var(--app-primary);
@@ -1066,7 +1033,7 @@
       }
 
       .planner select {
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-3);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
@@ -1135,6 +1102,12 @@
         cursor: pointer;
       }
 
+      @media (pointer: coarse) {
+        .planner-choice {
+          min-height: var(--app-touch);
+        }
+      }
+
       .planner-choice input {
         width: 16px;
         height: 16px;
@@ -1177,7 +1150,7 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-3);
         cursor: pointer;
       }
@@ -1437,7 +1410,7 @@
       .log ol {
         padding: var(--app-space-2) 0;
         list-style: none;
-        font: var(--text-code) / 1.55 var(--app-font-mono);
+        font: var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
@@ -1536,7 +1509,7 @@
         }
 
         .transports a {
-          min-height: var(--touch);
+          min-height: var(--app-touch);
           padding: 0 var(--app-space-1);
         }
 
@@ -1580,7 +1553,7 @@
 
         .switch [role='tab'],
         button.wire-fold {
-          min-height: var(--touch);
+          min-height: var(--app-touch);
         }
 
         .switch {
@@ -1896,6 +1869,19 @@
                 <ul id="sign-up-phone-messages" class="violations" hidden></ul>
                 <p id="sign-up-phone-hint" class="hint">E.164: a +, then 7 to 15 digits</p>
               </div>
+              <div class="field">
+                <label for="sign-up-guests">Guests</label>
+                <textarea
+                  id="sign-up-guests"
+                  name="guests"
+                  rows="3"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  aria-describedby="sign-up-guests-hint"
+                ></textarea>
+                <ul id="sign-up-guests-messages" class="violations" hidden></ul>
+                <p id="sign-up-guests-hint" class="hint">Up to 8 emails, one a line</p>
+              </div>
               <label class="check">
                 <input
                   id="sign-up-validates"
@@ -1918,17 +1904,20 @@
                   type="checkbox"
                   aria-describedby="sign-up-short-detail-note"
                 />
-                A detail of 256 bytes
+                Bound the client's detail to 256 bytes
               </label>
               <p id="sign-up-short-detail-note" class="note">
-                The client's refusal holds its violations in a detail of 1,024 bytes, or 256 with
-                this checked: a list longer than it holds ends <code>and N more</code>. Validate
-                before sending, then break several fields, to see it. The page reloads with its
-                client so bounded.
+                The client writes its own refusals, and reads the server's, in a detail of 1,024
+                bytes, or 256 with this checked. A list the client writes longer than that ends
+                <code>and N more</code>; a detail it reads cut short leaves the rest uncounted. The
+                page reloads with its client so bounded.
               </p>
               <div class="buttons">
                 <button type="submit">Sign up</button>
                 <button type="button" id="sign-up-broken">Break several fields</button>
+                <button type="button" id="sign-up-past-bound">
+                  Break it past the server's bound
+                </button>
                 <button type="button" id="sign-up-valid">Fill a valid one</button>
               </div>
               <p id="sign-up-status" role="status">—</p>
@@ -2154,14 +2143,10 @@ What it answers shows once the sign-up is sent.</pre>
 
           <div class="planner">
             <section class="planner-packages" aria-labelledby="planner-packages-h">
-              <div class="planner-row">
-                <h2 id="planner-packages-h">Packages</h2>
-                <div class="buttons">
-                  <button type="button" data-add-package="typescript">
-                    Add a TypeScript package
-                  </button>
-                  <button type="button" data-add-package="csharp">Add a C# package</button>
-                </div>
+              <h2 id="planner-packages-h">Packages</h2>
+              <div class="planner-add" role="group" aria-labelledby="planner-add-label">
+                <span id="planner-add-label" class="label">Add a package in</span>
+                <div id="planner-add" class="planner-add-buttons"></div>
               </div>
               <div id="planner-editor" class="planner-editor"></div>
             </section>
@@ -2205,12 +2190,13 @@ What it answers shows once the sign-up is sent.</pre>
             <p class="note">
               Each folder and each transport's key is derived from what its package holds, never
               from its place in the list: removing a package renames no other. To name them
-              otherwise, rename them in <code>beadc.yaml</code>; a key of
-              <code>server.transports</code> is the member of
-              <code>SERVED_PROCEDURES</code> (TypeScript) or <code>ServedProcedures</code> (C#) the
-              application hands its transport. The file around these outputs keeps its
-              <code>version</code> and its <code>source</code>: what depends on the disk, the
-              <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
+              otherwise, rename them in <code>beadc.yaml</code>. A key of
+              <code>server.transports</code> names what the application hands its transport: a
+              member of <code>SERVED_PROCEDURES</code> in TypeScript, of
+              <code>ServedProcedures</code> in C#, and in Rust a field of
+              <code>SERVED_PROCEDURES</code>, the key in snake case. The file around these outputs
+              keeps its <code>version</code> and its <code>source</code>: what depends on the disk,
+              the <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
             </p>
           </section>
         </div>

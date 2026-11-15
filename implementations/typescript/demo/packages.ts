@@ -15,6 +15,7 @@ import {
   DEMO_PACKAGES,
   EMPTY_SELECTION,
   type HoldingMode,
+  inLanguage,
   type IOutputPlan,
   type IPackage,
   type IPlan,
@@ -30,6 +31,7 @@ import {
   SHOP_PACKAGES,
   TRANSPORT_TYPES,
   type TransportType,
+  TRANSPORTS_OF,
 } from './planner';
 
 // types
@@ -144,6 +146,10 @@ const listedOf = (blueprint: IBlueprint): IListed[] => {
       };
     });
   });
+};
+
+const languageOf = (value: string): Language | undefined => {
+  return Object.hasOwn(LANGUAGES, value) ? (value as Language) : undefined;
 };
 
 const levelOf = (listed: IListed): string => {
@@ -664,8 +670,11 @@ export const mountPackages = (): void => {
                   },
                   children: [
                     make('option', { text: 'Add a transport…', attributes: { value: '' } }),
-                    ...Object.entries(TRANSPORT_TYPES).map(([value, name]) => {
-                      return make('option', { text: name, attributes: { value } });
+                    ...TRANSPORTS_OF[planned.language].map((value) => {
+                      return make('option', {
+                        text: TRANSPORT_TYPES[value],
+                        attributes: { value },
+                      });
                     }),
                   ],
                 }),
@@ -797,8 +806,8 @@ export const mountPackages = (): void => {
     // * what generate refuses first; then, where it refuses nothing, that it would take them
     const isRefused =
       'refusal' in plan.reading ||
-      plan.outputs.some(({ findings }) => {
-        return findings.length > 0;
+      plan.outputs.some(({ findings, refusals }) => {
+        return findings.length + refusals.length > 0;
       });
 
     if (!isRefused && plan.outputs.length > 0) {
@@ -808,6 +817,16 @@ export const mountPackages = (): void => {
     for (const output of plan.outputs) {
       for (const { rule, message } of output.findings) {
         note('bad', [make('span', { className: 'rule', text: rule }), message]);
+      }
+
+      for (const message of output.refusals) {
+        note('bad', [
+          make('span', {
+            className: 'rule',
+            text: `${LANGUAGES[output.planned.language]} target`,
+          }),
+          message,
+        ]);
       }
 
       const types = new Map<TransportType, number>();
@@ -1233,7 +1252,7 @@ export const mountPackages = (): void => {
       const type = target.value as TransportType;
 
       update(at, (planned) => {
-        return planned.server === undefined || !(type in TRANSPORT_TYPES)
+        return planned.server === undefined || !TRANSPORTS_OF[planned.language].includes(type)
           ? planned
           : {
               ...planned,
@@ -1251,8 +1270,10 @@ export const mountPackages = (): void => {
     }
 
     if (field === 'language') {
+      const language = languageOf(target.value);
+
       update(at, (planned) => {
-        return { ...planned, language: target.value as Language };
+        return language === undefined ? planned : inLanguage(planned, language);
       });
 
       return;
@@ -1369,18 +1390,26 @@ export const mountPackages = (): void => {
     });
   });
 
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-add-package]')) {
-    button.addEventListener('click', () => {
-      packages = [
-        ...packages,
-        {
-          language: (button.dataset['addPackage'] ?? 'typescript') as Language,
-          client: { mode: 'all', selections: [EMPTY_SELECTION] },
-        },
-      ];
-      render();
-    });
-  }
+  // a button a language, each a package of its client to start from
+  elementOf('planner-add').replaceChildren(
+    ...Object.entries(LANGUAGES).map(([value, name]) => {
+      const button = make('button', { text: name, attributes: { type: 'button' } });
+
+      button.addEventListener('click', () => {
+        const language = languageOf(value);
+
+        if (language !== undefined) {
+          packages = [
+            ...packages,
+            { language, client: { mode: 'all', selections: [EMPTY_SELECTION] } },
+          ];
+          render();
+        }
+      });
+
+      return button;
+    })
+  );
 
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-blueprint]')) {
     button.addEventListener('click', () => {

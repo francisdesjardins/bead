@@ -110,6 +110,46 @@ test.describe("the demo's gateway", () => {
     ]);
   });
 
+  test('takes a sign-up’s guests as a JSON array, and places a guest’s violation by its index', async () => {
+    await using demo = await mounted();
+    const welcomed = await signUp(demo.origin, {
+      email: 'ada@example.org',
+      guests: ['grace@example.org'],
+      name: 'ada',
+      seats: 2,
+    });
+
+    expect(welcomed.status).toBe(200);
+
+    const refusedOf = async (guests: string[]) => {
+      const answer = await signUp(demo.origin, {
+        email: 'ada@example.org',
+        guests,
+        name: 'ada',
+        seats: 2,
+      });
+      const problem = (await answer.json()) as { errors: { pointer: string; ruleId: string }[] };
+
+      expect(answer.status).toBe(422);
+
+      return problem.errors.map(({ pointer, ruleId }) => {
+        return [pointer, ruleId];
+      });
+    };
+
+    // * an item by its index (RFC 6901), the list's own bound at the list
+    expect(await refusedOf(['grace@example.org', 'nobody'])).toEqual([
+      ['#/guests/1', 'string.pattern'],
+    ]);
+    expect(
+      await refusedOf(
+        Array.from({ length: 9 }, (_, index) => {
+          return `guest${String(index)}@example.org`;
+        })
+      )
+    ).toEqual([['#/guests', 'repeated.max_items']]);
+  });
+
   test('serves the OpenAPI document beadc wrote of the sign-up, byte for byte', async () => {
     await using demo = await mounted();
     const answer = await fetch(`${demo.origin}/openapi.json`);

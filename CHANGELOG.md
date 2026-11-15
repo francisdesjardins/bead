@@ -46,6 +46,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
   a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
   0053).
+- The demo's Packages tab plans Rust packages, beadc's third target, and adds a package in each
+  language from one row. Each language's server is offered the transports its side has, as the
+  support matrix gives them: the Web Worker is the TypeScript side's alone, and AMQP 1.0 is not
+  offered in Rust. A Rust gateway's procedure named as a method its HTTP client holds is refused
+  on the page in beadc's words.
+- The demo's sign-up takes up to 8 guests, each an email. A violation of a guest says its path,
+  `guests[1]`. "Break it past the server's bound" raises more violations than
+  the server's detail of 1,024 bytes holds, and the page says how many its closing line counts. The
+  box that bounds the client's detail to 256 bytes says it bounds the refusals the client writes and
+  the details it reads.
 
 ### Changed
 
@@ -69,6 +79,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
   names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
   side's service manager over a router of the application's own ahead.
+- beadc judges in its model, `builder/src/model/check-rust.ts`, a Rust gateway's procedure whose
+  method its HTTP client holds already. A page that plans an output can run it as the Rust target
+  does, and the target's refusal reads the same.
 - The support matrix names each test it cites as its side declares it: a title cut where its test
   goes on, a renamed Rust function and a C# method's last word among them.
 - `spec/transcoding.md` refuses a body read before the gateway took its request, by the server
@@ -150,6 +163,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   result whenever `chunkBytes` held it. A server that joins HTTP with another transport, its
   `chunkBytes` its own, refuses an HTTP client's answer to its command past it, as it refuses that
   client's request (decisions 0001, 0033).
+- Bead's page, its demo and its not-found page stand on one skin, `tokens.skin.css`, over
+  penumbra's two sheets and Bead's overrides of them, which add a control's least size on a phone
+  and the size of a block of code. The page and the not-found page inline the whole stack, the
+  latter built into `site/dist/404.html`. The demo's dark scheme takes every one of penumbra's dark
+  values, and a block of code reads at 13 px on the page and on the demo.
 
 ### Removed
 

@@ -403,7 +403,8 @@ const workerOf = (): IWorkerLike => {
 
 // what the page's client counts: the calls it made, and the commands it answered
 const metricsRegistry = createMetricsRegistry();
-// the sign-up's "A detail of 256 bytes" box bounds the client's own refusals, on any transport
+// the sign-up's "Bound the client's detail to 256 bytes" box bounds what the client writes and
+// reads, on any transport
 const limits =
   new URLSearchParams(location.search).get('detail') === 'short'
     ? { maximumDetailBytes: 256 }

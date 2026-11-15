@@ -53,6 +53,16 @@ message SignUpRequest {
   }];
   // An E.164 number: a +, then 7 to 15 digits, the first not 0.
   string phone = 4 [(buf.validate.field).string.pattern = "^\\+[1-9][0-9]{6,14}$"];
+  // Up to 8 guests, each an email as the visitor's own is.
+  repeated string guests = 5 [(buf.validate.field).repeated = {
+    max_items: 8
+    items: {
+      string: {
+        max_len: 254
+        pattern: "^[^@ ]+@[^@ .]+(\\.[^@ .]+)+$"
+      }
+    }
+  }];
 }
 
 // What the sign-up holds.

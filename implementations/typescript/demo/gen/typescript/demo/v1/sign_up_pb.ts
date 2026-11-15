@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file demo/v1/sign_up.proto.
  */
 export const file_demo_v1_sign_up: GenFile = /*@__PURE__*/
-  fileDesc("ChVkZW1vL3YxL3NpZ25fdXAucHJvdG8SB2RlbW8udjEiSgoNU2lnblVwUmVxdWVzdBIMCgRuYW1lGAEgASgJEg0KBXNlYXRzGAIgASgFEg0KBWVtYWlsGAMgASgJEg0KBXBob25lGAQgASgJIiEKDlNpZ25VcFJlc3BvbnNlEg8KB3dlbGNvbWUYASABKAkyXAoNU2lnblVwU2VydmljZRJBCgZTaWduVXASFi5kZW1vLnYxLlNpZ25VcFJlcXVlc3QaFy5kZW1vLnYxLlNpZ25VcFJlc3BvbnNlIgaiyBwCCAEaCKLIHAQIAhABQgiiyBwECgIKAGIGcHJvdG8z", [file_bead_options]);
+  fileDesc("ChVkZW1vL3YxL3NpZ25fdXAucHJvdG8SB2RlbW8udjEiWgoNU2lnblVwUmVxdWVzdBIMCgRuYW1lGAEgASgJEg0KBXNlYXRzGAIgASgFEg0KBWVtYWlsGAMgASgJEg0KBXBob25lGAQgASgJEg4KBmd1ZXN0cxgFIAMoCSIhCg5TaWduVXBSZXNwb25zZRIPCgd3ZWxjb21lGAEgASgJMlwKDVNpZ25VcFNlcnZpY2USQQoGU2lnblVwEhYuZGVtby52MS5TaWduVXBSZXF1ZXN0GhcuZGVtby52MS5TaWduVXBSZXNwb25zZSIGosgcAggBGgiiyBwECAIQAUIIosgcBAoCCgBiBnByb3RvMw", [file_bead_options]);
 
 /**
  * Who signs up, how many seats, and where to confirm: an email or a phone, exactly one.
@@ -46,6 +46,13 @@ export type SignUpRequest = Message<"demo.v1.SignUpRequest"> & {
    * @generated from field: string phone = 4;
    */
   phone: string;
+
+  /**
+   * Up to 8 guests, each an email as the visitor's own is.
+   *
+   * @generated from field: repeated string guests = 5;
+   */
+  guests: string[];
 };
 
 /**

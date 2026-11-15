@@ -4,7 +4,7 @@
 // held to the rules of its .proto, by the server before its resolver, or by the client before it
 // goes when the form asks it to. A refusal, PAYLOAD_INVALID, is read by the runtime's reader, and
 // each violation it carries is bound to the field its path names; one of no field is shown above
-// the form.
+// the form. The guests are a repeated field, one email a line of their box.
 
 // dependencies
 
@@ -19,7 +19,7 @@ import { curlOf, openApiDocument, refusedOf, welcomedOf } from './over-http';
 /** A field of the form: its input, its hint, and where its violations are written. */
 interface IField {
   hint: HTMLElement;
-  input: HTMLInputElement;
+  input: HTMLInputElement | HTMLTextAreaElement;
   messages: HTMLElement;
 }
 
@@ -33,16 +33,17 @@ interface ISignUpOptions {
 /** The form's fields, in the order of their numbers in the .proto, which a refusal keeps. */
 type FieldName = (typeof FIELDS)[number];
 
-/** What the form holds, as its inputs hold it: text. */
+/** What the form holds, as its inputs hold it: text, the guests one a line. */
 type Filled = Readonly<Record<FieldName, string>>;
 
 // constants
 
-const FIELDS = Object.freeze(['name', 'seats', 'email', 'phone'] as const);
+const FIELDS = Object.freeze(['name', 'seats', 'email', 'phone', 'guests'] as const);
 
 /** A sign-up its rules take: a name, two seats, and an email alone. */
 const VALID: Filled = Object.freeze({
   email: 'ada@example.org',
+  guests: '',
   name: 'ada',
   phone: '',
   seats: '2',
@@ -55,9 +56,21 @@ const VALID: Filled = Object.freeze({
  */
 const BROKEN: Filled = Object.freeze({
   email: 'ada@example',
+  guests: '',
   name: '9 Lives!',
   phone: '555-0100',
   seats: '12',
+});
+
+/**
+ * The broken sign-up with twelve guests, past their 8, none an email: 18 violations, more than the
+ * server's detail of 1,024 bytes holds, so its closing line counts the rest (spec 18.6).
+ */
+const PAST_BOUND: Filled = Object.freeze({
+  ...BROKEN,
+  guests: Array.from({ length: 12 }, (_, index) => {
+    return `guest${String(index + 1)}@example`;
+  }).join('\n'),
 });
 
 // what an int32 holds
@@ -102,9 +115,27 @@ const fieldOf = ({ fieldPath }: IViolation): FieldName | undefined => {
   return isField(first) ? first : undefined;
 };
 
-/** A violation's words, as the reader gave them, else its rule's id. */
+/** The guests, as their box holds them: one a line, a blank line none. */
+const guestsOf = (text: string): string[] => {
+  return text
+    .split('\n')
+    .map((line) => {
+      return line.trim();
+    })
+    .filter((line) => {
+      return line !== '';
+    });
+};
+
+/**
+ * A violation's words, as the reader gave them, else its rule's id. A path that is not a field's
+ * name alone is said with them: an item's `guests[1]`, or a path the form holds no field of.
+ */
 const wordsOf = (violation: IViolation): string => {
-  return violation.message ?? violation.ruleId;
+  const words = violation.message ?? violation.ruleId;
+  const { fieldPath } = violation;
+
+  return fieldPath === undefined || isField(fieldPath) ? words : `${fieldPath}: ${words}`;
 };
 
 const plural = (count: number, word: string): string => {
@@ -150,7 +181,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
         name,
         {
           hint: elementOf(`sign-up-${name}-hint`),
-          input: elementOf(`sign-up-${name}`) as HTMLInputElement,
+          input: elementOf(`sign-up-${name}`) as HTMLInputElement | HTMLTextAreaElement,
           messages: elementOf(`sign-up-${name}-messages`),
         },
       ];
@@ -203,6 +234,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   const requestOf = () => {
     return {
       email: fields.email.input.value,
+      guests: guestsOf(fields.guests.input.value),
       name: fields.name.input.value,
       phone: fields.phone.input.value,
       seats: seatsOf(fields.seats.input.value),
@@ -263,12 +295,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
 
     unboundList.replaceChildren(
       ...left.map((violation) => {
-        const words = wordsOf(violation);
-
-        // a path the form holds no field of is said with it
-        return itemOf(
-          violation.fieldPath === undefined ? words : `${violation.fieldPath}: ${words}`
-        );
+        return itemOf(wordsOf(violation));
       })
     );
     unbound.hidden = left.length === 0;
@@ -341,6 +368,9 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   });
   elementOf('sign-up-broken').addEventListener('click', () => {
     fill(BROKEN);
+  });
+  elementOf('sign-up-past-bound').addEventListener('click', () => {
+    fill(PAST_BOUND);
   });
   fill(VALID);
 };

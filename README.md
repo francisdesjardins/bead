@@ -441,14 +441,19 @@ extension's icons, and records the sha256 of the mark and of each in `src/icons.
 three faces, Geist, Geist Mono and Newsreader, are in `src/fonts/`, with their licence, the SIL Open
 Font License.
 
+The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over
+penumbra's two sheets and Bead's overrides of them, all four in
+`implementations/typescript/devtools/penumbra/`. The demo links them; the build inlines them into
+the page, under `src/styles.css`, and into the not-found page, under the styles of `src/404.html`.
+
 `build.mjs` and `check.mjs` need Node alone; `render.mjs` and `icons.mjs` need the Yarn project's
 Mermaid and a Chromium, its own from Playwright or one it is given, and `render.mjs` the page's
 faces, so that labels are measured in the face the page draws them with:
 
 ```sh
 cd site
-node build.mjs     # writes dist/index.html, committed and never edited by hand
-node check.mjs     # each SVG its source's render, each icon the mark's, and dist/index.html the build's
+node build.mjs     # writes dist/index.html and dist/404.html, committed and never edited by hand
+node check.mjs     # each SVG its source's render, each icon the mark's, and both pages the build's
 yarn install --immutable
 node render.mjs --chromium <chrome> --fonts src/fonts
 node icons.mjs --chromium <chrome>
@@ -1041,7 +1046,8 @@ against each server.
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
 - `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
-  committed `site/dist/index.html` byte for byte ([The page](#the-page)).
+  committed `site/dist/index.html` and `site/dist/404.html` byte for byte
+  ([The page](#the-page)).
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 

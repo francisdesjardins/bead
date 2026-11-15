@@ -2131,11 +2131,15 @@ A form signs up for a workshop through a service of its own, `SignUpService`, wh
 from the demo's `.proto`, [`demo/proto/demo/v1/sign_up.proto`](demo/proto/demo/v1/sign_up.proto),
 as [`demo/beadc.yaml`](demo/beadc.yaml) says, into `demo/gen/`: its request holds protovalidate's
 rules — a name of 1 to 63 characters in a DNS label's shape, 1 to 10 seats, an email or a phone,
-exactly one — which every server judges before its resolver, answering a request they refuse
-`PAYLOAD_INVALID` (spec 18). The page reads the detail with `violationsOf`: each violation under the
-field its path names, the field marked `aria-invalid` and described by it, the first focused, one of
-no field above the form. "Validate before sending" calls through a client side whose options say
-`validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
+exactly one, up to 8 guests, each an email — which every server judges before its resolver,
+answering a request they refuse `PAYLOAD_INVALID` (spec 18). The page reads the detail with
+`violationsOf`: each violation under the field its path names, the field marked `aria-invalid` and
+described by it, the first focused, one of no field above the form. A violation of a guest says its
+path, `guests[1]`. "Validate before sending" calls through a client side whose options say
+`validates`, which refuses the same request before anything goes on the wire. Twelve guests none of
+which is an email raise more violations than the server's detail of 1,024 bytes holds, and its
+closing line counts the rest; a box bounds the client's detail to 256 bytes, both the refusals it
+writes and the details it reads. `yarn test:demo` runs
 the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
 joined in memory, and over MQTT 5 where `BEAD_MQTT_URL` names a broker, skipped, saying so, where
 none does; and the form in Chromium, against the static build `yarn playground:build:file` makes.
@@ -2149,8 +2153,9 @@ HTTP form, the sign-up's OpenAPI document, the server and its metrics, and `exam
 sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fragment names the
 scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
 Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
-and radii are penumbra's, the DevTools panel's copy of its two sheets, which the internal demo
-serves and the static build writes into the page.
+and radii are penumbra's, the DevTools panel's copy of its two sheets, and its colours and faces
+are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. The
+internal demo serves the four sheets, and the static build writes them into the page.
 
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server

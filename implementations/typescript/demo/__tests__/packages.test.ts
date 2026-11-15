@@ -101,6 +101,100 @@ test.describe('mountPackages', () => {
     );
   });
 
+  test('adds a package in each language', async ({ page }) => {
+    await page.goto(`${served?.url ?? ''}#packages`);
+
+    const add = page.getByRole('group', { name: 'Add a package in' });
+
+    for (const language of ['TypeScript', 'C#', 'Rust']) {
+      await add.getByRole('button', { name: language, exact: true }).click();
+    }
+
+    await expect(page.locator('#planner-yaml')).toHaveText(
+      [
+        DEMO_YAML.trimEnd(),
+        '  - language: typescript',
+        '    out: gen/typescript-client',
+        '    client: {}',
+        '  - language: csharp',
+        '    out: gen/csharp-client-2',
+        '    client: {}',
+        '  - language: rust',
+        '    out: gen/rust-client',
+        '    client: {}',
+        '',
+      ].join('\n')
+    );
+    await expect(page.locator('#planner-reading')).toHaveText(
+      'parseConfig reads it back: 5 outputs, as planned.'
+    );
+
+    // * a Rust server is offered the transports the Rust side has: no Web Worker, no AMQP 1.0
+    await page
+      .getByRole('region', { name: 'gen/rust-client' })
+      .getByRole('button', { name: 'server' })
+      .click();
+    await expect(
+      page
+        .getByRole('region', { name: 'gen/rust-server-client' })
+        .getByLabel('Add a transport')
+        .locator('option')
+    ).toHaveText([
+      'Add a transport…',
+      'WebSocket',
+      'HTTP',
+      'in memory',
+      'MQTT 5',
+      'another broker',
+    ]);
+  });
+
+  test('refuses a Rust gateway’s procedure named as its HTTP client’s method, in beadc’s words', async ({
+    page,
+  }) => {
+    await page.goto(`${served?.url ?? ''}#packages`);
+    await page.locator('#planner-file').setInputFiles({
+      name: 'doc.blueprint.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(
+        JSON.stringify({
+          format: 'bead-blueprint/1',
+          services: [
+            {
+              serviceId: 1,
+              serviceName: 'Doc',
+              procedures: [{ procedureId: 1, procedureName: 'clone', procedureKind: 'request' }],
+            },
+          ],
+        })
+      ),
+    });
+
+    const language = page
+      .getByRole('region', { name: 'gen/typescript-whole' })
+      .getByLabel('Language');
+
+    await language.selectOption('rust');
+    await page
+      .getByRole('region', { name: 'gen/rust-whole' })
+      .getByRole('button', { name: 'gateway' })
+      .click();
+
+    const findings = page.locator('#planner-findings');
+
+    await expect(findings).toContainText(
+      "Rust targetthe procedure Doc/clone is the method clone of DocHttpClient in Rust, which the client holds already: rename the procedure, or take it out of the output's gateway"
+    );
+    await expect(findings).not.toContainText('No finding');
+
+    // * the same gateway in TypeScript is refused nothing
+    await page
+      .getByRole('region', { name: 'gen/rust-gateway' })
+      .getByLabel('Language')
+      .selectOption('typescript');
+    await expect(findings).toContainText('No finding');
+  });
+
   test('opens a blueprint of its own, and says what it cannot plan', async ({ page }) => {
     await page.goto(`${served?.url ?? ''}#packages`);
 
