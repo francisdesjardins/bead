@@ -716,8 +716,11 @@ export const startPanel = (host: IPanelHost): void => {
         : []),
       part(count('failed'), 'failed'),
       part(count('flight'), 'in flight'),
-      part(subscriptions.length, `subscriptions, ${numberOf(count('open'))} open`),
-      part(state.dropped, 'records let go'),
+      part(
+        subscriptions.length,
+        `${subscriptions.length === 1 ? 'subscription' : 'subscriptions'}, ${numberOf(count('open'))} open`
+      ),
+      part(state.dropped, state.dropped === 1 ? 'record let go' : 'records let go'),
       make('span', {
         text:
           state.book.callsLetGo === 0
@@ -726,7 +729,11 @@ export const startPanel = (host: IPanelHost): void => {
       }),
       ...(state.isRecording
         ? []
-        : [make('span', { text: `paused: ${numberOf(state.pausedLetGo)} records not recorded` })])
+        : [
+            make('span', {
+              text: `paused: ${numberOf(state.pausedLetGo)} ${state.pausedLetGo === 1 ? 'record' : 'records'} not recorded`,
+            }),
+          ])
     );
   };
 
@@ -891,10 +898,6 @@ export const startPanel = (host: IPanelHost): void => {
         const kept = records.filter((record) => {
           return keepsParcel(record, { joined, keeper: state.keeper });
         });
-        const pane = shown.broker.querySelector('.participant-table');
-        const follow =
-          state.participantSelected === undefined &&
-          (pane === null || pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 2);
         replaceKeeping(
           shown.broker,
           brokerViewOf({
@@ -929,12 +932,6 @@ export const startPanel = (host: IPanelHost): void => {
             },
           })
         );
-        if (follow) {
-          const table = shown.broker.querySelector('.participant-table');
-          if (table !== null) {
-            table.scrollTop = table.scrollHeight;
-          }
-        }
       } else if (state.view === 'metrics') {
         replaceKeeping(shown.metrics, metricsOfView());
       } else {

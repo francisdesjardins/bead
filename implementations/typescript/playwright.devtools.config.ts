@@ -6,8 +6,8 @@ import { COMPONENT_TIMEOUT, playwrightBase } from './tools/playwright-base.mjs';
  * under test needs a page they would break.
  *
  * Two projects: `unit`, its pure modules in Node, the panel's model among them; and `extension`,
- * which loads `devtools/dist/` in Chromium against the demo's static build, and opens the panel as a
- * page on a fake DevTools API.
+ * which loads `devtools/dist/` in Chromium against the demo's static build, opens the panel as a
+ * page on a fake DevTools API, and runs the extension's scripts on a fake of Chrome's runtime.
  * `yarn devtools:build` and `yarn playground:build:file` make what the second loads.
  */
 export default defineConfig({
@@ -16,12 +16,20 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testIgnore: ['**/__tests__/{hook,panel}.test.ts', '**/views/__tests__/*.test.ts'],
+      testIgnore: [
+        '**/__tests__/{hook,panel}.test.ts',
+        '**/views/__tests__/*.test.ts',
+        '**/chrome/__tests__/*.test.ts',
+      ],
       testMatch: ['**/__tests__/*.test.ts'],
     },
     {
       name: 'extension',
-      testMatch: ['**/__tests__/{hook,panel}.test.ts', '**/views/__tests__/*.test.ts'],
+      testMatch: [
+        '**/__tests__/{hook,panel}.test.ts',
+        '**/views/__tests__/*.test.ts',
+        '**/chrome/__tests__/*.test.ts',
+      ],
       timeout: COMPONENT_TIMEOUT,
     },
   ],

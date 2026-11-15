@@ -10,7 +10,7 @@
 import type { IPanelHost } from '../host';
 import { PORTS } from '../messages';
 import { startPanel } from '../panel';
-import { chromeOf } from './api';
+import { chromeOf, lastErrorOf } from './api';
 
 // definition
 
@@ -24,6 +24,7 @@ const host: IPanelHost = {
     return {
       onDisconnect: (listener) => {
         port.onDisconnect.addListener(() => {
+          lastErrorOf();
           listener();
         });
       },

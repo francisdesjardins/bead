@@ -6,7 +6,7 @@
 
 // dependencies
 
-import { chromeOf, type IPort } from './api';
+import { chromeOf, lastErrorOf, type IPort } from './api';
 import type { BackgroundMessage, IPanelGreeting, PanelMessage } from '../messages';
 import { PORTS } from '../messages';
 
@@ -57,6 +57,7 @@ const takePage = (port: IPort): void => {
     tell(panels.get(tabId), message as BackgroundMessage);
   });
   port.onDisconnect.addListener(() => {
+    lastErrorOf();
     if (pages.get(tabId) === port) {
       pages.delete(tabId);
       tell(panels.get(tabId), { type: 'page-gone' });
@@ -103,6 +104,7 @@ const takePanel = (port: IPort): void => {
     }
   });
   port.onDisconnect.addListener(() => {
+    lastErrorOf();
     if (tabId !== undefined && panels.get(tabId) === port) {
       panels.delete(tabId);
       tell(pages.get(tabId), { type: 'unwatch' });

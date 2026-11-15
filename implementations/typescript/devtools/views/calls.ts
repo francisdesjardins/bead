@@ -166,7 +166,7 @@ const markerRowOf = (marker: IMarker): HTMLElement => {
         attributes: { colspan: '8' },
         text:
           marker.kind === 'gap'
-            ? `${numberOf(marker.count ?? 0)} records let go here, in a burst: the hook holds 5,000 at most between two batches`
+            ? `${numberOf(marker.count ?? 0)} ${marker.count === 1 ? 'record' : 'records'} let go here, in a burst: the hook holds 5,000 at most between two batches`
             : `Page reloaded at ${clockOf(marker.at)}`,
       }),
     ],

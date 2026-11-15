@@ -22,6 +22,9 @@ import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 /** What the fake DevTools API keeps, on the panel's page. */
 interface IFake {
   deliver: (message: BackgroundMessage) => void;
+  // the background's end gone, its disconnect told with `runtime.lastError` set meanwhile
+  drop: (error: string) => void;
+  lastErrorReads: number;
   finish: (entry: object) => void;
   opened: [url: string, line: number][];
   posted: unknown[];
@@ -87,12 +90,21 @@ const openPanel = async (
         removeListener: () => {},
       };
     };
+    let lastError: { message: string } | undefined;
     const fake: IFake = {
       deliver: (message) => {
         for (const listener of listeners.message) {
           listener(message);
         }
       },
+      drop: (error) => {
+        lastError = { message: error };
+        for (const listener of listeners.disconnect) {
+          listener({});
+        }
+        lastError = undefined;
+      },
+      lastErrorReads: 0,
       finish: (entry) => {
         for (const listener of listeners.finished) {
           listener(entry);
@@ -137,6 +149,11 @@ const openPanel = async (
             return `chrome-extension://fake/${path}`;
           },
           id: 'fake',
+          get lastError() {
+            fake.lastErrorReads += 1;
+
+            return lastError;
+          },
           onConnect: eventOf([]),
         },
       },
@@ -156,7 +173,7 @@ const fakeOf = (page: Page): Promise<IFake> => {
   return page.evaluate(() => {
     const { fake } = globalThis as unknown as { fake: IFake };
 
-    return { ...fake, deliver: undefined, finish: undefined } as unknown as IFake;
+    return { ...fake, deliver: undefined, drop: undefined, finish: undefined } as unknown as IFake;
   });
 };
 
@@ -797,6 +814,71 @@ test.describe('the panel', () => {
     }
   });
 
+  for (const themeName of THEMES) {
+    test(`centres each select’s selected text and its chevron within its control, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+
+      // * the selected text and the chevron live in the select's user-agent shadow tree, which
+      // only the DevTools protocol reads
+      const session = await page.context().newCDPSession(page);
+      const { root } = await session.send('DOM.getDocument', { depth: -1, pierce: true });
+      const nodes: (typeof root)[] = [];
+      const walk = (node: typeof root): void => {
+        nodes.push(node);
+        for (const child of [
+          ...(node.shadowRoots ?? []),
+          ...(node.children ?? []),
+          ...(node.pseudoElements ?? []),
+        ]) {
+          walk(child);
+        }
+      };
+      walk(root);
+      const spanOf = async (nodeId: number) => {
+        const { quads } = await session.send('DOM.getContentQuads', { nodeId });
+        const ys = (quads[0] ?? []).filter((_, index) => {
+          return index % 2 === 1;
+        });
+
+        return { top: Math.min(...ys), bottom: Math.max(...ys) };
+      };
+
+      for (const { id, text } of [
+        { id: 'source', text: 'All clients' },
+        { id: 'layout', text: 'Auto' },
+      ]) {
+        const select = nodes.find((node) => {
+          return node.nodeName === 'SELECT' && node.attributes?.includes(id);
+        });
+        const inner = nodes.find((node) => {
+          return (
+            node.attributes?.includes('-internal-select-inner-element') &&
+            select?.shadowRoots?.[0]?.children?.includes(node)
+          );
+        });
+        const icon = select?.pseudoElements?.find(({ pseudoType }) => {
+          return pseudoType === 'picker-icon';
+        });
+
+        expect(inner?.children?.[0]?.nodeValue).toBe(text);
+
+        const control = await spanOf(select!.nodeId);
+        const selected = await spanOf(inner!.children![0]!.nodeId);
+        // the chevron is the lower half of its rotated square, from its side corners down
+        const square = await spanOf(icon!.nodeId);
+        const chevron = { top: (square.top + square.bottom) / 2, bottom: square.bottom };
+        const middleOf = ({ top, bottom }: { top: number; bottom: number }) => {
+          return (top + bottom) / 2;
+        };
+
+        expect(Math.abs(middleOf(selected) - middleOf(control)), id).toBeLessThanOrEqual(1);
+        expect(Math.abs(middleOf(chevron) - middleOf(control)), id).toBeLessThanOrEqual(1);
+      }
+    });
+  }
+
   test('gives each control edge at least 3:1 contrast against its surfaces in both themes', async ({
     page,
   }) => {
@@ -1356,6 +1438,10 @@ test.describe('the panel', () => {
     await expect(rowOf(page, 'download')).toContainText('↓ 2.5 MiB');
     await expect(page.locator('#footer')).toContainText('10 calls');
     await expect(page.locator('#footer')).toContainText('3 failed');
+    await expect(page.locator('#footer')).toContainText('1 subscription, 0 open');
+    await deliver(page, { dropped: 1, records: [], type: 'records' });
+    await expect(page.locator('#footer')).toContainText('1 record let go');
+    await expect(page.locator('#calls tr.marker.gap')).toContainText('1 record let go here');
   });
 
   test('unfolds a call into its envelopes in words, and lists every envelope in its Envelopes mode', async ({
@@ -1658,7 +1744,9 @@ test.describe('the panel', () => {
       'aria-pressed',
       'false'
     );
-    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 4), type: 'records' });
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 1), type: 'records' });
+    await expect(page.locator('#footer')).toContainText('paused: 1 record not recorded');
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(1, 4), type: 'records' });
     await expect(page.locator('#footer')).toContainText('paused: 4 records not recorded');
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
 
@@ -1979,7 +2067,20 @@ test('tells a stale page hook by an unanswered participant reading and by a prot
   await expect(page.locator('#hook-notice')).toBeVisible();
 });
 
-test('holds Broker selection, focus, pane scroll and keyed rows across the second and records added, and follows only its end', async ({
+test('reads runtime.lastError as its port closes, and says it reconnects', async ({ page }) => {
+  await page.clock.install();
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await page.evaluate(() => {
+    (globalThis as unknown as { fake: IFake }).fake.drop(
+      'The page keeping the extension port is moved into back/forward cache'
+    );
+  });
+  await expect(page.locator('#status')).toHaveText('reconnecting…');
+  expect((await fakeOf(page)).lastErrorReads).toBe(1);
+});
+
+test('holds Broker selection, focus, pane scroll and keyed rows across the second and records added, newest first', async ({
   page,
 }) => {
   await page.clock.install();
@@ -2005,27 +2106,29 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
   });
   await deliver(page, { type: 'records', dropped: 0, records });
   await page.click('[data-tab="broker"]');
-  const pane = page.locator('.participant-table');
-  await expect
-    .poll(async () => {
-      return pane.evaluate((node) => {
-        return node.scrollHeight - node.scrollTop - node.clientHeight;
-      });
+  const pane = page.getByRole('region', { name: 'Parcels, newest first' });
+  const sequenceOf = (row: string) => {
+    return page.locator(`#broker tbody tr${row} td:nth-child(6)`);
+  };
+  await expect(sequenceOf(':first-child')).toHaveText('162');
+  await expect(sequenceOf(':last-child')).toHaveText('3');
+  expect(
+    await pane.evaluate((node) => {
+      return node.scrollTop;
     })
-    .toBeLessThanOrEqual(2);
+  ).toBe(0);
   await deliver(page, {
     type: 'records',
     dropped: 0,
     records: [{ ...records[0], sequence: 163, at: T0 + 163 } as (typeof records)[number]],
   });
   await expect(page.locator('#broker tbody tr')).toHaveCount(161);
-  await expect
-    .poll(async () => {
-      return pane.evaluate((node) => {
-        return node.scrollHeight - node.scrollTop - node.clientHeight;
-      });
+  await expect(sequenceOf(':first-child')).toHaveText('163');
+  expect(
+    await pane.evaluate((node) => {
+      return node.scrollTop;
     })
-    .toBeLessThanOrEqual(2);
+  ).toBe(0);
   await pane.evaluate((node) => {
     node.scrollTop = 200;
     node.scrollLeft = 80;
@@ -2084,11 +2187,11 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
     })
   ).toEqual({ ...before, same: true, focused: true });
   await pane.press('End');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('200');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('3');
   await pane.press('Home');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('3');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('200');
   await pane.press('ArrowDown');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('4');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('164');
   await pane.press('Enter');
   await expect(page.locator('.participant-detail')).toBeFocused();
   await page.locator('.participant-detail').press('Escape');

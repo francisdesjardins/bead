@@ -208,6 +208,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   places percentages, so a resized panel redraws nothing. A call too short for a bar of 6 px is an
   instant, a diamond on its start, and the ticks and rings within one percent of the track are
   drawn once.
+- The DevTools panel's Broker view lists a participant's parcels newest first, as the Calls list
+  does, a new parcel appearing at the top.
 
 ### Removed
 
@@ -224,6 +226,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   take the keyboard's focus, and the focus on a phone is scrolled to above the demo's folded wire.
   The panel's controls are 24 px tall or more, and its Calls and Envelopes switch is a radio group,
   chosen by the arrow keys.
+- The DevTools panel's selects centre their selected text on their row, where it sat at the top.
+  Its footer and its Calls list count one subscription or one record in the singular, and the
+  Broker view's labels and its recorded fields' heading read as the rest of the panel.
+- The DevTools extension reads `runtime.lastError` as each of its ports closes, where Chrome
+  reported it unchecked as a page went into the back/forward cache, and the bridge closes its port
+  while the page sits there and opens another once it is shown again, where it scheduled a
+  reconnection from the cached page.
+- On a phone, the page keeps a name of code in a table whole, as REQUEST, where it split inside the
+  word, and the demo's wire, opened as a sheet, lies over its scene tabs.
 - beadc retries its work area's `.beadc` parent's creation too when another run removes it as
   it is made, which Windows answers with ENOENT, where it failed the run.
 - beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it

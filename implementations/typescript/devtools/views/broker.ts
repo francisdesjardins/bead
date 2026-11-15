@@ -189,7 +189,12 @@ export const brokerViewOf = (options: {
         onFilter({ ...filters, [field]: currentOf(select).value });
       },
     });
-    return make('label', { children: [field, select] });
+    return make('label', {
+      children: [
+        field === 'kind' ? 'Kind' : field === 'connection' ? 'Connection' : 'Verdict',
+        select,
+      ],
+    });
   });
   const state = make('button', { text: 'Envelope credit → State' });
   listen(state, { type: 'click', handle: onState });
@@ -207,6 +212,7 @@ export const brokerViewOf = (options: {
     'Verdict',
   ];
   const rows = records
+    .toReversed()
     .filter((record) => {
       return (
         record.event !== 'parcel' ||
@@ -282,7 +288,7 @@ export const brokerViewOf = (options: {
   });
   const table = make('div', {
     className: 'participant-table rows',
-    attributes: { tabindex: '0', 'aria-label': 'Parcels, oldest first', role: 'region' },
+    attributes: { tabindex: '0', 'aria-label': 'Parcels, newest first', role: 'region' },
     children: [
       make('table', {
         className: 'plain',
