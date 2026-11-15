@@ -110,6 +110,21 @@ test.describe('the json codec', () => {
     expect(written(read)).toBe('{"__proto__":{"a":1},"b":2}');
   });
 
+  test('normalizes negative zero before a JSON payload is given to its type', () => {
+    // * this side's type is the JSON value read: each spelling of −0 reaches it as 0
+    for (const text of ['-0', '-0.0', '-0e0']) {
+      expect(Object.is(PAYLOAD_CODECS.json.decode(utf8(text)), 0)).toBe(true);
+    }
+
+    const read = PAYLOAD_CODECS.json.decode(utf8('[-0,-0.0,-0e0]')) as unknown[];
+
+    expect(
+      read.map((value) => {
+        return Object.is(value, 0);
+      })
+    ).toEqual([true, true, true]);
+  });
+
   test('reads a name that holds an escape as its escapes say, whatever an object of its shape held before', () => {
     // * a name drawn per run, so that no object read before in this process has its shape
     const first = `onTheLedge${randomBytes(8).toString('hex')}`;
