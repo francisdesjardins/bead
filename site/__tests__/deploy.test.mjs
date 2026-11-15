@@ -172,6 +172,14 @@ describe('the headers', () => {
       assert.ok(line.length <= 2_000, line.slice(0, 40));
     }
   });
+
+  test('name the scripts of every page given, each once', () => {
+    const other = '<script>\nfirst();\n    </script><script>\nthird();\n</script>';
+    const [policy] = headersOf(html, other).match(/script-src [^;]+/u);
+    for (const hash of [...inlineScriptHashes(html), ...inlineScriptHashes(other)]) {
+      assert.equal(policy.split(hash).length, 2, hash);
+    }
+  });
 });
 
 describe('the redirects', () => {
@@ -198,10 +206,16 @@ describe('the sitemap', () => {
       [
         'https://beadproto.dev/',
         'https://beadproto.dev/?lng=fr',
+        'https://beadproto.dev/privacy/',
+        'https://beadproto.dev/privacy/?lng=fr',
         'https://beadproto.dev/playground/',
       ]
     );
-    assert.equal(sitemap.match(/hreflang="x-default"/gu).length, 2);
-    assert.equal(sitemap.match(/<lastmod>2026-11-13<\/lastmod>/gu).length, 3);
+    assert.equal(sitemap.match(/hreflang="x-default"/gu).length, 4);
+    assert.equal(
+      sitemap.match(/hreflang="fr" href="https:\/\/beadproto\.dev\/privacy\/\?lng=fr"/gu).length,
+      2
+    );
+    assert.equal(sitemap.match(/<lastmod>2026-11-13<\/lastmod>/gu).length, 5);
   });
 });

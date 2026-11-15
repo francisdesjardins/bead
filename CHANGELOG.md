@@ -68,6 +68,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `@axe-core/playwright` 4.14.0 is a dev dependency of the TypeScript side.
 - An ended subscription's line in the DevTools panel's Timeline and Waterfall stops on a cap where
   it ended, and the legend's swatch shows it, so an ended line reads apart from an open one.
+- `yarn devtools:package`: the DevTools extension's zip for the Chrome Web Store, from an explicit
+  list of the build's files, the same bytes for the same commit, its SHA-256 printed; it refuses a
+  tree with changes. The extension's name and description are in English and in French.
+- The DevTools extension's privacy policy, at beadproto.dev's `/privacy/`, in English and in French,
+  linked from the page's footer: what the extension reads, keeps and sends. Its build refuses a key
+  of the extension's manifest that the policy does not state.
 
 ### Changed
 

@@ -58,9 +58,12 @@ const STACK = [
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
 export const NOT_FOUND = join(HERE, 'dist', '404.html');
+export const PRIVACY = join(HERE, 'dist', 'privacy', 'index.html');
 
 export const LANGUAGES = ['en', 'fr'];
 const ADDRESS = 'https://beadproto.dev/';
+const PRIVACY_ADDRESS = `${ADDRESS}privacy/`;
+const MANIFEST = join(ROOT, 'implementations', 'typescript', 'devtools', 'chrome', 'manifest.json');
 const SOURCE = 'https://github.com/francisdesjardins/bead';
 const BLOB = `${SOURCE}/blob/main/`;
 const TREE = `${SOURCE}/tree/main/`;
@@ -704,6 +707,7 @@ const STRINGS = Object.freeze({
     contents: 'Contents',
     menu: 'Open the contents',
     menuClose: 'Close the contents',
+    home: '#top',
     top: 'Bead, to the top of the page',
     demo: 'Demo',
     other: 'Français',
@@ -720,6 +724,7 @@ const STRINGS = Object.freeze({
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',
     menuClose: 'Fermer le sommaire',
+    home: '#top',
     top: 'Bead, en haut de la page',
     demo: 'Démo',
     other: 'English',
@@ -730,15 +735,31 @@ const STRINGS = Object.freeze({
   },
 });
 
-const pageOf = (language, known) => {
-  const strings = STRINGS[language];
+// the privacy policy's strings outside its content, over the page's: its head, and its name, which
+// leads to the page
+const PRIVACY_STRINGS = Object.freeze({
+  en: {
+    ...STRINGS.en,
+    title: 'Bead DevTools: privacy policy',
+    description:
+      'What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser.',
+    home: '/',
+    top: 'Bead’s page',
+  },
+  fr: {
+    ...STRINGS.fr,
+    title: 'Bead DevTools : politique de confidentialité',
+    description:
+      'Ce que lit, garde et envoie l’extension Bead DevTools : elle lit les enregistrements de débogage Bead de la page que vous inspectez, les garde dans son panneau, et n’envoie rien hors de votre navigateur.',
+    home: '/',
+    top: 'La page de Bead',
+  },
+});
+
+// a page's content in `language`, under the bar and beside its contents; `content` is its template,
+// already filled
+const pageOf = (language, { strings, content: filled }) => {
   const other = language === 'en' ? 'fr' : 'en';
-  const template = read(join(SRC, `content.${language}.html`));
-  // ! the table of the three implementations is drawn from data alone, where the build holds it
-  if (template.split('{{implementations}}').length !== 2) {
-    throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
-  }
-  const filled = fill(template, language, known);
   const { items, content } = contentsOf(language === 'fr' ? typeset(filled) : filled);
   const chrome = read(join(SRC, 'chrome.html'))
     .replaceAll('{{lang}}', language)
@@ -768,33 +789,40 @@ export const buildNotFound = () => {
   });
 };
 
-export const build = () => {
-  const refusals = tableRefusals();
-  if (refusals.length > 0) {
-    throw new Error(
-      refusals
-        .map((refusal) => {
-          return `build: ${refusal}`;
-        })
-        .join('\n')
-    );
+// the main page's content in `language`, its placeholders filled from the repository
+const mainContentOf = (language, known) => {
+  const template = read(join(SRC, `content.${language}.html`));
+  // ! the table of the three implementations is drawn from data alone, where the build holds it
+  if (template.split('{{implementations}}').length !== 2) {
+    throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
   }
-  const known = facts();
+  return fill(template, language, known);
+};
+
+// one document of both languages in the shell: English in the page, French in a template the page
+// swaps in, each language's head and canonical address in the JSON beside the script
+const documentOf = ({ address, strings, contents }) => {
   const heads = Object.fromEntries(
     LANGUAGES.map((language) => {
       return [
         language,
-        { title: STRINGS[language].title, description: STRINGS[language].description },
+        {
+          title: strings[language].title,
+          description: strings[language].description,
+          canonical: language === 'en' ? address : `${address}?lng=${language}`,
+        },
       ];
     })
   );
-  const shell = read(join(SRC, 'shell.html'));
   const pages = Object.fromEntries(
     LANGUAGES.map((language) => {
-      return [language, pageOf(language, known)];
+      return [
+        language,
+        pageOf(language, { strings: strings[language], content: contents[language] }),
+      ];
     })
   );
-  const page = shell
+  const page = read(join(SRC, 'shell.html'))
     .replace('{{style}}', () => {
       // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
       // over them
@@ -814,12 +842,12 @@ export const build = () => {
       return JSON.stringify(heads).replaceAll('<', '\\u003c');
     })
     .replaceAll('{{title}}', () => {
-      return escapeAttribute(STRINGS.en.title);
+      return escapeAttribute(strings.en.title);
     })
     .replaceAll('{{description}}', () => {
-      return escapeAttribute(STRINGS.en.description);
+      return escapeAttribute(strings.en.description);
     })
-    .replaceAll('{{address}}', ADDRESS)
+    .replaceAll('{{address}}', address)
     .replace('{{page-en}}', () => {
       return pages.en;
     })
@@ -831,6 +859,94 @@ export const build = () => {
     throw new Error(`build: placeholders left: ${[...new Set(left)].join(', ')}`);
   }
   return page;
+};
+
+export const build = () => {
+  const refusals = tableRefusals();
+  if (refusals.length > 0) {
+    throw new Error(
+      refusals
+        .map((refusal) => {
+          return `build: ${refusal}`;
+        })
+        .join('\n')
+    );
+  }
+  const known = facts();
+  return documentOf({
+    address: ADDRESS,
+    strings: STRINGS,
+    contents: Object.fromEntries(
+      LANGUAGES.map((language) => {
+        return [language, mainContentOf(language, known)];
+      })
+    ),
+  });
+};
+
+// ── The privacy policy ────────────────────────────────────────────────────────
+
+// ! what the DevTools extension's privacy policy states: each key of its manifest, and every address
+// its content scripts match. A key added, `permissions` or `host_permissions` say, is a refusal
+// until the policy states it and this list takes it.
+const STATED_KEYS = Object.freeze([
+  'manifest_version',
+  'name',
+  'version',
+  'description',
+  'default_locale',
+  'minimum_chrome_version',
+  'icons',
+  'devtools_page',
+  'background',
+  'content_scripts',
+]);
+const STATED_MATCHES = Object.freeze(['<all_urls>']);
+
+// what the extension's manifest, its text, declares that the privacy policy does not state
+export const policyRefusals = (manifest) => {
+  const declared = JSON.parse(manifest);
+  const keys = Object.keys(declared).filter((key) => {
+    return !STATED_KEYS.includes(key);
+  });
+  const matches = (declared.content_scripts ?? [])
+    .flatMap((script) => {
+      return script.matches ?? [];
+    })
+    .filter((match) => {
+      return !STATED_MATCHES.includes(match);
+    });
+  return [
+    ...keys.map((key) => {
+      return `the DevTools manifest declares ${key}, which the privacy policy does not state`;
+    }),
+    ...matches.map((match) => {
+      return `the DevTools content scripts match ${match}, which the privacy policy does not state`;
+    }),
+  ];
+};
+
+// the DevTools extension's privacy policy, at /privacy/, in both languages as the page has them
+export const buildPrivacy = () => {
+  const refusals = policyRefusals(read(MANIFEST));
+  if (refusals.length > 0) {
+    throw new Error(
+      refusals
+        .map((refusal) => {
+          return `build: ${refusal}`;
+        })
+        .join('\n')
+    );
+  }
+  return documentOf({
+    address: PRIVACY_ADDRESS,
+    strings: PRIVACY_STRINGS,
+    contents: Object.fromEntries(
+      LANGUAGES.map((language) => {
+        return [language, read(join(SRC, `privacy.${language}.html`))];
+      })
+    ),
+  });
 };
 
 // the diagrams the content names, each of both languages
@@ -850,11 +966,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const page = build();
     const notFound = buildNotFound();
-    mkdirSync(dirname(OUT), { recursive: true });
+    const privacy = buildPrivacy();
+    mkdirSync(dirname(PRIVACY), { recursive: true });
     writeFileSync(OUT, page);
     writeFileSync(NOT_FOUND, notFound);
+    writeFileSync(PRIVACY, privacy);
     console.log(`build: dist/index.html, ${grouped(Buffer.byteLength(page), 'en')} bytes`);
     console.log(`build: dist/404.html, ${grouped(Buffer.byteLength(notFound), 'en')} bytes`);
+    console.log(
+      `build: dist/privacy/index.html, ${grouped(Buffer.byteLength(privacy), 'en')} bytes`
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

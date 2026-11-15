@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# the DevTools extension's zip, `yarn devtools:package`'s
+devtools/release/
 
 # Everything Yarn writes is derived — except the release, which is the point of vendoring it.
 .yarn/*

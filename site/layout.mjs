@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Holds the page beadproto.dev serves, `dist/index.html`, and its not-found page, `dist/404.html`,
-// to their layout in a headless Chromium, served on the loopback with the page's faces at /fonts/:
+// Holds the page beadproto.dev serves, `dist/index.html`, the DevTools extension's privacy policy,
+// `dist/privacy/index.html`, and the not-found page, `dist/404.html`, to their layout in a headless Chromium, served on the loopback with the page's faces at /fonts/:
 // the top bar 56 px tall and on one line, every tool whole, at each width from a small phone to a
 // wide desktop, in both languages and both themes; no page wider than a phone; every control a
 // finger reaches 44 px on a coarse pointer; every block of code at 13 px; no name of code in a table,
@@ -47,17 +47,19 @@ const TYPES = Object.freeze({
 
 // ── Serving ───────────────────────────────────────────────────────────────────
 
-// the page at `/`, its faces and icons where the host serves them, and the not-found page for
-// every other path, as the host answers it
+// the page at `/`, the privacy policy at `/privacy/`, their faces and icons where the host serves
+// them, and the not-found page for every other path, as the host answers it
 const serve = () => {
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     const file =
       path === '/'
         ? join(DIST, 'index.html')
-        : path.startsWith('/fonts/')
-          ? join(SRC, 'fonts', path.slice('/fonts/'.length))
-          : join(SRC, path.slice(1));
+        : path === '/privacy/'
+          ? join(DIST, 'privacy', 'index.html')
+          : path.startsWith('/fonts/')
+            ? join(SRC, 'fonts', path.slice('/fonts/'.length))
+            : join(SRC, path.slice(1));
     if (!path.includes('..') && existsSync(file) && extname(file) !== '') {
       response.writeHead(200, {
         'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
@@ -244,8 +246,14 @@ const holdBar = async ({ browser, address, path, label, scheme, items, alone = f
   }
 };
 
+// the surfaces of both languages, each by its path and its name in a fault
+const SURFACES = Object.freeze([
+  Object.freeze({ path: '', label: 'the page' }),
+  Object.freeze({ path: 'privacy/', label: 'the privacy policy' }),
+]);
+
 // on a coarse pointer, every control whole, the menu's included once it is open
-const holdTouch = async ({ browser, address, language, faults }) => {
+const holdTouch = async ({ browser, address, language, surface, faults }) => {
   const context = await browser.newContext({
     hasTouch: true,
     isMobile: true,
@@ -253,14 +261,17 @@ const holdTouch = async ({ browser, address, language, faults }) => {
   });
   try {
     const page = await context.newPage();
-    await page.goto(`${address}?lng=${language}`);
+    await page.goto(`${address}${surface.path}?lng=${language}`);
     await facesIn(page);
     for (const small of await smallTargetsOf(page)) {
-      faults.push(`the page, ${language}, a finger's target: ${small}`);
+      faults.push(`${surface.label}, ${language}, a finger's target: ${small}`);
     }
     await page.locator('[data-action="menu"]').tap();
     for (const small of await smallTargetsOf(page)) {
-      faults.push(`the page's menu, ${language}, a finger's target: ${small}`);
+      faults.push(`${surface.label}'s menu, ${language}, a finger's target: ${small}`);
+    }
+    if (surface.path !== '') {
+      return;
     }
     const page404 = await context.newPage();
     await page404.goto(`${address}nowhere`);
@@ -273,11 +284,12 @@ const holdTouch = async ({ browser, address, language, faults }) => {
 };
 
 // the menu opened by its button, closed by Escape, the focus back on its button; no menu past it
-const holdMenu = async ({ browser, address, language, faults }) => {
+const holdMenu = async ({ browser, address, language, surface, faults }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const label = `${surface.label}'s menu, ${language}`;
   try {
     const page = await context.newPage();
-    await page.goto(`${address}?lng=${language}`);
+    await page.goto(`${address}${surface.path}?lng=${language}`);
     const button = page.locator('[data-action="menu"]');
     await button.click();
     const opened = await page.evaluate(() => {
@@ -288,7 +300,7 @@ const holdMenu = async ({ browser, address, language, faults }) => {
       };
     });
     if (opened.expanded !== 'true' || !opened.open || !opened.shown) {
-      faults.push(`the page's menu, ${language}: not opened by its button`);
+      faults.push(`${label}: not opened by its button`);
     }
     await page.keyboard.press('Escape');
     const closed = await page.evaluate(() => {
@@ -300,11 +312,11 @@ const holdMenu = async ({ browser, address, language, faults }) => {
       };
     });
     if (closed.expanded !== 'false' || closed.open || !closed.focused) {
-      faults.push(`the page's menu, ${language}: Escape leaves it open, or the focus elsewhere`);
+      faults.push(`${label}: Escape leaves it open, or the focus elsewhere`);
     }
     await page.setViewportSize({ width: 1200, height: 800 });
     if (await button.isVisible()) {
-      faults.push(`the page's menu, ${language}: its button shown beside the contents`);
+      faults.push(`${label}: its button shown beside the contents`);
     }
   } finally {
     await context.close();
@@ -399,16 +411,18 @@ const main = async () => {
   const faults = [];
   try {
     for (const scheme of SCHEMES) {
-      for (const language of LANGUAGES) {
-        await holdBar({
-          browser,
-          address,
-          path: `?lng=${language}`,
-          label: `the page, ${language}`,
-          scheme,
-          items: '.topbar > *, .topbar .tools > *',
-          faults,
-        });
+      for (const surface of SURFACES) {
+        for (const language of LANGUAGES) {
+          await holdBar({
+            browser,
+            address,
+            path: `${surface.path}?lng=${language}`,
+            label: `${surface.label}, ${language}`,
+            scheme,
+            items: '.topbar > *, .topbar .tools > *',
+            faults,
+          });
+        }
       }
       // * the mark and the name alone: no tool
       await holdBar({
@@ -423,8 +437,10 @@ const main = async () => {
       });
     }
     for (const language of LANGUAGES) {
-      await holdTouch({ browser, address, language, faults });
-      await holdMenu({ browser, address, language, faults });
+      for (const surface of SURFACES) {
+        await holdTouch({ browser, address, language, surface, faults });
+        await holdMenu({ browser, address, language, surface, faults });
+      }
       await holdFocus({ browser, address, language, faults });
     }
     await holdTheme({ browser, address, faults });
@@ -439,7 +455,7 @@ const main = async () => {
     return 1;
   }
   console.log(
-    `layout: the page and the not-found page hold, at ${WIDTHS.join(', ')} px, in both languages and both themes`
+    `layout: the page, the privacy policy and the not-found page hold, at ${WIDTHS.join(', ')} px, in both languages and both themes`
   );
   return 0;
 };

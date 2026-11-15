@@ -171,9 +171,9 @@ jobs:
       # build above, in Chromium.
       - if: matrix.node == '26'
         run: $YARN test:demo
-      # The page, the not-found page and every scene of the demo, as beadproto.dev serves them from
-      # out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its own tests, which fail here
-      # rather than skip.
+      # The page, the privacy policy, the not-found page and every scene of the demo, as
+      # beadproto.dev serves them from out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its
+      # own tests, which fail here rather than skip.
       - if: matrix.node == '26'
         name: WCAG 2.2 AA, the check's own tests
         working-directory: .
@@ -185,7 +185,8 @@ jobs:
         working-directory: .
         run: >-
           node --input-type=module -e "(await import('./site/deploy.mjs')).assemble({ day: '1970-01-01' })"
-          && node tools/check-a11y.mjs --serve site/out / '/?lng=fr' /nowhere /playground/
+          && node tools/check-a11y.mjs --serve site/out / '/?lng=fr' /privacy/ '/privacy/?lng=fr'
+          /nowhere /playground/
           '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
           '/playground/#code' '/playground/#packages'
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
