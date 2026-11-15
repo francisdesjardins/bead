@@ -3,9 +3,10 @@
  *
  * What a project decides — which test projects exist, what a browser project needs served, how many
  * engines it runs on — stays in its `playwright.config.ts`. The CI posture lives here: fail on
- * `.only`, retry twice, one worker, and a list reporter beside the HTML one so a log is readable
- * without opening a file. Copied by hand, that posture drifts, and the field that matters most is
- * `forbidOnly`.
+ * `.only`, never retry, one worker, and a list reporter beside the HTML one so a log is readable
+ * without opening a file. No retry, in CI or out of it: a test that fails once fails the run, so a
+ * flaky one shows rather than passing on its second try. Copied by hand, that posture drifts, and
+ * the field that matters most is `forbidOnly`.
  *
  * Timeouts are here for the same reason and are two numbers rather than one. A unit test runs in
  * Node with no page, so ten seconds means hung rather than slow. A component test shares the machine
@@ -29,7 +30,7 @@ export function playwrightBase({ ci = Boolean(process.env['CI']) } = {}) {
   return {
     fullyParallel: true,
     forbidOnly: ci,
-    retries: ci ? 2 : 0,
+    retries: 0,
     workers: ci ? 1 : '50%',
     timeout: UNIT_TIMEOUT,
     reporter: ci

@@ -48,6 +48,12 @@ test("an earlier's root that holds no .proto, as git archive writes a submodule,
   const folder = test.info().outputPath('earlier');
 
   mkdirSync(join(folder, 'proto', 'empty'), { recursive: true });
+  // * a work area another run left or fills is beadc's, never the root's own .proto
+  mkdirSync(join(folder, 'proto', '.beadc', 'buf-run', 'include', 'bead'), { recursive: true });
+  writeFileSync(
+    join(folder, 'proto', '.beadc', 'buf-run', 'include', 'bead', 'options.proto'),
+    'syntax = "proto3";\n'
+  );
 
   for (const root of ['proto', 'missing']) {
     expect(() => {

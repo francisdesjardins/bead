@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -134,4 +135,66 @@ test('an image marks the imports buf compiled, and reads as a set', () => {
   expect(blueprintOf(readSet(image, { roots: [FIXTURES] })).blueprint).toEqual(
     blueprintOf(readSet(set, { roots: [FIXTURES] })).blueprint
   );
+});
+
+// * the parent's removal answers `code`, as another run's removal or hold makes it answer; the
+// seam lives in a child, so that no parallel case sees its replacement
+const parentRace = (root: string, code: string): void => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+        import assert from 'node:assert/strict';
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        import path from 'node:path';
+
+        const [module, root, code] = process.argv.slice(1);
+        const { compile } = await import(module);
+        const parent = path.join(path.dirname(root), '.beadc');
+        const remove = fs.rmdirSync;
+        const failure = Object.assign(new Error('filesystem refusal'), { code });
+        let refused = 0;
+
+        fs.rmdirSync = (folder, options) => {
+          if (path.resolve(folder) === parent) {
+            refused += 1;
+            throw failure;
+          }
+          return remove(folder, options);
+        };
+        syncBuiltinESMExports();
+
+        try {
+          if (code === 'EACCES') {
+            assert.throws(() => { compile([root]); }, (error) => { return error === failure; });
+          } else {
+            assert.ok(compile([root]).length > 0);
+          }
+          assert.equal(refused, 1);
+          assert.deepEqual(fs.readdirSync(parent), []);
+        } finally {
+          fs.rmdirSync = remove;
+          syncBuiltinESMExports();
+        }
+      `,
+      new URL('../compile.ts', import.meta.url).href,
+      root,
+      code,
+    ],
+    { stdio: 'pipe' }
+  );
+};
+
+test('keeps the work area’s parent another run removes or holds, and refuses any other answer', () => {
+  test.setTimeout(30_000);
+
+  for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+    const root = test.info().outputPath(code, 'proto');
+
+    cpSync(FIXTURES, root, { recursive: true });
+    parentRace(root, code);
+  }
 });

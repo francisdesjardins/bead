@@ -154,6 +154,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc retries its work area's `.beadc` parent's creation too when another run removes it as
+  it is made, which Windows answers with ENOENT, where it failed the run.
+- beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it
+  counted another run's copy of its options, and failed on a file that run removed as it read.
+- beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal
+  with EPERM or EBUSY, as it does while another run removes or holds that folder, where it failed
+  the run.
 - The TypeScript side tells the `tx` step of a call made within a notification's callback once
   its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
   told it with no id, and the DevTools panel showed that call twice, once never answered.

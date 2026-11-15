@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { expect, test } from '@playwright/test';
 
 import { readStandardInput } from '../breaking/against.ts';
 import { extractArchive } from '../breaking/archive.ts';
+import { BEADC_FOLDER } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
 
 const BUILDER = fileURLToPath(new URL('../../', import.meta.url));
@@ -45,6 +46,21 @@ const beadc = (
   );
 
   return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+};
+
+// ! the pair's earlier, copied into the running case's own folder: a compile against a folder holds
+// its work area in it, which buf, compiling the same folder for another case, trips on
+const earlierOfCase = (): string => {
+  const earlier = test.info().outputPath('earlier');
+
+  cpSync(join(BUILDER, PAIR, 'earlier'), earlier, {
+    recursive: true,
+    filter: (source) => {
+      return basename(source) !== BEADC_FOLDER;
+    },
+  });
+
+  return earlier;
 };
 
 // a project of the interop's blueprint and one output, in the running test's output folder
@@ -365,7 +381,7 @@ test("breaking over a .proto prints Bead's finding at the rpc's span and buf's a
   test.setTimeout(60_000);
 
   const file = `${PAIR}/current/parcel/v1/parcel.proto`;
-  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
+  const pair = ['breaking', `${PAIR}/current`, '--against', earlierOfCase()];
   const run = beadc(pair);
   const renamed = `${file}:22:7: error PROCEDURE_SAME_NAME: `;
   const field = `${file}:34:3: error buf:FIELD_SAME_TYPE: `;
@@ -429,7 +445,7 @@ test('--against - reads a tar from standard input, and refuses a terminal', asyn
 test("prints each breaking finding's subject, in text, json and github", () => {
   test.setTimeout(60_000);
 
-  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
+  const pair = ['breaking', `${PAIR}/current`, '--against', earlierOfCase()];
   const [text] = beadc(pair).stdout.split('\n');
   const [json] = beadc([...pair, '--error-format', 'json']).stdout.split('\n');
   // * GitHub's annotation names its file from the workspace, wherever beadc ran

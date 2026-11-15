@@ -384,8 +384,8 @@ of its error, never as a class.
 and `expect`, as their generators write them, and every side names the relays a failure crossed
 `relays`, as the spec does.
 
-**The harnesses play the conformance files without retry**, on every side: Playwright retries a
-failed test twice on CI, which would hide on the TypeScript side what fails the C# side's run.
+**The harnesses play the conformance files without retry**, on every side: a retry would hide on
+the TypeScript side what fails the C# side's run. No Playwright run retries.
 
 **The broker's cases speak the file's vocabulary**, named connections and a clock advanced, in both
 roles ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) to
