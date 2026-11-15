@@ -1,7 +1,7 @@
 // ── Demo page ─────────────────────────────────────────────────────────────────
 
-// The demo's page in Chromium: its faces and its theme, in its static build and as its launcher
-// serves it; and over MQTT 5, served by its launcher beside the Mosquitto `BEAD_MQTT_URL` names
+// The demo's page in Chromium: its faces, its theme and its top bar, its controls' size and its
+// code's, in its static build and as its launcher serves it; and over MQTT 5, served by its launcher beside the Mosquitto `BEAD_MQTT_URL` names
 // (`node tools/mqtt-broker.mjs run -- yarn test:demo`), as `?transport=mqtt` links it: where none
 // is given, skipped, saying so, or failed where `BEAD_MQTT_REQUIRED=1`.
 
@@ -13,6 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   outcomeOf,
   PLAYGROUND,
+  rowFaultsOf,
   serveFolder,
   serveMqttDemo,
 } from '../../devtools/__tests__/fixtures';
@@ -33,6 +34,15 @@ const IS_MQTT_REQUIRED = process.env['BEAD_MQTT_REQUIRED'] === '1';
 
 /** How long a glyph has to cross, each way: the page's own timeout for it. */
 const GLYPH_TIMEOUT = 60_000;
+
+/** The widths the bar is held at: a small phone to a wide desktop, each side of every breakpoint. */
+const WIDTHS = Object.freeze([320, 390, 600, 899, 900, 1199, 1200, 1440]);
+
+/** The page's scenes, by their fragments. */
+const SCENES = Object.freeze(['calls', 'rules', 'openapi', 'server', 'code', 'packages']);
+
+/** The least a control a finger reaches is, tall and wide: the skin's `--app-touch`. */
+const TOUCH = 44;
 
 // helpers
 
@@ -56,6 +66,83 @@ const facesOf = (page: Page): Promise<string[]> => {
 const parsedSchemeOf = (page: Page): Promise<unknown> => {
   return page.evaluate(() => {
     return (globalThis as { parsedScheme?: unknown }).parsedScheme;
+  });
+};
+
+/**
+ * The controls a finger reaches that are under `TOUCH` either way. A link inside a sentence is
+ * exempt, as WCAG 2.5.8 exempts it; a box inside its label is reached by its label, which is
+ * measured instead.
+ */
+const smallTargetsOf = (page: Page): Promise<string[]> => {
+  return page.evaluate((touch) => {
+    const small = new Set<string>();
+
+    for (const element of document.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [role="tab"], label'
+    )) {
+      if (
+        element.matches('a') &&
+        element.closest('p, li, dd, figcaption, td') !== null &&
+        element.closest('header, nav, .strip') === null
+      ) {
+        continue;
+      }
+
+      const target = element.matches('input') ? (element.closest('label') ?? element) : element;
+
+      // a label that holds no control is text, not a target
+      if (target.matches('label') && target.querySelector('input, select, textarea') === null) {
+        continue;
+      }
+
+      const { height, width } = target.getBoundingClientRect();
+
+      if (width > 0 && height > 0 && (width < touch - 0.5 || height < touch - 0.5)) {
+        small.add(
+          `${target.tagName.toLowerCase()}${target.id === '' ? '' : `#${target.id}`} ${String(Math.round(width))}x${String(Math.round(height))} "${target.textContent.trim().slice(0, 24)}"`
+        );
+      }
+    }
+
+    return [...small];
+  }, TOUCH);
+};
+
+/**
+ * The outline `selector`'s first element draws once the keyboard reaches it, Tab after Tab from
+ * where the focus is; `none` where it draws none, or where no Tab reaches it.
+ */
+const outlineByTabOf = async (page: Page, selector: string): Promise<string> => {
+  for (let tabs = 0; tabs < 40; tabs += 1) {
+    await page.keyboard.press('Tab');
+
+    const style = await page.evaluate((wanted) => {
+      const focused = document.activeElement;
+
+      return focused !== null && focused.matches(wanted) && focused.matches(':focus-visible')
+        ? getComputedStyle(focused).outlineStyle
+        : undefined;
+    }, selector);
+
+    if (style !== undefined) {
+      return style;
+    }
+  }
+
+  return 'none';
+};
+
+/** The sizes code is set in, by what holds it: each block, and the wire's log. */
+const codeSizesOf = (page: Page): Promise<string[]> => {
+  return page.evaluate(() => {
+    return [
+      ...new Set(
+        [...document.querySelectorAll('pre, pre code, .log ol')].map((element) => {
+          return getComputedStyle(element).fontSize;
+        })
+      ),
+    ];
   });
 };
 
@@ -145,6 +232,104 @@ test.describe('the demo’s page', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.reload();
     expect(await parsedSchemeOf(page)).toBe('light');
+  });
+
+  test('keeps its bar 56 px tall, on one line, every tool whole, at 320, 390, 600, 899, 900, 1199, 1200 and 1440 px', async ({
+    page,
+  }) => {
+    await page.goto(served?.url ?? '');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+
+    for (const width of WIDTHS) {
+      await page.setViewportSize({ width, height: 800 });
+      expect(
+        await rowFaultsOf(page, '.topbar', {
+          height: 56,
+          items: '.topbar > *, .topbar .tools > *',
+        }),
+        `at ${String(width)} px`
+      ).toEqual([]);
+    }
+
+    // * the bar names Bead and its page, and holds nothing of the demo's state
+    await expect(page.locator('.topbar .brand')).toHaveAttribute('href', 'https://beadproto.dev/');
+    await expect(page.locator('.topbar .tools a')).toHaveText('Page');
+    await expect(page.locator('.topbar #connection, .topbar .transports')).toHaveCount(0);
+  });
+
+  test('gives every control a finger reaches 44 px on a coarse pointer', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+
+    try {
+      for (const scene of SCENES) {
+        await page.goto(`${served?.url ?? ''}#${scene}`);
+        // ! a fragment's change keeps the document, and the served attribute the scene before set
+        await page.evaluate(() => {
+          document.body.dataset['beadTransport'] = 'worker';
+        });
+        await expect(page.locator(`#${scene}-scene`)).toBeVisible();
+        expect(await smallTargetsOf(page), `${scene}, static`).toEqual([]);
+
+        // * what a served page shows too: its transports
+        await page.evaluate(() => {
+          document.body.dataset['beadTransport'] = 'ws';
+        });
+        expect(await smallTargetsOf(page), `${scene}, served`).toEqual([]);
+      }
+
+      // what the strip and the wire open
+      await page.locator('#transport-toggle').click();
+      expect(await smallTargetsOf(page), 'the transports').toEqual([]);
+      await page.locator('#status-toggle').click();
+      expect(await smallTargetsOf(page), 'the connection').toEqual([]);
+      await page.locator('#wire-sheet').click();
+      expect(await smallTargetsOf(page), 'the wire').toEqual([]);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('shows the keyboard’s focus on the bar’s tools and the strip’s controls', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(served?.url ?? '');
+    await page.evaluate(() => {
+      document.body.dataset['beadTransport'] = 'ws';
+    });
+
+    for (const control of [
+      '.topbar .brand',
+      '.topbar .tools a',
+      '.topbar [data-action="theme"]',
+      '#transport-toggle',
+      '#status-toggle',
+      '#wire-toggle',
+    ]) {
+      expect(await outlineByTabOf(page, control), control).not.toBe('none');
+    }
+
+    // * a link of the transports the chip opens
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#transports')).toBeVisible();
+    expect(await outlineByTabOf(page, '#transports a'), 'a transport').not.toBe('none');
+  });
+
+  test('sets every block of code at 13 px', async ({ page }) => {
+    for (const scene of SCENES) {
+      await page.goto(`${served?.url ?? ''}#${scene}`);
+      await expect(page.locator(`#${scene}-scene`)).toBeVisible();
+      expect(await codeSizesOf(page), scene).toEqual(['13px']);
+    }
   });
 });
 

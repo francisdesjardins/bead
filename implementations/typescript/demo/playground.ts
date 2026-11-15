@@ -42,13 +42,14 @@ const THEME = '<script src="penumbra/theme.js"></script>';
 /** The page's faces, which the folder holds where a host of it at its root serves them. */
 const FONTS = new URL('../../../site/src/fonts/', DEMO);
 
-/** Penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them and Bead's skin, which
- * the page links under its own styles. */
+/** Penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them, Bead's skin and
+ * Bead's top bar, which the page links under its own styles. */
 const SHEETS: readonly string[] = Object.freeze([
   'penumbra/tokens.system.css',
   'penumbra/tokens.skin.base.css',
   'penumbra/tokens.system.overrides.css',
   'penumbra/tokens.skin.css',
+  'penumbra/chrome.css',
 ]);
 
 // helpers

@@ -36,6 +36,7 @@ import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
 import { mountPackages } from './packages';
 import { mountScenes } from './scenes';
 import { mountSides } from './sides';
+import { mountStrip } from './strip';
 // ! types alone: the module itself is loaded apart, over MQTT 5 alone
 import type { clientOverMqtt, IMqttReach } from './over-mqtt';
 import { mountSignUp } from './sign-up';
@@ -452,6 +453,7 @@ const shown = {
   clientExposition: elementOf('client-exposition') as HTMLDetailsElement,
   clientMetrics: elementOf('client-metrics'),
   connection: elementOf('connection'),
+  connectionSaid: elementOf('connection-said'),
   connections: elementOf('connections'),
   counter: elementOf('counter'),
   counterOutcome: elementOf('counter-outcome'),
@@ -462,6 +464,7 @@ const shown = {
   glyphCaption: elementOf('glyph-caption'),
   health: elementOf('health'),
   identity: elementOf('identity'),
+  identitySaid: elementOf('identity-said'),
   identitySession: elementOf('identity-session'),
   identityWho: elementOf('identity-who'),
   mean: elementOf('mean'),
@@ -723,13 +726,13 @@ const showGlyph = (pixels: Uint8Array, caption: string): void => {
   shown.glyphCaption.textContent = caption;
 };
 
-// who the calls are made as, as the server read the token's claims, by a role in the bar, its whole
-// in its title and in its card; why not, once logged out
+// who the calls are made as, as the server read the token's claims, by a role in the strip, its
+// whole in what the strip opens and in its card; why not, once logged out
 const showIdentity = (identity: IIdentity | string): void => {
   if (typeof identity === 'string') {
     shown.identity.textContent = 'logged out';
     shown.identity.dataset['role'] = 'none';
-    shown.identity.title = identity;
+    shown.identitySaid.textContent = identity;
     shown.identityWho.textContent = identity;
     shown.identitySession.textContent = '';
 
@@ -742,19 +745,19 @@ const showIdentity = (identity: IIdentity | string): void => {
 
   shown.identity.textContent = claims.roles.join(', ');
   shown.identity.dataset['role'] = claims.roles.join(' ');
-  shown.identity.title = `${who} — ${session}`;
+  shown.identitySaid.textContent = `${who} — ${session}`;
   shown.identityWho.textContent = who;
   shown.identitySession.textContent = session;
 };
 
-/** How the connection stands: its light, its first words in the bar, its whole as its title. */
+/** How the connection stands: its light, its first words in the strip, its whole in what it opens. */
 const showConnection = (state: 'closed' | 'open', said: string): void => {
   shown.connection.dataset['state'] = state;
-  // a connection closed still says what to do, since a phone shows no title
+  // a connection closed still says what to do in the words the strip shows
   shown.connection.textContent = said.startsWith('closed')
     ? 'closed: reload'
     : (said.split(/[,:]/u)[0] ?? said);
-  shown.connection.title = said;
+  shown.connectionSaid.textContent = said;
 };
 
 /** A step of what to try first, done; the first one not done, the one to do. */
@@ -1005,10 +1008,8 @@ for (const details of [shown.clientExposition, shown.serverExposition]) {
   });
 }
 
-// the transport in use, marked among the others
-document
-  .querySelector(`.transports a[href="?transport=${transport ?? 'ws'}"]`)
-  ?.setAttribute('aria-current', 'page');
+// the transport in use, marked among the others and named by the strip's chip
+mountStrip(transport ?? 'ws');
 
 client.transport.on('close', () => {
   showConnection('closed', 'closed: reload the page');
@@ -1082,7 +1083,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
           ? `connected, ${transport === 'http' ? 'HTTP' : 'WebSocket'} on ${location.host}${pathname}`
           : isShared
             ? 'connected, in a Web Worker the tabs share'
-            : 'connected, in a Web Worker of the page'
+            : 'connected, in this page’s Web Worker'
     );
   },
   (reason: unknown) => {

@@ -361,14 +361,177 @@
   }
 }
 
-      /* its scheme the system's, since it runs no script */
+/* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
+   the name, a link to the page, a context word where there is one, and a row of tools at the right,
+   each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
+   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
+   demo links it. */
+
+:root {
+  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  --frame-gutter: max(var(--app-space-4), 3vw);
+}
+
+html {
+  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
+}
+
+body {
+  padding-top: var(--app-topbar-height);
+}
+
+.topbar,
+.topbar * {
+  box-sizing: border-box;
+}
+
+/* ! a height, never a least one: a bar that grows on a narrow screen covers what follows it */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--app-z-topbar);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--app-space-3);
+  height: var(--app-topbar-height);
+  /* its ends on the frame's edges */
+  padding-inline: max(
+    var(--frame-gutter),
+    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+  );
+  background: var(--app-paper);
+  border-bottom: 1px solid var(--app-divider);
+}
+
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-2);
+  min-width: var(--app-touch);
+  min-height: var(--app-touch);
+  color: var(--app-text);
+  font-family: var(--app-font-mono);
+  font-weight: 500;
+  font-size: var(--app-text-md);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand:hover {
+  color: var(--app-text);
+}
+
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the accent */
+.mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
+}
+
+/* what part of Bead this is, after its name */
+.context {
+  flex: none;
+  color: var(--app-text-tertiary);
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+}
+
+.tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--app-space-1);
+  margin-inline-start: auto;
+}
+
+/* * a finger's square at least; the pill it shows is 40 px, inside a transparent edge of 2 px */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--app-touch);
+  height: var(--app-touch);
+  min-height: var(--app-touch);
+  margin: 0;
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
+}
+
+.tool:hover {
+  border-color: transparent;
+  background-color: var(--app-hover);
+  color: var(--app-text);
+}
+
+/* a tool drawn as a glyph: the theme, the page's menu */
+.tool[data-action='theme'],
+.tool[data-action='menu'] {
+  width: var(--app-touch);
+  padding: 0;
+  font-size: 1.25rem;
+}
+
+/* under 360 px, the bar keeps the mark and leaves the name to the heading under it */
+@media (max-width: 359px) {
+  .brand {
+    font-size: 0;
+  }
+
+  .context {
+    display: none;
+  }
+
+  .topbar {
+    gap: var(--app-space-2);
+    padding-inline: var(--app-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool {
+    transition: none;
+  }
+}
+
+      /* its scheme the system's, since it runs no script; under the bar, its two messages centred */
       body {
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-content: center;
         gap: 2.5rem;
-        padding: 2rem 1rem;
+        padding: calc(var(--app-topbar-height) + 2rem) 1rem 2rem;
         box-sizing: border-box;
         background: var(--app-paper);
         color: var(--app-text);
@@ -388,6 +551,9 @@
     </style>
   </head>
   <body>
+    <header class="topbar">
+      <a class="brand" href="/" title="Bead’s page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+    </header>
     <section>
       <h1>Not found</h1>
       <p>No page of Bead’s is at this address. <a href="/?lng=en" hreflang="en">Bead’s page</a></p>

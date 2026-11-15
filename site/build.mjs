@@ -41,15 +41,16 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
-// penumbra's two sheets, Bead's copy of them, Bead's overrides of them and Bead's skin, which the
-// demo links too: the page's styles come on top of them, and the not-found page's own; and beside
-// them the theme's script, which the demo loads too
+// penumbra's two sheets, Bead's overrides of them, Bead's skin and Bead's top bar, which the demo
+// links too: the page's styles come on top of them, and the not-found page's own; and beside them
+// the theme's script, which the demo loads too
 const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
 const STACK = [
   'tokens.system.css',
   'tokens.skin.base.css',
   'tokens.system.overrides.css',
   'tokens.skin.css',
+  'chrome.css',
 ].map((name) => {
   return join(PENUMBRA, name);
 });
@@ -791,7 +792,8 @@ const sheetsOf = (paths) => {
     .join('\n\n');
 };
 
-// the not-found page: Bead's skin on penumbra's sheets, under its own styles, and no script
+// the not-found page: Bead's skin and its bar on penumbra's sheets, under its own styles, and no
+// script
 export const buildNotFound = () => {
   return read(join(SRC, '404.html')).replace('{{stack}}', () => {
     return sheetsOf(STACK);
@@ -826,7 +828,8 @@ export const build = () => {
   );
   const page = shell
     .replace('{{style}}', () => {
-      // * Bead's skin on penumbra's sheets, as the demo has them, then the page's styles over them
+      // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
+      // over them
       return sheetsOf([...STACK, join(SRC, 'styles.css')]);
     })
     .replace('{{head-script}}', () => {

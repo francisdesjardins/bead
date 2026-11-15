@@ -2154,8 +2154,13 @@ sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fr
 scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
 Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
 and radii are penumbra's, the DevTools panel's copy of its two sheets, and its colours and faces
-are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. The
-internal demo serves the four sheets, and the static build writes them into the page.
+are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. Its top
+bar is the page's, `devtools/penumbra/chrome.css`: Bead's mark and name, a link to the page, the
+theme. Under it, the demo's own strip, as `demo/strip.ts` mounts it: the transport in use among the
+others, the connection's light, who the calls are made as, and the wire; on a phone, one compact
+row whose chip opens the other transports and whose light opens the connection's sentence and the
+identity. The internal demo serves the five sheets, and the static build writes them into the
+page.
 
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server

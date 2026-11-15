@@ -1224,6 +1224,32 @@ jobs:
           --exclude spec/pki/server.key --exclude spec/pki/stranger-client.key
           --exclude spec/pki/stranger-server.key
 
+  # ── Site ─────────────────────────────────────────────────────────────────────
+  # The page beadproto.dev serves and its not-found page, as committed, laid out in Chromium by
+  # site/layout.mjs: the top bar on one line at every width, in both languages and both themes, no
+  # page wider than a phone, a finger's targets, the code's size, the menu and the theme. The image
+  # of the Playwright the TypeScript side pins holds the Chromium the site's own `playwright-core`,
+  # the same version, drives.
+  site:
+    name: Site
+    needs: playwright
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: $YARN install --immutable
+      - name: The page's layout
+        run: node layout.mjs
+
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,
   # including when one was cancelled or skipped.
@@ -1245,6 +1271,7 @@ jobs:
         protobuf-conformance,
         protovalidate-differential,
         commits,
+        site,
       ]
     runs-on: ubuntu-26.04
     timeout-minutes: 2

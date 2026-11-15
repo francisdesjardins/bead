@@ -172,6 +172,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   declares once for the three surfaces. It takes the theme the page keeps before its first paint,
   and a toggle in its bar switches it and keeps the choice for both. One script,
   `penumbra/theme.js`, holds the theme for the page and the demo.
+- Bead's page, its demo and its not-found page share one top bar, `penumbra/chrome.css`: Bead's mark
+  and name, a link to the other surface, the language where there are two and the theme, fixed and
+  56 px tall at every width, on one line, each tool 44 px. The demo's transport, connection,
+  identity and wire leave it for a strip of the demo's own under it, sticky on a desktop, one
+  compact row on a phone whose chip opens the other transports and whose light opens the
+  connection's sentence and the identity. The demo's scene tabs stay under the bar as the page
+  scrolls, on a screen 700 px tall or more, their end faded while the list runs on. CI's `site` job
+  holds the page and the not-found page to their layout from 320 to 1440 px, `site/layout.mjs`.
 
 ### Removed
 

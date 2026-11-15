@@ -1,7 +1,7 @@
-/* The page's own styles, over penumbra's two sheets, Bead's overrides of them and Bead's skin, which
-   the build puts ahead of this sheet: its own tokens, the code's, the byte roles' and the
-   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to the
-   system where no script set it. */
+/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
+   top bar, which the build puts ahead of this sheet: its own tokens, the code's, the byte roles'
+   and the diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`,
+   or to the system where no script set it. */
 
 :root {
   /* the page's own, each of the site's */
@@ -62,7 +62,6 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -78,7 +77,6 @@ html {
 
 body {
   margin: 0;
-  padding-top: var(--app-topbar-height);
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--app-font-body);
@@ -108,7 +106,10 @@ a:hover {
   top: var(--app-space-2);
   left: var(--app-space-2);
   z-index: 50;
-  padding: var(--app-space-2) var(--app-space-3);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
   background: var(--app-paper);
   border-radius: var(--app-radius);
   transform: translateY(-200%);
@@ -120,97 +121,7 @@ a:hover {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-.topbar {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: var(--app-z-topbar);
-  display: flex;
-  align-items: center;
-  gap: var(--app-space-3);
-  height: var(--app-topbar-height);
-  /* its ends on the frame's edges, the demo's bar's alike */
-  padding-inline: max(
-    var(--frame-gutter),
-    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
-  );
-  background: var(--app-paper);
-  border-bottom: 1px solid var(--app-divider);
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--app-space-2);
-  margin-inline: 0 auto;
-  color: var(--app-text);
-  font-family: var(--app-font-mono);
-  font-weight: 500;
-  font-size: var(--app-text-md);
-  letter-spacing: 0.01em;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
-   edge in beads; the disc dark in either theme, its edge a hairline, the light the page's accent */
-.mark {
-  flex: none;
-  width: 22px;
-  height: 22px;
-}
-
-.mark .moon {
-  fill: var(--app-body);
-  stroke: var(--app-text-tertiary);
-  stroke-width: 1;
-}
-
-.mark .rim {
-  fill: none;
-  stroke: var(--app-primary);
-  stroke-width: 0.9;
-  stroke-opacity: 0.6;
-}
-
-.mark .bead {
-  fill: var(--app-primary);
-}
-
-.tools {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--app-space-1);
-}
-
-.tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--app-space-10);
-  height: var(--app-space-10);
-  padding: 0 var(--app-space-2);
-  border: none;
-  border-radius: var(--app-radius-pill);
-  background: transparent;
-  color: var(--app-text);
-  font: 500 var(--app-text-md) / 1 var(--app-font-body);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color var(--app-quick) var(--app-ease);
-}
-
-.tool:hover {
-  background: var(--app-hover);
-}
-
-.tool[data-action='theme'],
-.tool[data-action='menu'] {
-  width: var(--app-space-10);
-  padding: 0;
-  font-size: 1.25rem;
-}
-
+/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
 .language .short {
   display: none;
 }
@@ -229,23 +140,7 @@ a:hover {
   }
 }
 
-/* under 360 px, the bar keeps the mark and leaves the name to the page's heading */
-@media (max-width: 359px) {
-  .brand {
-    font-size: 0;
-  }
-  .topbar {
-    gap: var(--app-space-2);
-    padding-inline: var(--app-space-3);
-  }
-}
-
 /* ── Layout and contents ──────────────────────────────────────────────────── */
-
-/* the frame the demo shares: penumbra's content width, and the same gutter at its sides */
-:root {
-  --frame-gutter: max(var(--app-space-4), 3vw);
-}
 
 .layout {
   display: grid;
@@ -338,7 +233,21 @@ main:focus {
     box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
   }
   :root[data-menu-open] .toc a {
-    padding-block: var(--app-space-2);
+    display: flex;
+    align-items: center;
+    min-height: var(--app-touch);
+  }
+}
+
+/* the menu's sheet comes in at once, or a short fade where motion is welcome */
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  :root[data-menu-open] .toc {
+    transition: opacity var(--app-quick) var(--app-ease);
+  }
+  @starting-style {
+    :root[data-menu-open] .toc {
+      opacity: 0;
+    }
   }
 }
 
@@ -487,6 +396,13 @@ h3 code,
 
 .invite a {
   color: inherit;
+}
+
+/* the invite's second way out, a link a finger reaches beside its button */
+.invite .actions a:not(.button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
 }
 
 .invite :focus-visible {

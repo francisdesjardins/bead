@@ -442,13 +442,21 @@ three faces, Geist, Geist Mono and Newsreader, are in `src/fonts/`, with their l
 Font License.
 
 The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over
-penumbra's two sheets and Bead's overrides of them, all four in
-`implementations/typescript/devtools/penumbra/`. The demo links them; the build inlines them into
-the page, under `src/styles.css`, and into the not-found page, under the styles of `src/404.html`.
+penumbra's two sheets and Bead's overrides of them, and share one top bar, `chrome.css`, all five in
+`implementations/typescript/devtools/penumbra/`. The bar holds Bead's name and its navigation alone:
+the mark and the name, a link to the other surface, the language where there are two, the theme. It
+keeps 56 px at every width, on one line. The demo's own state, its transport, its connection, who
+it calls as and the wire, is a strip under it. The demo links the sheets; the build inlines them
+into the page, under `src/styles.css`, and into the not-found page, under the styles of
+`src/404.html`.
 
-`build.mjs` and `check.mjs` need Node alone; `render.mjs` and `icons.mjs` need the Yarn project's
-Mermaid and a Chromium, its own from Playwright or one it is given, and `render.mjs` the page's
-faces, so that labels are measured in the face the page draws them with:
+`build.mjs` and `check.mjs` need Node alone; `render.mjs`, `icons.mjs` and `layout.mjs` need the
+Yarn project's Playwright and a Chromium, its own or one it is given, `render.mjs` Mermaid too and
+the page's faces, so that labels are measured in the face the page draws them with. `layout.mjs`
+holds the page and the not-found page to their layout: the bar 56 px tall and on one line from 320
+to 1440 px, in both languages and both themes, no page wider than a phone, every control a finger
+reaches 44 px on a coarse pointer, every block of code at 13 px, the keyboard's focus shown, the
+menu closed by Escape with the focus given back, and the theme set before the first paint:
 
 ```sh
 cd site
@@ -457,10 +465,12 @@ node check.mjs     # each SVG its source's render, each icon the mark's, and bot
 yarn install --immutable
 node render.mjs --chromium <chrome> --fonts src/fonts
 node icons.mjs --chromium <chrome>
+node layout.mjs --chromium <chrome>
 ```
 
 `render.mjs` renders the diagrams whose SVG is stale, `--all` every one, and fails on a colour left
-that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`.
+that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`; its `site`
+job runs `layout.mjs`.
 
 beadproto.dev is a Cloudflare Worker that serves files alone, `beadproto`, which `wrangler.jsonc`
 configures: no script, no workers.dev address, no preview address, and a path nothing answers a 404. `deploy.mjs` assembles `out/` from the files it lists, and nothing else: the page at `/`, the
@@ -594,7 +604,9 @@ on a desktop and a sheet on a phone, logs the calls and envelopes as the client 
 it: a sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its
 payload rules show each violation under its field; the server, and what the client's and the
 server's metrics registries count; and Packages, a blueprint cut into the outputs of `beadc.yaml`
-by the builder's own selection and reading of it, run in the page, the YAML to copy.
+by the builder's own selection and reading of it, run in the page, the YAML to copy. Its top bar is
+the page's; under it, its own strip holds the transport, the connection, who it calls as and the
+wire.
 
 ```sh
 cd implementations/typescript
