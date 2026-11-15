@@ -51,13 +51,6 @@ export const HTTP_MODULE = 'bead_http';
 /** The type a service's HTTP client is, after its name, the one name the target adds in `bead_http`. */
 export const HTTP_CLIENT_SUFFIX = 'HttpClient';
 
-/**
- * The methods a service's HTTP client holds besides its procedures': its constructor, and those of
- * the traits it implements, `Clone` and `Debug`. A procedure that renders as one of them would be
- * two methods of one name, which the Rust target refuses for its output.
- */
-export const HTTP_CLIENT_METHODS: ReadonlySet<string> = new Set(['new', 'clone', 'fmt']);
-
 const ERROR = '::bead::ProgrammerError';
 const ERROR_LINK = `[\`ProgrammerError\`](${ERROR})`;
 // what a client's call fails with, the requester's own errors

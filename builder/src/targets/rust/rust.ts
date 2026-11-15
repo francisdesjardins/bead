@@ -34,6 +34,7 @@ import {
   LEGACY_REQUIRED_FEATURE,
   VALIDATE_FEATURE,
 } from '../../model/blueprint.ts';
+import { rustGatewayRefusalsOf } from '../../model/check-rust.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { cutOf } from '../../model/selection.ts';
 import {
@@ -61,7 +62,7 @@ import {
   toSnakeCase,
 } from './names.ts';
 import { EXTERNAL_INCLUDE_FILE, type IRustOptions } from './options.ts';
-import { HTTP_CLIENT_METHODS, HTTP_FILE, HTTP_MODULE, printRustHttp } from './http.ts';
+import { HTTP_FILE, HTTP_MODULE, printRustHttp } from './http.ts';
 import { printRustServed, SERVED_FILE, SERVED_MODULE } from './served.ts';
 import { INDENT, printService } from './templates.ts';
 import { printRustValidators } from './validators.ts';
@@ -394,18 +395,12 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
     const gateway = cut.gateway ?? blueprint;
 
     if (options.http !== undefined) {
-      // ! a procedure a client calls whose method would be one its HTTP client holds already, its
-      // constructor's or a trait's it implements: two methods of one name, refused for this output
-      for (const service of gateway.services) {
-        for (const procedure of service.procedures) {
-          const method = toSnakeCase(procedure.procedureName);
+      // ! a procedure a client calls whose method would be one its HTTP client holds already: two
+      // methods of one name, refused for this output, the first the gateway writes
+      const [refusal] = rustGatewayRefusalsOf(gateway);
 
-          if (procedure.procedureKind !== 'command' && HTTP_CLIENT_METHODS.has(method)) {
-            throw new InputError(
-              `the procedure ${service.serviceName}/${procedure.procedureName} is the method ${method} of ${service.serviceName}HttpClient in Rust, which the client holds already: rename the procedure, or take it out of the output's gateway`
-            );
-          }
-        }
+      if (refusal !== undefined) {
+        throw new InputError(refusal.message);
       }
     }
 
