@@ -76,7 +76,7 @@
     nothing. A payload is bounded only by the limits of both ends. A refusal says how far the
     request got.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="compare">
       <thead>
         <tr>
@@ -163,7 +163,7 @@
     <code>0x80</code> are reserved. A header holds 1,020 bytes at most (§2 to §4).
   </p>
   {{header}}
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -488,7 +488,7 @@
     A request presents a credential in its CREDENTIAL block. Its scheme names a format, as HTTP
     names an authentication scheme: a peer knows what the bytes are without reading them.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table class="schemes">
       <thead>
         <tr>
@@ -680,7 +680,7 @@
       Nothing announces the limits: both ends of a connection set them alike, but the last row’s,
       which each side sets for itself.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -782,7 +782,7 @@
     <figcaption>A relayed call, then a refusal at the opening</figcaption>
     {{diagram of="relay"}}
   </figure>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -1140,7 +1140,7 @@
     Encryption is no gate of Bead’s. It is TLS’s job, under the transport, set up by the
     deployment. Of its own, Bead only refuses to send a bearer credential in clear off the machine.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>
@@ -1343,7 +1343,7 @@
       A peer that holds on to a server costs it memory, sockets and time. Each side therefore bounds
       what a peer holds of it, on the model of HTTP/2 and Kestrel, and each bound can be set.
     </p>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0">
       <table>
         <thead>
           <tr>
@@ -1463,7 +1463,7 @@
     variable: <code>*</code> for any run of characters, <code>-</code> to leave a name out. It adds
     three selectors.
   </p>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0">
     <table>
       <thead>
         <tr>

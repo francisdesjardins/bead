@@ -154,6 +154,30 @@
             ],
             "description": "A local part, an @ and a domain with a dot, within RFC 5321's 254 octets of a path."
           },
+          "guests": {
+            "allOf": [
+              {
+                "items": {
+                  "allOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "maxLength": 254
+                    },
+                    {
+                      "pattern": "^[^@ ]+@[^@ .]+(\\.[^@ .]+)+$"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "maxItems": 8
+              }
+            ],
+            "description": "Up to 8 guests, each an email as the visitor's own is."
+          },
           "name": {
             "allOf": [
               {

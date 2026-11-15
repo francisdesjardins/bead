@@ -1,7 +1,8 @@
 // ── Demo samples ─────────────────────────────────────────────────────────────
 
-// What the page shows of `examples/hello`: its resolvers, its server and its client, each on both
-// sides, as the repository holds them, written into `samples.ts` so the page bundles them. Run from
+// What the page shows of `examples/hello`: its resolvers, its server and its client, each in
+// TypeScript, C# and Rust, as the repository holds them, written into `samples.ts` so the page
+// bundles them. Run from
 // the package, `node demo/make-samples.ts`; the demo's tests hold `samples.ts` to what this writes,
 // so a sample never parts from the code the example builds and runs.
 
@@ -15,19 +16,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = new URL('../../../', import.meta.url);
 const OUT = new URL('./samples.ts', import.meta.url);
 
-/** Each role the page offers, and the file of it on each side, from the repository's root. */
+/** Each role the page offers, and the file of it in each language, from the repository's root. */
 const FILES = Object.freeze({
   resolvers: {
-    csharp: 'examples/hello/dotnet/Resolvers.cs',
     typescript: 'examples/hello/typescript/src/resolvers.ts',
+    csharp: 'examples/hello/dotnet/Resolvers.cs',
+    rust: 'examples/hello/rust/src/resolvers.rs',
   },
   serving: {
-    csharp: 'examples/hello/dotnet/Serving.cs',
     typescript: 'examples/hello/typescript/src/serving.ts',
+    csharp: 'examples/hello/dotnet/Serving.cs',
+    rust: 'examples/hello/rust/src/serving.rs',
   },
   calling: {
-    csharp: 'examples/hello/dotnet/Calling.cs',
     typescript: 'examples/hello/typescript/src/calling.ts',
+    csharp: 'examples/hello/dotnet/Calling.cs',
+    rust: 'examples/hello/rust/src/calling.rs',
   },
 } as const);
 
@@ -43,15 +47,16 @@ const textOf = async (file: string): Promise<string> => {
 /** The text of `samples.ts`, as this script writes it from the example's files. */
 export const samplesModule = async (): Promise<string> => {
   const roles = await Promise.all(
-    Object.entries(FILES).map(async ([role, { csharp, typescript }]) => {
-      const [csharpText, typescriptText] = await Promise.all([textOf(csharp), textOf(typescript)]);
+    Object.entries(FILES).map(async ([role, files]) => {
+      const languages = await Promise.all(
+        Object.entries(files).map(async ([language, file]) => {
+          const text = await textOf(file);
 
-      return [
-        `  ${role}: {`,
-        `    csharp: { file: ${JSON.stringify(csharp)}, text: ${JSON.stringify(csharpText)} },`,
-        `    typescript: { file: ${JSON.stringify(typescript)}, text: ${JSON.stringify(typescriptText)} },`,
-        '  },',
-      ].join('\n');
+          return `    ${language}: { file: ${JSON.stringify(file)}, text: ${JSON.stringify(text)} },`;
+        })
+      );
+
+      return [`  ${role}: {`, ...languages, '  },'].join('\n');
     })
   );
 
@@ -60,7 +65,7 @@ export const samplesModule = async (): Promise<string> => {
     '',
     "// examples/hello's files, as `make-samples.ts` writes them: never edited by hand.",
     '',
-    '/** Each role the page offers, its file and its text on each side. */',
+    '/** Each role the page offers, its file and its text in each language. */',
     'export const SAMPLES = Object.freeze({',
     ...roles,
     '} as const);',

@@ -2131,11 +2131,15 @@ A form signs up for a workshop through a service of its own, `SignUpService`, wh
 from the demo's `.proto`, [`demo/proto/demo/v1/sign_up.proto`](demo/proto/demo/v1/sign_up.proto),
 as [`demo/beadc.yaml`](demo/beadc.yaml) says, into `demo/gen/`: its request holds protovalidate's
 rules — a name of 1 to 63 characters in a DNS label's shape, 1 to 10 seats, an email or a phone,
-exactly one — which every server judges before its resolver, answering a request they refuse
-`PAYLOAD_INVALID` (spec 18). The page reads the detail with `violationsOf`: each violation under the
-field its path names, the field marked `aria-invalid` and described by it, the first focused, one of
-no field above the form. "Validate before sending" calls through a client side whose options say
-`validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
+exactly one, up to 8 guests, each an email — which every server judges before its resolver,
+answering a request they refuse `PAYLOAD_INVALID` (spec 18). The page reads the detail with
+`violationsOf`: each violation under the field its path names, the field marked `aria-invalid` and
+described by it, the first focused, one of no field above the form. A violation of a guest says its
+path, `guests[1]`. "Validate before sending" calls through a client side whose options say
+`validates`, which refuses the same request before anything goes on the wire. Twelve guests none of
+which is an email raise more violations than the server's detail of 1,024 bytes holds, and its
+closing line counts the rest; a box bounds the client's detail to 256 bytes, both the refusals it
+writes and the details it reads. `yarn test:demo` runs
 the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
 joined in memory, and over MQTT 5 where `BEAD_MQTT_URL` names a broker, skipped, saying so, where
 none does; and the form in Chromium, against the static build `yarn playground:build:file` makes.
@@ -2149,8 +2153,14 @@ HTTP form, the sign-up's OpenAPI document, the server and its metrics, and `exam
 sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fragment names the
 scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
 Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
-and radii are penumbra's, the DevTools panel's copy of its two sheets, which the internal demo
-serves and the static build writes into the page.
+and radii are penumbra's, the DevTools panel's copy of its two sheets, and its colours and faces
+are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. Its top
+bar is the page's, `devtools/penumbra/chrome.css`: Bead's mark and name, a link to the page, the
+theme. Under it, the demo's own strip, as `demo/strip.ts` mounts it: the transport in use among the
+others, the connection's light, who the calls are made as, and the wire; on a phone, one compact
+row whose chip opens the other transports and whose light opens the connection's sentence and the
+identity. The internal demo serves the five sheets, and the static build writes them into the
+page.
 
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
@@ -2195,22 +2205,24 @@ its tab `Bead ⦿`; the extension's icons are Bead's mark, which `site/icons.mjs
 - **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
   panel's records — its session, the calls in flight, the subscriptions and their credit, the
   transfers and how far they went. It replays nothing, and sends nothing to the page.
-- **Timeline**: every call shown on one axis of time, a notification a ring, a chunk, a credit or a
-  cancel a tick; dragging across it bounds the Calls list to that span.
+- **Timeline**: every call shown, a row each as in Calls and newest first as it lists them, on one
+  axis of time, a notification a ring, a chunk, a credit or a cancel a tick, a call too short for
+  its bar a diamond on its start; a row opens its call in Calls, and dragging across the axis bounds
+  the Calls list to that span and narrows the axis to it.
 - **Metrics**: what each client's registry counts, a row a procedure, read by
   `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
   median and a p95, its calls a second over the last minute, and its exposition as a scrape reads
   it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Broker**: each broker participant the page announced, a header each, its levels — its inbox, its
   incarnation, the names it holds and its gauges against their bounds — read while the view is shown
-  and folded into a disclosure; a table of its parcels, oldest first, its link's transitions and its
+  and folded into a disclosure; a table of its parcels, newest first, its link's transitions and its
   reports among them, a DATA's parts counted by connection and direction, an incomplete capture
   named, with filters of its own by kind, connection and verdict; and a row's recorded fields beside
   it, once it is selected. No row holds a payload, a credential or the acceptor's half, and the last
   1,000 records of the page's participants, all together, are kept, those let go counted. Its
   envelope credit is the State view's, which a button opens. It keeps its selection, its focus and
-  its panes' scroll across readings, follows new parcels only while its list stands at its end with
-  no row selected, and its list and the recorded fields scroll in panes of their own.
+  its panes' scroll across readings, a new parcel appearing at the top, and its list and the
+  recorded fields scroll in panes of their own.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
   procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
@@ -2259,7 +2271,8 @@ model they draw from in `model/` and their views in `views/`, which ask of the b
 `host.ts` names; `records.ts`, `preview.ts` and `stack.ts`, which make each event plain before it
 leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each other, in
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
-extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
+extension's world, which alone may open a runtime port, and closes it while the page sits in the
+back/forward cache; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
 panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its type scale
 and spacing are penumbra's, its two sheets copied whole into `devtools/penumbra/` with the commit
@@ -2276,6 +2289,7 @@ in it, the demo's client followed over MQTT 5,
 `demo/serve.ts` beside a broker of the run's own, its page at `?transport=mqtt`, its one WebSocket
 the broker's — `node ../../tools/mqtt-broker.mjs run -- yarn test:devtools` plays it, CI's job
 `mqtt` runs it, `--grep "over MQTT 5"`, and where `BEAD_MQTT_URL` and `BEAD_MQTT_WS_URL` name no
-broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; and the panel as a page on
-a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
+broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; the panel as a page on
+a fake DevTools API, for what only DevTools gives it; and the bridge and the background on a fake of
+Chrome's runtime, in `chrome/__tests__/`, each disconnect's `runtime.lastError` read. `yarn devtools:build` and
 `yarn playground:build:file` make what they load.

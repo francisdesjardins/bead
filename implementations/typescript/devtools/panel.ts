@@ -548,8 +548,12 @@ export const startPanel = (host: IPanelHost): void => {
     shown.callsTable.hidden = state.mode !== 'calls';
     shown.envelopesTable.hidden = state.mode !== 'envelopes';
 
+    // * the two modes are one choice, a radio group: the one chosen checked, and the Tab's stop
     for (const button of document.querySelectorAll<HTMLElement>('[data-mode]')) {
-      button.setAttribute('aria-pressed', String(button.dataset['mode'] === state.mode));
+      const isChosen = button.dataset['mode'] === state.mode;
+
+      button.setAttribute('aria-checked', String(isChosen));
+      button.tabIndex = isChosen ? 0 : -1;
     }
 
     if (state.mode === 'calls') {
@@ -712,8 +716,11 @@ export const startPanel = (host: IPanelHost): void => {
         : []),
       part(count('failed'), 'failed'),
       part(count('flight'), 'in flight'),
-      part(subscriptions.length, `subscriptions, ${numberOf(count('open'))} open`),
-      part(state.dropped, 'records let go'),
+      part(
+        subscriptions.length,
+        `${subscriptions.length === 1 ? 'subscription' : 'subscriptions'}, ${numberOf(count('open'))} open`
+      ),
+      part(state.dropped, state.dropped === 1 ? 'record let go' : 'records let go'),
       make('span', {
         text:
           state.book.callsLetGo === 0
@@ -722,7 +729,11 @@ export const startPanel = (host: IPanelHost): void => {
       }),
       ...(state.isRecording
         ? []
-        : [make('span', { text: `paused: ${numberOf(state.pausedLetGo)} records not recorded` })])
+        : [
+            make('span', {
+              text: `paused: ${numberOf(state.pausedLetGo)} ${state.pausedLetGo === 1 ? 'record' : 'records'} not recorded`,
+            }),
+          ])
     );
   };
 
@@ -850,13 +861,25 @@ export const startPanel = (host: IPanelHost): void => {
             isAllClients: isEveryClient(),
             nameOf,
             now: Date.now(),
+            // * the detail is the Calls view's: a row opened shows it there, its row in sight
+            onOpen: (key) => {
+              state.view = 'calls';
+              select(key);
+              requestAnimationFrame(() => {
+                shown.calls
+                  .querySelector(`tr[data-key="${String(key)}"]`)
+                  ?.scrollIntoView({ block: 'nearest' });
+                shown.detail.focus({ preventScroll: true });
+              });
+            },
             onRange: (range) => {
               state.range = range;
               draw();
             },
+            onSelect: select,
             range: state.range,
+            selected: state.selected,
             span: spanOfCalls(calls),
-            width: shown.timeline.clientWidth,
           }),
         ]);
       } else if (state.view === 'broker') {
@@ -875,10 +898,6 @@ export const startPanel = (host: IPanelHost): void => {
         const kept = records.filter((record) => {
           return keepsParcel(record, { joined, keeper: state.keeper });
         });
-        const pane = shown.broker.querySelector('.participant-table');
-        const follow =
-          state.participantSelected === undefined &&
-          (pane === null || pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 2);
         replaceKeeping(
           shown.broker,
           brokerViewOf({
@@ -913,12 +932,6 @@ export const startPanel = (host: IPanelHost): void => {
             },
           })
         );
-        if (follow) {
-          const table = shown.broker.querySelector('.participant-table');
-          if (table !== null) {
-            table.scrollTop = table.scrollHeight;
-          }
-        }
       } else if (state.view === 'metrics') {
         replaceKeeping(shown.metrics, metricsOfView());
       } else {
@@ -1429,16 +1442,6 @@ export const startPanel = (host: IPanelHost): void => {
     layOut();
   });
   window.addEventListener('resize', layOut);
-  // the Timeline is drawn at its view's width: a panel resized redraws it at the new one
-  let resized = 0;
-  new ResizeObserver(() => {
-    cancelAnimationFrame(resized);
-    resized = requestAnimationFrame(() => {
-      if (state.view === 'timeline') {
-        draw();
-      }
-    });
-  }).observe(shown.timeline);
 
   // * the splitter is WAI-ARIA APG's Window Splitter, the list its primary pane: a separator
   // whose value is the list's share, moved by its arrows, sent to its limits by Home and End.
@@ -1567,6 +1570,19 @@ export const startPanel = (host: IPanelHost): void => {
     button.addEventListener('click', () => {
       state.mode = button.dataset['mode'] === 'envelopes' ? 'envelopes' : 'calls';
       draw();
+    });
+    // an arrow key chooses the other mode, and the focus goes with the choice
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(event.key)) {
+        return;
+      }
+
+      event.preventDefault();
+      // ! the list's own arrows step through its rows: the group's are the group's alone
+      event.stopPropagation();
+      state.mode = state.mode === 'calls' ? 'envelopes' : 'calls';
+      draw();
+      document.querySelector<HTMLElement>(`[data-mode="${state.mode}"]`)?.focus();
     });
   }
 

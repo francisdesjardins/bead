@@ -3,7 +3,7 @@
 // with the sha256 of its source, `diagrams/<language>/<name>.mmd`, its line breaks LF, and every
 // source has its SVG and every SVG its source; each icon is the one `icons.mjs` wrote from the mark,
 // `src/favicon.svg`, by the hashes `src/icons.json` records; then the build gives the committed
-// `dist/index.html` byte for byte.
+// `dist/index.html` and `dist/404.html` byte for byte.
 //
 //   node check.mjs
 //
@@ -12,10 +12,10 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LANGUAGES, OUT, build } from './build.mjs';
+import { LANGUAGES, NOT_FOUND, OUT, build, buildNotFound } from './build.mjs';
 import { ICONS, RECORD, hashOf, markBytes } from './icons.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -74,9 +74,13 @@ for (const language of LANGUAGES) {
 
 if (problems.length === 0) {
   try {
-    const page = build();
-    if (!existsSync(OUT) || read(OUT) !== page) {
-      problems.push('dist/index.html: not what the build gives; node build.mjs');
+    for (const [path, page] of [
+      [OUT, build()],
+      [NOT_FOUND, buildNotFound()],
+    ]) {
+      if (!existsSync(path) || read(path) !== page) {
+        problems.push(`dist/${basename(path)}: not what the build gives; node build.mjs`);
+      }
     }
   } catch (error) {
     problems.push(error instanceof Error ? error.message : String(error));
@@ -90,6 +94,6 @@ if (problems.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    'site: every SVG is its source’s render, every icon the mark’s, and the build gives dist/index.html'
+    'site: every SVG is its source’s render, every icon the mark’s, and the build gives dist/index.html and dist/404.html'
   );
 }

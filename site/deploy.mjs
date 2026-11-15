@@ -2,9 +2,9 @@
 // Deploys what beadproto.dev serves: assembles `out/` from the files it lists, and nothing else, then
 // uploads it by the Wrangler `package.json` pins, to the Worker `wrangler.jsonc` names, which serves
 // files alone. The page, `dist/index.html`, at `/`; the demo's static build, `demo/dist/playground/`
-// of the TypeScript side, built here from its own sources, at `/playground/`; Bead's mark and the
-// faces the page draws with; the 404 page; and, written here, `_redirects`, `_headers`, `robots.txt`
-// and `sitemap.xml`.
+// of the TypeScript side, built here from its own sources, at `/playground/`, its copy of the faces
+// left out; Bead's mark and the faces the page and the demo draw with; the 404 page,
+// `dist/404.html`; and, written here, `_redirects`, `_headers`, `robots.txt` and `sitemap.xml`.
 //
 //   node deploy.mjs              the checks, `out/`, then `wrangler deploy`
 //   node deploy.mjs --assemble   `out/` alone, from the tree as it is: a trial, never uploaded
@@ -49,7 +49,7 @@ export const TOKEN_VARIABLES = Object.freeze(['CLOUDFLARE_API_TOKEN', 'CLOUDFLAR
 // it is, under this folder
 export const FILES = Object.freeze({
   'index.html': 'dist/index.html',
-  '404.html': 'src/404.html',
+  '404.html': 'dist/404.html',
   'favicon.svg': 'src/favicon.svg',
   'favicon.ico': 'src/favicon.ico',
   'apple-touch-icon.png': 'src/apple-touch-icon.png',
@@ -59,13 +59,18 @@ export const FILES = Object.freeze({
   'fonts/OFL.txt': 'src/fonts/OFL.txt',
 });
 
-// the demo's static build: its page, and its page's script and its worker's, each named by its
-// content
+// the demo's static build: its page, and its page's script, its theme's and its worker's, each named
+// by its content
 export const DEMO_FILES = Object.freeze([
   /^index\.html$/u,
   /^page-[A-Z0-9]+\.js$/u,
+  /^theme-[A-Z0-9]+\.js$/u,
   /^worker-[A-Z0-9]+\.js$/u,
 ]);
+
+// what the demo's build holds for a host of it alone, and this one serves already: its copy of the
+// page's faces, which it asks at `/fonts/`
+export const DEMO_LEFT_OUT = Object.freeze(['fonts']);
 
 // ! every old path of the page and of the demo that reaches this host, in one hop to where it is;
 // the demo's before the page's, the first rule that matches being the one applied
@@ -98,9 +103,9 @@ const DENIED = [
   'xr-spatial-tracking',
 ];
 
-// the sha256 of each script the page holds inline, as a policy names it: the language and the theme
-// before the first paint, and the page's own at the end of the body; the JSON its heads are in runs
-// nothing
+// the sha256 of each script the page holds inline, as a policy names it: the language, then the
+// theme, before the first paint, and the page's own at the end of the body; the JSON its heads are
+// in runs nothing
 export const inlineScriptHashes = (html) => {
   // a parser reads a CRLF as an LF before a script's text is hashed
   const read = html.replaceAll('\r\n', '\n');
@@ -200,8 +205,12 @@ export const treeRefusals = (git) => {
 
 // ── Assembly ──────────────────────────────────────────────────────────────────
 
-// the demo's files, each by the list, or a refusal naming what the list does not know
-export const demoFilesOf = (names) => {
+// the demo's files, each by the list, what it leaves out aside, or a refusal naming what the list
+// does not know
+export const demoFilesOf = (listed) => {
+  const names = listed.filter((name) => {
+    return !DEMO_LEFT_OUT.includes(name);
+  });
   const unknown = names.filter((name) => {
     return !DEMO_FILES.some((pattern) => {
       return pattern.test(name);
@@ -313,10 +322,15 @@ const main = async () => {
   const commit = git(['rev-parse', '--short', 'HEAD']).trim();
   console.log(`deploy: ${trial ? 'a trial of the tree at' : 'the commit'} ${commit}`);
 
-  // the page, as its build gives it, which check.mjs holds in CI
-  const { OUT: PAGE, build } = await import('./build.mjs');
-  if (readFileSync(PAGE, 'utf8').replaceAll('\r\n', '\n') !== build()) {
-    throw new Error('deploy: dist/index.html is not what the build gives; node build.mjs');
+  // the page and the not-found page, as their build gives them, which check.mjs holds in CI
+  const { NOT_FOUND, OUT: PAGE, build, buildNotFound } = await import('./build.mjs');
+  for (const [path, name, page] of [
+    [PAGE, 'index.html', build()],
+    [NOT_FOUND, '404.html', buildNotFound()],
+  ]) {
+    if (readFileSync(path, 'utf8').replaceAll('\r\n', '\n') !== page) {
+      throw new Error(`deploy: dist/${name} is not what the build gives; node build.mjs`);
+    }
   }
 
   // the demo, from its sources, as CI builds it

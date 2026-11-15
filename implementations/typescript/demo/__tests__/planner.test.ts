@@ -4,6 +4,7 @@ import type { IBlueprint } from '../../../../builder/src/model/blueprint.ts';
 import {
   DEMO_PACKAGES,
   EMPTY_SELECTION,
+  inLanguage,
   type IPackage,
   type IPlan,
   type IPlannedSide,
@@ -12,6 +13,8 @@ import {
   READ_BACK_FOLDER,
   SHOP_BLUEPRINT,
   SHOP_PACKAGES,
+  TRANSPORT_TYPES,
+  TRANSPORTS_OF,
 } from '../planner';
 
 // helpers
@@ -68,6 +71,29 @@ const findingsOf = (plan: IPlan) => {
     return output.findings;
   });
 };
+
+const refusalsOf = (plan: IPlan) => {
+  return plan.outputs.flatMap((output) => {
+    return output.refusals;
+  });
+};
+
+/** A blueprint whose procedures are named as the methods a Rust HTTP client holds already. */
+const CLIENT_METHODS_BLUEPRINT = Object.freeze({
+  format: 'bead-blueprint/1',
+  services: [
+    {
+      serviceId: 1,
+      serviceName: 'Doc',
+      procedures: [
+        { procedureId: 1, procedureName: 'clone', procedureKind: 'request' },
+        { procedureId: 2, procedureName: 'fmt', procedureKind: 'notifies' },
+        { procedureId: 3, procedureName: 'new', procedureKind: 'command' },
+        { procedureId: 4, procedureName: 'read', procedureKind: 'request' },
+      ],
+    },
+  ],
+});
 
 // definition
 
@@ -188,6 +214,123 @@ test.describe('planOf', () => {
       ['Shop', new Set(['watchOrders', 'refreshCatalogue'])],
       ['Auth', new Set(['signUp', 'signIn'])],
     ]);
+  });
+
+  test('writes a Rust output as beadc reads it', () => {
+    const plan = planOf(readBlueprint(SHOP_BLUEPRINT), [
+      {
+        language: 'rust',
+        server: {
+          ...ALL,
+          transports: [
+            { type: 'webSocket', side: ALL },
+            { type: 'mqtt', side: including(['Shop/placeOrder']) },
+          ],
+        },
+        client: ALL,
+        gateway: ALL,
+      },
+    ]);
+
+    expect(plan.outputs[0]?.folder).toBe('gen/rust-webSocket');
+    expect(plan.yaml).toContain('  - language: rust\n    out: gen/rust-webSocket\n');
+    expect(readBackOf(plan)).toEqual(plannedOf(plan));
+    expect(findingsOf(plan)).toEqual([]);
+    expect(refusalsOf(plan)).toEqual([]);
+
+    // * beadc's default for a Rust output: the messages generated beside its services
+    expect('config' in plan.reading ? plan.reading.config.outputs?.[0]?.messages : undefined).toBe(
+      'generate'
+    );
+  });
+
+  test('derives Rust transports’ keys that are each their own field, which parseConfig refuses otherwise', () => {
+    const transports = TRANSPORTS_OF.rust.flatMap((type) => {
+      return [
+        { type, side: ALL },
+        { type, side: ALL },
+      ];
+    });
+    const plan = planOf(readBlueprint(SHOP_BLUEPRINT), [
+      { language: 'rust', server: { ...ALL, transports } },
+    ]);
+
+    expect(plan.outputs[0]?.transportKeys).toEqual([
+      'webSocket',
+      'webSocket2',
+      'http',
+      'http2',
+      'memory',
+      'memory2',
+      'mqtt',
+      'mqtt2',
+      'broker',
+      'broker2',
+    ]);
+    expect(readBackOf(plan)).toEqual(plannedOf(plan));
+  });
+
+  test('refuses a Rust gateway’s procedure named as a method its HTTP client holds, as beadc words it', () => {
+    const blueprint = readBlueprint(CLIENT_METHODS_BLUEPRINT);
+    const refused = planOf(blueprint, [{ language: 'rust', gateway: ALL }]);
+
+    // * a command takes any name, since no HTTP client calls it
+    expect(refusalsOf(refused)).toEqual([
+      "the procedure Doc/clone is the method clone of DocHttpClient in Rust, which the client holds already: rename the procedure, or take it out of the output's gateway",
+      "the procedure Doc/fmt is the method fmt of DocHttpClient in Rust, which the client holds already: rename the procedure, or take it out of the output's gateway",
+    ]);
+    expect('config' in refused.reading).toBe(true);
+
+    // a gateway without them, another language's and a Rust output with no gateway: nothing refused
+    const others = planOf(blueprint, [
+      { language: 'rust', gateway: including(['Doc/read', 'Doc/new']) },
+      { language: 'typescript', gateway: ALL },
+      { language: 'rust', client: ALL },
+    ]);
+
+    expect(refusalsOf(others)).toEqual([]);
+  });
+
+  test('offers each language the transports it has', () => {
+    expect(TRANSPORTS_OF.typescript).toEqual(Object.keys(TRANSPORT_TYPES));
+    expect(TRANSPORTS_OF.csharp).toEqual(['webSocket', 'http', 'memory', 'mqtt', 'amqp', 'broker']);
+    expect(TRANSPORTS_OF.rust).toEqual(['webSocket', 'http', 'memory', 'mqtt', 'broker']);
+
+    // * a package moved to another language keeps the transports it has there, in their order
+    const planned: IPackage = {
+      language: 'typescript',
+      server: {
+        ...ALL,
+        transports: [
+          { type: 'worker', side: ALL },
+          { type: 'webSocket', side: ALL },
+          { type: 'amqp', side: including(['Shop/placeOrder']) },
+          { type: 'mqtt', side: ALL },
+        ],
+      },
+      client: ALL,
+    };
+
+    expect(inLanguage(planned, 'csharp')).toEqual({
+      ...planned,
+      language: 'csharp',
+      server: {
+        ...ALL,
+        transports: [
+          { type: 'webSocket', side: ALL },
+          { type: 'amqp', side: including(['Shop/placeOrder']) },
+          { type: 'mqtt', side: ALL },
+        ],
+      },
+    });
+    expect(inLanguage(planned, 'rust').server?.transports).toEqual([
+      { type: 'webSocket', side: ALL },
+      { type: 'mqtt', side: ALL },
+    ]);
+    expect(inLanguage({ language: 'csharp', client: ALL }, 'rust')).toEqual({
+      language: 'rust',
+      client: ALL,
+    });
   });
 
   test('derives each folder from what its package writes: a package removed renames no other', () => {

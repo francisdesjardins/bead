@@ -16,6 +16,24 @@ const MESSAGES = Object.freeze({
   seats: 'must be greater than or equal to 1 and less than or equal to 10',
 });
 
+/** The box that bounds the client's detail, by its label. */
+const SHORT_DETAIL = "Bound the client's detail to 256 bytes";
+
+/** The guests the sign-up past the server's bound invites: twelve, past 8, none an email. */
+const PAST_GUESTS = Array.from({ length: 12 }, (_, index) => {
+  return `guest${String(index + 1)}@example`;
+});
+
+/**
+ * What the server's detail holds of the guests' violations past its bound: their count first, the
+ * first item whole, the second without its `message` or `bounds`, which leaves it its rule's id.
+ */
+const PAST_GUESTS_MESSAGES = Object.freeze([
+  'must contain no more than 8 item(s)',
+  'guests[0]: does not match regex pattern `^[^@ ]+@[^@ .]+(\\.[^@ .]+)+$`',
+  'guests[1]: string.pattern',
+]);
+
 // helpers
 
 /** The lines of the envelopes' log that open a sign-up: a REQUEST to service 2's procedure 1. */
@@ -145,10 +163,10 @@ test.describe('mountSignUp', () => {
     page,
   }) => {
     // * the box reloads the page under the short detail, and says so once it has
-    await page.getByLabel('A detail of 256 bytes').check();
+    await page.getByLabel(SHORT_DETAIL).check();
     await expect(page).toHaveURL(/[?&]detail=short#rules$/u);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
-    await expect(page.getByLabel('A detail of 256 bytes')).toBeChecked();
+    await expect(page.getByLabel(SHORT_DETAIL)).toBeChecked();
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
     await page.getByRole('button', { name: 'Sign up' }).click();
@@ -176,10 +194,10 @@ test.describe('mountSignUp', () => {
     await expect(page.locator('#sign-up-unbound')).toBeHidden();
 
     // * the default detail holds all five, through the same form and judging
-    await page.getByLabel('A detail of 256 bytes').uncheck();
+    await page.getByLabel(SHORT_DETAIL).uncheck();
     await expect(page).not.toHaveURL(/detail=short/u);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
-    await expect(page.getByLabel('A detail of 256 bytes')).not.toBeChecked();
+    await expect(page.getByLabel(SHORT_DETAIL)).not.toBeChecked();
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
     await page.getByRole('button', { name: 'Sign up' }).click();
@@ -195,7 +213,7 @@ test.describe('mountSignUp', () => {
   }) => {
     // * the server writes its whole detail; the client reads it under its 256 bytes, its closing
     // line among what it cuts (spec 18.7)
-    await page.getByLabel('A detail of 256 bytes').check();
+    await page.getByLabel(SHORT_DETAIL).check();
     await expect(page).toHaveURL(/[?&]detail=short#rules$/u);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.getByRole('button', { name: 'Break several fields' }).click();
@@ -207,6 +225,63 @@ test.describe('mountSignUp', () => {
     await expect(requestsOf(page)).toHaveCount(1);
     await expect(page.locator('[aria-invalid]')).toHaveCount(1);
     await expect(page.locator('#sign-up-name-messages')).toHaveText(MESSAGES.name);
+  });
+
+  test('ends the server’s detail past 1,024 bytes with and N more', async ({ page }) => {
+    await page.getByRole('button', { name: "Break it past the server's bound" }).click();
+
+    await expect(page.locator('#sign-up-guests')).toHaveValue(PAST_GUESTS.join('\n'));
+    await expect(page.locator('#sign-up-http-request')).toContainText(
+      `"guests":["guest1@example","guest2@example"`
+    );
+
+    await page.getByRole('button', { name: 'Sign up' }).click();
+
+    // * 18 violations, 7 of them within the server's 1,024 bytes; its closing line counts the rest,
+    // the message's own rule among them
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      'refused by the server before its resolver: PAYLOAD_INVALID, 7 violations, and 11 more'
+    );
+    await expect(requestsOf(page)).toHaveCount(1);
+    await expect(page.locator('[aria-invalid]')).toHaveCount(5);
+    await expect(page.locator('#sign-up-guests')).toHaveAttribute(
+      'aria-describedby',
+      'sign-up-guests-messages sign-up-guests-hint'
+    );
+    await expect(page.locator('#sign-up-guests-messages li')).toHaveText(PAST_GUESTS_MESSAGES);
+    await expect(page.locator('#sign-up-unbound')).toBeHidden();
+    await expect(page.locator('#sign-up-name')).toBeFocused();
+    await expect(page.locator('#sign-up-http-answer')).toContainText('"more": 11');
+  });
+
+  test('names the client’s bound, written and read', async ({ page }) => {
+    const box = page.getByLabel(SHORT_DETAIL);
+
+    await expect(box).toHaveAccessibleDescription(
+      "The client writes its own refusals, and reads the server's, in a detail of 1,024 bytes, or 256 with this checked. A list the client writes longer than that ends and N more; a detail it reads cut short leaves the rest uncounted. The page reloads with its client so bounded."
+    );
+
+    await box.check();
+    await expect(page).toHaveURL(/[?&]detail=short#rules$/u);
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+
+    // * written: the client's own refusal, cut at 256 bytes, counts what it left out
+    await page.getByLabel('Validate before sending').check();
+    await page.getByRole('button', { name: "Break it past the server's bound" }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      'refused by the client before it went, nothing on the wire: PAYLOAD_INVALID, 2 violations, and 16 more'
+    );
+    await expect(requestsOf(page)).toHaveCount(0);
+
+    // * read: the server's detail, whole at its own bound, cut at the client's, its closing line
+    // among what it cut
+    await page.getByLabel('Validate before sending').uncheck();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      "refused by the server before its resolver: PAYLOAD_INVALID, 1 violation, and more the detail's bound cut, uncounted"
+    );
+    await expect(requestsOf(page)).toHaveCount(1);
   });
 
   test('says it stops at the first violation when the client judges only that one', async ({

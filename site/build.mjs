@@ -8,9 +8,10 @@
 // `docs/support.md`: each row of its Features and Transports in one part of the table or in
 // OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the union of what its
 // rows' cells say for its sides by the token `ahead: <stage>`, a row of the differences of kind
-// open. Node alone, nothing installed, and the same bytes on every machine.
+// open. It writes the not-found page too, `dist/404.html`, its styles over the same skin. Node
+// alone, nothing installed, and the same bytes on every machine.
 //
-//   node build.mjs   writes dist/index.html
+//   node build.mjs   writes dist/index.html and dist/404.html
 //
 // Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, or a table the
 // matrix does not hold: a row in no list or in two, a title the matrix lacks, "ahead" in a cell's
@@ -36,17 +37,27 @@ import {
   STATUS_HEADINGS,
   WIRE,
 } from './src/data.mjs';
+import { tokensOf } from '../implementations/typescript/demo/highlight.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
-// penumbra's system half, Bead's copy of it, and Bead's overrides of it, which the demo links too:
-// the page's styles come on top of both
+// penumbra's two sheets, Bead's overrides of them, Bead's skin and Bead's top bar, which the demo
+// links too: the page's styles come on top of them, and the not-found page's own; and beside them
+// the theme's script, which the demo loads too
 const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
-const SYSTEM = join(PENUMBRA, 'tokens.system.css');
-const OVERRIDES = join(PENUMBRA, 'tokens.system.overrides.css');
+const STACK = [
+  'tokens.system.css',
+  'tokens.skin.base.css',
+  'tokens.system.overrides.css',
+  'tokens.skin.css',
+  'chrome.css',
+].map((name) => {
+  return join(PENUMBRA, name);
+});
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
+export const NOT_FOUND = join(HERE, 'dist', '404.html');
 
 export const LANGUAGES = ['en', 'fr'];
 const ADDRESS = 'https://beadproto.dev/';
@@ -190,7 +201,7 @@ const headerOf = (language) => {
       return `<div class="word"><code class="word-name">${escape(pick(name, language))}</code><div class="word-bits">${cells}</div></div>`;
     })
     .join('');
-  return `<div class="bitmap" role="img" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
+  return `<div class="bitmap" role="img" tabindex="0" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
 };
 
 const stageOf = (code, language) => {
@@ -218,7 +229,7 @@ const failuresOf = (language) => {
   const body = FAILURES.map(([name, code, fate, when]) => {
     return `<tr><td class="code-num">${code}</td><td><code>${name}</code></td><td><span class="stage">${escape(stageOf(code, language))}</span></td><td>${fateOf(fate, language)}</td><td>${escape(pick(when, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const statusesOf = (language) => {
@@ -228,7 +239,7 @@ const statusesOf = (language) => {
   const body = STATUSES.map(([status, what]) => {
     return `<tr><td class="code-num">${status}</td><td>${escape(pick(what, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const wireOf = (language) => {
@@ -474,52 +485,19 @@ const implementationsOf = (language) => {
       .join('');
     return `<tr><th scope="row">${escape(pick(part.name, language))}</th>${cells}</tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 // ── Code ──────────────────────────────────────────────────────────────────────
 
-const KEYWORDS = new Set(
-  'as async await break case catch class const continue default else enum export extends false finally for from function if import in instanceof interface let message new null of package repeated return static switch syntax this throw true try type typeof undefined using var void while yield'.split(
-    ' '
-  )
-);
-
-// a block of code, coloured as the page colours it: comments, strings, numbers and keywords, by a
-// scanner that knows no grammar and needs none for a few lines of a snippet
+// a block of code, coloured by the demo's scanner, which Node runs with its types stripped: each
+// token in a span of its kind's class, the text between them as it is
 const highlight = (source, language) => {
-  if (language === 'plaintext') {
-    return escape(source);
-  }
-  const comment = language === 'toml' || language === 'shell' ? '#' : '//';
-  const pattern = new RegExp(
-    [
-      `(${comment === '#' ? '#[^\\n]*' : '\\/\\/[^\\n]*'})`,
-      '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
-      '(\\b(?:0x[0-9a-fA-F_]+|\\d[\\d_]*(?:\\.\\d+)?(?:e[+-]?\\d+)?)\\b)',
-      '([A-Za-z_$][\\w$]*)',
-    ].join('|'),
-    'gu'
-  );
-  let out = '';
-  let at = 0;
-  for (const match of source.matchAll(pattern)) {
-    out += escape(source.slice(at, match.index));
-    const [text, isComment, isString, isNumber, word] = match;
-    if (isComment !== undefined) {
-      out += `<span class="tok-comment">${escape(text)}</span>`;
-    } else if (isString !== undefined) {
-      out += `<span class="tok-string">${escape(text)}</span>`;
-    } else if (isNumber !== undefined) {
-      out += `<span class="tok-number">${escape(text)}</span>`;
-    } else if (word !== undefined && language !== 'json' && KEYWORDS.has(word)) {
-      out += `<span class="tok-keyword">${escape(text)}</span>`;
-    } else {
-      out += escape(text);
-    }
-    at = match.index + text.length;
-  }
-  return out + escape(source.slice(at));
+  return tokensOf(source, language)
+    .map(({ kind, text }) => {
+      return kind === 'text' ? escape(text) : `<span class="tok-${kind}">${escape(text)}</span>`;
+    })
+    .join('');
 };
 
 const codeBlock = (source, language) => {
@@ -773,6 +751,23 @@ const pageOf = (language, known) => {
   return chrome.trim();
 };
 
+// sheets as one, in their order
+const sheetsOf = (paths) => {
+  return paths
+    .map((path) => {
+      return read(path).trim();
+    })
+    .join('\n\n');
+};
+
+// the not-found page: Bead's skin and its bar on penumbra's sheets, under its own styles, and no
+// script
+export const buildNotFound = () => {
+  return read(join(SRC, '404.html')).replace('{{stack}}', () => {
+    return sheetsOf(STACK);
+  });
+};
+
 export const build = () => {
   const refusals = tableRefusals();
   if (refusals.length > 0) {
@@ -801,16 +796,16 @@ export const build = () => {
   );
   const page = shell
     .replace('{{style}}', () => {
-      // * penumbra's system half and Bead's overrides of it, as the demo has them, then the page's
-      // styles over them
-      return [SYSTEM, OVERRIDES, join(SRC, 'styles.css')]
-        .map((path) => {
-          return read(path).trim();
-        })
-        .join('\n\n');
+      // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
+      // over them
+      return sheetsOf([...STACK, join(SRC, 'styles.css')]);
     })
     .replace('{{head-script}}', () => {
       return read(join(SRC, 'head.js')).trim();
+    })
+    .replace('{{theme-script}}', () => {
+      // * the theme as the demo keeps it too, one script for both
+      return read(join(PENUMBRA, 'theme.js')).trim();
     })
     .replace('{{page-script}}', () => {
       return read(join(SRC, 'page.js')).trim();
@@ -854,9 +849,12 @@ export const diagramsNamed = () => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const page = build();
+    const notFound = buildNotFound();
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, page);
+    writeFileSync(NOT_FOUND, notFound);
     console.log(`build: dist/index.html, ${grouped(Buffer.byteLength(page), 'en')} bytes`);
+    console.log(`build: dist/404.html, ${grouped(Buffer.byteLength(notFound), 'en')} bytes`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

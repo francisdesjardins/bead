@@ -2,9 +2,11 @@ import { defineConfig } from '@playwright/test';
 import { COMPONENT_TIMEOUT, playwrightBase } from './tools/playwright-base.mjs';
 
 /** The tests that load the demo's page: the page's own, and each of a module it mounts. */
-const PAGE_TESTS = ['packages', 'page', 'scenes', 'sides', 'sign-up', 'tabs'].map((name) => {
-  return `**/__tests__/${name}.test.ts`;
-});
+const PAGE_TESTS = ['packages', 'page', 'scenes', 'sides', 'sign-up', 'strip', 'tabs'].map(
+  (name) => {
+    return `**/__tests__/${name}.test.ts`;
+  }
+);
 
 /**
  * The demo's tests, apart from the package's unit project, whose claim that nothing under test

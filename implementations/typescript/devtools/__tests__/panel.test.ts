@@ -4,6 +4,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
+import {
+  auditPage,
+  EACH_SCHEME,
+  EACH_WIDTH,
+  ONCE,
+  reportOf,
+  type IViolation,
+} from '../../../../tools/check-a11y.mjs';
 import type { ActivityRecord, BackgroundMessage } from '../messages';
 import type { ILog } from '../model/log';
 import { assertBuilt, EXTENSION } from './fixtures';
@@ -14,6 +22,9 @@ import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 /** What the fake DevTools API keeps, on the panel's page. */
 interface IFake {
   deliver: (message: BackgroundMessage) => void;
+  // the background's end gone, its disconnect told with `runtime.lastError` set meanwhile
+  drop: (error: string) => void;
+  lastErrorReads: number;
   finish: (entry: object) => void;
   opened: [url: string, line: number][];
   posted: unknown[];
@@ -25,9 +36,29 @@ interface IFake {
 /** DevTools' themes, as `chrome.devtools.panels.themeName` names them. */
 type ThemeName = (typeof THEMES)[number];
 
+/** The three schemes a root declaration answers to: none, dark as a script chose it, the system's. */
+type Scheme = (typeof SCHEMES)[number];
+
+/** What a surface's sheets declare: each scheme's root tokens, and what any other rule declares. */
+interface IDeclared {
+  local: Set<string>;
+  roots: Record<Scheme, Map<string, string>>;
+  unread: string[];
+}
+
 // constants
 
 const THEMES = Object.freeze(['dark', 'default'] as const);
+
+const SCHEMES = Object.freeze(['light', 'chosen', 'system'] as const);
+
+/** The root's selector in each scheme, its quotes as the sheets write them, and the system's query. */
+const ROOT_OF = Object.freeze({
+  chosen: ":root[data-color-scheme='dark']",
+  light: ':root',
+  system: ':root:not([data-color-scheme])',
+});
+const SYSTEM_DARK = '@media (prefers-color-scheme: dark)';
 
 /** A selected tab and another, in the views' bar and in a call's. */
 const TAB_PAIRS = Object.freeze([
@@ -59,12 +90,21 @@ const openPanel = async (
         removeListener: () => {},
       };
     };
+    let lastError: { message: string } | undefined;
     const fake: IFake = {
       deliver: (message) => {
         for (const listener of listeners.message) {
           listener(message);
         }
       },
+      drop: (error) => {
+        lastError = { message: error };
+        for (const listener of listeners.disconnect) {
+          listener({});
+        }
+        lastError = undefined;
+      },
+      lastErrorReads: 0,
       finish: (entry) => {
         for (const listener of listeners.finished) {
           listener(entry);
@@ -109,6 +149,11 @@ const openPanel = async (
             return `chrome-extension://fake/${path}`;
           },
           id: 'fake',
+          get lastError() {
+            fake.lastErrorReads += 1;
+
+            return lastError;
+          },
           onConnect: eventOf([]),
         },
       },
@@ -128,7 +173,7 @@ const fakeOf = (page: Page): Promise<IFake> => {
   return page.evaluate(() => {
     const { fake } = globalThis as unknown as { fake: IFake };
 
-    return { ...fake, deliver: undefined, finish: undefined } as unknown as IFake;
+    return { ...fake, deliver: undefined, drop: undefined, finish: undefined } as unknown as IFake;
   });
 };
 
@@ -295,6 +340,197 @@ const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
 };
 
+/** A sheet's top-level blocks, each its prelude and its body, its comments gone. */
+const blocksOf = (sheet: string): { body: string; prelude: string }[] => {
+  const text = sheet.replaceAll(/\/\*[\s\S]*?\*\//gu, '');
+  const blocks: { body: string; prelude: string }[] = [];
+  let depth = 0;
+  let opened = 0;
+  let after = 0;
+
+  for (const { index } of text.matchAll(/[{}]/gu)) {
+    if (text[index] === '{') {
+      if (depth === 0) {
+        opened = index;
+      }
+      depth += 1;
+    } else {
+      depth -= 1;
+      if (depth === 0) {
+        const prelude = text.slice(after, opened).split(';').at(-1) ?? '';
+
+        blocks.push({ body: text.slice(opened + 1, index), prelude: prelude.trim() });
+        after = index + 1;
+      }
+    }
+  }
+
+  return blocks;
+};
+
+/** Each rule of a sheet that declares a custom property: its query, its selector, what it declares. */
+const rulesOf = (
+  sheet: string,
+  query = ''
+): { declarations: [name: string, value: string][]; query: string; selector: string }[] => {
+  return blocksOf(sheet).flatMap(({ body, prelude }) => {
+    if (prelude.startsWith('@media')) {
+      return rulesOf(body, prelude.replaceAll(/\s+/gu, ' '));
+    }
+    const declarations = [...body.matchAll(/(--[\w-]+)\s*:\s*([^;]*)/gu)].map(
+      ([, name = '', value = '']): [name: string, value: string] => {
+        return [name, value.replaceAll(/\s+/gu, ' ').trim()];
+      }
+    );
+
+    if (prelude.startsWith('@') || declarations.length === 0) {
+      return [];
+    }
+
+    return [
+      { declarations, query, selector: prelude.replaceAll('"', "'").replaceAll(/\s+/gu, ' ') },
+    ];
+  });
+};
+
+/** What a surface's sheets declare, read in their order: the root's by scheme, the rest as local. */
+const declaredOf = (sheets: readonly string[]): IDeclared => {
+  const declared: IDeclared = {
+    local: new Set(),
+    roots: { chosen: new Map(), light: new Map(), system: new Map() },
+    unread: [],
+  };
+
+  for (const { declarations, query, selector } of sheets.flatMap((sheet) => {
+    return rulesOf(sheet);
+  })) {
+    const scheme = SCHEMES.find((each) => {
+      return selector === ROOT_OF[each] && query === (each === 'system' ? SYSTEM_DARK : '');
+    });
+
+    if (scheme !== undefined) {
+      for (const [name, value] of declarations) {
+        declared.roots[scheme].set(name, value);
+      }
+    } else if (selector.startsWith(':root') && (selector !== ':root' || query === SYSTEM_DARK)) {
+      // a root this reading does not place in a scheme would answer for it unseen
+      declared.unread.push(`${query} ${selector}`.trim());
+    } else {
+      // a rule's own, or the root's under a query of the width, drawn with where it holds
+      for (const [name] of declarations) {
+        declared.local.add(name);
+      }
+    }
+  }
+
+  return declared;
+};
+
+/** The root's tokens in a scheme: the light ones, under the dark ones that answer to it. */
+const rootTokensOf = (declared: IDeclared, scheme: Scheme): Map<string, string> => {
+  return new Map([...declared.roots.light, ...(scheme === 'light' ? [] : declared.roots[scheme])]);
+};
+
+/** A token's colour in a scheme, `var()` followed to the value it names, as its channels. */
+const channelsOf = (tokens: Map<string, string>, name: string): number[] | undefined => {
+  let value = tokens.get(name);
+
+  while (value?.startsWith('var(--') === true) {
+    value = tokens.get(value.slice('var('.length, -1));
+  }
+
+  const hex = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/iu.exec(value ?? '');
+
+  return hex?.slice(1).map((channel) => {
+    return Number.parseInt(channel, 16);
+  });
+};
+
+/** The WCAG 2 contrast of two opaque colours, by their channels. */
+const contrastBetween = (color: number[], ground: number[]): number => {
+  const luminanceOf = (rgb: number[]): number => {
+    const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+      const share = value / 255;
+
+      return share <= 0.040_45 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+    });
+
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const [darker = 0, lighter = 0] = [luminanceOf(color), luminanceOf(ground)].toSorted(
+    (one, other) => {
+      return one - other;
+    }
+  );
+
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
+/** The custom properties a text draws with. */
+const usedIn = (text: string): string[] => {
+  return [...text.matchAll(/var\((--[\w-]+)/gu)].map(([, name = '']) => {
+    return name;
+  });
+};
+
+/** The sheets an HTML page holds: its `<style>` elements, and each `style` attribute as a rule. */
+const stylesOf = (html: string): string[] => {
+  return [
+    ...[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gu)].map(([, sheet = '']) => {
+      return sheet;
+    }),
+    ...[...html.matchAll(/\sstyle="([^"]*)"/gu)].map(([, declarations = '']) => {
+      return `[style] { ${declarations} }`;
+    }),
+  ];
+};
+
+/**
+ * The surfaces Bead's skin paints, each its sheets in the order the browser reads them and every
+ * text that draws with them: the demo as its page links them, and the page and its not-found page
+ * as the page's build writes them.
+ */
+const skinnedSurfacesOf = async (): Promise<
+  { name: string; sheets: string[]; texts: string[] }[]
+> => {
+  const devtools = new URL('../', import.meta.url);
+  const demo = new URL('../demo/', devtools);
+  const site = new URL('../../../site/dist/', devtools);
+  const page = await readFile(new URL('index.html', demo), 'utf8');
+  const linked = await Promise.all(
+    [...page.matchAll(/<link rel="stylesheet" href="(penumbra\/[^"]+)"/gu)].map(([, href = '']) => {
+      return readFile(new URL(href, devtools), 'utf8');
+    })
+  );
+  const scripts = await Promise.all(
+    (await readdir(demo))
+      .filter((name) => {
+        return name.endsWith('.ts');
+      })
+      .map((name) => {
+        return readFile(new URL(name, demo), 'utf8');
+      })
+  );
+  const built = await Promise.all(
+    ['index.html', '404.html'].map((name) => {
+      return readFile(new URL(name, site), 'utf8');
+    })
+  );
+
+  return [
+    {
+      name: 'the demo',
+      sheets: [...linked, ...stylesOf(page)],
+      texts: [...linked, page, ...scripts],
+    },
+    ...['the page', 'the not-found page'].map((name, index) => {
+      const html = built[index] ?? '';
+
+      return { name, sheets: stylesOf(html), texts: [html] };
+    }),
+  ];
+};
+
 // definition
 
 test.describe('the panel', () => {
@@ -335,6 +571,115 @@ test.describe('the panel', () => {
       });
 
     expect([...new Set(undefinedOnes)]).toEqual([]);
+  });
+
+  test('defines every custom property the demo, the page and the not-found page draw with, in each scheme, the dark a script chose and the system’s alike', async () => {
+    for (const { name, sheets, texts } of await skinnedSurfacesOf()) {
+      const declared = declaredOf(sheets);
+      const used = [...new Set(texts.flatMap(usedIn))];
+
+      expect.soft(declared.unread, `${name}: a root in no scheme`).toEqual([]);
+      for (const scheme of SCHEMES) {
+        const tokens = rootTokensOf(declared, scheme);
+
+        expect
+          .soft(
+            used.filter((token) => {
+              return !tokens.has(token) && !declared.local.has(token);
+            }),
+            `${name}: undefined in the ${scheme} scheme`
+          )
+          .toEqual([]);
+      }
+
+      // * a page whose script has not run, or never runs, is dark by the system's query alone
+      const chosen = rootTokensOf(declared, 'chosen');
+      const system = rootTokensOf(declared, 'system');
+
+      expect
+        .soft(
+          [...new Set([...chosen.keys(), ...system.keys()])].filter((token) => {
+            return chosen.get(token) !== system.get(token);
+          }),
+          `${name}: dark as chosen and as the system's apart`
+        )
+        .toEqual([]);
+    }
+  });
+
+  test('colours code at 4.5:1 or more on a card and on an inset, in each scheme, wherever Bead’s skin paints', async () => {
+    for (const { name, sheets } of await skinnedSurfacesOf()) {
+      const declared = declaredOf(sheets);
+
+      for (const scheme of SCHEMES) {
+        const tokens = rootTokensOf(declared, scheme);
+
+        for (const kind of ['comment', 'keyword', 'number', 'string']) {
+          for (const ground of ['--app-paper', '--raised']) {
+            const said = `${name}, ${scheme}: --tok-${kind} on ${ground}`;
+            const color = channelsOf(tokens, `--tok-${kind}`);
+            const under = channelsOf(tokens, ground);
+
+            expect.soft(color, `${said}, a colour`).toBeDefined();
+            expect.soft(under, `${said}, a ground`).toBeDefined();
+            expect
+              .soft(contrastBetween(color ?? [], under ?? []), said)
+              .toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    }
+  });
+
+  test('holds every view and each tab of a call to WCAG 2.2 AA, in both themes, at 1280 and 390 px', async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+
+    const found: IViolation[] = [];
+
+    for (const themeName of THEMES) {
+      await openWithTraffic(page, { themeName });
+
+      for (const width of [1280, 390]) {
+        await resize(page, { height: 800, width });
+
+        for (const tab of ['calls', 'timeline', 'state', 'metrics', 'broker', 'wire']) {
+          await page.click(`[data-tab="${tab}"]`);
+          found.push(
+            ...(await auditPage(page, {
+              label: `${tab}, ${themeName}, ${String(width)} px`,
+              checks: themeName === THEMES[0] ? EACH_WIDTH : EACH_SCHEME,
+            }))
+          );
+        }
+
+        await page.click('[data-tab="calls"]');
+        await rowOf(page, 'whoami').click();
+
+        for (const detail of ['overview', 'payload', 'exchange', 'trace', 'diff']) {
+          const button = page.locator(`[data-detail="${detail}"]`);
+
+          // * a call shows the tabs its records give it
+          if (await button.isVisible()) {
+            await button.click();
+            found.push(
+              ...(await auditPage(page, {
+                label: `a call’s ${detail}, ${themeName}, ${String(width)} px`,
+                checks: themeName === THEMES[0] ? EACH_WIDTH : EACH_SCHEME,
+              }))
+            );
+          }
+        }
+      }
+
+      // ! a panel is pointed at by a mouse: a finger's 44 px is the page's and the demo's floor
+      if (themeName === THEMES[0]) {
+        found.push(...(await auditPage(page, { label: `a call, ${themeName}`, checks: ONCE })));
+      }
+    }
+
+    expect(reportOf(found)).toEqual([]);
   });
 
   test('greets the background with its tab, follows DevTools’ theme, and reads the registries as its Metrics view opens', async ({
@@ -468,6 +813,71 @@ test.describe('the panel', () => {
       expect(Math.abs(offset.y)).toBeLessThanOrEqual(0.5);
     }
   });
+
+  for (const themeName of THEMES) {
+    test(`centres each select’s selected text and its chevron within its control, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+
+      // * the selected text and the chevron live in the select's user-agent shadow tree, which
+      // only the DevTools protocol reads
+      const session = await page.context().newCDPSession(page);
+      const { root } = await session.send('DOM.getDocument', { depth: -1, pierce: true });
+      const nodes: (typeof root)[] = [];
+      const walk = (node: typeof root): void => {
+        nodes.push(node);
+        for (const child of [
+          ...(node.shadowRoots ?? []),
+          ...(node.children ?? []),
+          ...(node.pseudoElements ?? []),
+        ]) {
+          walk(child);
+        }
+      };
+      walk(root);
+      const spanOf = async (nodeId: number) => {
+        const { quads } = await session.send('DOM.getContentQuads', { nodeId });
+        const ys = (quads[0] ?? []).filter((_, index) => {
+          return index % 2 === 1;
+        });
+
+        return { top: Math.min(...ys), bottom: Math.max(...ys) };
+      };
+
+      for (const { id, text } of [
+        { id: 'source', text: 'All clients' },
+        { id: 'layout', text: 'Auto' },
+      ]) {
+        const select = nodes.find((node) => {
+          return node.nodeName === 'SELECT' && node.attributes?.includes(id);
+        });
+        const inner = nodes.find((node) => {
+          return (
+            node.attributes?.includes('-internal-select-inner-element') &&
+            select?.shadowRoots?.[0]?.children?.includes(node)
+          );
+        });
+        const icon = select?.pseudoElements?.find(({ pseudoType }) => {
+          return pseudoType === 'picker-icon';
+        });
+
+        expect(inner?.children?.[0]?.nodeValue).toBe(text);
+
+        const control = await spanOf(select!.nodeId);
+        const selected = await spanOf(inner!.children![0]!.nodeId);
+        // the chevron is the lower half of its rotated square, from its side corners down
+        const square = await spanOf(icon!.nodeId);
+        const chevron = { top: (square.top + square.bottom) / 2, bottom: square.bottom };
+        const middleOf = ({ top, bottom }: { top: number; bottom: number }) => {
+          return (top + bottom) / 2;
+        };
+
+        expect(Math.abs(middleOf(selected) - middleOf(control)), id).toBeLessThanOrEqual(1);
+        expect(Math.abs(middleOf(chevron) - middleOf(control)), id).toBeLessThanOrEqual(1);
+      }
+    });
+  }
 
   test('gives each control edge at least 3:1 contrast against its surfaces in both themes', async ({
     page,
@@ -1028,6 +1438,10 @@ test.describe('the panel', () => {
     await expect(rowOf(page, 'download')).toContainText('↓ 2.5 MiB');
     await expect(page.locator('#footer')).toContainText('10 calls');
     await expect(page.locator('#footer')).toContainText('3 failed');
+    await expect(page.locator('#footer')).toContainText('1 subscription, 0 open');
+    await deliver(page, { dropped: 1, records: [], type: 'records' });
+    await expect(page.locator('#footer')).toContainText('1 record let go');
+    await expect(page.locator('#calls tr.marker.gap')).toContainText('1 record let go here');
   });
 
   test('unfolds a call into its envelopes in words, and lists every envelope in its Envelopes mode', async ({
@@ -1048,6 +1462,38 @@ test.describe('the panel', () => {
     await expect(page.locator('#envelopes tr')).toHaveCount(25);
     await page.fill('#filter', 'e(credit)');
     await expect(page.locator('#envelopes tr')).toHaveCount(3);
+  });
+
+  test('chooses between Calls and Envelopes as a radio group, by a click and by the arrow keys, the focus with the choice', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+
+    const calls = page.locator('[data-mode="calls"]');
+    const envelopes = page.locator('[data-mode="envelopes"]');
+    const selected = page.locator('#calls tr[aria-selected="true"]');
+
+    await expect(page.locator('.list-bar [role="radiogroup"]')).toHaveAccessibleName('Show');
+    await expect(calls).toHaveAttribute('aria-checked', 'true');
+    await expect(envelopes).toHaveAttribute('tabindex', '-1');
+    await expect(selected).toContainText('whoami');
+
+    await calls.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(envelopes).toHaveAttribute('aria-checked', 'true');
+    await expect(envelopes).toBeFocused();
+    await expect(calls).toHaveAttribute('tabindex', '-1');
+    await expect(page.locator('#envelopes')).toBeVisible();
+
+    // * the group's arrows are its own: the list's selection does not step with them
+    await page.keyboard.press('ArrowDown');
+    await expect(calls).toHaveAttribute('aria-checked', 'true');
+    await expect(calls).toBeFocused();
+    await expect(selected).toContainText('whoami');
+
+    await envelopes.click();
+    await expect(envelopes).toHaveAttribute('aria-checked', 'true');
   });
 
   test('keeps the call whose envelope was clicked selected in the Envelopes mode, each of its envelopes marked', async ({
@@ -1223,15 +1669,29 @@ test.describe('the panel', () => {
     await expect(page.locator('#live')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  test('draws every call on a time axis, and bounds the list to the span dragged across it', async ({
+  test('draws every call a row on a time axis, opens one in Calls, and bounds the list to the span dragged across it', async ({
     page,
   }) => {
     await openWithTraffic(page);
     await page.click('[data-tab="timeline"]');
 
-    await expect(page.locator('#timeline .hit')).toHaveCount(10);
+    const rows = page.locator('#timeline tbody tr[data-key]');
 
-    const box = await page.locator('#timeline svg').boundingBox();
+    await expect(rows).toHaveCount(10);
+
+    const key = await rows.nth(1).getAttribute('data-key');
+
+    await rows.nth(1).locator('td.name').click();
+    await expect(page.locator('[data-tab="calls"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(`#calls tr[data-key="${String(key)}"]`)).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.locator('#detail')).toBeFocused();
+    await page.click('[data-tab="timeline"]');
+    await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+    const box = await page.locator('#timeline thead .track').boundingBox();
 
     if (box === null) {
       throw new Error('the timeline has no box');
@@ -1241,6 +1701,7 @@ test.describe('the panel', () => {
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.99, box.y + 40, { steps: 4 });
     await page.mouse.up();
+    await expect(rows).not.toHaveCount(10);
     await page.click('[data-tab="calls"]');
     await expect(page.locator('#range .chip')).toBeVisible();
     await expect(page.locator('#calls tr.call')).not.toHaveCount(10);
@@ -1283,7 +1744,9 @@ test.describe('the panel', () => {
       'aria-pressed',
       'false'
     );
-    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 4), type: 'records' });
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 1), type: 'records' });
+    await expect(page.locator('#footer')).toContainText('paused: 1 record not recorded');
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(1, 4), type: 'records' });
     await expect(page.locator('#footer')).toContainText('paused: 4 records not recorded');
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
 
@@ -1604,7 +2067,20 @@ test('tells a stale page hook by an unanswered participant reading and by a prot
   await expect(page.locator('#hook-notice')).toBeVisible();
 });
 
-test('holds Broker selection, focus, pane scroll and keyed rows across the second and records added, and follows only its end', async ({
+test('reads runtime.lastError as its port closes, and says it reconnects', async ({ page }) => {
+  await page.clock.install();
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await page.evaluate(() => {
+    (globalThis as unknown as { fake: IFake }).fake.drop(
+      'The page keeping the extension port is moved into back/forward cache'
+    );
+  });
+  await expect(page.locator('#status')).toHaveText('reconnecting…');
+  expect((await fakeOf(page)).lastErrorReads).toBe(1);
+});
+
+test('holds Broker selection, focus, pane scroll and keyed rows across the second and records added, newest first', async ({
   page,
 }) => {
   await page.clock.install();
@@ -1630,27 +2106,29 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
   });
   await deliver(page, { type: 'records', dropped: 0, records });
   await page.click('[data-tab="broker"]');
-  const pane = page.locator('.participant-table');
-  await expect
-    .poll(async () => {
-      return pane.evaluate((node) => {
-        return node.scrollHeight - node.scrollTop - node.clientHeight;
-      });
+  const pane = page.getByRole('region', { name: 'Parcels, newest first' });
+  const sequenceOf = (row: string) => {
+    return page.locator(`#broker tbody tr${row} td:nth-child(6)`);
+  };
+  await expect(sequenceOf(':first-child')).toHaveText('162');
+  await expect(sequenceOf(':last-child')).toHaveText('3');
+  expect(
+    await pane.evaluate((node) => {
+      return node.scrollTop;
     })
-    .toBeLessThanOrEqual(2);
+  ).toBe(0);
   await deliver(page, {
     type: 'records',
     dropped: 0,
     records: [{ ...records[0], sequence: 163, at: T0 + 163 } as (typeof records)[number]],
   });
   await expect(page.locator('#broker tbody tr')).toHaveCount(161);
-  await expect
-    .poll(async () => {
-      return pane.evaluate((node) => {
-        return node.scrollHeight - node.scrollTop - node.clientHeight;
-      });
+  await expect(sequenceOf(':first-child')).toHaveText('163');
+  expect(
+    await pane.evaluate((node) => {
+      return node.scrollTop;
     })
-    .toBeLessThanOrEqual(2);
+  ).toBe(0);
   await pane.evaluate((node) => {
     node.scrollTop = 200;
     node.scrollLeft = 80;
@@ -1709,11 +2187,11 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
     })
   ).toEqual({ ...before, same: true, focused: true });
   await pane.press('End');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('200');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('3');
   await pane.press('Home');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('3');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('200');
   await pane.press('ArrowDown');
-  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('4');
+  await expect(sequenceOf('[aria-selected="true"]')).toHaveText('164');
   await pane.press('Enter');
   await expect(page.locator('.participant-detail')).toBeFocused();
   await page.locator('.participant-detail').press('Escape');
@@ -1738,6 +2216,14 @@ test('holds Broker selection, focus, pane scroll and keyed rows across the secon
           return document.documentElement.scrollHeight <= innerHeight;
         })
       ).toBe(true);
+      // * every column within its pane at 1280 px, none scrolled to
+      if (width === 1280) {
+        expect(
+          await pane.evaluate((node) => {
+            return node.scrollWidth - node.clientWidth;
+          })
+        ).toBeLessThanOrEqual(0);
+      }
       await page.screenshot({
         path: test
           .info()

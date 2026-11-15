@@ -43,6 +43,7 @@ const ROOT = [
   'site/check.mjs',
   'site/deploy.mjs',
   'site/icons.mjs',
+  'site/layout.mjs',
   'site/render.mjs',
   'site/__tests__',
   'site/package.json',

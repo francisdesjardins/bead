@@ -9,60 +9,38 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
-      /* the page's faces and palette, both schemes, as src/styles.css has them */
-      @font-face {
-        font-family: 'Geist';
-        font-weight: 400 600;
-        font-display: swap;
-        src: url('/fonts/geist.woff2') format('woff2');
-      }
-      @font-face {
-        font-family: 'Newsreader';
-        font-weight: 400 600;
-        font-display: swap;
-        src: url('/fonts/newsreader.woff2') format('woff2');
-      }
-      :root {
-        color-scheme: light dark;
-        --paper: #fdfcfe;
-        --text: #17111d;
-        --text-secondary: #4a4055;
-        --accent: #c13584;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #15111c;
-          --text: #f2ecf5;
-          --text-secondary: #b2a7bf;
-          --accent: #ff8bc4;
-        }
-      }
+{{stack}}
+
+      /* its scheme the system's, since it runs no script; under the bar, its two messages centred */
       body {
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-content: center;
         gap: 2.5rem;
-        padding: 2rem 1rem;
+        padding: calc(var(--app-topbar-height) + 2rem) 1rem 2rem;
         box-sizing: border-box;
-        background: var(--paper);
-        color: var(--text);
-        font: 1rem/1.6 Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: 1rem/1.6 var(--app-font-body);
       }
       h1 {
         margin: 0 0 0.25rem;
-        font: 600 1.75rem/1.2 Newsreader, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+        font: 600 1.75rem/1.2 var(--app-font-display);
       }
       p {
         margin: 0;
-        color: var(--text-secondary);
+        color: var(--app-text-secondary);
       }
       a {
-        color: var(--accent);
+        color: var(--app-accent);
       }
     </style>
   </head>
   <body>
+    <header class="topbar">
+      <a class="brand" href="/" title="Bead’s page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+    </header>
     <section>
       <h1>Not found</h1>
       <p>No page of Bead’s is at this address. <a href="/?lng=en" hreflang="en">Bead’s page</a></p>
