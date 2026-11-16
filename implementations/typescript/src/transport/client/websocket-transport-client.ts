@@ -184,7 +184,9 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * then drops the socket; over the global `WebSocket`, its platform bounds its close. Over `ws`, an
  * upgrade refused fails the connect with its status and its reason, "the server refused the
  * upgrade: 403 host-refused"; the global `WebSocket` reads nothing of it, as the WHATWG WebSockets
- * Standard has a page's, and names its close alone, 1006.
+ * Standard has a page's, and names its close alone, 1006. Its connect resolves once its upgrade is
+ * answered with a 101 (RFC 6455 §4.1): what its server wrote after it, a close among it, is heard
+ * after the connect.
  *
  * Once open, over `ws`, `error` tells what this side fails its connection for of its own (spec
  * 15.1): a protocol error, `ws`'s own error, or a message past `maxPayload`, a
@@ -360,12 +362,26 @@ export const createWebSocketTransportClient = (
             timeout = CONNECT_DEFAULTS.timeout,
           } = { ...CONNECT_DEFAULTS, ...connectOptions };
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
-          // what the attempt's credential provider is told to give up by: the attempt settled
-          const attempt = new AbortController();
+          // what the attempt's credential provider is told to give up by, the attempt settled; whether
+          // a dispose ended it; whether its socket closed before its connect ended, and the end its
+          // connect still tells then, a reconnection's attempt telling none as it closes
+          const attempt: {
+            controller: AbortController;
+            isClosedEarly: boolean;
+            isDisposed: boolean;
+            untoldEnd: (() => void) | undefined;
+          } = {
+            controller: new AbortController(),
+            isClosedEarly: false,
+            isDisposed: false,
+            untoldEnd: undefined,
+          };
           let ended = false;
           const providerAttempt = { called: false };
           let stopWaiting: (() => void) | undefined;
           let opened: IWebSocketLike | undefined;
+          // this attempt's own, which only it clears: a newer attempt may hold the shared one
+          let ownReject: ((reason: Error) => void) | undefined;
 
           isSecure = isSecureUrl(url);
           carried = undefined;
@@ -377,7 +393,8 @@ export const createWebSocketTransportClient = (
                   setReadyStateConnecting(client);
                 }
 
-                rejectConnect = (reason) => {
+                rejectConnect = ownReject = (reason) => {
+                  attempt.isDisposed = true;
                   ended = true;
                   reject(reason);
                 };
@@ -479,28 +496,51 @@ export const createWebSocketTransportClient = (
 
                     // * its end: its one error, then its close, what a listener of `error` throws
                     // dropped (spec 15.1)
+                    const end = (): void => {
+                      setReadyStateClosed(client);
+
+                      if (failure !== undefined) {
+                        report(failure);
+                      }
+
+                      tell(CLOSE_EVENT, [false, false]);
+                    };
+
                     socket.onclose = () => {
                       stopBeating();
                       hold.drop();
 
-                      if (!client.isReconnecting()) {
-                        setReadyStateClosed(client);
-
-                        if (failure !== undefined) {
-                          report(failure);
+                      // ! a reconnection's attempt closed before its connect ended: the connect
+                      // tells its end, unless a dispose ends the attempt first
+                      if (client.isReconnecting()) {
+                        if (!ended) {
+                          attempt.isClosedEarly = true;
+                          attempt.untoldEnd = end;
                         }
 
-                        tell(CLOSE_EVENT, [false, false]);
+                        return;
                       }
+
+                      // ! closed before its connect ended, which ends without opening: a dispose
+                      // from now on finds the attempt over
+                      if (!ended) {
+                        attempt.isClosedEarly = true;
+
+                        if (rejectConnect === ownReject) {
+                          rejectConnect = undefined;
+                        }
+                      }
+
+                      end();
                     };
 
                     beating = beatOf(socket);
                     carried = written;
 
-                    // its router's pause outlasts the connection it was made on
-                    if (hold.isPaused) {
-                      socket.pause?.();
-                    }
+                    // * read no further until its connect ends, so nothing is heard before it, and
+                    // on only then unless its router paused it: its pause outlasts the connection
+                    // it was made on
+                    socket.pause?.();
 
                     resolve();
                   };
@@ -552,7 +592,7 @@ export const createWebSocketTransportClient = (
                   providerAttempt.called = true;
                   const settled = new Set<() => void>();
                   const pending = Promise.resolve().then(() => {
-                    return credentialProvider({ signal: attempt.signal });
+                    return credentialProvider({ signal: attempt.controller.signal });
                   });
                   pendingCredentials.set(credentialProvider, settled);
                   const finish = (outcome: { value: string } | { reason: unknown }): void => {
@@ -604,29 +644,37 @@ export const createWebSocketTransportClient = (
               }
             );
 
-            // a close or a dispose between the open and here comes after it: what it left is kept
-            if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
-              throw new ConnectError('closed as it opened');
+            // * a dispose between the open and here fails the connect in its own words (spec 15.15),
+            // its socket reading on to its server's Close
+            if (attempt.isDisposed) {
+              opened?.resume?.();
+
+              throw new ConnectError('the transport client was disposed as it connected');
             }
           } catch (reason) {
             if (!client.isReconnecting()) {
               setReadyStateClosed(client);
             }
 
-            client[dispose]();
+            // ! its own socket alone: a close listener may have begun a newer attempt meanwhile
+            if (opened === undefined || client.socket === opened) {
+              client[dispose]();
+            }
 
             throw reason;
           } finally {
-            rejectConnect = undefined;
+            if (rejectConnect === ownReject) {
+              rejectConnect = undefined;
+            }
             ended = true;
             stopWaiting?.();
             if (!providerAttempt.called) {
-              attempt.abort();
+              attempt.controller.abort();
             } else {
               // oxlint-disable-next-line no-restricted-properties -- provider callbacks run after the connect settles, outside its stack
               globalThis.setTimeout(() => {
                 try {
-                  attempt.abort();
+                  attempt.controller.abort();
                 } catch {
                   /* the provider cannot replace the attempt's outcome */
                 }
@@ -634,7 +682,20 @@ export const createWebSocketTransportClient = (
             }
           }
 
+          // * a socket closed between its open and here opened all the same (RFC 6455 §4.1): the
+          // connect resolves, its client closed, its close told once, by its socket's `onclose` or
+          // here; whatever a close listener began meanwhile is left alone
+          if (attempt.isClosedEarly) {
+            attempt.untoldEnd?.();
+            return;
+          }
+
+          // a socket still open, or closing: its own `onclose` tells its end
           setReadyStateOpen(client);
+
+          if (!hold.isPaused) {
+            opened?.resume?.();
+          }
         },
 
         disconnect: async (disconnectOptions) => {

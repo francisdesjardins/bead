@@ -1398,8 +1398,9 @@ test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
     sockets[0]?.fireOpen();
     drop(client);
 
-    await expect(disposed).rejects.toThrow('closed as it opened');
-    expect(client.isOpen()).toBe(false);
+    // * told by the dispose's own words (spec 15.15)
+    await expect(disposed).rejects.toThrow('the transport client was disposed as it connected');
+    expect(client.isClosed()).toBe(true);
     expect(client.socket).toBeNull();
 
     const closed = client.connect({ host: 'h', port: 1 });
@@ -1407,9 +1408,83 @@ test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
     sockets[1]?.fireOpen();
     sockets[1]?.fireClose({ code: 1006, reason: '' });
 
-    await expect(closed).rejects.toBeInstanceOf(ConnectError);
+    // * it opened all the same (RFC 6455 §4.1): its connect resolves, its client closed
+    await closed;
     expect(client.isClosed()).toBe(true);
     // the close of a connection that did open, once
+    expect(closes).toEqual([[false, false]]);
+  });
+
+  // * the connect that ends after the close leaves alone what its listener began
+  test('a reconnection a close listener begins as the socket closes before its connect ends keeps its own socket', async () => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const told: unknown[] = [];
+    let reconnecting: Promise<void> | undefined;
+
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.once('close', (...params) => {
+      told.push(['close', ...params]);
+      reconnecting = client.reconnect({ delay: 10_000, maximumAttempts: 2 });
+    });
+
+    const connecting = client.connect({ host: 'h', port: 1 });
+
+    sockets[0]?.fireOpen();
+    sockets[0]?.fireClose({ code: 1006, reason: '' });
+    await connecting;
+
+    expect(told).toEqual([['close', false, false], 'reconnect']);
+    expect(client.isReconnecting()).toBe(true);
+    expect(client.socket).toBe(sockets[1]);
+    expect(sockets[1]?.closeCodes).toEqual([]);
+
+    sockets[1]?.fireOpen();
+    await reconnecting;
+
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect();
+
+    // a connect a close listener begins instead: a dispose still fails it, in its own words
+    let following: Promise<void> | undefined;
+
+    client.once('close', () => {
+      following = client.connect({ host: 'h', port: 1, timeout: 1_000 });
+    });
+
+    const again = client.connect({ host: 'h', port: 1 });
+
+    sockets[2]?.fireOpen();
+    sockets[2]?.fireClose({ code: 1006, reason: '' });
+    await again;
+    drop(client);
+
+    await expect(following).rejects.toThrow('the transport client was disposed as it connected');
+  });
+
+  // a reconnection's attempt that opened is its success, whatever closed it before it ended
+  test('a reconnection whose socket closes before its attempt’s connect ends resolves, its client closed, its close told once', async () => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const closes: unknown[] = [];
+
+    const connecting = client.connect({ host: 'h', port: 1 });
+
+    sockets[0]?.fireOpen();
+    await connecting;
+    client.on('close', (...params) => {
+      closes.push(params);
+    });
+
+    const reconnecting = client.reconnect({ delay: 10_000, maximumAttempts: 1 });
+
+    sockets[1]?.fireOpen();
+    sockets[1]?.fireClose({ code: 1006, reason: '' });
+    await reconnecting;
+
+    expect(client.isClosed()).toBe(true);
     expect(closes).toEqual([[false, false]]);
   });
 
@@ -2908,6 +2983,105 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
 
       expect(told).toEqual([['close', false, false]]);
     }
+  });
+});
+
+/**
+ * A listener that answers each upgrade with its 101 and `frames` in one write, which its client reads
+ * in one read, then ends its socket once the client's close came.
+ */
+const answeringWith = async (frames: Buffer) => {
+  const peers = new Set<Socket>();
+  const listener = createTcpServer((socket) => {
+    let head = '';
+
+    peers.add(socket);
+    socket.on('error', () => {});
+
+    const onHead = (chunk: Buffer): void => {
+      head += chunk.toString('latin1');
+
+      const key = /^sec-websocket-key:[ \t]*(\S+)/imu.exec(head)?.[1];
+
+      if (!head.includes('\r\n\r\n') || key === undefined) {
+        return;
+      }
+
+      socket.off('data', onHead);
+      endOnClose(socket);
+
+      const accept = createHash('sha1')
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest('base64');
+
+      socket.write(
+        Buffer.concat([
+          Buffer.from(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+            'latin1'
+          ),
+          frames,
+        ])
+      );
+    };
+
+    socket.on('data', onHead);
+  });
+
+  listener.listen(0, host);
+  await once(listener, 'listening');
+
+  return {
+    port: (listener.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: async () => {
+      for (const peer of peers) {
+        peer.destroy();
+      }
+
+      await new Promise((resolve) => {
+        listener.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+// spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
+test.describe('WebSocketTransportClient, a close its server wrote with its 101', () => {
+  test('opens on a 101 written together with a close, hears what came before it once open, and tells one close', async () => {
+    const message = frameOf(0x2, Uint8Array.of(0x2a));
+    const close = frameOf(0x8, Uint8Array.of(0x03, 0xe8));
+    const heard: Record<string, unknown[]> = {};
+
+    for (const [label, Tracked] of IMPLEMENTATIONS) {
+      for (const frames of [[close], [message, close]]) {
+        await using server = await answeringWith(Buffer.concat(frames));
+        const client = createWebSocketTransportClient({ WebSocket: Tracked });
+        const told: unknown[] = [];
+        const closed = nextEvent(client, 'close');
+
+        client.on('message', ({ data }) => {
+          told.push(['message', [...new Uint8Array(data as ArrayBuffer)], client.isOpen()]);
+        });
+        client.on('close', (wasClean, wasQuick) => {
+          told.push(['close', wasClean, wasQuick]);
+        });
+
+        await client.connect({ host, port: server.port });
+        told.push('connected');
+        await closed;
+
+        (heard[label] ??= []).push([told, client.isClosed()]);
+      }
+    }
+
+    // * the connect first, then what came before the close, heard open, then one unclean close
+    const expected = [
+      [['connected', ['close', false, false]], true],
+      [['connected', ['message', [0x2a], true], ['close', false, false]], true],
+    ];
+
+    expect(heard).toEqual({ 'the global WebSocket': expected, ws: expected });
   });
 });
 
