@@ -2273,7 +2273,6 @@ def a_retained_message(transport):
 
 @case(IN_MEMORY, MQTT, AMQP, over_mqtt=['15.25', '15.31'], over_amqp=['15.32', '15.38'])
 def a_name_served_with_a_twin(transport):
-    captures = Captures(transport)
     connections = [Connection(f'opener{n}', opener=half(n)) for n in range(1, 5)]
 
     # the twin serves the name in its group beside the server under test, and answers nothing: each

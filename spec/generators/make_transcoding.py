@@ -14,8 +14,6 @@ every body this reading takes or refuses, and reads back every body it writes: w
 it, the entry names the row of decision 0037's table that says why, and any other parting fails the
 generator. A backslash is chr(92), so that no escape this file builds is read before it is built."""
 import base64
-import calendar
-import hashlib
 import json
 import math
 import re
