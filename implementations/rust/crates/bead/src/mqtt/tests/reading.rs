@@ -106,7 +106,7 @@ async fn resets_its_socket_once_its_disconnect_cannot_leave_within_its_connect_t
 }
 
 #[tokio::test]
-async fn keeps_passwords_and_provider_details_out_of_its_debug_output() {
+async fn prints_no_password_nor_its_provider() {
     let script = script().await;
     let options = options_of(&script);
     let shown = format!("{options:?}");
