@@ -356,9 +356,12 @@ impl Sent {
             loop {
                 let changed = self.changed.notified();
 
+                // * a connection that sent nothing yet counts none, as the other sides count it
                 if locked(&self.by_connection)
                     .get(connection_handle)
-                    .is_some_and(|outgoing| outgoing.cancelled || outgoing.notifications >= count)
+                    .map_or(count == 0, |outgoing| {
+                        outgoing.cancelled || outgoing.notifications >= count
+                    })
                 {
                     return;
                 }

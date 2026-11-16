@@ -4596,3 +4596,1201 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_hold
 
     fixture.dispose().await.expect("disposed");
 }
+
+// ── Its streams, scripted ─────────────────────────────────────────────────────
+
+// a transport that answers each request the envelopes `replies` writes of its call, standing for
+// a server, and counts the requests
+#[derive(Debug)]
+struct Replying {
+    replies: fn(u32) -> Vec<bead::internal::Envelope>,
+    requests: AtomicUsize,
+    memory: Mutex<Option<bead::MemoryTransportServer>>,
+}
+
+impl ServerListener for Replying {
+    fn on_message(&self, message: bead::TransportMessage, connection_handle: &ConnectionHandle) {
+        let Some(memory) = locked(&self.memory).clone() else {
+            return;
+        };
+        let bead::internal::Envelope::Request { header, .. } =
+            bead::testing::scripted::envelope_of(&message.data, bead::RouterSide::Server)
+        else {
+            return;
+        };
+
+        self.requests.fetch_add(1, Ordering::SeqCst);
+
+        for envelope in (self.replies)(header.call_id) {
+            let mut reply = bead::TransportMessage::default();
+
+            reply.data = bead::internal::write_envelope(&envelope, 1024).expect("an envelope");
+            drop(memory.send(reply, connection_handle));
+        }
+    }
+}
+
+fn result_envelope((call_id, payload): (u32, &'static [u8])) -> bead::internal::Envelope {
+    bead::internal::Envelope::Result {
+        header: bead::ResultHeader {
+            call_id,
+            total: None,
+            credential: None,
+        },
+        payload: Bytes::from_static(payload),
+    }
+}
+
+fn notification_envelope((call_id, payload): (u32, &'static [u8])) -> bead::internal::Envelope {
+    bead::internal::Envelope::Notification {
+        header: bead::NotificationHeader { call_id },
+        payload: Bytes::from_static(payload),
+    }
+}
+
+// a failure of SESSION_REQUIRED, ending a call
+fn session_required(call_id: u32) -> bead::internal::Envelope {
+    bead::internal::Envelope::Failure {
+        header: bead::FailureHeader {
+            call_id,
+            credential: None,
+        },
+        failure: bead::FailureRecord {
+            code: bead::ProtocolCode::SESSION_REQUIRED.get(),
+            scope: bead::FailureScope::Protocol,
+            detail: String::new(),
+            relays: 0,
+        },
+    }
+}
+
+// a gateway on its own listener in front of a transport `replies` answers, its options `adjust`'s
+// changes over the file's defaults; what it reported, and the port it listens on
+struct Scripted {
+    gateway: bead::HttpGateway,
+    memory: bead::MemoryTransportServer,
+    replying: Arc<Replying>,
+    reported: Arc<Mutex<Vec<String>>>,
+    port: u16,
+}
+
+impl Scripted {
+    async fn new<F: FnOnce(&mut HttpGatewayOptions)>(
+        replies: fn(u32) -> Vec<bead::internal::Envelope>,
+        adjust: F,
+    ) -> Self {
+        let mut options = gateway_options().expect("the gateway's options");
+        let memory = options.transport.clone();
+
+        adjust(&mut options);
+        memory.start().await.expect("started");
+
+        let replying = Arc::new(Replying {
+            replies,
+            requests: AtomicUsize::new(0),
+            memory: Mutex::new(Some(memory.clone())),
+        });
+
+        memory.listen(Arc::<Replying>::clone(&replying));
+
+        let gateway = bead::HttpGateway::new(&options).expect("a gateway");
+        let reported = Arc::new(Mutex::new(Vec::<String>::new()));
+        let reporting = Arc::clone(&reported);
+
+        gateway.on_error(Arc::new(move |error| {
+            locked(&reporting).push(error.to_string());
+        }));
+
+        let mut start = bead::HttpGatewayStartOptions::default();
+
+        start.address = Some(HOST.to_owned());
+        start.port = Some(0);
+
+        let port = gateway.start(&start).await.expect("listening").port;
+
+        Self {
+            gateway,
+            memory,
+            replying,
+            reported,
+            port,
+        }
+    }
+
+    fn requests(&self) -> usize {
+        self.replying.requests.load(Ordering::SeqCst)
+    }
+
+    fn reported(&self) -> Vec<String> {
+        locked(&self.reported).clone()
+    }
+
+    async fn dispose(self) {
+        until(|| self.memory.clients().is_empty()).await;
+        self.gateway.dispose().await.expect("disposed");
+        self.memory.dispose().await.expect("disposed");
+    }
+}
+
+// `watch`'s route, its result and its notification native JSON
+fn watch_of_json(route: &bead::HttpRoute) -> bead::HttpRoute {
+    bead::route_of(bead::HttpRouteInit {
+        procedure: route.procedure().clone(),
+        request: route.request().clone(),
+        result: bead::HttpPayload::Json,
+        notification: Some(bead::HttpPayload::Json),
+        failures: route.failures().to_vec(),
+        no_side_effects: route.no_side_effects(),
+        routes: route.routes().to_vec(),
+    })
+    .expect("a route")
+}
+
+const UNDECODABLE_502: &str = "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reports_one_send_bound_drop_when_consecutive_stream_frames_exceed_the_bound() {
+    let scripted = Scripted::new(
+        |call_id| {
+            vec![
+                result_envelope((call_id, b"{}")),
+                notification_envelope((call_id, b"{\"value\":1}")),
+                notification_envelope((call_id, b"{\"value\":1}")),
+                notification_envelope((call_id, b"{\"value\":1}")),
+                session_required(call_id),
+            ]
+        },
+        |options| {
+            options.heartbeat = Some(bead::NEVER);
+            options.maximum_unsent_bytes = Some(1);
+            options.routes = changed_routes(&options.routes, ("watch", &watch_of_json));
+        },
+    )
+    .await;
+    let received = received_on(sent(scripted.port, &watch_octets(scripted.port)).await).await;
+
+    until(|| scripted.memory.clients().is_empty()).await;
+    assert_eq!(received, 0, "nothing written");
+    assert_eq!(scripted.requests(), 1, "one call");
+    assert_eq!(
+        scripted.reported(),
+        ["the response is dropped: maximumUnsentBytes 1 bytes"],
+        "one drop, reported once"
+    );
+
+    scripted.dispose().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writes_native_json_results_and_notifications_in_stream_order() {
+    const RESULT: &[u8] = "{\"label\":\"Été\",\"count\":1.00}".as_bytes();
+    const NOTIFICATION: &[u8] = "[\"雪\",null,true]".as_bytes();
+
+    let scripted = Scripted::new(
+        |call_id| {
+            vec![
+                result_envelope((call_id, RESULT)),
+                notification_envelope((call_id, NOTIFICATION)),
+                session_required(call_id),
+            ]
+        },
+        |options| {
+            options.heartbeat = Some(bead::NEVER);
+            options.routes = changed_routes(&options.routes, ("watch", &watch_of_json));
+        },
+    )
+    .await;
+    let answered = exchanged(scripted.port, &watch_octets(scripted.port)).await;
+    let body = text_of(&answered);
+    let prefix = format!(
+        "event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {}\n\nevent: failure\nid: 3\ndata: ",
+        String::from_utf8_lossy(RESULT),
+        String::from_utf8_lossy(NOTIFICATION)
+    );
+
+    assert_eq!(answered.head.status, 200);
+    assert_eq!(field(&answered, "content-type"), Some("text/event-stream"));
+    assert_eq!(field(&answered, "bead-refusal"), None);
+    let failure: serde_json::Value = serde_json::from_str(
+        body.strip_prefix(&prefix)
+            .unwrap_or_else(|| panic!("its events in their order: {body}"))
+            .trim(),
+    )
+    .expect("its failure's problem");
+
+    assert_eq!(
+        (&failure["scope"], &failure["status"], &failure["title"]),
+        (
+            &serde_json::json!("protocol"),
+            &serde_json::json!(401),
+            &serde_json::json!("SESSION_REQUIRED")
+        ),
+        "{failure}"
+    );
+    assert_eq!(scripted.requests(), 1, "one call");
+    assert_eq!(
+        scripted.reported(),
+        Vec::<String>::new(),
+        "nothing reported"
+    );
+
+    scripted.dispose().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drops_a_notification_while_an_unreadable_notification_holds_its_streams_end_before_the_result()
+ {
+    let scripted = Scripted::new(
+        |call_id| {
+            // * both notifications precede the result: the first holds the end, the second drops
+            vec![
+                notification_envelope((call_id, &[8, 1])),
+                notification_envelope((call_id, b"")),
+                result_envelope((call_id, b"")),
+            ]
+        },
+        |options| {
+            let edges = route_named("echoEdges").result().clone();
+
+            options.window = Some(2);
+            options.routes = changed_routes(
+                &options.routes,
+                ("watch", &|route| notifying(route, edges.clone())),
+            );
+        },
+    )
+    .await;
+    let answered = exchanged(scripted.port, &watch_octets(scripted.port)).await;
+
+    assert_eq!(answered.head.status, 200);
+    assert_eq!(field(&answered, "content-type"), Some("text/event-stream"));
+    assert_eq!(
+        text_of(&answered),
+        format!(
+            "event: result\nid: 1\ndata: {{}}\n\nevent: failure\nid: 2\ndata: {UNDECODABLE_502}\n\n"
+        )
+    );
+    assert_eq!(scripted.requests(), 1, "one call");
+    assert_eq!(scripted.reported().len(), 1, "{:?}", scripted.reported());
+
+    scripted.dispose().await;
+}
+
+// ── Its streams, their writes and their results ───────────────────────────────
+
+// `ticks`' route, at `template` alone, its result and its notification told they are `told`'s
+fn ticks_told(
+    template: &str,
+    (result, notification): (bead::HttpPayload, bead::HttpPayload),
+) -> bead::HttpRoute {
+    let ticks = route_named("ticks");
+
+    bead::route_of(bead::HttpRouteInit {
+        procedure: ticks.procedure().clone(),
+        request: ticks.request().clone(),
+        result,
+        notification: Some(notification),
+        failures: ticks.failures().to_vec(),
+        no_side_effects: ticks.no_side_effects(),
+        routes: vec![bead::HttpRouteTemplate {
+            method: bead::HttpMethod::Post,
+            template: template.to_owned(),
+            body: Some("*".to_owned()),
+            response_body: None,
+        }],
+    })
+    .expect("a route")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writes_a_text_or_a_raw_stream_s_data_as_a_json_string_and_a_result_it_cannot_read_as_a_call_s_failure()
+ {
+    // * ticks served thrice more, its result and its notifications told they are raw, text, or an
+    // Edges
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            let edges = route_named("echoEdges").result().clone();
+            let tick = route_named("ticks")
+                .notification()
+                .cloned()
+                .expect("ticks notifies");
+            let (raw, text) = (bead::HttpPayload::Raw, bead::HttpPayload::Text);
+
+            options.routes.extend([
+                ticks_told("/raw-ticks", (raw.clone(), raw)),
+                ticks_told("/text-ticks", (text.clone(), text)),
+                ticks_told("/edges-ticks", (edges, tick)),
+            ]);
+        },
+        true,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&heard);
+
+    // * a listener that panics: what it panicked with dropped, the listener after it told, the
+    // exchange answering on (spec 15.1)
+    fixture
+        .gateway
+        .on_error(Arc::new(|_error| panic!("a listener broke")));
+    fixture.gateway.on_error(Arc::new(move |error| {
+        locked(&hearing).push(error.to_string());
+    }));
+
+    let ticked = |path: &'static str, from: i32| {
+        let port = fixture.port;
+
+        async move {
+            let body = format!("{{\"from\":{from}}}");
+
+            posted(
+                port,
+                &Post {
+                    path,
+                    fields: &["accept: text/event-stream"],
+                    body: &body,
+                },
+            )
+            .await
+        }
+    };
+
+    // its result, each notification and the failure that ends them, in their order, none overtaken
+    for (path, from, begun) in [
+        (
+            "/raw-ticks",
+            2,
+            "event: result\nid: 1\ndata: \"CAI=\"\n\nid: 2\ndata: \"CAE=\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n",
+        ),
+        (
+            "/text-ticks",
+            2,
+            "event: result\nid: 1\ndata: \"\\b\\u0002\"\n\nid: 2\ndata: \"\\b\\u0001\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n",
+        ),
+        // a subscription its server drops right behind its result: the result first, then the
+        // failure
+        (
+            "/text-ticks",
+            0,
+            "event: result\nid: 1\ndata: \"\"\n\nevent: failure\nid: 2\n",
+        ),
+    ] {
+        let body = text_of(&ticked(path, from).await);
+
+        assert!(body.starts_with(begun), "{path} from {from}: {body}");
+    }
+
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    // a result its stock library refuses, or a text one not UTF-8: 502, nothing of the stream
+    // written, reported
+    for (path, from) in [("/edges-ticks", 2), ("/text-ticks", -1)] {
+        let answered = ticked(path, from).await;
+
+        assert_eq!(
+            (answered.head.status, text_of(&answered)),
+            (502, UNDECODABLE_502.to_owned()),
+            "{path} from {from}"
+        );
+    }
+
+    assert_eq!(locked(&reported).len(), 2);
+    assert_eq!(*locked(&heard), *locked(&reported));
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_500_a_result_its_mapping_holds_no_form_of_reported_in_the_mapping_s_words() {
+    // * raw's route told its result is an Edges: the bytes its server echoes, a Value of NaN, a
+    // mask of foo_
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            let edges = route_named("echoEdges").result().clone();
+
+            options.routes = changed_routes(
+                &options.routes,
+                ("raw", &|route| rebuilt(route, (None, Some(edges.clone())))),
+            );
+        },
+        true,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    // an Edges whose value, field 5, is a Value whose number, field 2, is NaN
+    let nan = [0x2A, 0x09, 0x11, 0, 0, 0, 0, 0, 0, 0xF8, 0x7F];
+    let answered = raw_of(fixture.port, &nan).await;
+
+    assert_eq!(
+        (answered.head.status, text_of(&answered)),
+        (
+            500,
+            "{\"detail\":\"a Value whose number is not finite\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}".to_owned()
+        )
+    );
+    assert_eq!(*locked(&reported), ["a Value whose number is not finite"]);
+
+    // an Edges whose mask, field 3, holds the path foo_
+    let mask = [0x1A, 0x06, 0x0A, 0x04, b'f', b'o', b'o', b'_'];
+    let unwritable = raw_of(fixture.port, &mask).await;
+
+    assert_eq!(
+        (unwritable.head.status, text_of(&unwritable)),
+        (
+            500,
+            "{\"detail\":\"a FieldMask path whose lowerCamelCase does not read back\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}".to_owned()
+        )
+    );
+    assert_eq!(
+        *locked(&reported),
+        [
+            "a Value whose number is not finite",
+            "a FieldMask path whose lowerCamelCase does not read back"
+        ]
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// transcoding 10.2
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_a_held_body_past_its_grace_when_its_minimum_rate_is_zero() {
+    use tokio::io::AsyncWriteExt as _;
+
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.body_grace_period = Some(Duration::from_millis(50));
+            options.minimum_body_bytes_per_second = Some(0);
+        },
+        true,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let mut octets = format!(
+        "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{}\r\n{JSON}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+        fixture.port
+    )
+    .into_bytes();
+
+    octets.push(b'{');
+
+    let mut socket = sent(fixture.port, &octets).await;
+
+    // * twice its grace on the platform's clock, its body held: no connection drawn, none dropped
+    rest(Duration::from_millis(100)).await;
+    assert!(fixture.memory.clients().is_empty(), "no call yet");
+    socket.write_all(b"}").await.expect("the rest of its body");
+
+    let answered = read_until(&mut socket, "\r\n\r\n{}").await;
+
+    assert!(answered.starts_with("HTTP/1.1 200 "), "{answered}");
+    assert!(
+        answered.contains("content-type: application/json\r\n"),
+        "{answered}"
+    );
+    assert!(answered.ends_with("\r\n\r\n{}"), "{answered}");
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+    until(|| fixture.memory.clients().is_empty()).await;
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// a request of `kind`, an answer, a problem, the document or an event, its socket closed after it
+fn kind_octets(port: u16, kind: &str) -> Vec<u8> {
+    match kind {
+        "problem" => line_octets(port, "GET /missing HTTP/1.1"),
+        "document" => line_octets(port, "GET /openapi.json HTTP/1.1"),
+        "event" => watch_octets(port),
+        _ => octets_of(
+            port,
+            &OwnCase {
+                lines: &["POST /api/Transcoding/echo HTTP/1.1", JSON],
+                status: 0,
+                words: "",
+                body: "{}",
+                reason: None,
+            },
+        ),
+    }
+}
+
+// transcoding 10.2
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounds_every_response_body_by_maximum_unsent_bytes_before_writing() {
+    for kind in ["answer", "problem", "document", "event"] {
+        let fixture = started_with((
+            |options: &mut HttpGatewayOptions| {
+                options.maximum_unsent_bytes = Some(1);
+                options.heartbeat = Some(bead::NEVER);
+            },
+            true,
+        ))
+        .await;
+        let reported = reported_by(&fixture);
+        let received =
+            received_on(sent(fixture.port, &kind_octets(fixture.port, kind)).await).await;
+
+        assert_eq!(received, 0, "{kind}: nothing written");
+        until(|| fixture.memory.clients().is_empty()).await;
+        fixture.watched(2).await;
+        until(|| !locked(&reported).is_empty()).await;
+        assert_eq!(
+            *locked(&reported),
+            ["the response is dropped: maximumUnsentBytes 1 bytes"],
+            "{kind}"
+        );
+
+        fixture.dispose().await.expect("disposed");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn abandons_a_held_connection_when_its_response_closes() {
+    // * the Rust form: its in-memory transport takes no hook that holds its accept, so the
+    // exchange holds its Bead connection by a call of `hang`, which its server never answers, and
+    // its response closes as its socket does
+    let fixture = started().await;
+    let reported = reported_by(&fixture);
+    let socket = sent(
+        fixture.port,
+        &octets_of(
+            fixture.port,
+            &OwnCase {
+                lines: &["POST /api/Transcoding/hang HTTP/1.1", JSON],
+                status: 0,
+                words: "",
+                body: "{}",
+                reason: None,
+            },
+        ),
+    )
+    .await;
+
+    until(|| fixture.counts.hanging.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(fixture.memory.clients().len(), 1, "its connection held");
+    drop(socket);
+
+    // its connection abandoned, its call given up, nothing written, nothing reported
+    until(|| fixture.memory.clients().is_empty()).await;
+    until(|| fixture.counts.cancelled.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// ── Its writes, mounted ───────────────────────────────────────────────────────
+//
+// * mounted, its host takes each slice as it polls the body: a body the test does not poll is a
+// response that does not drain, and a body it drops is a response lost
+
+// a request a host hands on: its method and target, its fields, its body
+fn handed(
+    (method, target): (&str, &str),
+    (fields, body): (&[&str], Bytes),
+) -> http::Request<Handed> {
+    let mut request = http::Request::new(Handed(if body.is_empty() {
+        Vec::new()
+    } else {
+        vec![body.clone()]
+    }));
+
+    *request.method_mut() = method.parse().expect("a method");
+    *request.uri_mut() = target.parse().expect("a target");
+
+    let headers = request.headers_mut();
+
+    headers.insert("host", http::HeaderValue::from_static("127.0.0.1"));
+
+    if !body.is_empty() {
+        headers.insert("content-length", http::HeaderValue::from(body.len()));
+    }
+
+    for line in fields {
+        let (name, value) = line.split_once(": ").expect("a field");
+
+        headers.insert(
+            http::header::HeaderName::from_bytes(name.as_bytes()).expect("a name"),
+            http::HeaderValue::from_str(value).expect("a value"),
+        );
+    }
+
+    request
+}
+
+// a stream's request to `watch`, handed on
+fn watch_handed() -> http::Request<Handed> {
+    handed(
+        ("POST", "/api/Transcoding/watch"),
+        (
+            &[JSON, "accept: text/event-stream"],
+            Bytes::from_static(b"{}"),
+        ),
+    )
+}
+
+// a request of `kind`, an answer, a problem, the document or an event, handed on
+fn kind_handed(kind: &str) -> http::Request<Handed> {
+    match kind {
+        "problem" => handed(("GET", "/missing"), (&[], Bytes::new())),
+        "document" => handed(("GET", "/openapi.json"), (&[], Bytes::new())),
+        "event" => watch_handed(),
+        _ => handed(
+            ("POST", "/api/Transcoding/echo"),
+            (&[JSON], Bytes::from_static(b"{}")),
+        ),
+    }
+}
+
+// what a frame polled of a response's body is
+#[derive(Debug, PartialEq, Eq)]
+enum Framed {
+    Slice(Bytes),
+    Ended,
+    Cut,
+}
+
+fn framed_of<E>(polled: Option<Result<Frame<Bytes>, E>>) -> Framed {
+    match polled {
+        Some(Ok(frame)) => Framed::Slice(frame.into_data().expect("a data frame")),
+        Some(Err(_cut)) => Framed::Cut,
+        None => Framed::Ended,
+    }
+}
+
+// the next frame of `body`, as its host would take it
+async fn frame_of(body: &mut HttpGatewayBody) -> Framed {
+    let polled = patience(
+        PATIENCE,
+        poll_fn(|context| Pin::new(&mut *body).poll_frame(context)),
+    )
+    .await
+    .expect("a frame in time");
+
+    framed_of(polled)
+}
+
+// the frame `body` holds now, polled once; none where none came yet
+fn frame_now(body: &mut HttpGatewayBody) -> Option<Framed> {
+    let mut context = Context::from_waker(core::task::Waker::noop());
+
+    match Pin::new(body).poll_frame(&mut context) {
+        Poll::Ready(polled) => Some(framed_of(polled)),
+        Poll::Pending => None,
+    }
+}
+
+// a slice's text, or what came in its place
+fn text_of_slice(framed: &Framed) -> String {
+    match framed {
+        Framed::Slice(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        Framed::Ended | Framed::Cut => format!("{framed:?}"),
+    }
+}
+
+// a response the mounted gateway of `fixture` answers to `request`
+async fn mounted_answer(
+    fixture: &TranscodingFixture,
+    request: http::Request<Handed>,
+) -> http::Response<HttpGatewayBody> {
+    patience(PATIENCE, fixture.gateway.answer(request, None))
+        .await
+        .expect("answered in time")
+}
+
+// the paced credits its server's router hears, each one's end, in their order
+fn credits_of(fixture: &TranscodingFixture) -> Arc<Mutex<Vec<u64>>> {
+    let credits = Arc::new(Mutex::new(Vec::new()));
+    let crediting = Arc::clone(&credits);
+
+    let _listening = fixture.server.router().on_debug(Arc::new(
+        move |direction: bead::DebugDirection, traced: &bead::TracedEnvelope| {
+            if let bead::EnvelopeHeader::Credit(credit) = &traced.header
+                && direction == bead::DebugDirection::Rx
+                && credit.paced
+            {
+                locked(&crediting).push(credit.credit_end);
+            }
+        },
+    ));
+
+    credits
+}
+
+// the platform's clock, but for each timer of `held` it holds until the test fires it, which a
+// cancel takes away: a heartbeat that beats as the test moves it
+struct Beating {
+    platform: bead::SystemClock,
+    held: Duration,
+    live: Arc<Mutex<Vec<(usize, bead::TimerCallback)>>>,
+    armed: AtomicUsize,
+}
+
+impl core::fmt::Debug for Beating {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Beating")
+            .field("held", &self.held)
+            .finish_non_exhaustive()
+    }
+}
+
+// a timer of a beating clock, taken away as it is cancelled
+#[derive(Debug)]
+struct BeatingTimer {
+    number: usize,
+    live: std::sync::Weak<Mutex<Vec<(usize, bead::TimerCallback)>>>,
+}
+
+impl bead::Timer for BeatingTimer {
+    fn cancel(&self) {
+        if let Some(live) = self.live.upgrade() {
+            locked(&live).retain(|(number, _callback)| *number != self.number);
+        }
+    }
+}
+
+impl Beating {
+    fn shared(held: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            platform: bead::SystemClock::current().expect("the platform's clock"),
+            held,
+            live: Arc::new(Mutex::new(Vec::new())),
+            armed: AtomicUsize::new(0),
+        })
+    }
+
+    // how many of its timers are live
+    fn live(&self) -> usize {
+        locked(&self.live).len()
+    }
+
+    // fires each timer live, once
+    fn fire(&self) {
+        let live: Vec<(usize, bead::TimerCallback)> = core::mem::take(&mut *locked(&self.live));
+
+        for (_number, mut callback) in live {
+            callback();
+        }
+    }
+}
+
+impl bead::Clock for Beating {
+    fn monotonic(&self) -> Duration {
+        self.platform.monotonic()
+    }
+
+    fn wall(&self) -> std::time::SystemTime {
+        self.platform.wall()
+    }
+
+    fn arm(
+        &self,
+        schedule: bead::Schedule,
+        callback: bead::TimerCallback,
+    ) -> Result<Arc<dyn bead::Timer>, bead::ProgrammerError> {
+        if matches!(schedule, bead::Schedule::Once(after) if after == self.held) {
+            let number = self.armed.fetch_add(1, Ordering::SeqCst);
+
+            locked(&self.live).push((number, callback));
+
+            return Ok(Arc::new(BeatingTimer {
+                number,
+                live: Arc::downgrade(&self.live),
+            }));
+        }
+
+        self.platform.arm(schedule, callback)
+    }
+}
+
+// a mounted fixture whose heartbeat beats on `clock`, each second
+async fn beating_on(clock: &Arc<Beating>) -> TranscodingFixture {
+    let shared: bead::SharedClock = Arc::<Beating>::clone(clock);
+
+    started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.clock = Some(shared);
+            options.heartbeat = Some(Duration::from_secs(1));
+        },
+        false,
+    ))
+    .await
+}
+
+const RESULT_EVENT: &str = "event: result\nid: 1\ndata: {}\n\n";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn waits_for_a_stream_response_to_drain_before_writing_its_next_event() {
+    // * a window of one, so that each notification taken is credited at once
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.window = Some(1);
+        },
+        false,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let credits = credits_of(&fixture);
+    let mut body = mounted_answer(&fixture, watch_handed()).await.into_body();
+
+    fixture.watched(2).await;
+    rest(Duration::from_millis(50)).await;
+
+    // * each event its own write, its credit held until its response took it
+    assert_eq!(text_of_slice(&frame_of(&mut body).await), RESULT_EVENT);
+    assert!(
+        locked(&credits).iter().all(|end| *end < 2),
+        "nothing credited before it was taken: {:?}",
+        locked(&credits)
+    );
+    assert_eq!(
+        text_of_slice(&frame_of(&mut body).await),
+        "id: 2
+data: {\"remaining\":2}
+
+"
+    );
+    until(|| locked(&credits).iter().any(|end| *end >= 2)).await;
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    drop(body);
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settles_every_held_write_once_its_response_drains() {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.window = Some(2);
+            options.heartbeat = Some(bead::NEVER);
+        },
+        false,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let credits = credits_of(&fixture);
+    let mut body = mounted_answer(&fixture, watch_handed()).await.into_body();
+
+    fixture.watched(2).await;
+    fixture.watched(1).await;
+    rest(Duration::from_millis(50)).await;
+
+    // nothing taken, nothing credited
+    assert!(
+        locked(&credits).iter().all(|end| *end < 4),
+        "{:?}",
+        locked(&credits)
+    );
+
+    let mut written = String::new();
+
+    for _ in 0..3 {
+        written.push_str(&text_of_slice(&frame_of(&mut body).await));
+    }
+
+    assert_eq!(
+        written,
+        "event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {\"remaining\":2}\n\nid: 3\ndata: {\"remaining\":1}\n\n"
+    );
+    // * the response drained: each held write settled, its credit given
+    until(|| locked(&credits).iter().any(|end| *end >= 4)).await;
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    drop(body);
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn releases_a_stream_closed_while_its_response_waits_for_drainage() {
+    let clock = Beating::shared(Duration::from_secs(1));
+    let fixture = beating_on(&clock).await;
+    let reported = reported_by(&fixture);
+    let body = mounted_answer(&fixture, watch_handed()).await.into_body();
+
+    // * its result unread, the response closes: its subscription and its heartbeat let go
+    drop(body);
+    until(|| fixture.memory.clients().is_empty()).await;
+    until(|| clock.live() == 0).await;
+    fixture.watched(2).await;
+    clock.fire();
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drops_a_late_notification_after_an_unreadable_notification_starts_ending_its_stream() {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            let edges = route_named("echoEdges").result().clone();
+
+            options.window = Some(1);
+            options.routes = changed_routes(
+                &options.routes,
+                ("watch", &|route| notifying(route, edges.clone())),
+            );
+        },
+        false,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let mut body = mounted_answer(&fixture, watch_handed()).await.into_body();
+    let first = frame_of(&mut body).await;
+
+    // a Tick of 1, 08 01, which no reader of Edges takes: its failure written, and held unread
+    fixture.watched(1).await;
+    until(|| !locked(&reported).is_empty()).await;
+    // then a Tick of 0, no byte, which one takes: late, dropped
+    fixture.watched(0).await;
+    rest(Duration::from_millis(50)).await;
+
+    let mut written = text_of_slice(&first);
+
+    loop {
+        match frame_of(&mut body).await {
+            Framed::Slice(bytes) => written.push_str(&String::from_utf8_lossy(&bytes)),
+            Framed::Ended => break,
+            Framed::Cut => panic!("its body cut"),
+        }
+    }
+
+    assert_eq!(
+        written,
+        format!("{RESULT_EVENT}event: failure\nid: 2\ndata: {UNDECODABLE_502}\n\n")
+    );
+    assert_eq!(locked(&reported).len(), 1, "{:?}", locked(&reported));
+    until(|| fixture.memory.clients().is_empty()).await;
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// transcoding 10.2
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paces_every_response_body_and_reports_its_send_bound() {
+    for kind in ["answer", "problem", "document", "event"] {
+        let fixture = started_with((
+            |options: &mut HttpGatewayOptions| {
+                options.heartbeat = Some(bead::NEVER);
+                options.maximum_exchanges = Some(1);
+                options.maximum_connections = Some(1);
+                options.minimum_send_bytes_per_second = Some(1_000_000);
+                options.send_grace_period = Some(Duration::from_millis(1));
+            },
+            false,
+        ))
+        .await;
+        let reported = reported_by(&fixture);
+        let response = mounted_answer(&fixture, kind_handed(kind)).await;
+
+        assert_eq!(
+            response.status(),
+            if kind == "problem" { 404 } else { 200 },
+            "{kind}"
+        );
+
+        // * its first slice handed, never taken: past its deadline, its body is cut
+        let mut body = response.into_body();
+
+        until(|| !locked(&reported).is_empty()).await;
+        assert_eq!(frame_of(&mut body).await, Framed::Cut, "{kind}");
+        drop(body);
+        until(|| fixture.memory.clients().is_empty()).await;
+        fixture.watched(2).await;
+
+        // its place freed: the next exchange of its kind is answered
+        let probe = mounted_answer(
+            &fixture,
+            kind_handed(if kind == "event" { "event" } else { "answer" }),
+        )
+        .await;
+
+        assert_eq!(probe.status(), 200, "{kind}");
+
+        let mut probed = probe.into_body();
+
+        assert!(
+            matches!(frame_of(&mut probed).await, Framed::Slice(_)),
+            "{kind}: its first slice"
+        );
+        drop(probed);
+        until(|| fixture.memory.clients().is_empty()).await;
+        assert_eq!(
+            *locked(&reported),
+            [
+                "the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms"
+            ],
+            "{kind}"
+        );
+
+        fixture.dispose().await.expect("disposed");
+    }
+}
+
+// transcoding 10.2
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounds_an_accepted_slice_until_its_pending_bytes_are_flushed() {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.minimum_send_bytes_per_second = Some(1_000_000);
+            options.send_grace_period = Some(Duration::from_millis(1));
+        },
+        false,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let bytes = Bytes::from(vec![b'a'; 3 * 65_536 + 7]);
+    let mut body = mounted_answer(
+        &fixture,
+        handed(
+            ("POST", "/api/Transcoding/raw"),
+            (&["content-type: application/octet-stream"], bytes),
+        ),
+    )
+    .await
+    .into_body();
+    let first = frame_of(&mut body).await;
+
+    // * its first slice taken, the next one handed and never taken: past its deadline, cut
+    assert!(
+        matches!(&first, Framed::Slice(slice) if slice.len() == 65_536),
+        "{first:?}"
+    );
+    until(|| !locked(&reported).is_empty()).await;
+    assert_eq!(frame_of(&mut body).await, Framed::Cut);
+    drop(body);
+    until(|| fixture.memory.clients().is_empty()).await;
+    assert_eq!(
+        *locked(&reported),
+        ["the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms"]
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stops_a_document_when_its_response_write_throws() {
+    // * the Rust form: a host whose write fails lets its body go, which stops the document; its
+    // host's error is its own, so the gateway reports none, as the C# side's
+    let document = Bytes::from(vec![b'a'; 2 * 65_536 + 7]);
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.document = Some(document);
+        },
+        false,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let mut body = mounted_answer(&fixture, kind_handed("document"))
+        .await
+        .into_body();
+    let first = frame_of(&mut body).await;
+
+    assert!(
+        matches!(&first, Framed::Slice(slice) if slice.len() == 65_536),
+        "{first:?}"
+    );
+    drop(body);
+    rest(Duration::from_millis(50)).await;
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writes_whole_answers_and_documents_in_slices_of_at_most_64_kib() {
+    let bytes = Bytes::from(vec![b'a'; 3 * 64 * 1_024 + 7]);
+
+    for kind in ["answer", "document"] {
+        let document = bytes.clone();
+        let fixture = started_with((
+            |options: &mut HttpGatewayOptions| {
+                options.document = Some(document);
+            },
+            false,
+        ))
+        .await;
+        let reported = reported_by(&fixture);
+        let request = if kind == "document" {
+            kind_handed("document")
+        } else {
+            handed(
+                ("POST", "/api/Transcoding/raw"),
+                (&["content-type: application/octet-stream"], bytes.clone()),
+            )
+        };
+        let response = mounted_answer(&fixture, request).await;
+
+        assert_eq!(response.status(), 200, "{kind}");
+
+        let mut body = response.into_body();
+        let mut written = Vec::new();
+        let mut sizes = Vec::new();
+
+        while let Framed::Slice(slice) = frame_of(&mut body).await {
+            sizes.push(slice.len());
+            written.extend_from_slice(&slice);
+        }
+
+        assert_eq!(written, bytes, "{kind}");
+        assert_eq!(sizes, [65_536, 65_536, 65_536, 7], "{kind}");
+        assert_eq!(*locked(&reported), Vec::<String>::new(), "{kind}");
+
+        fixture.dispose().await.expect("disposed");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stops_heartbeats_after_their_write_loses_its_response() {
+    let clock = Beating::shared(Duration::from_secs(1));
+    let fixture = beating_on(&clock).await;
+    let reported = reported_by(&fixture);
+    let mut body = mounted_answer(&fixture, watch_handed()).await.into_body();
+
+    assert_eq!(text_of_slice(&frame_of(&mut body).await), RESULT_EVENT);
+
+    // * its heartbeat writes its comment, and its host lets the response go before it takes it
+    until(|| clock.live() == 1).await;
+    clock.fire();
+    drop(body);
+    until(|| fixture.memory.clients().is_empty()).await;
+
+    // its heartbeat stopped: no timer live, nothing more written
+    until(|| clock.live() == 0).await;
+    clock.fire();
+    fixture.watched(2).await;
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writes_its_comment_a_heartbeat_after_its_last_write_and_none_while_writes_go() {
+    let clock = Beating::shared(Duration::from_secs(1));
+    let fixture = beating_on(&clock).await;
+    let mut body = mounted_answer(&fixture, watch_handed()).await.into_body();
+
+    assert_eq!(text_of_slice(&frame_of(&mut body).await), RESULT_EVENT);
+
+    // * each write arms its heartbeat again, the one before it taken away: one live at a time,
+    // a heartbeat after the last write
+    for remaining in [2, 1] {
+        until(|| clock.live() == 1).await;
+        fixture.watched(remaining).await;
+        assert_eq!(
+            text_of_slice(&frame_of(&mut body).await),
+            format!(
+                "id: {}\ndata: {{\"remaining\":{remaining}}}\n\n",
+                4 - remaining
+            )
+        );
+    }
+
+    until(|| clock.live() == 1).await;
+    assert_eq!(frame_now(&mut body), None, "no comment while writes go");
+    clock.fire();
+    assert_eq!(text_of_slice(&frame_of(&mut body).await), ":\n");
+
+    drop(body);
+    fixture.dispose().await.expect("disposed");
+}

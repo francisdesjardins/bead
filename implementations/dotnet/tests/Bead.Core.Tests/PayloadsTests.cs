@@ -179,6 +179,28 @@ public sealed class PayloadsTests
     }
 
     [Fact]
+    public void Normalizes_negative_zero_before_a_JSON_payload_is_given_to_its_type()
+    {
+        // * this side's type is the JsonElement read: each spelling of -0 reaches it as 0
+        foreach (var text in new[] { "-0", "-0.0", "-0e0" })
+        {
+            var read = PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+
+            Assert.Equal("0", read.GetRawText());
+            Assert.Equal(BitConverter.DoubleToInt64Bits(0.0), BitConverter.DoubleToInt64Bits(read.GetDouble()));
+            Assert.Equal(0, read.GetInt64());
+        }
+
+        var array = PayloadCodecs.Json.Decode("[-0,-0.0,-0e0]"u8.ToArray());
+
+        Assert.Equal("[0,0,0]", array.GetRawText());
+        Assert.All(array.EnumerateArray(), (value) =>
+        {
+            Assert.Equal(BitConverter.DoubleToInt64Bits(0.0), BitConverter.DoubleToInt64Bits(value.GetDouble()));
+        });
+    }
+
+    [Fact]
     public void Writes_a_string_as_written_when_it_holds_no_escape_and_is_UTF_8_and_from_its_characters_otherwise()
     {
         // * the first as its bytes are, the second its escapes read; the third holds a byte that is
