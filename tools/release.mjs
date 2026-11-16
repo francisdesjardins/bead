@@ -121,13 +121,6 @@ export const withCargoVersion = (text, version) => {
   return `${text.slice(0, table.index)}${moved}${text.slice(table.index + table[0].length)}`;
 };
 
-// the locks of the packages outside the workspace that build its crates by path, the fuzz targets
-// and protobuf's conformance testee, each moving the workspace's members and keeping its own
-const OUTER_CARGO_LOCKS = [
-  'implementations/rust/fuzz/Cargo.lock',
-  'implementations/rust/tools/protobuf-conformance/Cargo.lock',
-];
-
 // ! a text replacement, not `cargo update --workspace`: the root's tools run no third toolchain
 // (decision 0005). Each member of a Cargo lock, a `[[package]]` of no `source`, at the version: the
 // text, and how many members it holds; `members`, when given, names only those to move, so the
@@ -609,10 +602,16 @@ export const prepare = (root, options = {}) => {
         return name;
       })
     );
-    for (const lock of OUTER_CARGO_LOCKS) {
-      if (readText(join(root, lock)) !== null) {
-        stage(lock, (text) => withCargoLockMembers(text, product, { members }).text);
-      }
+    // ! every lock git lists outside the workspace, the fuzz targets', a tool's testee's, an
+    // example's: a package that builds the workspace's crates by path holds its members, which move,
+    // and keeps its own; a list written by hand missed a lock added after it
+    const outer = git(root, ['ls-files', '--', '*Cargo.lock'])
+      .split('\n')
+      .filter((path) => {
+        return path !== '' && path !== CARGO_LOCK;
+      });
+    for (const lock of outer) {
+      stage(lock, (text) => withCargoLockMembers(text, product, { members }).text);
     }
   }
   // * a hotfix starts from main, whose CI keeps the waivers of the release it tags, all moot: the
