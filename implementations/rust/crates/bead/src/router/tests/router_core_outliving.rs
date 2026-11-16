@@ -696,6 +696,57 @@ async fn closes_a_connection_that_it_refused_twice_maximum_answering_calls_reque
     assert_eq!(reports_of(peer).await.len(), 1);
 }
 
+// spec 9.2; RFC 9113 §10.5
+#[tokio::test]
+async fn closes_nothing_and_reports_nothing_more_of_a_connection_it_refused_twice_maximum_answering_calls_requests_in_a_row_once_its_router_was_disposed_before_that_close_came_due()
+ {
+    let holding = Holding::new(1).await;
+    let peer = &holding.peer;
+    let close_detail = "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed";
+
+    receive_all(peer, (vec![request(1)], "a")).await;
+    peer.settle().await;
+    receive_all(peer, (vec![cancel_of(1), request(3)], "a")).await;
+    peer.settle().await;
+    receive_all(peer, (vec![request(5)], "a")).await;
+    peer.settle().await;
+
+    // twice, in a row: reported at once, its close waiting on its transport
+    let (release, releasing) = oneshot::channel::<()>();
+
+    peer.owner
+        .run(move |state| {
+            state.sending.push_back(Ok(Sent::Later(Box::pin(async move {
+                releasing.await.ok();
+
+                Ok(())
+            }))));
+
+            receive(state, (request(7), "a", None));
+        })
+        .await
+        .expect("received");
+
+    let reported = [("a".to_owned(), close_detail.to_owned())];
+
+    assert_eq!(reports_of(peer).await, reported);
+
+    // * disposed before the refusal settles: the close it comes to is none
+    peer.owner
+        .run(router_core::dispose)
+        .await
+        .expect("disposed");
+    peer.settle().await;
+
+    assert_eq!(closed_of(peer).await, Vec::<String>::new());
+
+    release.send(()).ok();
+    peer.settle().await;
+
+    assert_eq!(closed_of(peer).await, Vec::<String>::new());
+    assert_eq!(reports_of(peer).await, reported);
+}
+
 // spec 9.10
 #[tokio::test]
 async fn tells_every_resolver_still_running_on_a_connection_as_it_closes_its_call_answered_or_not_and_counts_those_that_outlive_it_side_wide_until_they_settle()
