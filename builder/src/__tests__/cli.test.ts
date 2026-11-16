@@ -25,7 +25,6 @@ const FIXTURES = fileURLToPath(new URL('../../test/fixtures/', import.meta.url))
 const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const PAIR = 'test/breaking/buf';
 const ARCHIVE = new URL('../../test/breaking/archive/archive.tar', import.meta.url);
-const HELLO_PROTO = fileURLToPath(new URL('../../../examples/hello/proto/', import.meta.url));
 
 // how many runs of beadc go at once in the stress of one --against folder
 const STRESS_PROCESSES = 12;
@@ -556,7 +555,7 @@ test('check and generate write in the project what beadc.yaml names alone, the w
   const temporary = temporaryOfCase();
   const project = test.info().outputPath('project');
 
-  cpSync(HELLO_PROTO, join(project, 'proto'), { recursive: true });
+  cpSync(FIXTURES, join(project, 'proto'), { recursive: true });
   writeFileSync(
     join(project, 'beadc.yaml'),
     [
