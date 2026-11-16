@@ -17,7 +17,7 @@ import { messagesOf, routesOf } from '../../model/routes.ts';
 import { INDENT } from '../lines.ts';
 import { upperFirst } from '../names.ts';
 import { DEPRECATION_ID, type IHttpInput } from '../target.ts';
-import { literalOf, obsoleteOf } from './templates.ts';
+import { bindingTypeOf, literalOf, obsoleteOf } from './templates.ts';
 
 // types
 
@@ -107,16 +107,7 @@ export const printCSharpHttp = (options: ICSharpHttpOptions): string[] => {
     });
   });
 
-  const native = Object.freeze({
-    raw: 'global::System.ReadOnlyMemory<byte>',
-    text: 'string',
-    json: 'global::System.Text.Json.JsonElement',
-  });
-  const typeOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? messageOf(binding.message)
-      : native[binding.encoding as keyof typeof native];
-  };
+  const typeOf = bindingTypeOf(messageOf);
   let index = 0;
   const clients = blueprint.services.flatMap((service) => {
     const name = `${service.serviceName}HttpClient`;

@@ -153,6 +153,20 @@ export const obsoleteOf = (deprecation: IDeprecation | undefined, indent: string
   return deprecation === undefined ? [] : [`${indent}${attributeOf(deprecation)}`];
 };
 
+/**
+ * The C# type of a binding, each message's the qualified type `messageOf` gives by its full name:
+ * its message's, or a native payload's.
+ */
+export const bindingTypeOf = (
+  messageOf: (fullName: string) => string
+): ((binding: IBinding) => string) => {
+  return (binding) => {
+    return binding.encoding === 'proto' && binding.message !== undefined
+      ? messageOf(binding.message)
+      : NATIVE[binding.encoding as keyof typeof NATIVE][0];
+  };
+};
+
 // ! a required member's accessors, its getter marked: C# refuses `[Obsolete]` on a required member
 // of a type that is not obsolete itself (CS9042), and every use but the file's own initializer reads
 // the getter
@@ -293,11 +307,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       })
     ),
   ].sort();
-  const typeOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? options.messageOf(binding.message)
-      : NATIVE[binding.encoding as keyof typeof NATIVE][0];
-  };
+  const typeOf = bindingTypeOf(options.messageOf);
   const notifiedOf = (procedure: IProcedureEntry): string => {
     return typeOf(procedure.notification ?? procedure.result);
   };

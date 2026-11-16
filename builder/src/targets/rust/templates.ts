@@ -42,6 +42,14 @@ export interface IRustTemplateOptions {
   readonly called: ReadonlySet<string> | undefined;
 }
 
+/** What a binding's codec is, as the service's file and the route table write it. */
+export interface IRustCodecTypes {
+  /** Its codec's type: `bead_protobuf`'s of its message, or a native one. */
+  readonly codecTypeOf: (binding: IBinding) => string;
+  /** The value its codec reads and writes: its message's own type, a native codec's by its trait. */
+  readonly valueOf: (binding: IBinding) => string;
+}
+
 // a field of a record: its documentation's and its marks' lines, then its declaration
 interface IField {
   readonly doc: readonly string[];
@@ -57,7 +65,9 @@ const NATIVE = Object.freeze({
   json: '::bead::JsonCodec',
 } as const);
 
-const ERROR = '::bead::ProgrammerError';
+/** The error a made item answers where its blueprint and the runtime disagree. */
+export const ERROR = '::bead::ProgrammerError';
+
 const ERROR_LINK = `[\`ProgrammerError\`](${ERROR})`;
 
 // ! the characters rustc refuses in a comment or a literal: a lone CR, which ends no line of Rust's,
@@ -191,9 +201,27 @@ const admissionOf = (admission: AdmissionRule): string => {
   return `::bead::AdmissionRule::Hook(${literalOf(admission.hook)})`;
 };
 
-// the `# Errors` section of a function that answers a `ProgrammerError`
-const errorsOf = (cause: string): string => {
+/** The `# Errors` section of a function that answers a `ProgrammerError`, `cause` its case. */
+export const errorsOf = (cause: string): string => {
   return `# Errors\n\nA ${ERROR_LINK} ${cause}.`;
+};
+
+/** What a binding's codec is, each message by the path `messageOf` gives it. */
+export const codecTypesOf = (messageOf: (fullName: string) => string): IRustCodecTypes => {
+  const codecTypeOf = (binding: IBinding): string => {
+    return binding.encoding === 'proto' && binding.message !== undefined
+      ? `::bead_protobuf::ProtoCodec<${messageOf(binding.message)}>`
+      : NATIVE[binding.encoding as keyof typeof NATIVE];
+  };
+
+  return {
+    codecTypeOf,
+    valueOf: (binding) => {
+      return binding.encoding === 'proto' && binding.message !== undefined
+        ? messageOf(binding.message)
+        : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
+    },
+  };
 };
 
 // a struct of `fields` at the file's root, after its documentation and marks; a unit struct where
@@ -297,21 +325,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
   const fieldOf = (procedure: IProcedureEntry): string => {
     return snakeIdentifierOf(procedure.procedureName);
   };
-  const codecTypeOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? `::bead_protobuf::ProtoCodec<${options.messageOf(binding.message)}>`
-      : NATIVE[binding.encoding as keyof typeof NATIVE];
-  };
+  const { codecTypeOf, valueOf } = codecTypesOf(options.messageOf);
   const codecOf = (binding: IBinding): string => {
     return binding.encoding === 'proto' && binding.message !== undefined
       ? '::bead_protobuf::ProtoCodec::new()?'
       : NATIVE[binding.encoding as keyof typeof NATIVE];
-  };
-  // the value a codec reads and writes: a message's own type, a native codec's by its trait
-  const valueOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? options.messageOf(binding.message)
-      : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
   };
   const notificationOf = (procedure: IProcedureEntry): IBinding => {
     return procedure.notification ?? procedure.result;
