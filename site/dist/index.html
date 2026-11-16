@@ -1859,6 +1859,20 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
 <span class="tok-keyword">await</span> greeter.notifications.countDown({ <span class="tok-keyword">from</span>: <span class="tok-number">3</span> }, <span class="tok-keyword">async</span> ({ remaining }) =&gt; {
   <span class="tok-comment">// a window of 1: the next tick waits until this callback settles</span>
 })();</code></pre>
+  <p>
+    Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
+    reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec
+    whose conformance files every language plays; a builder that writes each language’s typed sides
+    from one <code>.proto</code>; a DevTools panel that reads a page’s calls; a dissenter bound to
+    argue against every change the others agree on. Each can be taken into another project, and
+    each has the record that says why it is so.
+  </p>
+  <p>
+    Bead is built to production standards: a spec every side plays, the three sides calling each
+    other in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold
+    a side, and its pages held to WCAG 2.2 AA. It is not yet proven in production, and before 1.0.0
+    a minor may still break.
+  </p>
 </section>
 
 <section id="enveloppe">
@@ -3977,6 +3991,22 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
 <span class="tok-keyword">await</span> greeter.notifications.countDown({ <span class="tok-keyword">from</span>: <span class="tok-number">3</span> }, <span class="tok-keyword">async</span> ({ remaining }) =&gt; {
   <span class="tok-comment">// une fenêtre de 1 : le tic suivant attend que ce rappel ait fini</span>
 })();</code></pre>
+  <p>
+    Bead est aussi un ensemble d’idées qui tiennent ensemble, et chacune tient seule : une enveloppe
+    qu’un routeur lit sans la décoder ; un même crédit qui règle le rythme d’un abonnement comme celui
+    d’un transfert ; une spécification dont chaque langage joue les fichiers de conformance ; un
+    générateur qui écrit, d’un seul <code>.proto</code>, les côtés typés de chaque langage ; un panneau
+    DevTools qui lit les appels d’une page ; un dissident tenu de contester chaque changement sur
+    lequel les autres s’entendent. Chacune peut servir dans un autre projet, et chacune a sa décision
+    qui dit pourquoi elle est ainsi.
+  </p>
+  <p>
+    Bead est construit selon les exigences de la production : une spécification que chaque côté
+    joue, les trois côtés qui s’appellent entre eux dans la CI, une campagne de fuzzing chaque
+    semaine, des planchers de couverture, des bornes contre un pair qui tente de retenir un côté, et
+    ses pages tenues à WCAG 2.2 AA. Il n’est pas encore éprouvé en production, et avant 1.0.0 une
+    version mineure peut encore rompre la compatibilité.
+  </p>
 </section>
 
 <section id="enveloppe">
