@@ -38,7 +38,8 @@ export interface IHttpTemplateOptions {
 /** The file an output with a `gateway` writes its route table in, at its root. */
 export const HTTP_FILE = 'bead_http.ts';
 
-// a text as a single-quoted literal, the TypeScript side's own quotes
+// ? a text as a single-quoted literal, its `\` and `'` alone escaped: `openapi.problemTypes` may
+// hold a control character or a lone surrogate, which `literalOf` escapes and this does not
 const quotedOf = (text: string): string => {
   return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 };

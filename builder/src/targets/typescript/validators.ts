@@ -24,6 +24,7 @@ import {
   LENGTH_CEILING,
 } from '../../model/rules.ts';
 import { compilePattern, type IPatternTable } from '../../patterns/pattern.ts';
+import { literalOf } from './templates.ts';
 
 // types
 
@@ -55,13 +56,6 @@ const KEY_ORDER: Readonly<Record<string, 'string' | 'integer' | 'bool'>> = Objec
 });
 
 // helpers
-
-// a string as a single-quoted literal, whatever it holds
-const literalOf = (text: string): string => {
-  const escaped = JSON.stringify(text).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'");
-
-  return `'${escaped}'`;
-};
 
 // a JSON value of a rule's bounds as a frozen literal
 const frozenOf = (value: BoundsValue): string => {
