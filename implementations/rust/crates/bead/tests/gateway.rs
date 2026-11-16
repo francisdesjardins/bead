@@ -435,6 +435,105 @@ async fn answers_a_stream_s_request_that_carries_last_event_id_with_204_and_no_c
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_a_head_that_asks_a_stream_as_its_get_begins_and_ends_at_its_head_its_subscription_with_it()
+ {
+    use tokio::io::AsyncWriteExt as _;
+
+    // * on its own listener, and mounted on an application's server: each holds one stream an address
+    for listens in [true, false] {
+        let fixture = started_with((
+            |options: &mut HttpGatewayOptions| {
+                options.maximum_connections_per_address = Some(1);
+            },
+            listens,
+        ))
+        .await;
+        let watched = watched_on(&fixture.memory);
+        let (place, port) = if listens {
+            ("its own listener", fixture.port)
+        } else {
+            (
+                "mounted",
+                mounted_behind_reader(fixture.gateway.clone()).await,
+            )
+        };
+        let asked = |method: &str| {
+            format!(
+                "{method} /v1/watch HTTP/1.1\r\nhost: {HOST}:{port}\r\naccept: text/event-stream\r\n\r\n"
+            )
+        };
+
+        // * one socket, kept alive: every byte it takes, in order
+        let mut socket = sent(port, asked("HEAD").as_bytes()).await;
+        let read = read_until(&mut socket, "\r\n\r\n").await;
+        let (head, rest) = read.split_once("\r\n\r\n").expect("its head");
+        let mut lines = head.split("\r\n");
+        let status = lines.next().unwrap_or_default();
+        let fields: Vec<(String, String)> = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+            .collect();
+        let field_of = |name: &str| {
+            fields
+                .iter()
+                .find(|(each, _)| each == name)
+                .map(|(_, value)| value.as_str())
+        };
+
+        // its GET's head, its call made: 200 text/event-stream and 6.2's fields, with no content
+        assert_eq!(status, "HTTP/1.1 200 OK", "{place}");
+        assert_eq!(
+            [
+                "content-type",
+                "cache-control",
+                "x-content-type-options",
+                "vary"
+            ]
+            .map(field_of),
+            [
+                Some("text/event-stream"),
+                Some("no-store"),
+                Some("nosniff"),
+                Some("Origin")
+            ],
+            "{place}"
+        );
+        assert_eq!(field_of("content-length"), None, "{place}");
+        assert_eq!(field_of("transfer-encoding"), None, "{place}");
+        assert_eq!(rest, "", "{place}");
+        assert_eq!(locked(&watched.drawn).len(), 1, "{place}");
+
+        // * its exchange's connection closed with its response, and its subscription with it
+        until(|| locked(&watched.closed).len() == 1).await;
+        assert_eq!(*locked(&watched.closed), *locked(&watched.drawn), "{place}");
+
+        // its response ended at its head, and its place freed: the next request on its socket, a GET
+        // that opens the same stream, answered
+        socket
+            .write_all(asked("GET").as_bytes())
+            .await
+            .expect("its GET written");
+
+        let stream = read_until(&mut socket, "event: result\nid: 1\ndata: {}\n\n").await;
+
+        assert!(
+            stream.starts_with("HTTP/1.1 200 OK\r\n"),
+            "{place}: {stream}"
+        );
+        assert!(
+            stream
+                .to_ascii_lowercase()
+                .contains("content-type: text/event-stream"),
+            "{place}: {stream}"
+        );
+        assert_eq!(locked(&watched.drawn).len(), 2, "{place}");
+        drop(socket);
+
+        fixture.dispose().await.expect("disposed");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answers_a_command_to_an_exchange_s_connection_service_unknown() {
     let fixture = started().await;
     let asked = exchanged(
