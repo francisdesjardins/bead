@@ -27,6 +27,7 @@ from google.protobuf import any_pb2, descriptor_pb2, descriptor_pool, duration_p
 from google.protobuf import field_mask_pb2, json_format, message_factory, struct_pb2, timestamp_pb2  # noqa: F401
 from google.protobuf import wrappers_pb2  # noqa: F401
 
+import proto_text
 from bounds import DEFAULTS
 from conformance import CODES, hexadecimal, unit_order, write_json, write_text
 from details import canonical, es, number_text
@@ -453,41 +454,24 @@ def proto_type(field):
 
 
 def declaration(field, indent):
-    if field.label == 'map':
-        head = f'map<{field.key}, {proto_type(field)}> {field.name} = {field.number}'
-    else:
-        prefix = 'repeated ' if field.label == 'repeated' else 'optional ' if field.optional else ''
-        head = f'{prefix}{proto_type(field)} {field.name} = {field.number}'
-
     options = [*([f'json_name = "{field.json_name}"'] if field.custom_json else []),
                *([field.rules] if field.rules else []),
                *(['features.field_presence = LEGACY_REQUIRED'] if field.required else []),
                *(['features.message_encoding = DELIMITED'] if field.delimited else [])]
 
-    return indent + head + (f' [{", ".join(options)}]' if options else '') + ';'
+    return proto_text.field_text(field, indent, type_name=proto_type(field),
+                                 label='repeated ' if field.label == 'repeated' else 'optional ' if field.optional else '',
+                                 options=options)
 
 
-def message_text(each):
-    lines = [f'// {each.note}', f'message {each.name} {{']
-    written = set()
+def type_text_of(each):
+    """A message's text, or an enum's."""
+    if isinstance(each, Enum):
+        return proto_text.enum_text(each.name, each.note, each.values,
+                                    options=[*(['  option allow_alias = true;'] if each.alias else []),
+                                             *(['  option features.enum_type = CLOSED;'] if each.closed else [])])
 
-    for field in each.fields:
-        if field.oneof is None:
-            lines.append(declaration(field, '  '))
-        elif field.oneof not in written:
-            written.add(field.oneof)
-            lines.append(f'  oneof {field.oneof} {{')
-            lines.extend(declaration(member, '    ') for member in each.fields if member.oneof == field.oneof)
-            lines.append('  }')
-
-    lines.append('}')
-    return '\n'.join(lines)
-
-
-def enum_text(each):
-    return '\n'.join([f'// {each.note}', f'enum {each.name} {{', *(['  option allow_alias = true;'] if each.alias else []),
-                      *(['  option features.enum_type = CLOSED;'] if each.closed else []),
-                      *[f'  {value} = {number};' for value, number in each.values], '}'])
+    return proto_text.message_text(each, declaration)
 
 
 def type_text(name):
@@ -548,61 +532,39 @@ def own_types(required_file):
 def required_proto_file():
     """spec/transcoding-required.proto: the messages of fields protobuf requires, and a closed enum, which
     spec/transcoding.proto, proto3, imports."""
-    return '\n'.join([
+    comments = [
         '// The messages spec/transcoding.json plays a gateway against that a proto3 file cannot declare, written with',
         '// its entries by spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision',
         '// 0042).',
-        'edition = "2023";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "google/protobuf/field_mask.proto";',
-        '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own_types(True)),
+    ]
+
+    return '\n'.join([
+        *proto_text.head(comments, 'edition = "2023";', PACKAGE, ['google/protobuf/field_mask.proto']),
+        '\n\n'.join(type_text_of(each) for each in own_types(True)),
         '',
     ])
 
 
 def proto_file():
-    own = own_types(False)
-
-    return '\n'.join([
+    comments = [
         '// The messages and the service spec/transcoding.json plays a gateway against, written with its entries by',
         '// spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision 0037).',
-        'syntax = "proto3";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "bead/options.proto";',
-        'import "buf/validate/validate.proto";',
-        'import "google/api/annotations.proto";',
-        'import "google/protobuf/any.proto";',
-        'import "google/protobuf/duration.proto";',
-        'import "google/protobuf/empty.proto";',
-        'import "google/protobuf/field_mask.proto";',
-        'import "google/protobuf/struct.proto";',
-        'import "google/protobuf/timestamp.proto";',
-        'import "google/protobuf/wrappers.proto";',
-        'import "transcoding-required.proto";',
-        '',
-        'option (bead.file) = {',
-        '  admission: {',
-        '    none: {}',
-        '  }',
-        '};',
-        '',
-        "// What a gateway answers, each procedure by its default routes and its rules.",
-        'service TranscodingService {',
-        '  option (bead.service) = {',
-        '    id: 1',
-        '    revision: 1',
-        '    failures: "TranscodingFailure"',
-        '  };',
-        '',
+    ]
+    imports = ['bead/options.proto', 'buf/validate/validate.proto', 'google/api/annotations.proto',
+               'google/protobuf/any.proto', 'google/protobuf/duration.proto', 'google/protobuf/empty.proto',
+               'google/protobuf/field_mask.proto', 'google/protobuf/struct.proto', 'google/protobuf/timestamp.proto',
+               'google/protobuf/wrappers.proto', 'transcoding-required.proto']
+
+    return '\n'.join([
+        *proto_text.head(comments, 'syntax = "proto3";', PACKAGE, imports),
+        *proto_text.ADMISSION_NONE,
+        *proto_text.service_head('TranscodingService',
+                                 'What a gateway answers, each procedure by its default routes and its rules.',
+                                 ['id: 1', 'revision: 1', 'failures: "TranscodingFailure"']),
         '\n\n'.join(rpc_text(procedure) for procedure in PROCEDURES),
         '}',
         '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own),
+        '\n\n'.join(type_text_of(each) for each in own_types(False)),
         '',
     ])
 

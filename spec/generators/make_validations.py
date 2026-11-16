@@ -27,6 +27,7 @@ import urllib.request
 
 import re2
 
+import proto_text
 from conformance import ROOT, hexadecimal, write_json, write_text
 from details import KEPT, LARGEST_COUNT, canonical, detail_of, es, judged, utf8, violation
 from proto_wire import LEN, f32, length_delimited, scalar_bytes, tag, varint
@@ -510,49 +511,19 @@ def proto_type(field):
 
 
 def declaration(field, indent):
-    if field.label == 'map':
-        head = f'map<{field.key}, {proto_type(field)}> {field.name} = {field.number}'
-    else:
-        head = f'{"repeated " if field.label == "repeated" else ""}{proto_type(field)} {field.name} = {field.number}'
+    options = [*(['features.field_presence = IMPLICIT'] if field.implicit else []),
+               *([f'(buf.validate.field) = {{{text_rules(field.rules)}}}'] if field.rules else [])]
 
-    options = []
-
-    if field.implicit:
-        options.append('features.field_presence = IMPLICIT')
-
-    if field.rules:
-        options.append(f'(buf.validate.field) = {{{text_rules(field.rules)}}}')
-
-    return indent + head + (f' [{", ".join(options)}]' if options else '') + ';'
+    return proto_text.field_text(field, indent, type_name=proto_type(field),
+                                 label='repeated ' if field.label == 'repeated' else '', options=options)
 
 
 def message_text(message):
-    lines = [f'// {message.note}', f'message {message.name} {{']
+    def oneof_options(oneof):
+        return ['    option (buf.validate.oneof).required = true;'] if dict(message.oneofs)[oneof] else []
 
-    if message.rules:
-        lines.append(f'  option (buf.validate.message) = {{{text_rules(message.rules)}}};')
-
-    written = set()
-
-    for field in message.fields:
-        if field.oneof is None:
-            lines.append(declaration(field, '  '))
-        elif field.oneof not in written:
-            written.add(field.oneof)
-            required = dict(message.oneofs)[field.oneof]
-            lines.append(f'  oneof {field.oneof} {{')
-
-            if required:
-                lines.append('    option (buf.validate.oneof).required = true;')
-
-            for member in message.fields:
-                if member.oneof == field.oneof:
-                    lines.append(declaration(member, '    '))
-
-            lines.append('  }')
-
-    lines.append('}')
-    return '\n'.join(lines)
+    options = [f'  option (buf.validate.message) = {{{text_rules(message.rules)}}};'] if message.rules else []
+    return proto_text.message_text(message, declaration, options=options, oneof_options=oneof_options)
 
 
 def proto_file():
@@ -561,41 +532,25 @@ def proto_file():
                f'    option (bead.procedure) = {{id: {message.procedure}}};\n'
                '  }' for message in MESSAGES]
     name, note, values = COLOUR
-
-    return '\n'.join([
+    comments = [
         '// The messages spec/validations.json judges, their rules protovalidate\'s, written with the verdicts',
         '// by spec/generators/make_validations.py: regenerate, never edit (spec section 18, decision 0035).',
-        'edition = "2023";',
-        '',
-        'package bead.validations.v1;',
-        '',
-        'import "bead/options.proto";',
-        'import "buf/validate/validate.proto";',
-        'import "google/protobuf/wrappers.proto";',
-        '',
-        'option (bead.file) = {',
-        '  admission: {',
-        '    none: {}',
-        '  }',
-        '};',
-        '',
-        '// Each message bound as a request, so that beadc generates each side\'s validators for it.',
-        'service ValidationsService {',
-        '  option (bead.service) = {',
-        '    id: 1',
-        '    revision: 1',
-        '  };',
-        '',
+    ]
+    imports = ['bead/options.proto', 'buf/validate/validate.proto', 'google/protobuf/wrappers.proto']
+
+    return '\n'.join([
+        *proto_text.head(comments, 'edition = "2023";', 'bead.validations.v1', imports),
+        *proto_text.ADMISSION_NONE,
+        *proto_text.service_head('ValidationsService',
+                                 'Each message bound as a request, so that beadc generates each side\'s validators for it.',
+                                 ['id: 1', 'revision: 1']),
         '\n\n'.join(service),
         '}',
         '',
         '// What a procedure answers a request its rules take: nothing.',
         'message Taken {}',
         '',
-        f'// {note}',
-        f'enum {name} {{',
-        *[f'  {value} = {number};' for value, number in values],
-        '}',
+        proto_text.enum_text(name, note, values),
         '',
         '\n\n'.join(message_text(message) for message in [INNER, PAIR, *MESSAGES]),
         '',
