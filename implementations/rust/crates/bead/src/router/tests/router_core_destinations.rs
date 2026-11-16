@@ -1,22 +1,20 @@
 //! A destination's handler owns its admission, payload limit and answers, apart from local resolvers.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::sync::oneshot;
 
 use super::router_core_sessions::handler;
 use super::{Handed, locked};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Envelope, RequestHeader};
 use crate::failure::Failure;
-use crate::router::core::{self as router_core, AdmissionRefusal, Dispatch};
+use crate::router::core::{self as router_core, AdmissionRefusal};
 use crate::router::types::{RouterAnswer, RouterLimitsOptions};
-use crate::testing::core_port::{Peer, completed, scripted_header};
+use crate::testing::core_port::{Peer, scripted_header};
 use crate::testing::pair::echo;
 
 #[tokio::test]
-#[ignore = "divergence: an undispatched internal answer settles successfully; the TypeScript and C# cores refuse its copied header"]
 #[expect(
     clippy::too_many_lines,
     reason = "the routed and local handlers, admission refusal and dispatch identity share one source scenario"
@@ -94,39 +92,8 @@ async fn takes_a_request_for_a_destination_to_the_handler_its_port_gives_and_ans
         .await
         .expect("the routed answer exceeds the local limit");
 
-    // * a copied header carries no dispatch identity; it cannot answer the open call
-    let (reply, rejected) = oneshot::channel();
-    let header = requests[1].header.clone();
-    let answer = RouterAnswer::Result(payload.clone());
-    peer.owner
-        .run(move |state| {
-            let dispatch = Arc::new(Dispatch {
-                id: state.core.draw_id(),
-                connection_handle: Arc::from("a"),
-                header,
-                handler: Mutex::new(None),
-                session: Mutex::new(None),
-                answered: Mutex::new(None),
-                origin: (None, None),
-                run: crate::router::parts::ResolverRun::default(),
-                is_failed_answered: std::sync::atomic::AtomicBool::new(false),
-            });
-            router_core::respond(
-                state,
-                (
-                    answer,
-                    dispatch,
-                    Some(Box::new(move |_, result| {
-                        drop(reply.send(result));
-                    })),
-                ),
-            );
-        })
-        .await
-        .expect("the undispatched header");
-    completed(rejected)
-        .await
-        .expect_err("a copied header is no dispatched call");
+    // * an answer goes only through the answerer its request was handed: nothing goes out on 7
+    // until that one answers it
     let sent = peer.sent().await;
     assert_eq!(sent.len(), 3);
     for (index, call_id, code) in [

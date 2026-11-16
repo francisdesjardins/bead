@@ -172,17 +172,19 @@ async fn close_awaiting((forward, incoming): (bool, u32)) -> usize {
     let close_readings = peer.monotonic_readings().saturating_sub(readings);
     peer.settle().await;
 
-    // * The Core.now observer sees the incoming batch's shared reading; requester completions
-    // read their captured clock directly. Both sets of calls and every transfer are out before
-    // that first counted end. The port's clock counter includes both paths.
+    // * The Core.now observer sees each incoming call's end; requester completions read their
+    // captured clock directly. Both sets of calls and every transfer are out before the first
+    // counted end. The port's clock counter includes both paths.
     {
         let reads = locked(&reads);
         assert_eq!(
             reads.len(),
-            1,
-            "the counted incoming batch reads its clock once"
+            usize::try_from(incoming).expect("small count"),
+            "each counted incoming call reads its clock as it ends"
         );
-        detached(&reads[0]);
+        for read in reads.iter() {
+            detached(read);
+        }
     }
     {
         let heard = locked(&heard);
@@ -276,7 +278,11 @@ async fn detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_
 #[tokio::test]
 async fn detach_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
  {
-    let _: usize = close_awaiting((false, 2)).await;
+    assert_eq!(
+        close_awaiting((false, 2)).await,
+        4,
+        "each counted call reads its clock as it ends"
+    );
 }
 
 #[tokio::test]
@@ -290,7 +296,6 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
 }
 
 #[tokio::test]
-#[ignore = "divergence: closing two incoming and two outgoing calls reads the clock three times; both source sides require four"]
 async fn detaches_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
  {
     assert_eq!(

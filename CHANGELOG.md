@@ -242,6 +242,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# side's WebSocket server gives a connection's place back before it tells its close, as the
+  TypeScript side's does: a client that came again on that close could still meet 503 busy.
 - The Rust side's session request's debug text leaves out its transport credential and whether
   one was carried, keeping the connection and the request header.
 - The Rust side's JSON codec keeps its parser's refusal as the cause of a `not JSON` refusal,
@@ -313,6 +315,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side closes no connection refused twice `maximumAnsweringCalls` requests in a row once
   its router was disposed before that close came due, as the C# side does: it asked its transport
   to close the connection.
+- The Rust side reads its monotonic clock at the end of each counted call a closing connection
+  answered, as the TypeScript and C# sides do: those calls shared one reading, short of the two
+  readings a counted call takes (debugging 3.3).
 
 ### Security
 

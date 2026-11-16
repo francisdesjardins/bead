@@ -95,10 +95,12 @@ async fn resolver_failures(batched: bool) {
     assert_eq!(
         served.reported(),
         if batched {
+            // * a malformed envelope as it comes; each resolver's failure, its panic as its error,
+            // as its task settles, in the order they were handed on a runtime of one thread
             [
                 "ENVELOPE_MALFORMED first",
-                "a resolver panicked: thrown second",
                 "rejected first",
+                "a resolver panicked: thrown second",
                 "gone second",
             ]
         } else {
@@ -123,19 +125,11 @@ async fn resolver_failures(batched: bool) {
     }
     assert_eq!(
         served.sent_since(),
-        if batched {
-            [
-                "second failure 1 PROCEDURE_FAILED",
-                "first failure 1 PROCEDURE_FAILED",
-                "second failure 3 SERVICE_UNKNOWN",
-            ]
-        } else {
-            [
-                "first failure 1 PROCEDURE_FAILED",
-                "second failure 1 PROCEDURE_FAILED",
-                "second failure 3 SERVICE_UNKNOWN",
-            ]
-        }
+        [
+            "first failure 1 PROCEDURE_FAILED",
+            "second failure 1 PROCEDURE_FAILED",
+            "second failure 3 SERVICE_UNKNOWN",
+        ]
     );
     served
         .router
@@ -156,7 +150,7 @@ async fn requests_that_fail_in_their_resolver_or_do_not_read_are_reported_with_t
 }
 
 #[tokio::test]
-#[ignore = "divergence: Rust reports a synchronous resolver panic before a later malformed envelope; TypeScript reports the malformed envelope first"]
-async fn that_fail_in_their_resolver_or_do_not_read_are_reported_with_their_connection() {
+async fn that_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
+ {
     resolver_failures(true).await;
 }
