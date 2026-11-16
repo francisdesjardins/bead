@@ -2,7 +2,6 @@
 import base64
 import datetime
 import hashlib
-import hmac
 import json
 import math
 import re
@@ -10,6 +9,7 @@ import string
 
 import amqp_messages
 from conformance import hexadecimal, nested, text, write_json
+from jws import base64url, compact, part, signed, unbase64url
 from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
                           width)
 from spec_version import spec_version
@@ -411,19 +411,6 @@ failure_refusals = [
 # ── The verdicts of JWTs (section 13.8) ─────────────────────────────────────────────────────────
 
 
-def base64url(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-
-def unbase64url(text):
-    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
-
-
-def compact(value):
-    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
-    return json.dumps(value, separators=(',', ':')).encode('ascii')
-
-
 def thumbprint(jwk):
     """A JWK's thumbprint (RFC 7638): SHA-256 over its required members, in their order, no space."""
     required = ('crv', 'kty', 'x', 'y') if jwk['kty'] == 'EC' else ('k', 'kty')
@@ -522,15 +509,9 @@ HS = key(TRUST, 'HS256', HMAC_KEY)
 HS_BY_THUMBPRINT = key(TRUST, 'HS256', {**HMAC_KEY, 'kid': thumbprint(HMAC_KEY)})
 
 
-def part(value):
-    """A header or a claims set, from a JSON value or from its bytes as given."""
-    return base64url(value if isinstance(value, bytes) else compact(value))
-
-
 def hs256(header, claims, secret=unbase64url(HMAC_KEY['k'])):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac."""
-    signing_input = part(header) + '.' + part(claims)
-    return signing_input + '.' + base64url(hmac.new(secret, signing_input.encode('ascii'), hashlib.sha256).digest())
+    return signed(header, claims, secret)
 
 
 def access(issuer=TRUST, **claims):

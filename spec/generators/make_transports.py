@@ -1,10 +1,7 @@
 """Writes spec/transports.json: what a transport's server does at its edge, over HTTP, with what a
 peer of the test's own sends it in exact octets."""
-import base64
 import hashlib
-import hmac
 import ipaddress
-import json
 import re
 from datetime import datetime
 
@@ -12,6 +9,7 @@ import amqp_messages
 from bounds import DEFAULTS
 from conformance import advance, armed, hexadecimal, text, word, write_json
 from interop import PROCEDURES, SERVICE_ID
+from jws import signed, unbase64url
 from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
 
@@ -847,17 +845,9 @@ def interop_jwt():
     # the wall clock's start, 2026-01-01T00:00:00Z, in seconds since the epoch
     wall = 1_767_225_600
 
-    def base64url(data):
-        return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-    def part(value):
-        return base64url(json.dumps(value, separators=(',', ':')).encode('ascii'))
-
     claims = {'iss': issuer, 'sub': 'carol', 'aud': audience, 'exp': wall + 3600, 'iat': wall, 'jti': 'at-relay',
               'client_id': 'bead-client'}
-    signing_input = part({'alg': 'HS256', 'typ': 'at+jwt'}) + '.' + part(claims)
-    key = base64.urlsafe_b64decode(secret + '=' * (-len(secret) % 4))
-    token = signing_input + '.' + base64url(hmac.new(key, signing_input.encode('ascii'), hashlib.sha256).digest())
+    token = signed({'alg': 'HS256', 'typ': 'at+jwt'}, claims, unbase64url(secret))
 
     # its block: the scheme 2, its length, its characters a byte each, then zero bytes to a word
     data = token.encode('ascii')
