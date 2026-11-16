@@ -2999,13 +2999,10 @@ pub(crate) fn reject_pending<S: Side>(
 
     let outliving = core.answering.close_outliving(handle);
 
-    // * read once, and only when a call it takes is counted (spec/debugging.md 3.1)
-    let mut now = None;
-
+    // * each call counted reads its clock at its own end gate, and one not counted reads none
+    // (spec/debugging.md 3.1, 3.3)
     for (_, answering) in &mut taken {
-        answering.end(CallEnding::Closed, || {
-            *now.get_or_insert_with(|| core.now())
-        });
+        answering.end(CallEnding::Closed, || core.now());
     }
 
     // then each call waiting settled, and each signal aborted, application code last
