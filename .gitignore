@@ -27,7 +27,7 @@ __pycache__/
 Thumbs.db
 *.log
 
-# beadc's own folder beside a beadc.yaml, the root's among them: what it extracts or writes for a run
+# beadc's own folder beside a beadc.yaml: the editor's copy of its options, which generate writes
 .beadc/
 
 # protobuf's conformance runner and protovalidate-es, fetched by their pins, what

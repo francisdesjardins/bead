@@ -219,17 +219,16 @@ export const documentTextOf = (blueprint: IBlueprint, config: IConfig): string =
   });
 };
 
-// one output's files, under its folder, a temporary folder made under the project's `folder`: its
-// messages of the whole blueprint, its target's files of what its sides select
+// one output's files, under its folder: its messages of the whole blueprint, its target's files of
+// what its sides select
 const outputFilesOf = (
   output: Output,
   details: {
     readonly input: ITargetInput;
-    readonly folder: string;
     readonly http: IHttpInput | undefined;
   }
 ): readonly IGeneratedFile[] => {
-  const { input, folder, http } = details;
+  const { input, http } = details;
   const messages = input.set !== undefined && output.messages === Messages.GENERATE;
   const set = input.set;
   const keeps = {
@@ -253,7 +252,7 @@ const outputFilesOf = (
     return [
       ...(set === undefined || !messages
         ? []
-        : generateCSharpMessages(set, { blueprint: input.blueprint, folder, ...keeps })),
+        : generateCSharpMessages(set, { blueprint: input.blueprint, ...keeps })),
       ...csharpTarget.generate(input, {
         ...(output.namespace === undefined ? {} : { namespace: output.namespace }),
         messages: output.messages,
@@ -463,7 +462,6 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
     const cut = cutOf(blueprint, output);
     const written = outputFilesOf(output, {
       input: { ...input, cut },
-      folder: config.folder,
       http: httpOf(cut),
     }).map((file) => {
       const path = join(output.out, ...file.name.split('/'));

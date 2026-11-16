@@ -37,6 +37,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -106,10 +107,7 @@ const filesOf = (folder) => {
 
 /** What differs between `side`'s folder and what beadc writes for it, or nothing once written. */
 const checkOf = (side, tools) => {
-  // ! apart under the root's `.beadc/`, not the system's temporary folder: beadc's options and a
-  // project's roots must share a folder for buf, and on Windows they may sit on two drives
-  mkdirSync(join(ROOT, '.beadc'), { recursive: true });
-  const apart = mkdtempSync(join(ROOT, '.beadc', 'transcoding-'));
+  const apart = mkdtempSync(join(tmpdir(), 'bead-transcoding-'));
   const committed = join(ROOT, side.folder);
 
   try {

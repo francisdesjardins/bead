@@ -6,8 +6,8 @@
 // (VALIDATE_COPY). googleapis' `google/api/http.proto` and `annotations.proto`, which beadc vendors
 // too (decision 0037), are taken from the roots where both are there and each is the pin's bytes, a
 // line's CRLF read as LF, since many a project vendors googleapis whole; any other copy is HTTP_COPY.
-// Where a file of the set is on disk, for a finding's path. The roots' source files are read alone;
-// beadc's work area belongs to its own module.
+// Where a file of the set is on disk, for a finding's path. The roots' source files are read alone,
+// never the editor's copy of beadc's options a root's `.beadc/` holds.
 
 // dependencies
 
@@ -69,8 +69,8 @@ export const displayOf = (path: string): string => {
   return relative(process.cwd(), path).split(sep).join('/');
 };
 
-// whether `folder` holds a `.proto` file, at any depth; never in a work area, which another run
-// fills and removes as the walk reads it
+// whether `folder` holds a `.proto` file, at any depth; never in beadc's own folder, the editor's
+// copy of its options
 const holdsProto = (folder: string): boolean => {
   return readdirSync(folder, { withFileTypes: true }).some((entry) => {
     if (entry.isDirectory()) {

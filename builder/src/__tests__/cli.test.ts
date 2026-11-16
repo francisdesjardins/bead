@@ -1,14 +1,23 @@
-import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { expect, test } from '@playwright/test';
 
 import { readStandardInput } from '../breaking/against.ts';
 import { extractArchive } from '../breaking/archive.ts';
-import { BEADC_FOLDER } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
+import { MARKER_FILE, NEWBORN, STALE_AFTER, WORK_AREAS } from '../work-area.ts';
 
 const BUILDER = fileURLToPath(new URL('../../', import.meta.url));
 const INTEROP = fileURLToPath(new URL('../../../spec/interop-blueprint.json', import.meta.url));
@@ -17,14 +26,24 @@ const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const PAIR = 'test/breaking/buf';
 const ARCHIVE = new URL('../../test/breaking/archive/archive.tar', import.meta.url);
 
+// how many runs of beadc go at once in the stress of one --against folder
+const STRESS_PROCESSES = 12;
+
+// the system's temporary folder a child is given, `temporary` where named
+const temporaryEnvOf = (temporary: string | undefined): NodeJS.ProcessEnv => {
+  return temporary === undefined ? {} : { TMPDIR: temporary, TMP: temporary, TEMP: temporary };
+};
+
 // beadc as a user runs it, outside a workflow: Node, src/cli.ts as written, from builder/ or the
-// folder given, after the modules `node` is given to load first, `input` on its standard input
+// folder given, after the modules `node` is given to load first, `input` on its standard input,
+// under `temporary` as the system's temporary folder where named
 const beadc = (
   args: readonly string[],
   options: {
     readonly cwd?: string;
     readonly imports?: readonly string[];
     readonly input?: Uint8Array;
+    readonly temporary?: string;
   } = {}
 ): { status: number | null; stdout: string; stderr: string } => {
   const run = spawnSync(
@@ -40,27 +59,12 @@ const beadc = (
       cwd: options.cwd ?? BUILDER,
       encoding: 'utf8',
       // ! CI's runner sets GITHUB_WORKSPACE, which moves every file the github format names
-      env: { ...process.env, GITHUB_WORKSPACE: '' },
+      env: { ...process.env, GITHUB_WORKSPACE: '', ...temporaryEnvOf(options.temporary) },
       ...(options.input === undefined ? {} : { input: options.input }),
     }
   );
 
   return { status: run.status, stdout: run.stdout, stderr: run.stderr };
-};
-
-// ! the pair's earlier, copied into the running case's own folder: a compile against a folder holds
-// its work area in it, which buf, compiling the same folder for another case, trips on
-const earlierOfCase = (): string => {
-  const earlier = test.info().outputPath('earlier');
-
-  cpSync(join(BUILDER, PAIR, 'earlier'), earlier, {
-    recursive: true,
-    filter: (source) => {
-      return basename(source) !== BEADC_FOLDER;
-    },
-  });
-
-  return earlier;
 };
 
 // a project of the interop's blueprint and one output, in the running test's output folder
@@ -381,7 +385,7 @@ test("breaking over a .proto prints Bead's finding at the rpc's span and buf's a
   test.setTimeout(60_000);
 
   const file = `${PAIR}/current/parcel/v1/parcel.proto`;
-  const pair = ['breaking', `${PAIR}/current`, '--against', earlierOfCase()];
+  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
   const run = beadc(pair);
   const renamed = `${file}:22:7: error PROCEDURE_SAME_NAME: `;
   const field = `${file}:34:3: error buf:FIELD_SAME_TYPE: `;
@@ -445,7 +449,7 @@ test('--against - reads a tar from standard input, and refuses a terminal', asyn
 test("prints each breaking finding's subject, in text, json and github", () => {
   test.setTimeout(60_000);
 
-  const pair = ['breaking', `${PAIR}/current`, '--against', earlierOfCase()];
+  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
   const [text] = beadc(pair).stdout.split('\n');
   const [json] = beadc([...pair, '--error-format', 'json']).stdout.split('\n');
   // * GitHub's annotation names its file from the workspace, wherever beadc ran
@@ -498,4 +502,207 @@ test('a path the file system refuses is one line, exit 2; a folder the output na
 
   expect(beadc(['blueprint', INTEROP, '-o', made]).status).toBe(0);
   expect(readFileSync(made, 'utf8')).toBe(readFileSync(INTEROP, 'utf8').replaceAll('\r\n', '\n'));
+});
+
+// ── Work areas ────────────────────────────────────────────────────────────────
+
+// a case's own temporary folder: an area planted in the system's would be swept by another case
+const temporaryOfCase = (): string => {
+  const folder = test.info().outputPath('tmp');
+
+  mkdirSync(folder, { recursive: true });
+
+  return folder;
+};
+
+// an area planted under `temporary`, its marker's process `pid` where given, its folder `age` old
+const plantArea = (
+  temporary: string,
+  options: { readonly name: string; readonly pid?: number; readonly age: number }
+): string => {
+  const area = join(temporary, WORK_AREAS, options.name);
+
+  mkdirSync(join(area, 'buf-x'), { recursive: true });
+  writeFileSync(join(area, 'buf-x', 'set.binpb'), Buffer.alloc(1000));
+
+  if (options.pid !== undefined) {
+    writeFileSync(
+      join(area, MARKER_FILE),
+      JSON.stringify({ pid: options.pid, started: new Date().toISOString() })
+    );
+  }
+
+  const time = new Date(Date.now() - options.age);
+
+  utimesSync(area, time, time);
+
+  return area;
+};
+
+// every file under `folder`, by its path from it
+const filesOf = (folder: string): string[] => {
+  return readdirSync(folder, { recursive: true, withFileTypes: true })
+    .map((entry) => {
+      return relative(folder, join(entry.parentPath, entry.name));
+    })
+    .toSorted();
+};
+
+// a pid no process holds: past every system's bound, and a signal 0 to it answers ESRCH
+const DEAD_PID = 2 ** 31 - 1;
+
+test('check and generate write in the project what beadc.yaml names alone, the work area apart and gone', () => {
+  const temporary = temporaryOfCase();
+  const project = test.info().outputPath('project');
+
+  cpSync(FIXTURES, join(project, 'proto'), { recursive: true });
+  writeFileSync(
+    join(project, 'beadc.yaml'),
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen',
+      '',
+    ].join('\n')
+  );
+
+  const before = filesOf(project);
+
+  expect(beadc(['check'], { cwd: project, temporary }).status).toBe(0);
+  expect(filesOf(project)).toEqual(before);
+
+  const run = beadc(['generate'], { cwd: project, temporary });
+
+  expect(run.stderr).toBe('');
+  expect(run.status).toBe(0);
+  // * the outputs and the editor's copy of beadc's options, as generate writes them, and nothing else
+  expect(
+    filesOf(project).filter((path) => {
+      return !path.startsWith('gen') && !path.startsWith('.beadc');
+    })
+  ).toEqual(before);
+  expect(readdirSync(join(project, '.beadc'))).toEqual(['include']);
+  expect(readdirSync(join(temporary, WORK_AREAS))).toEqual([]);
+});
+
+test('each run sweeps the work areas of runs gone first, never a running one’s', () => {
+  const temporary = temporaryOfCase();
+  const dead = plantArea(temporary, { name: 'run-dead', pid: DEAD_PID, age: 0 });
+  const running = plantArea(temporary, { name: 'run-running', pid: process.pid, age: 0 });
+
+  expect(beadc(['version'], { temporary }).status).toBe(0);
+  expect(existsSync(dead)).toBe(false);
+  expect(existsSync(running)).toBe(true);
+});
+
+test('clean takes out the stale work areas, saying which and how many bytes; --all those without a marker too', () => {
+  const temporary = temporaryOfCase();
+  const dead = plantArea(temporary, { name: 'run-dead', pid: DEAD_PID, age: 0 });
+  const old = plantArea(temporary, { name: 'run-old', age: STALE_AFTER + 60_000 });
+  const young = plantArea(temporary, { name: 'run-young', age: 10 * NEWBORN });
+  const running = plantArea(temporary, { name: 'run-running', pid: process.pid, age: 0 });
+  const marker = statSync(join(dead, MARKER_FILE)).size;
+  const clean = beadc(['clean'], { temporary });
+
+  expect(clean.stderr).toBe('');
+  expect(clean.status).toBe(0);
+  expect(clean.stdout.split('\n').toSorted()).toEqual(
+    [
+      '',
+      `beadc: clean takes out ${dead}, ${String(1000 + marker)} bytes`,
+      `beadc: clean takes out ${old}, 1000 bytes`,
+      `beadc: clean took out 2 work areas, ${String(2000 + marker)} bytes`,
+    ].toSorted()
+  );
+  expect(clean.stdout.endsWith(`2 work areas, ${String(2000 + marker)} bytes\n`)).toBe(true);
+  expect(existsSync(young)).toBe(true);
+
+  const all = beadc(['clean', '--all'], { temporary });
+
+  expect(all.stdout).toBe(
+    [
+      `beadc: clean takes out ${young}, 1000 bytes`,
+      'beadc: clean took out 1 work area, 1000 bytes',
+      '',
+    ].join('\n')
+  );
+  expect(existsSync(running)).toBe(true);
+  expect(beadc(['clean'], { temporary }).stdout).toBe(
+    `beadc: clean finds no work area to take out in ${join(temporary, WORK_AREAS)}\n`
+  );
+  expect(beadc(['clean', 'proto'], { temporary }).status).toBe(2);
+  expect(beadc(['check', '--all', INTEROP], { temporary }).status).toBe(2);
+});
+
+test('--help prints the usage, clean among the commands, exit 0', () => {
+  const run = beadc(['--help']);
+
+  expect(run.status).toBe(0);
+  expect(run.stdout).toContain('clean [--all]');
+  expect(run.stdout).toContain('--help');
+});
+
+// ! the 12 runs at once against one folder that failed some 15 in 300 on Windows while each kept
+// its work area in the project, buf walking the others'; BEADC_STRESS_ROUNDS raises the rounds
+test('runs at once against one --against folder all give the same findings, and leave no work area', async () => {
+  const rounds = Number(process.env['BEADC_STRESS_ROUNDS'] ?? '3');
+
+  test.setTimeout(60_000 + rounds * 30_000);
+
+  const temporary = temporaryOfCase();
+  const earlier = join(BUILDER, PAIR, 'earlier');
+  const before = filesOf(earlier);
+  const runOnce = async (): Promise<{ status: number | null; stdout: string; stderr: string }> => {
+    const running = spawn(
+      process.execPath,
+      [CLI, 'breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`],
+      {
+        cwd: BUILDER,
+        env: { ...process.env, GITHUB_WORKSPACE: '', ...temporaryEnvOf(temporary) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+    let stdout = '';
+    let stderr = '';
+
+    running.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    running.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+
+    const status = await new Promise<number | null>((resolve) => {
+      running.once('close', (code) => {
+        resolve(code);
+      });
+    });
+
+    return { status, stdout, stderr };
+  };
+  const runs = (
+    await Promise.all(
+      Array.from({ length: STRESS_PROCESSES }, async () => {
+        const each = [];
+
+        for (let round = 0; round < rounds; round += 1) {
+          each.push(await runOnce());
+        }
+
+        return each;
+      })
+    )
+  ).flat();
+  const expected = beadc(['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`]);
+  const failed = runs.filter((each) => {
+    return each.status !== expected.status || each.stdout !== expected.stdout || each.stderr !== '';
+  });
+
+  expect(expected.status).toBe(1);
+  expect(failed, `${String(failed.length)} of ${String(runs.length)}`).toEqual([]);
+  expect(filesOf(earlier)).toEqual(before);
+  expect(readdirSync(join(temporary, WORK_AREAS))).toEqual([]);
 });

@@ -1,15 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmdirSync,
-  rmSync,
-} from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fromBinary } from '@bufbuild/protobuf';
@@ -21,6 +12,7 @@ import { compile, lintRules, OPTIONS_ROOT } from '../compile.ts';
 import { InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
+import { MARKER_FILE, WORK_AREAS, workArea } from '../work-area.ts';
 
 const FIXTURES = fileURLToPath(new URL('../../test/fixtures/', import.meta.url));
 const UNCOMPILED = fileURLToPath(new URL('../../test/proto/PROCEDURE_OPTIONS/', import.meta.url));
@@ -29,43 +21,81 @@ const UNCOMPILED = fileURLToPath(new URL('../../test/proto/PROCEDURE_OPTIONS/', 
 const IMAGE_FILE_EXTENSION = 8042;
 const IS_IMPORT = 1;
 
-test('compiles a project with its options on the project’s drive and removes the run’s copy', () => {
-  const folder = mkdtempSync(join(tmpdir(), 'beadc-other-drive-'));
-  const root = join(folder, 'proto');
+// every file under `folder`, by its path from it
+const filesOf = (folder: string): string[] => {
+  return readdirSync(folder, { recursive: true, withFileTypes: true })
+    .map((entry) => {
+      return relative(folder, join(entry.parentPath, entry.name));
+    })
+    .toSorted();
+};
+
+test('compiles a project from a copy in the run’s work area, the project untouched', () => {
+  const root = test.info().outputPath('proto');
+
+  cpSync(FIXTURES, root, { recursive: true });
+  // * a root at the project folder holds the editor's copy too, which never reaches buf
+  cpSync(OPTIONS_ROOT, join(root, '.beadc/include'), { recursive: true });
+
+  const before = filesOf(root);
+
+  for (const image of [false, true]) {
+    expect(compile([root], { image })).toEqual(compile([FIXTURES], { image }));
+  }
+  expect(compile([relative(process.cwd(), FIXTURES)])).toEqual(compile([FIXTURES]));
+  expect(lintRules([root], { files: [join(root, 'bead/interop/v1/interop.proto')] })).toEqual([]);
+  expect(() => {
+    return compile([root], { files: [join(root, 'absent.proto')] });
+  }).toThrow(InputError);
+  expect(() => {
+    return lintRules([root], { files: [join(root, 'absent.proto')] });
+  }).toThrow(InputError);
+  expect(filesOf(root)).toEqual(before);
+  // * each compile's copy goes as it ends: the area keeps its marker alone
+  expect(readdirSync(workArea())).toEqual([MARKER_FILE]);
+  expect(dirname(workArea())).toBe(join(tmpdir(), WORK_AREAS));
+});
+
+test('compiles a root that holds a link whose target is gone', () => {
+  const root = test.info().outputPath('proto');
+  const gone = test.info().outputPath('gone');
+
+  cpSync(FIXTURES, root, { recursive: true });
+  mkdirSync(gone);
+  // * a junction where Windows has it, which takes no right to make; a symbolic link elsewhere
+  symlinkSync(gone, join(root, 'lock'), 'junction');
+  rmdirSync(gone);
+
+  expect(compile([root])).toEqual(compile([FIXTURES]));
+});
+
+test('buf’s refusal names the project’s file, never the copy’s', () => {
+  const root = test.info().outputPath('proto');
+
+  mkdirSync(join(root, 'broken', 'v1'), { recursive: true });
+  writeFileSync(
+    join(root, 'broken', 'v1', 'broken.proto'),
+    [
+      'syntax = "proto3";',
+      'package broken.v1;',
+      'message Twice {',
+      '  string a = 1;',
+      '  string b = 1;',
+      '}',
+      '',
+    ].join('\n')
+  );
+
+  let message = '';
 
   try {
-    mkdirSync(root);
-    cpSync(FIXTURES, root, { recursive: true });
-
-    for (const image of [false, true]) {
-      expect(compile([root], { folder, image })).toEqual(compile([FIXTURES], { image }));
-    }
-    expect(compile([FIXTURES], { folder: relative(process.cwd(), FIXTURES) })).toEqual(
-      compile([FIXTURES])
-    );
-
-    // * a root at the project folder also contains the temporary module and an editor's copy.
-    cpSync(OPTIONS_ROOT, join(root, '.beadc/include'), { recursive: true });
-    expect(compile([root], { folder: root })).toEqual(compile([FIXTURES]));
-    expect(readdirSync(join(root, '.beadc'))).toEqual(['include']);
-    rmSync(join(root, '.beadc/include'), { recursive: true });
-    rmdirSync(join(root, '.beadc'));
-    expect(compile([root])).toEqual(compile([FIXTURES]));
-    expect(
-      lintRules([root], { folder, files: [join(root, 'bead/interop/v1/interop.proto')] })
-    ).toEqual([]);
-    expect(() => {
-      return compile([root], { folder, files: [join(root, 'absent.proto')] });
-    }).toThrow(InputError);
-    expect(() => {
-      return lintRules([root], { folder, files: [join(root, 'absent.proto')] });
-    }).toThrow(InputError);
-    expect(existsSync(join(folder, '.beadc'))).toBe(false);
-    expect(existsSync(join(root, '.beadc'))).toBe(false);
-  } finally {
-    expect(dirname(folder)).toBe(resolve(tmpdir()));
-    rmSync(folder, { recursive: true, force: true });
+    compile([root]);
+  } catch (error) {
+    message = (error as Error).message;
   }
+
+  expect(message).toContain(`${join(root, 'broken', 'v1', 'broken.proto')}:5:`);
+  expect(message).not.toContain(workArea());
 });
 
 // whether buf's image marks `file` an import, read from its ImageFileExtension; none in a set
@@ -135,66 +165,4 @@ test('an image marks the imports buf compiled, and reads as a set', () => {
   expect(blueprintOf(readSet(image, { roots: [FIXTURES] })).blueprint).toEqual(
     blueprintOf(readSet(set, { roots: [FIXTURES] })).blueprint
   );
-});
-
-// * the parent's removal answers `code`, as another run's removal or hold makes it answer; the
-// seam lives in a child, so that no parallel case sees its replacement
-const parentRace = (root: string, code: string): void => {
-  execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      `
-        import assert from 'node:assert/strict';
-        import fs from 'node:fs';
-        import { syncBuiltinESMExports } from 'node:module';
-        import path from 'node:path';
-
-        const [module, root, code] = process.argv.slice(1);
-        const { compile } = await import(module);
-        const parent = path.join(path.dirname(root), '.beadc');
-        const remove = fs.rmdirSync;
-        const failure = Object.assign(new Error('filesystem refusal'), { code });
-        let refused = 0;
-
-        fs.rmdirSync = (folder, options) => {
-          if (path.resolve(folder) === parent) {
-            refused += 1;
-            throw failure;
-          }
-          return remove(folder, options);
-        };
-        syncBuiltinESMExports();
-
-        try {
-          if (code === 'EACCES') {
-            assert.throws(() => { compile([root]); }, (error) => { return error === failure; });
-          } else {
-            assert.ok(compile([root]).length > 0);
-          }
-          assert.equal(refused, 1);
-          assert.deepEqual(fs.readdirSync(parent), []);
-        } finally {
-          fs.rmdirSync = remove;
-          syncBuiltinESMExports();
-        }
-      `,
-      new URL('../compile.ts', import.meta.url).href,
-      root,
-      code,
-    ],
-    { stdio: 'pipe' }
-  );
-};
-
-test('keeps the work area’s parent another run removes or holds, and refuses any other answer', () => {
-  test.setTimeout(30_000);
-
-  for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
-    const root = test.info().outputPath(code, 'proto');
-
-    cpSync(FIXTURES, root, { recursive: true });
-    parentRace(root, code);
-  }
 });

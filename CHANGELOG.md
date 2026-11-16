@@ -97,6 +97,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
   names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
   side's service manager over a router of the application's own ahead.
+- beadc works in a folder of its own for each run, `beadc/run-<id>` under the system's temporary
+  folder, where it worked under the project's `.beadc/`: buf builds a copy of the roots' `.proto`
+  files there, and runs at once against one `--against` folder no longer fail on each other's work
+  areas. An area holds its process's pid and start time, and goes as the run ends, by SIGINT,
+  SIGTERM or Ctrl+C too; each run first sweeps the areas of runs gone, and `beadc clean` sweeps
+  them on demand, `--all` those without a marker too. A project's `.beadc/` holds the editor's
+  copy alone, and `beadc --help` prints the usage.
 - beadc judges in its model, `builder/src/model/check-rust.ts`, a Rust gateway's procedure whose
   method its HTTP client holds already. A page that plans an output can run it as the Rust target
   does, and the target's refusal reads the same.
@@ -255,13 +262,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reconnection from the cached page.
 - On a phone, the page keeps a name of code in a table whole, as REQUEST, where it split inside the
   word, and the demo's wire, opened as a sheet, lies over its scene tabs.
-- beadc retries its work area's `.beadc` parent's creation too when another run removes it as
-  it is made, which Windows answers with ENOENT, where it failed the run.
-- beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it
-  counted another run's copy of its options, and failed on a file that run removed as it read.
-- beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal
-  with EPERM or EBUSY, as it does while another run removes or holds that folder, where it failed
-  the run.
 - The TypeScript side tells the `tx` step of a call made within a notification's callback once
   its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
   told it with no id, and the DevTools panel showed that call twice, once never answered.
