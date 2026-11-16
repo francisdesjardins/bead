@@ -21,6 +21,7 @@ import struct
 from decimal import Decimal, getcontext
 
 from conformance import ROOT, hexadecimal, nested, write_json
+from details import Members, canonical, es, members_of, utf16
 from proto_wire import EGROUP, I32, I64, LEN, SGROUP, VARINT
 from spec_version import spec_version
 
@@ -52,10 +53,6 @@ NOT_HELD = "A value a side's type cannot hold"
 LEADING_FEFF = "A string's leading U+FEFF in a proto payload"
 
 
-class Members(list):
-    """An object's members as the bytes name them, in their order, a name given twice kept twice."""
-
-
 class Undefined:
     """What a language holds that JSON has no value for: JavaScript's undefined, a C# JsonElement of kind
     Undefined."""
@@ -71,46 +68,9 @@ class NotJSON(Exception):
 # ── The writer, 17.7 ────────────────────────────────────────────────────────────────────────────
 
 
-def es(value):
-    """ECMAScript's Number::toString of a finite double (ECMA-262, Number::toString), from repr's
-    shortest digits: what RFC 8785 3.2.2.3 writes a number as."""
-    if value == 0:
-        return '0'
-
-    if value < 0:
-        return '-' + es(-value)
-
-    _, digits, exponent = Decimal(repr(value)).as_tuple()
-    digits = ''.join(map(str, digits)).lstrip('0')
-    stripped = digits.rstrip('0')
-    exponent += len(digits) - len(stripped)
-    digits = stripped
-    k, n = len(digits), exponent + len(digits)
-
-    if k <= n <= 21:
-        return digits + '0' * (n - k)
-
-    if 0 < n <= 21:
-        return digits[:n] + '.' + digits[n:]
-
-    if -6 < n <= 0:
-        return '0.' + '0' * -n + digits
-
-    return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
-
-
 def has_surrogate(text):
     """Whether a string holds a surrogate alone: Python holds a pair as its one character."""
     return any(0xD800 <= ord(character) <= 0xDFFF for character in text)
-
-
-def utf16(name):
-    """A name's UTF-16 code units, which RFC 8785 3.2.3 sorts names by."""
-    return name.encode('utf-16-be', 'surrogatepass')
-
-
-def members_of(value):
-    return list(value) if isinstance(value, Members) else list(value.items())
 
 
 def write_reasons(value, depth=0):
@@ -152,32 +112,6 @@ def write_reasons(value, depth=0):
                 met(reason)
 
     return reasons
-
-
-def canonical(value):
-    """A value's canonical form (17.7, RFC 8785 3.2), of a value write_reasons refuses nothing of."""
-    if value is None:
-        return 'null'
-
-    if value is True:
-        return 'true'
-
-    if value is False:
-        return 'false'
-
-    if isinstance(value, (int, float)):
-        return es(float(value))
-
-    if isinstance(value, str):
-        # Python's dumps writes each character as JSON.stringify writes a well-formed string: " and the
-        # backslash, five control characters short, the others in lower-case hexadecimal
-        return json.dumps(value, ensure_ascii=False)
-
-    if isinstance(value, list) and not isinstance(value, Members):
-        return '[' + ','.join(canonical(item) for item in value) + ']'
-
-    members = sorted(members_of(value), key=lambda member: utf16(member[0]))
-    return '{' + ','.join(json.dumps(name, ensure_ascii=False) + ':' + canonical(item) for name, item in members) + '}'
 
 
 # ── The reader, 17.5 and 17.6 ───────────────────────────────────────────────────────────────────

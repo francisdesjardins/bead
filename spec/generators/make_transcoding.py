@@ -29,7 +29,7 @@ from google.protobuf import wrappers_pb2  # noqa: F401
 
 from bounds import DEFAULTS
 from conformance import CODES, hexadecimal, unit_order, write_json, write_text
-from details import canonical, es
+from details import canonical, es, number_text
 from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
 from transcoding_version import transcoding_version
 
@@ -1348,26 +1348,6 @@ def read_body(each, data):
 
 
 # ── Writing a proto result, Bead's proto JSON form, transcoding 5.6 and 5.7 ─────────────────────
-
-
-def number_text(digits, exponent):
-    """Number::toString of a positive number of these digits, its value int(digits) * 10 ** exponent."""
-    digits = digits.lstrip('0')
-    stripped = digits.rstrip('0')
-    exponent += len(digits) - len(stripped)
-    digits = stripped
-    k, n = len(digits), exponent + len(digits)
-
-    if k <= n <= 21:
-        return digits + '0' * (n - k)
-
-    if 0 < n <= 21:
-        return digits[:n] + '.' + digits[n:]
-
-    if -6 < n <= 0:
-        return '0.' + '0' * -n + digits
-
-    return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
 
 
 def float_neighbours(value):
