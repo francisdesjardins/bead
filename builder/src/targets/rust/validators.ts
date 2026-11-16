@@ -19,14 +19,17 @@
 import type { DescEnum, DescField, DescMessage } from '@bufbuild/protobuf';
 import { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
 
+import { enumOfField, fieldOf } from '../../descriptors.ts';
 import type { FieldType, IFieldRulesEntry, ScalarName } from '../../model/blueprint.ts';
-import type {
-  IFieldPlan,
-  IJudgment,
-  IMessagePlan,
-  INumber,
-  IRuleSite,
-  IValuePlan,
+import {
+  hasWork,
+  type IFieldPlan,
+  type IJudgment,
+  type IMessagePlan,
+  type INumber,
+  type IRuleSite,
+  type IValuePlan,
+  scalarOf,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
 import { INDENT } from '../lines.ts';
@@ -81,14 +84,6 @@ const INTEGERS: Readonly<
 const U64_MAX = 18_446_744_073_709_551_615n;
 
 // helpers
-
-const scalarOf = (type: FieldType): ScalarName | undefined => {
-  if ('scalar' in type) {
-    return type.scalar;
-  }
-
-  return 'wrapper' in type ? type.wrapper : undefined;
-};
 
 // `digits` grouped by three with `_`, from the right or from the left, where they are five or more,
 // as clippy's `unreadable_literal` asks
@@ -269,24 +264,6 @@ export const printRustValidators = (
           '}',
         ],
       });
-    };
-    const fieldOf = (entry: IFieldRulesEntry): DescField => {
-      const field = message.fields.find((each) => {
-        return each.number === entry.fieldNumber;
-      });
-
-      if (field === undefined) {
-        throw new Error(`${plan.fullName} holds no field ${String(entry.fieldNumber)}`);
-      }
-
-      return field;
-    };
-    const enumOfField = (field: DescField): DescEnum | undefined => {
-      return field.fieldKind === 'enum' ||
-        (field.fieldKind === 'list' && field.listKind === 'enum') ||
-        (field.fieldKind === 'map' && field.mapKind === 'enum')
-        ? field.enum
-        : undefined;
     };
     // an enum's number of a value at `value`, a reference: Buffa's EnumValue's own, or a closed
     // enum's, held bare, through its trait
@@ -662,9 +639,6 @@ export const printRustValidators = (
         );
       }
     };
-    const hasWork = (value: IValuePlan | undefined): boolean => {
-      return value !== undefined && (value.judgments.length > 0 || value.message !== undefined);
-    };
     // a required rule's violation at the field `name`, then the field's function ends
     const requiredOf = (
       indent: string,
@@ -755,7 +729,7 @@ export const printRustValidators = (
 
     const printField = (fieldPlan: IFieldPlan): void => {
       const { entry } = fieldPlan;
-      const field = fieldOf(entry);
+      const field = fieldOf(message, entry);
       const name = literalOf(entry.fieldName);
       const site = `${prefix}_${upperOf(entry.fieldName)}`;
       const enumOf = enumOfField(field);
@@ -1022,7 +996,7 @@ export const printRustValidators = (
     plan.oneofRules.forEach((rule, at) => {
       const many = siteOf(rule.many, `${prefix}_ONEOF_${String(at)}`);
       const counted = rule.fields.map((entry) => {
-        return setOf(entry, fieldOf(entry));
+        return setOf(entry, fieldOf(message, entry));
       });
       const name = uniqueOf(`${rules}_oneof_${String(at)}`, takenFunctions);
       const body = [
