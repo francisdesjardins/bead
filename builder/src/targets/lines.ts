@@ -2,9 +2,10 @@
 
 // How the C# and the Rust targets write their code: as lines of text, one level of indentation
 // `INDENT`, four spaces, as `dotnet format` and rustfmt indent alike. A template gathers its lines
-// in arrays, a level's indentation written before each line; a statement whose value spans lines
-// is `statementOf`'s. The TypeScript target writes through protoplugin's `GeneratedFile` instead.
-// This module imports nothing.
+// in arrays, a level's indentation written before each line; a body written a line at a time is
+// `printerOf`'s, each line at its depth; a statement whose value spans lines is `statementOf`'s.
+// The TypeScript target writes through protoplugin's `GeneratedFile` instead. This module imports
+// nothing.
 
 // constants
 
@@ -12,6 +13,13 @@
 export const INDENT = '    ';
 
 // definition
+
+/** A printer into `lines`: each line at `depth` levels of `INDENT`, an empty line left empty. */
+export const printerOf = (lines: string[]): ((depth: number, line: string) => void) => {
+  return (depth, line) => {
+    lines.push(line === '' ? '' : `${INDENT.repeat(depth)}${line}`);
+  };
+};
 
 /**
  * A statement, `head` then a value of several lines at `details.indent`, its last line ending it

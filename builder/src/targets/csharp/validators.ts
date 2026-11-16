@@ -26,7 +26,7 @@ import {
   scalarOf,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
-import { INDENT } from '../lines.ts';
+import { INDENT, printerOf } from '../lines.ts';
 import { pascalOf } from '../names.ts';
 import { literalOf } from './templates.ts';
 
@@ -219,9 +219,7 @@ export const printCSharpValidators = (
     const fields: string[] = [];
     const body: string[] = [];
     const names = new Set<string>();
-    const print = (indent: number, line: string): void => {
-      body.push(line === '' ? '' : `${INDENT.repeat(indent)}${line}`);
-    };
+    const print = printerOf(body);
     const fieldNameOf = (name: string): string => {
       let unique = name;
 
