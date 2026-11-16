@@ -9,8 +9,8 @@
 // dependencies
 
 import type { ITransportCut } from '../../model/selection.ts';
+import { INDENT } from '../lines.ts';
 import { snakeIdentifierOf } from './names.ts';
-import { INDENT } from './templates.ts';
 
 // constants
 

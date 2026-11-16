@@ -23,9 +23,10 @@ import type {
   IServiceEntry,
 } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { INDENT } from '../lines.ts';
 import type { IHttpInput } from '../target.ts';
 import { identifierOf, snakeIdentifierOf, toSnakeCase } from './names.ts';
-import { deprecatedOf, docOf, INDENT, literalOf } from './templates.ts';
+import { deprecatedOf, docOf, literalOf } from './templates.ts';
 
 // types
 

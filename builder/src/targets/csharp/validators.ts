@@ -23,6 +23,7 @@ import type {
   IValuePlan,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
+import { INDENT } from '../lines.ts';
 import { pascalOf } from '../names.ts';
 import { literalOf } from './templates.ts';
 
@@ -37,8 +38,6 @@ export interface ICSharpValidatorOptions {
 }
 
 // constants
-
-const INDENT = '    ';
 
 // the members a message's class declares or overrides, which protoc's C# generator takes a field's
 // property away from with a `_` (`GetPropertyName`)

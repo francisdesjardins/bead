@@ -25,6 +25,7 @@ import type {
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
+import { INDENT, statementOf } from '../lines.ts';
 import { csharpNameOfFailure, upperFirst } from '../names.ts';
 import { DEPRECATION_ID, deprecationTextOf } from '../target.ts';
 
@@ -49,8 +50,6 @@ interface IMember {
 }
 
 // constants
-
-const INDENT = '    ';
 
 // the type and the codec of each encoding that is no message's
 const NATIVE = Object.freeze({
@@ -227,24 +226,6 @@ const initializerOf = (
         }),
         `${indent}}`,
       ];
-};
-
-// a statement, `head` then a value of several lines at `indent`, its last line ending it
-const statementOf = (
-  head: string,
-  details: { readonly value: readonly string[]; readonly indent: string }
-): string[] => {
-  const [first, ...rest] = details.value;
-
-  if (rest.length === 0) {
-    return [`${details.indent}${head}${String(first)};`];
-  }
-
-  return [
-    `${details.indent}${head}${String(first)}`,
-    ...rest.slice(0, -1),
-    `${String(rest.at(-1))};`,
-  ];
 };
 
 // definition

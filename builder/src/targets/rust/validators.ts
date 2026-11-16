@@ -29,9 +29,10 @@ import type {
   IValuePlan,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
+import { INDENT } from '../lines.ts';
 import { pascalOfSnake } from '../names.ts';
 import { identifierOf, toSnakeCase } from './names.ts';
-import { INDENT, literalOf } from './templates.ts';
+import { literalOf } from './templates.ts';
 
 // types
 

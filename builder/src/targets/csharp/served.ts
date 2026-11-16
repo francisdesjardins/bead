@@ -10,6 +10,7 @@
 // dependencies
 
 import type { ITransportCut } from '../../model/selection.ts';
+import { INDENT } from '../lines.ts';
 import { upperFirst } from '../names.ts';
 
 // constants
@@ -17,7 +18,6 @@ import { upperFirst } from '../names.ts';
 /** The file an output whose server names its transports writes their procedures in. */
 export const SERVED_FILE = 'BeadServed.cs';
 
-const INDENT = '    ';
 const ADDRESSES = 'global::System.Collections.Generic.IReadOnlyList<global::Bead.ProcedureAddress>';
 
 // definition

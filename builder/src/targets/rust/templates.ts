@@ -24,6 +24,7 @@ import type {
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
+import { INDENT, statementOf } from '../lines.ts';
 import { deprecationTextOf } from '../target.ts';
 import { identifierOf, snakeIdentifierOf, toSnakeCase } from './names.ts';
 
@@ -48,9 +49,6 @@ interface IField {
 }
 
 // constants
-
-/** One level of indentation, rustfmt's. */
-export const INDENT = '    ';
 
 // the codec of each encoding that is no message's, a value of its own type
 const NATIVE = Object.freeze({
@@ -235,24 +233,6 @@ const recordValueOf = (
       return `${details.indent}${INDENT}${field}: ${value},`;
     }),
     `${details.indent}}`,
-  ];
-};
-
-// a `let` of `value`, its first line after `head`, its last ending the statement
-const letOf = (
-  head: string,
-  details: { readonly value: readonly string[]; readonly indent: string }
-) => {
-  const [first, ...rest] = details.value;
-
-  if (rest.length === 0) {
-    return [`${details.indent}${head}${String(first)};`];
-  }
-
-  return [
-    `${details.indent}${head}${String(first)}`,
-    ...rest.slice(0, -1),
-    `${String(rest.at(-1))};`,
   ];
 };
 
@@ -920,11 +900,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}${INDENT}layer.fail_fast = options.fail_fast;`,
       `${INDENT}${INDENT}layer.validates = options.validates;`,
       '',
-      ...letOf('let service = ::bead::ServiceServer::new(', {
+      ...statementOf('let service = ::bead::ServiceServer::new(', {
         value: [...built.slice(0, -1), `${String(built.at(-1))}, &layer)?`],
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let command = ', {
+      ...statementOf('let command = ', {
         value: recordValueOf(`${name}Commands`, {
           fields: commands.map((procedure) => {
             return [
@@ -936,7 +916,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
         }),
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let notify = ', {
+      ...statementOf('let notify = ', {
         value: recordValueOf(`${name}Notifiers`, {
           fields: notifying.map((procedure) => {
             return [
@@ -1056,11 +1036,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}${INDENT}layer.fail_fast = options.fail_fast;`,
       `${INDENT}${INDENT}layer.validates = options.validates;`,
       '',
-      ...letOf('let service = ::bead::ServiceClient::new(', {
+      ...statementOf('let service = ::bead::ServiceClient::new(', {
         value: [...built.slice(0, -1), `${String(built.at(-1))}, client, &layer)?`],
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let request = ', {
+      ...statementOf('let request = ', {
         value: recordValueOf(`${name}Requesters`, {
           fields: answered.map((procedure) => {
             const descriptor =
@@ -1074,7 +1054,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
         }),
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let notifications = ', {
+      ...statementOf('let notifications = ', {
         value: recordValueOf(`${name}Notifications`, {
           fields: notified.map((procedure) => {
             return [

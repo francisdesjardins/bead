@@ -14,6 +14,7 @@
 
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { INDENT } from '../lines.ts';
 import { upperFirst } from '../names.ts';
 import { DEPRECATION_ID, type IHttpInput } from '../target.ts';
 import { literalOf, obsoleteOf } from './templates.ts';
@@ -37,7 +38,6 @@ export interface ICSharpHttpOptions {
 /** The file an output with a `gateway` writes its route table in. */
 export const HTTP_FILE = 'BeadHttp.cs';
 
-const INDENT = '    ';
 const TRANSCODING = 'global::Bead.Transcoding';
 
 // definition

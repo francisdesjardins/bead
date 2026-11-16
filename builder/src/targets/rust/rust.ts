@@ -37,6 +37,7 @@ import {
 import { rustGatewayRefusalsOf } from '../../model/check-rust.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { cutOf } from '../../model/selection.ts';
+import { INDENT } from '../lines.ts';
 import { pascalOfSnake } from '../names.ts';
 import {
   bindsMessages,
@@ -65,7 +66,7 @@ import {
 import { EXTERNAL_INCLUDE_FILE, type IRustOptions } from './options.ts';
 import { HTTP_FILE, HTTP_MODULE, printRustHttp } from './http.ts';
 import { printRustServed, SERVED_FILE, SERVED_MODULE } from './served.ts';
-import { INDENT, printService } from './templates.ts';
+import { printService } from './templates.ts';
 import { printRustValidators } from './validators.ts';
 
 // constants
