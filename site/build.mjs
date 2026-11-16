@@ -89,13 +89,13 @@ const pick = (pair, language) => {
 
 // ── Templates ─────────────────────────────────────────────────────────────────
 
-// a tag of a template: `{{name}}`, `{{name a="…" b="…"}}`, or `{{s:key}}`, a string of the page
-const TAG = /\{\{([\w-]+(?::\w+)?)((?:\s+\w+="[^"]*")*)\s*\}\}/gu;
+// a placeholder of a template: `{{name}}`, `{{name a="…" b="…"}}`, or `{{s:key}}`, a string of the page
+const PLACEHOLDER = /\{\{([\w-]+(?::\w+)?)((?:\s+\w+="[^"]*")*)\s*\}\}/gu;
 
-// what reads as a tag once a template is filled: one no filler took
+// what reads as a placeholder once a template is filled: one no filler took
 const LEFT = /\{\{[\w:-]+[^}]*\}\}/gu;
 
-// the attributes of a tag, `{{name a="…" b="…"}}`
+// the attributes of a placeholder, `{{name a="…" b="…"}}`
 const attributesOf = (text) => {
   return Object.fromEntries(
     [...text.matchAll(/(\w+)="([^"]*)"/gu)].map(([, key, value]) => {
@@ -111,7 +111,7 @@ const raw = (filler) => {
 };
 
 // the markup's state at the end of `text`, given its state at the start: whether it is inside a
-// tag, `<a …>`, and in which quote of an attribute's value
+// tag of the HTML, `<a …>`, and in which quote of an attribute's value
 const markupAfter = (text, state) => {
   let { inside, quote } = state;
   for (const character of text) {
@@ -128,18 +128,19 @@ const markupAfter = (text, state) => {
   return { inside, quote };
 };
 
-// ! a template's tags filled in one pass, each by the filler of its name, which takes the tag's
-// attributes. Its text is escaped for where the tag stands: as an attribute's inside a tag of the
-// markup, as the page's outside. A raw filler's markup goes in as it is. What a filler gives is
-// never read for tags. A name with no filler, or a tag left once filled, is refused.
+// ! a template's placeholders filled in one pass, each by the filler of its name, which takes its
+// attributes. A filler's text is escaped for where the placeholder stands: as an attribute value
+// inside an HTML tag, as text outside one. A raw filler's markup goes in as it is. What a filler
+// gives is never read for placeholders. A name with no filler, or a placeholder left once filled,
+// is refused.
 const fill = (template, fillers) => {
   let state = { inside: false, quote: '' };
   let at = 0;
-  const filled = template.replace(TAG, (tag, name, rest, offset) => {
+  const filled = template.replace(PLACEHOLDER, (placeholder, name, rest, offset) => {
     state = markupAfter(template.slice(at, offset), state);
-    at = offset + tag.length;
+    at = offset + placeholder.length;
     if (!Object.hasOwn(fillers, name)) {
-      throw new Error(`build: no placeholder ${tag}`);
+      throw new Error(`build: no placeholder ${placeholder}`);
     }
     const filler = fillers[name];
     const attributes = attributesOf(rest);
