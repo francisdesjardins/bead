@@ -737,9 +737,16 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
-    // a place given back, as its upgrade failed or its connection ended
-    private void GivePlaceBack(string address)
+    // a place given back, once, as its upgrade failed or its connection ended
+    private void GivePlaceBack(Place place)
     {
+        if (!place.Give())
+        {
+            return;
+        }
+
+        var address = place.Address;
+
         lock (_gate)
         {
             _places -= 1;
@@ -752,6 +759,19 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             {
                 _perAddress[address] -= 1;
             }
+        }
+    }
+
+    // a place an upgrade took for its address, given back once whichever way its connection ends
+    private sealed class Place(string address)
+    {
+        private int _given;
+
+        public string Address { get; } = address;
+
+        public bool Give()
+        {
+            return Interlocked.Exchange(ref _given, 1) == 0;
         }
     }
 
@@ -832,9 +852,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
 
         var address = AddressOf(context);
-        var ip = address ?? "";
+        var place = new Place(address ?? "");
 
-        if (!TakePlace(ip))
+        if (!TakePlace(place.Address))
         {
             Refuse(context, WebSocketHandshake.Busy);
 
@@ -843,18 +863,19 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         try
         {
-            await Upgrade(context, (address, ip));
+            await Upgrade(context, (address, place));
         }
         finally
         {
-            GivePlaceBack(ip);
+            GivePlaceBack(place);
         }
     }
 
     // an upgrade judged and given its place: its connection, until its socket closes
-    private async Task Upgrade(HttpContext context, (string? Address, string Ip) client)
+    private async Task Upgrade(HttpContext context, (string? Address, Place Place) client)
     {
-        var (address, ip) = client;
+        var (address, place) = client;
+        var ip = place.Address;
 
         // ! an upgrade that carries an Origin is a page's, whose browser writes its own
         // authentication on it as it sends its cookies (Fetch, credentials mode include): it carries
@@ -933,6 +954,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             // its end told however its read went: nothing it holds, the write pump or a close, waits
             // on it forever
             connection.End();
+
+            // ! its place given back before its close is told, as the TypeScript side's socket does
+            // as it closes: a client that comes again on its close finds that place free
+            GivePlaceBack(place);
 
             try
             {
