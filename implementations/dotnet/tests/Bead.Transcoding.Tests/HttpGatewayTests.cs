@@ -3051,6 +3051,65 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Stops_a_stream_when_its_response_write_throws()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var lifetime = new DeadlineLifetime(cancelling);
+        var context = PaceContext("event", cancelling.Token);
+        using var body = new FailedStreamBody();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Features.Set<IHttpResponseFeature>(new WrittenResponseFeature(() => { return body.Writes > 0; }));
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            // * its result goes; the write of its first notification throws, which ends its exchange
+            await body.FirstWritten.Task.WaitAsync(Patience, Cancelled);
+            await service.Watched(2);
+            await serving.WaitAsync(Patience, Cancelled);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+
+            Assert.Equal(2, body.Writes);
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal(["the stream write failed"], reported);
+            Assert.Equal(1, lifetime.Aborts);
+        }
+        finally
+        {
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class FailedStreamBody : MemoryStream
+    {
+        public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Writes { get; private set; }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Writes += 1;
+
+            if (Writes > 1)
+            {
+                throw new InvalidOperationException("the stream write failed");
+            }
+
+            var written = base.WriteAsync(buffer, cancellationToken);
+
+            FirstWritten.TrySetResult();
+
+            return written;
+        }
+    }
+
+    [Fact]
     public async Task Abandons_a_held_connection_when_its_response_closes()
     {
         var accepting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -3346,7 +3405,6 @@ public sealed class HttpGatewayTests
     [Theory]
     [InlineData("io")]
     [InlineData("cancelled")]
-    [InlineData("state")]
     public async Task Stops_heartbeats_after_their_write_loses_its_response(string kind)
     {
         await using var service = await TranscodingService.Start();
@@ -3360,8 +3418,7 @@ public sealed class HttpGatewayTests
         Exception failure = kind switch
         {
             "io" => new IOException("the heartbeat response is gone"),
-            "cancelled" => new OperationCanceledException("the heartbeat response is gone", cancelling.Token),
-            _ => new InvalidOperationException("the heartbeat response is gone"),
+            _ => new OperationCanceledException("the heartbeat response is gone", cancelling.Token),
         };
         using var body = new HeartbeatResponseBody(failure);
         var context = new DefaultHttpContext();

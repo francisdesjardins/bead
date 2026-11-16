@@ -1202,6 +1202,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         finally
         {
+            drop.Over();
             settled.TrySetResult();
         }
     }
@@ -1286,7 +1287,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             await events.Heartbeat();
         }
-        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException)
+        catch (Exception reason) when (reason is IOException or OperationCanceledException)
         {
             // its client went: its stream ends with it
         }
@@ -1422,18 +1423,40 @@ public sealed class HttpGateway : IAsyncDisposable
     {
         // one report shared by every write of the exchange
         private int _told;
+        private int _over;
+
+        // whether its exchange returned: a write after that is a timer's late one, never a host's bug
+        public bool IsOver
+        {
+            get
+            {
+                return Volatile.Read(ref _over) == 1;
+            }
+        }
+
         public bool Take()
         {
             return Interlocked.Exchange(ref _told, 1) == 0;
+        }
+
+        public void Over()
+        {
+            Volatile.Write(ref _over, 1);
         }
     }
 
     // a drop belongs to the exchange that still owns the context, reported once before its abort
     private void DropWriter(HttpContext context, (DropState State, string Detail) drop)
     {
-        if (_drops.TryGetValue(context, out var current) && current == drop.State && drop.State.Take())
+        FailWriter(context, (drop.State, new IOException(drop.Detail)));
+    }
+
+    // a writer's failure, a drop's or a host's write that threw, reported once before its abort
+    private void FailWriter(HttpContext context, (DropState State, Exception Reason) failure)
+    {
+        if (_drops.TryGetValue(context, out var current) && current == failure.State && failure.State.Take())
         {
-            Report(new IOException(drop.Detail));
+            Report(failure.Reason);
             context.Abort();
         }
     }
@@ -1480,6 +1503,17 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             await body.WriteAsync(bytes, aborted);
             await body.FlushAsync(aborted);
+        }
+        catch (Exception reason) when (reason is not (IOException or OperationCanceledException or OutOfMemoryException))
+        {
+            // ! a host's write that throws is no client gone but what no gate foresaw (7.6): reported
+            // once and its exchange aborted, and the writes behind it go nowhere, as a client gone's
+            if (!drop.IsOver)
+            {
+                FailWriter(context, (drop, reason));
+            }
+
+            throw new IOException(reason.Message, reason);
         }
         finally
         {
