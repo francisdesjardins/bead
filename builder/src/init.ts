@@ -29,6 +29,7 @@ import { CONFIG_FILE } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import { EDITOR_COPY, writeEditorCopy } from './generate.ts';
 import { BEADC_FILES, HTTP_FOLDER, VALIDATE_FILE } from './roots.ts';
+import { pascalOfSnake } from './targets/names.ts';
 import { WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
@@ -95,16 +96,6 @@ const causeOf = (bytes: Uint8Array): string => {
     : `, by ${cause}: Windows PowerShell's > wrote it; run the line in PowerShell 7.6 (pwsh)`;
 };
 
-// `hello_world` as a type's name: HelloWorld
-const pascalOf = (name: string): string => {
-  return name
-    .split('_')
-    .map((part) => {
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join('');
-};
-
 // the lines a project's git files owe, each appended when absent: the wrappers', the blueprint's,
 // then one for each language's output
 const gitLinesOf = (languages: readonly Language[]): ReadonlyMap<string, readonly string[]> => {
@@ -145,7 +136,7 @@ const configOf = (name: string, languages: readonly Language[]): string => {
 };
 
 const protoOf = (name: string): string => {
-  const pascal = pascalOf(name);
+  const pascal = pascalOfSnake(name);
 
   return [
     'syntax = "proto3";',

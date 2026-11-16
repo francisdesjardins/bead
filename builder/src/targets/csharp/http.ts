@@ -14,6 +14,7 @@
 
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { upperFirst } from '../names.ts';
 import { DEPRECATION_ID, type IHttpInput } from '../target.ts';
 import { literalOf, obsoleteOf } from './templates.ts';
 
@@ -38,12 +39,6 @@ export const HTTP_FILE = 'BeadHttp.cs';
 
 const INDENT = '    ';
 const TRANSCODING = 'global::Bead.Transcoding';
-
-// helpers
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 // definition
 

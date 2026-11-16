@@ -25,7 +25,7 @@ import type {
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
-import { csharpNameOfFailure } from '../names.ts';
+import { csharpNameOfFailure, upperFirst } from '../names.ts';
 import { DEPRECATION_ID, deprecationTextOf } from '../target.ts';
 
 // types
@@ -67,10 +67,6 @@ const DICTIONARY = 'global::System.Collections.Generic.Dictionary';
 const READ_ONLY_DICTIONARY = 'global::System.Collections.Generic.IReadOnlyDictionary';
 
 // helpers
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 const hexOf = (character: string): string => {
   return (character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0');

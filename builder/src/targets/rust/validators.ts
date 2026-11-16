@@ -29,6 +29,7 @@ import type {
   IValuePlan,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
+import { pascalOfSnake } from '../names.ts';
 import { identifierOf, toSnakeCase } from './names.ts';
 import { INDENT, literalOf } from './templates.ts';
 
@@ -706,7 +707,7 @@ export const printRustValidators = (
     };
     // the variant of a oneof's member, as Buffa names its enum and its variant
     const variantOf = (field: DescField): string => {
-      return `${oneofOf(plan.fullName, field.oneof?.name ?? '')}::${identifierOf(pascalOf(field.name))}`;
+      return `${oneofOf(plan.fullName, field.oneof?.name ?? '')}::${identifierOf(pascalOfSnake(field.name))}`;
     };
     // the condition a field is set by, as a message's oneof rules read it: a place's, no reference
     // taken
@@ -1109,14 +1110,4 @@ export const printRustValidators = (
   }
 
   return { functions, lines };
-};
-
-// a field's or a oneof's name in Pascal case, as Buffa's `to_pascal_case` writes a variant
-const pascalOf = (name: string): string => {
-  return name
-    .split('_')
-    .map((part) => {
-      return `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
-    })
-    .join('');
 };

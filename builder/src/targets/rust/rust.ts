@@ -37,6 +37,7 @@ import {
 import { rustGatewayRefusalsOf } from '../../model/check-rust.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { cutOf } from '../../model/selection.ts';
+import { pascalOfSnake } from '../names.ts';
 import {
   bindsMessages,
   headerOf,
@@ -351,12 +352,7 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
             ...within.split('.').map((segment) => {
               return identifierOf(toSnakeCase(segment));
             }),
-            oneof
-              .split('_')
-              .map((part) => {
-                return `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
-              })
-              .join(''),
+            pascalOfSnake(oneof),
           ].join('::'),
           depth
         );

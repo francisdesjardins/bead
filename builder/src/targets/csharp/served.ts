@@ -10,6 +10,7 @@
 // dependencies
 
 import type { ITransportCut } from '../../model/selection.ts';
+import { upperFirst } from '../names.ts';
 
 // constants
 
@@ -18,12 +19,6 @@ export const SERVED_FILE = 'BeadServed.cs';
 
 const INDENT = '    ';
 const ADDRESSES = 'global::System.Collections.Generic.IReadOnlyList<global::Bead.ProcedureAddress>';
-
-// helpers
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 // definition
 

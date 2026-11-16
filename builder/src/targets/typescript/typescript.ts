@@ -26,6 +26,7 @@ import {
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { cutOf } from '../../model/selection.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../version.ts';
+import { lowerFirst } from '../names.ts';
 import {
   bindsMessages,
   headerOf,
@@ -52,10 +53,6 @@ const RELATIVE = /^\.{1,2}\//u;
 const LINT_OFF = '/* eslint-disable */';
 
 // helpers
-
-const lowerFirst = (name: string): string => {
-  return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
-};
 
 // the file a service is written in, under the output's folder: its `proto` member's, whichever the
 // source, which the blueprint's schema and PROTO_FILE hold to a path under its root

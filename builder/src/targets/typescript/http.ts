@@ -15,6 +15,7 @@ import type { GeneratedFile, Printable } from '@bufbuild/protoplugin';
 
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { upperFirst } from '../names.ts';
 import type { IHttpInput } from '../target.ts';
 import { deprecatedOf } from './templates.ts';
 
@@ -40,10 +41,6 @@ export const HTTP_FILE = 'bead_http.ts';
 // a text as a single-quoted literal, the TypeScript side's own quotes
 const quotedOf = (text: string): string => {
   return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
-};
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 };
 
 // definition
