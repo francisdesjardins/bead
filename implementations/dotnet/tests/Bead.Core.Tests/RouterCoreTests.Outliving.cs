@@ -414,6 +414,54 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Closes_nothing_and_reports_nothing_more_of_a_connection_it_refused_twice_maximumAnsweringCalls_requests_in_a_row_once_its_router_was_disposed_before_that_close_came_due()
+    {
+        var (server, _, _) = HoldingOf(1);
+        var sending = new List<TaskCompletionSource>();
+
+        // a close made would be reported, as it faults
+        server.OnClose = (_) =>
+        {
+            return Task.FromException(new IOException("the transport would not close"));
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(1) }, "a");
+        await server.Deliver(CancelOf(1), "a");
+        await server.Deliver(new Envelope { Header = RequestOf(3) }, "a");
+        await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+
+        // twice, in a row: reported at once, its close waiting on its transport
+        server.OnSend = (_) =>
+        {
+            var send = new TaskCompletionSource();
+
+            sending.Add(send);
+
+            return send.Task;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(7) }, "a");
+        Assert.Equal([(ushort)ProtocolCode.CapacityExceeded], server.Reports.Select((reason) =>
+        {
+            return Assert.IsType<FailureException>(reason).Code;
+        }));
+
+        // * disposed before the refusal settles: the close it comes to is none
+        server.Core.Dispose();
+        await server.Settle();
+        Assert.Empty(server.Closed);
+
+        foreach (var send in sending)
+        {
+            send.SetResult();
+        }
+
+        await server.Settle();
+        Assert.Empty(server.Closed);
+        Assert.Single(server.Reports);
+        Assert.Equal(["a"], server.ReportedOn);
+    }
+
+    [Fact]
     public async Task Tells_every_resolver_still_running_on_a_connection_as_it_closes_its_call_answered_or_not_and_counts_those_that_outlive_it_side_wide_until_they_settle()
     {
         var (server, resolver, held) = HoldingOf(2);
