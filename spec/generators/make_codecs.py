@@ -21,6 +21,7 @@ import re
 import struct
 from decimal import Decimal, getcontext
 
+from proto_wire import EGROUP, I32, I64, LEN, SGROUP, VARINT
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -288,9 +289,6 @@ def text_read(data):
 
 
 # ── The proto reader and writer, 17.9 ───────────────────────────────────────────────────────────
-
-# the wire types of protobuf's Encoding guide, "Message Structure"
-VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
 
 # Probe's fields by number, as spec/codecs.proto declares them: its name, its type, and the wire types
 # its records take, a repeated scalar of a numeric type its own and the length-delimited, packed or not

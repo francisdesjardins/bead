@@ -30,6 +30,7 @@ from google.protobuf import wrappers_pb2  # noqa: F401
 
 from bounds import DEFAULTS
 from details import canonical, es
+from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
 from transcoding_version import transcoding_version
 
 # the conformance files sit one folder up from their generators
@@ -611,61 +612,6 @@ def proto_file():
 
 # ── The encoder, protobuf's Encoding guide ──────────────────────────────────────────────────────
 
-VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
-
-
-def varint(value):
-    value &= (1 << 64) - 1
-    out = bytearray()
-
-    while True:
-        byte = value & 0x7F
-        value >>= 7
-
-        if value:
-            out.append(byte | 0x80)
-        else:
-            out.append(byte)
-            return bytes(out)
-
-
-def tag(number, wire):
-    return varint(number << 3 | wire)
-
-
-def scalar_bytes(kind, value):
-    """A scalar's record's body, and its wire type."""
-    if kind in ('int32', 'int64', 'uint32', 'uint64') or kind.startswith('enum:'):
-        return varint(value), VARINT
-    if kind == 'bool':
-        return varint(int(value)), VARINT
-    if kind == 'sint32':
-        return varint((value << 1) ^ (value >> 31)), VARINT
-    if kind == 'sint64':
-        return varint((value << 1) ^ (value >> 63)), VARINT
-    if kind == 'fixed32':
-        return struct.pack('<I', value), I32
-    if kind == 'sfixed32':
-        return struct.pack('<i', value), I32
-    if kind == 'float':
-        return struct.pack('<f', value), I32
-    if kind == 'fixed64':
-        return struct.pack('<Q', value), I64
-    if kind == 'sfixed64':
-        return struct.pack('<q', value), I64
-    if kind == 'double':
-        return struct.pack('<d', value), I64
-    if kind == 'string':
-        data = value.encode('utf-8')
-        return varint(len(data)) + data, LEN
-    if kind == 'bytes':
-        return varint(len(value)) + value, LEN
-    raise ValueError(kind)
-
-
-def length_delimited(data):
-    return varint(len(data)) + data
-
 
 def on_the_wire(kind, value):
     """Whether a field of implicit presence is written: protobuf writes one whose value is not its
@@ -894,11 +840,6 @@ def read_text(data):
         raise Refused('a number past a double', 1)
 
     return value
-
-
-def f32(value):
-    """The 32-bit float nearest a double, a tie to the even; OverflowError past the largest finite one."""
-    return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
 ARTICLE_AN = re.compile(r'[aeioAEIO]|sint|sfixed')
