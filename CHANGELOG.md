@@ -293,6 +293,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# MQTT adapter's stop sends no DISCONNECT once its client's reads ended, a packet MQTTnet
   cannot decode among them, in its drain as in its let-go (spec 15.29): MQTTnet says its link
   connected a moment past that end, and a stop that held no filter read it so and sent one.
+- The TypeScript side's gateway reports a host's response write that throws, once, and destroys
+  its response, as transcoding 7.6 states: on a stream, that write left a rejection unhandled,
+  every write after it rejected, and the response stayed open until its close. A write whose
+  callback fails, its client gone, destroys its response too, and is still not reported.
 
 ### Security
 

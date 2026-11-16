@@ -666,12 +666,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   const writers = new WeakMap<IResponseLike, (bytes: Uint8Array) => Promise<boolean>>();
   const dropped = new WeakSet<IResponseLike>();
-  const dropWriter = (response: IResponseLike, detail: string): void => {
+  // * a response is dropped and reported once: by its bound, its pace or a write that throws
+  const dropWriter = (response: IResponseLike, reason: unknown): void => {
     if (dropped.has(response)) {
       return;
     }
     dropped.add(response);
-    report(new Error(detail));
+    report(reason);
     response.destroy();
   };
   const writerOf = (response: IResponseLike): ((bytes: Uint8Array) => Promise<boolean>) => {
@@ -694,7 +695,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         late: () => {
           dropWriter(
             response,
-            `the response is dropped: minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} after sendGracePeriod ${String(pace.sendGracePeriod)}ms`
+            new Error(
+              `the response is dropped: minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} after sendGracePeriod ${String(pace.sendGracePeriod)}ms`
+            )
           );
         },
       },
@@ -725,7 +728,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       if (unsent() + bytes.length > maximumUnsentBytes) {
         dropWriter(
           response,
-          `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+          new Error(
+            `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+          )
         );
         return Promise.resolve(false);
       }
@@ -733,17 +738,29 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         const own = { sequence: ++sequence, completed: false };
         waiting = resolve;
         held = bytes.length;
-        const taken =
-          response.write(bytes, (error) => {
-            own.completed = true;
-            if (own.sequence !== sequence) {
-              return;
-            }
-            if (error !== undefined && error !== null) {
-              gone = true;
-            }
-            drain();
-          }) !== false;
+        let taken: boolean;
+        try {
+          taken =
+            response.write(bytes, (error) => {
+              own.completed = true;
+              if (own.sequence !== sequence) {
+                return;
+              }
+              // its client went: nothing to report, and the response is let go
+              if (error !== undefined && error !== null) {
+                gone = true;
+                response.destroy();
+              }
+              drain();
+            }) !== false;
+        } catch (error) {
+          // ! a client gone fails a write by its callback, so a write that throws is its host's bug:
+          // it is reported, and it settles false, so that no write rejects
+          gone = true;
+          dropWriter(response, error);
+          drain();
+          return;
+        }
         if (gone || own.completed) {
           drain();
           return;
