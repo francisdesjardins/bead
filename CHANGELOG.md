@@ -242,6 +242,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc refuses an `openapi.problemTypes` that is not of printable ASCII, as RFC 3986 spells a URI:
+  a control character or a lone surrogate passed, and each language's target wrote it otherwise,
+  the C# side keeping a lone surrogate the others turned into U+FFFD.
 - The TypeScript side's WebSocket client opens on a 101 its server wrote with a close, as RFC 6455
   §4.1 and the C# and Rust sides do: its connect resolves, what came before the close is heard
   after it, and its close is told once, where the connect failed after the message was heard. A

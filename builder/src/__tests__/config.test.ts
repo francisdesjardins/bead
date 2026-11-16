@@ -361,6 +361,18 @@ test("reads http's prefix, openapi's out, title, security and problemTypes, an o
       'openapi.security is an OpenAPI Security Scheme Object',
     ],
     ['openapi:\n  problemTypes: problems/\n', 'openapi.problemTypes is an absolute URI'],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\x01q/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\uD800q/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\u00E9/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
     ['openapi:\n  out: ../openapi.json\n', 'openapi.out: ../openapi.json is outside the folder'],
     [output('    gateway:\n      runtime: /runtime\n'), 'outputs[0].gateway.runtime is a package'],
     [
