@@ -3951,6 +3951,47 @@ test.describe('createRouterCore', () => {
       }
     });
 
+    test('closes nothing and reports nothing more of a connection it refused twice maximumAnsweringCalls requests in a row once its router was disposed before that close came due', async () => {
+      const closed: Handle[] = [];
+      const { control, core, reported } = createHolding(1, {
+        // a close made would be reported, as it rejects
+        close: (connectionHandle) => {
+          closed.push(connectionHandle);
+
+          return Promise.reject(new Error('the transport would not close'));
+        },
+      });
+
+      core.receive(requestOf(1), 'a');
+      await sleep(0);
+      core.receive(cancelOf(1), 'a');
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+
+      // twice, in a row: reported at once, its close waiting on its transport
+      control.held = [];
+      core.receive(requestOf(7), 'a');
+
+      expect(codesOf(reported)).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'a']]);
+
+      // * disposed before the refusal settles: the close it comes to is none
+      core[Symbol.dispose]();
+      await sleep(0);
+
+      expect(closed).toEqual([]);
+
+      for (const { resolve } of control.held) {
+        resolve();
+      }
+
+      await sleep(0);
+
+      expect(closed).toEqual([]);
+      expect(codesOf(reported)).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'a']]);
+    });
+
     test('tells every resolver still running on a connection as it closes, its call answered or not, and counts those that outlive it side-wide until they settle', async () => {
       const { core, handed, held, reported, sent } = createHolding(2);
 

@@ -1851,8 +1851,11 @@ fn refuse_past_tracked<S: Side>(state: &mut S, (dispatch, tracked_most): (&Arc<D
                         state.report(reported_call(error), &closing.connection_handle);
                     }
 
+                    // none once its router was disposed
                     state.core().later(move |state: &mut S| {
-                        state.close(&closing.connection_handle);
+                        if !state.core().is_disposed() {
+                            state.close(&closing.connection_handle);
+                        }
                     });
                 },
             )),

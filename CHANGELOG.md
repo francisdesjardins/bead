@@ -307,6 +307,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side's gateway answers what no gate foresaw with a 500 that carries none of the fields set
   before it, a refusal's mark among them, and aborts its exchange when its head already went or
   that 500 throws too: the 500 kept the mark, and a 500 that threw reached its host.
+- The TypeScript side closes no connection refused twice `maximumAnsweringCalls` requests in a row
+  once its router was disposed before that close came due, as the C# side does: it asked its
+  transport to close the connection, and reported what that close rejected with.
+- The Rust side closes no connection refused twice `maximumAnsweringCalls` requests in a row once
+  its router was disposed before that close came due, as the C# side does: it asked its transport
+  to close the connection.
 
 ### Security
 
