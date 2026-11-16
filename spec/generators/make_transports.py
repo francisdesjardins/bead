@@ -1,6 +1,5 @@
 """Writes spec/transports.json: what a transport's server does at its edge, over HTTP, with what a
 peer of the test's own sends it in exact octets."""
-import hashlib
 import ipaddress
 import re
 from datetime import datetime

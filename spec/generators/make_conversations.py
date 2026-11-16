@@ -1,5 +1,4 @@
 """Writes spec/conversations.json: what a server of the interop service does with what a client sends."""
-import hashlib
 import json
 import os
 import re
