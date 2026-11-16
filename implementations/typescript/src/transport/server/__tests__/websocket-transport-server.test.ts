@@ -4,7 +4,12 @@ import { Server } from 'node:http';
 import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import {
+  type ServerOptions,
+  WebSocket as WsClient,
+  type WebSocket as WsWebSocket,
+  WebSocketServer,
+} from 'ws';
 import type {
   TRANSPORT_CLIENT_EVENTS,
   TransportClientEventMap,
@@ -2245,9 +2250,13 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     await starting;
 
     const closes: unknown[] = [];
+    const errors: unknown[] = [];
 
     server.on('close', (...args) => {
       closes.push(args);
+    });
+    server.on('error', (error, handle) => {
+      errors.push([error.message, handle]);
     });
     const stubborn = createFakeSocket({ onClose: 'throw' });
     const connectionHandle = fake.connect(stubborn, { server });
@@ -2256,6 +2265,8 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     expect(stubborn.wasTerminated).toBe(true);
     expect(server.clients).toHaveLength(0);
     expect(server.gauges().connectionHandles).toEqual(new Set());
+    // what its close threw is its error
+    expect(errors).toEqual([['close refused', connectionHandle]]);
     expect(closes).toEqual([[false, connectionHandle]]);
     await server.stop();
   });
@@ -2303,6 +2314,74 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     // a socket that closes after its connection ended tells nothing more
     closed.hear('close', 1006);
     expect([closes.length, errors.length]).toEqual([2, 2]);
+  });
+
+  test('ends a connection dropped behind a bound whose drop throws, telling the bound, not what its drop threw, and its close', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      maximumUnsentBytes: 65_536,
+      minimumSendBytesPerSecond: 0,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    // a socket that never closes as it is terminated, sent more than its bound holds
+    const behind = createFakeSocket({ onTerminate: 'throw' });
+    const connectionHandle = fake.connect(behind, { server });
+
+    await server.send({ data: new Uint8Array(65_537) }, connectionHandle);
+
+    expect(behind.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      [
+        'error',
+        `${connectionHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+        connectionHandle,
+      ],
+      ['close', false, connectionHandle],
+    ]);
+    await server.stop();
+  });
+
+  test('ends a connection whose close and drop both throw, telling what its close threw, not its drop’s, and its close', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    const stubborn = createFakeSocket({ onClose: 'throw', onTerminate: 'throw' });
+    const connectionHandle = fake.connect(stubborn, { server });
+
+    await expect(server.close(connectionHandle)).resolves.toBe(true);
+    expect(stubborn.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      ['error', 'close refused', connectionHandle],
+      ['close', false, connectionHandle],
+    ]);
+    await server.stop();
   });
 });
 
@@ -2493,6 +2572,47 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       await server.stop();
       await allClosed();
     }
+  });
+
+  test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    using timers = spyIntervals();
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      heartbeat: 20,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    // no ping answered, and a socket that never closes as it is terminated
+    const silent = createFakeSocket({ onTerminate: 'throw' });
+    const connectionHandle = fake.connect(silent, { server });
+
+    // a ping, then the beat that drops its peer
+    timers.armed[0]?.beat();
+    timers.armed[0]?.beat();
+
+    expect(silent.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      ['error', 'terminate refused', connectionHandle],
+      ['close', false, connectionHandle],
+    ]);
+
+    // a socket that closes after its connection ended tells nothing more
+    silent.hear('close', 1006);
+    expect(told).toHaveLength(2);
+    await server.stop();
   });
 });
 
@@ -3304,6 +3424,66 @@ test.describe('WebSocketTransportServer, its bounds', () => {
 
     for (const { socket } of [again, other, third, back]) {
       socket.destroy();
+    }
+  });
+
+  test('gives back the place of a connection whose drop throws before its close is told, and ends its TCP connection', async () => {
+    // `ws`'s own server, whose sockets send no close and throw as they are terminated
+    const StubbornWebSocketServer = class extends WebSocketServer {
+      constructor(options: ServerOptions) {
+        super(options);
+        this.on('connection', (socket: WsWebSocket) => {
+          socket.close = () => {};
+          socket.terminate = () => {
+            throw new Error('terminate refused');
+          };
+        });
+      }
+    };
+    const server = createWebSocketTransportServer({
+      closeTimeout: 50,
+      heartbeat: Infinity,
+      maximumConnectionsPerAddress: 1,
+      WebSocketServer: StubbornWebSocketServer,
+    });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const told: unknown[] = [];
+
+    try {
+      server.on('error', (error, handle) => {
+        told.push(['error', error.message, handle]);
+      });
+      // the places its address holds as its close is told
+      server.on('close', (wasClean, handle) => {
+        told.push(['close', wasClean, handle, server.gauges().counts['largestAddressConnections']]);
+      });
+
+      const connection = nextServerEvent(server, 'connection');
+      const first = await upgradeOn(port, upgradeRequest());
+      const [, connectionHandle] = await connection;
+
+      // its close never goes out, and its drop at the close timeout throws
+      await expect(server.close(connectionHandle)).resolves.toBe(true);
+
+      expect(told).toEqual([
+        ['error', 'terminate refused', connectionHandle],
+        ['close', false, connectionHandle, 0],
+      ]);
+      // its TCP connection ended by the server
+      await expect
+        .poll(() => {
+          return first.socket.closed;
+        })
+        .toBe(true);
+
+      // its address's one place is free again
+      const again = await upgradeOn(port, upgradeRequest());
+
+      expect(again.status).toBe('HTTP/1.1 101 Switching Protocols');
+      again.socket.destroy();
+    } finally {
+      await server.stop();
+      await allClosed();
     }
   });
 
