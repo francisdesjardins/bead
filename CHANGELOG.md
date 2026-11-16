@@ -299,6 +299,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callback fails, its client gone, destroys its response too, and is still not reported.
 - The C# side's gateway reports a stream's write that throws, once, and aborts its exchange, as it
   does a document's: the stream stayed open, its writes after it attempted, and nothing reported.
+- The TypeScript side's gateway catches what its host throws as its listener answers, a refusal's
+  `writeHead` or `setHeader` among it, as the C# side does: reported once, answered 500 while its
+  head is unsent, its response destroyed otherwise or when that 500 throws too. The throw reached
+  Node's `request` emit uncaught, and a 500 that threw after a failed call left a rejection
+  unhandled.
 
 ### Security
 

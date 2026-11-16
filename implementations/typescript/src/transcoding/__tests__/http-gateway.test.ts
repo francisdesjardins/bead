@@ -4,6 +4,7 @@ import {
   type IncomingMessage,
   request as httpRequest,
   type IncomingHttpHeaders,
+  type OutgoingHttpHeaders,
 } from 'node:http';
 import {
   connect as connectHTTP2,
@@ -1153,6 +1154,117 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
     status: 500,
   });
   expect(reported).toEqual(['the clock broke']);
+});
+
+// transcoding 7.6
+test('ends an exchange whose host throws as its head is written, reported, and answers the next', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+
+  process.on('unhandledRejection', onUnhandled);
+
+  try {
+    // its host fails a refusal's head once, its 500 then answered, or each time, its response then
+    // destroyed; or each time after a call that failed, the 500 of what no gate foresaw destroyed
+    for (const [failing, times, isCall] of [
+      ['setHeader', 1, false],
+      ['writeHead', 1, false],
+      ['writeHead', Infinity, false],
+      ['writeHead', Infinity, true],
+    ] as const) {
+      let fails = times;
+      let isFirst = true;
+      // a clock that breaks once, as the call's body is read, past every gate
+      let breaks = isCall ? 1 : 0;
+      const clock: IClock = {
+        clearInterval: (timer) => {
+          clearInterval(timer as Parameters<typeof clearInterval>[0]);
+        },
+        clearTimeout: (timer) => {
+          clearTimeout(timer as Parameters<typeof clearTimeout>[0]);
+        },
+        Date,
+        performance: {
+          now: () => {
+            if (breaks > 0) {
+              breaks -= 1;
+              throw new Error('the clock broke');
+            }
+
+            return performance.now();
+          },
+        },
+        setInterval,
+        setTimeout,
+      };
+      await using fixture = await startTranscoding({
+        clock,
+        origins: [ORIGIN],
+        createServer: (listener) => {
+          return createNodeServer((request, response) => {
+            // * the first exchange's host throws as its head is written
+            if (isFirst) {
+              isFirst = false;
+
+              const writeHead = response.writeHead.bind(response);
+              const setHeader = response.setHeader.bind(response);
+              const fail = (named: string): void => {
+                if (failing === named && fails > 0) {
+                  fails -= 1;
+                  throw new Error('the host would not write its head');
+                }
+              };
+
+              response.writeHead = ((statusCode: number, headers?: OutgoingHttpHeaders) => {
+                fail('writeHead');
+
+                return writeHead(statusCode, headers);
+              }) as typeof response.writeHead;
+              response.setHeader = (name, value) => {
+                fail('setHeader');
+
+                return setHeader(name, value);
+              };
+            }
+
+            listener(request, response);
+          });
+        },
+      });
+      const reported = reportedBy(fixture.gateway);
+      // a listed origin's GET to a path that takes POST alone: its fields set, then refused 405
+      const refused = {
+        headers: { origin: ORIGIN },
+        method: 'GET',
+        path: '/api/Transcoding/echo',
+      };
+      const first = isCall ? { body: '{}', path: '/api/Transcoding/echo' } : refused;
+      const arm = `${failing} failing ${String(times)} times${isCall ? ' after a call' : ''}`;
+
+      if (times === 1) {
+        expect(await send(fixture.port, first)).toMatchObject({
+          body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+          status: 500,
+        });
+      } else {
+        await expect(send(fixture.port, first)).rejects.toThrow();
+      }
+
+      expect(reported, arm).toEqual([
+        isCall ? 'the clock broke' : 'the host would not write its head',
+      ]);
+      expect(await send(fixture.port, refused)).toMatchObject({ status: 405 });
+      expect(reported, arm).toHaveLength(1);
+    }
+
+    await sleep(50);
+
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });
 
 test('answers a route’s variable that names no field 500, reported, none of its words in the problem', async () => {
