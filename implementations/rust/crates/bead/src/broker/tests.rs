@@ -954,6 +954,53 @@ mod held {
         pair.stop().await;
     }
 
+    // spec 15.12.17: a router whose release is a later turn's resumes a connection that may be gone
+    #[tokio::test]
+    async fn lets_be_a_pause_and_a_resume_its_router_asks_of_a_connection_gone_its_participant_holding_a_paused_one_in_order()
+     {
+        let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+        let log = logged(&pair);
+        let client = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+
+        for byte in [1, 2] {
+            client.send(data_of(byte, 30)).expect("sent");
+        }
+
+        until_held(&pair.server_participant, &[(2, false)]).await;
+
+        assert!(log_of(&log).is_empty(), "nothing told while paused");
+
+        pair.server.resume(&handles[0]);
+        until(|| log_of(&log).len() == 2, "what it held told").await;
+
+        assert_eq!(
+            log_of(&log),
+            ["1 01 30", "1 02 30"],
+            "in order, once resumed"
+        );
+
+        // * a router's late resume of a connection gone: let be
+        client
+            .disconnect(&TransportClientDisconnectOptions::default())
+            .expect("disconnected");
+        until(|| log_of(&log).len() == 3, "its close told").await;
+        pair.server.pause(&handles[0]);
+        pair.server.resume(&handles[0]);
+
+        assert!(pair.server.clients().is_empty(), "none held");
+        assert_eq!(
+            log_of(&log),
+            ["1 01 30", "1 02 30", "1 closed true"],
+            "nothing more told"
+        );
+        assert!(locked(&pair.told.errors).is_empty(), "nothing reported");
+
+        pair.stop().await;
+    }
+
     // spec 15.12.17, 15.23.5: the twin of "a resume with a hand already queued keeps the order of
     // what is held": a take queued in the participant's turns ahead of the resume's release holds
     // its envelope behind what is held

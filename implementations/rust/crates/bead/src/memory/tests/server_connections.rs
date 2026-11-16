@@ -3,8 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use super::{Ends, FIRST, MemoryTransportClient, message_of, taken};
+use super::{
+    Ends, FIRST, MemoryTransportClient, MemoryTransportServer, MemoryTransportServerOptions,
+    message_of, taken,
+};
 use crate::router::types::{ConnectionHandle, Gauges};
+use crate::server::{Server, ServerOptions};
 use crate::transport::{ReadyState, ServerTransport, TransportServerClient};
 
 fn handles(clients: &[TransportServerClient]) -> Vec<ConnectionHandle> {
@@ -123,4 +127,25 @@ async fn counts_the_connections_it_holds_and_gives_their_handles_for_no_one_outs
     for client in [first, second] {
         MemoryTransportClient::dispose(&client);
     }
+}
+
+// * a transport gives the clock it was given, or none; a server over one that gives none runs on
+// the platform's
+#[tokio::test]
+async fn runs_on_the_clock_its_transport_supplies_the_platform_s_when_it_supplies_none() {
+    let ends = Ends::unstarted();
+    let supplied = ends.server.clock().expect("the clock it was given");
+
+    assert!(Arc::ptr_eq(&supplied, &ends.shared), "its own clock");
+
+    let unclocked = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .expect("a server on no clock of its own");
+
+    assert!(unclocked.clock().is_none(), "none supplied");
+
+    let server = Server::new(Arc::new(unclocked), &ServerOptions::default())
+        .expect("a server on the platform's clock");
+
+    assert_eq!(server.router().clock().description(), "the platform's");
+    server.dispose().await.expect("disposed");
 }
