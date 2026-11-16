@@ -1,5 +1,5 @@
-//! Its connect given up between its socket's open and its end: what it opened is let go of, never
-//! kept, the TypeScript client's owed twin.
+//! Between its socket's open and its connect's end: a dispose lets go of what it opened, never
+//! kept, and a close its server wrote with its 101 is read once its connect ended.
 
 use super::*;
 
@@ -109,4 +109,63 @@ async fn a_dispose_between_the_open_and_the_end_of_connect_is_not_undone() {
     settled(client.connect(&to(server.port))).await.unwrap();
     assert!(is_state(&client, ReadyState::Open), "open");
     client.dispose();
+}
+
+// each message its client tells, with the client's state as it came
+struct HeardWith {
+    client: WebSocketTransportClient,
+    heard: Mutex<Vec<(Vec<u8>, ReadyState)>>,
+}
+
+impl ClientListener for HeardWith {
+    fn on_message(&self, message: TransportMessage) {
+        let ready = self.client.ready_state();
+
+        self.heard
+            .lock()
+            .unwrap()
+            .push((message.data.to_vec(), ready));
+    }
+}
+
+// spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
+#[tokio::test]
+async fn opens_on_a_101_written_together_with_a_close_hears_what_came_before_it_once_open_and_tells_one_close()
+ {
+    let close = close_frame(1000);
+
+    for (frames, expected) in [
+        (close.clone(), Vec::new()),
+        (
+            [frame_of(0x2, &[0x2a]), close].concat(),
+            vec![(vec![0x2a], ReadyState::Open)],
+        ),
+    ] {
+        let mut server = raw_writing(frames).await;
+        let client = client();
+        let recorder = recorded(&client);
+        let heard = Arc::new(HeardWith {
+            client: client.clone(),
+            heard: Mutex::default(),
+        });
+        let listener: Arc<dyn ClientListener> = Arc::<HeardWith>::clone(&heard);
+
+        client.listen(Arc::clone(&listener));
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        // its close answered, the server ends its socket
+        let mut socket = server.next().await;
+
+        assert_eq!(close_code_from(&mut socket).await, Some(1000), "answered");
+        socket.shutdown().await.unwrap();
+
+        let closes = closes_within(&recorder, 1).await;
+
+        client.unlisten(&listener);
+
+        // * what came before the close, heard open, then one unclean close
+        assert_eq!(heard.heard.lock().unwrap().clone(), expected, "heard open");
+        assert_eq!(closes, vec![(false, false)], "one close");
+        assert!(is_state(&client, ReadyState::Closed), "closed");
+    }
 }
