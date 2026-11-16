@@ -20,7 +20,7 @@ import re
 import struct
 from decimal import Decimal, getcontext
 
-from conformance import ROOT, write_json
+from conformance import ROOT, hexadecimal, nested, write_json
 from proto_wire import EGROUP, I32, I64, LEN, SGROUP, VARINT
 from spec_version import spec_version
 
@@ -1099,10 +1099,6 @@ PROTO_DIFFERS = {
 }
 
 
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
 def payload_outcome(encoding, data):
     """The bytes written back of what was read, or for proto what was read, or the one reason it is
     refused for."""
@@ -1178,15 +1174,6 @@ FORMS = {
     'nameTwice': Members([('a', 1), ('a', 2)]),
     'undefined': UNDEFINED,
 }
-
-
-def nested(depth):
-    value = []
-
-    for _ in range(depth - 1):
-        value = [value]
-
-    return value
 
 
 # each value: its name, its encoding, its units, the value as the file gives it, and the languages

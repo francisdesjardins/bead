@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 
-from conformance import ROOT, write_json
+from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
 from make_codecs import payload_outcome
 from spec_version import spec_version
@@ -45,18 +45,6 @@ OUTSIDE_ASCII = '"Jos' + chr(0xE9) + ' a+b <x>"'
 # entry of a conformance file holds
 ESCAPED_NAME = 'a name that holds an escape is read as its escapes say, whatever a payload of its shape read on another connection held'
 SILL = 'onTheSill'
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def word(value, length):
-    return hexadecimal(value.to_bytes(length, 'big'))
-
-
-def text(value):
-    return hexadecimal(value.encode('utf-8'))
 
 
 def request(call_id, procedure, payload, *, service_id=SERVICE_ID, flags=0, words=3, tail=''):
@@ -112,15 +100,6 @@ def cancelled(call_id):
 
 def answer(call_id, value):
     return {'send': f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'}
-
-
-def armed(milliseconds):
-    """A timer armed on the server's clock, due that many milliseconds from now."""
-    return {'until': {'timer': milliseconds}}
-
-
-def advance(milliseconds):
-    return {'advance': milliseconds}
 
 
 def on(step, connection):

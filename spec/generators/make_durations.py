@@ -11,7 +11,7 @@ from decimal import Decimal
 from fractions import Fraction
 
 from bounds import DEFAULTS
-from conformance import write_json
+from conformance import unit_order, write_json
 from spec_version import spec_version
 
 # the ceiling, 2³¹ − 1 ms, as every platform's timers hold one alike
@@ -602,12 +602,6 @@ def outcome_of(value, place):
         return {'outcome': 'taken'}
 
     return met
-
-
-def unit_order(unit):
-    """A unit's place: the spec's first, then a companion's, behind its name and a colon."""
-    document, _, number = unit.rpartition(':')
-    return document, tuple(int(part) for part in number.split('.'))
 
 
 def clauses_of(place):

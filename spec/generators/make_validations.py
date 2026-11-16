@@ -27,7 +27,7 @@ import urllib.request
 
 import re2
 
-from conformance import ROOT, write_json, write_text
+from conformance import ROOT, hexadecimal, write_json, write_text
 from details import KEPT, LARGEST_COUNT, canonical, detail_of, es, judged, utf8, violation
 from proto_wire import LEN, f32, length_delimited, scalar_bytes, tag, varint
 from spec_version import spec_version
@@ -1278,10 +1278,6 @@ FOR_KEY = '18.3.5'
 PATH, ORDER, FAIL_FAST = '18.4', '18.5', '18.5'
 PRESENCE, LENGTHS, NUMBERS, EQUALITY, PATTERN, WORDS = '18.8.1', '18.8.2', '18.8.3', '18.8.4', '18.8.5', '18.8.6'
 DETAIL, READER = '18.6', '18.7'
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
 
 
 def verdict(name, clauses, message, value, *, maximum=None, fail_fast=False, runs=None):

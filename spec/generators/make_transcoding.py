@@ -28,7 +28,7 @@ from google.protobuf import field_mask_pb2, json_format, message_factory, struct
 from google.protobuf import wrappers_pb2  # noqa: F401
 
 from bounds import DEFAULTS
-from conformance import write_json, write_text
+from conformance import CODES, hexadecimal, unit_order, write_json, write_text
 from details import canonical, es
 from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
 from transcoding_version import transcoding_version
@@ -665,10 +665,6 @@ def encode(each, value):
             out += record(field.number, field.kind, given, delimited=field.delimited)
 
     return out
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
 
 
 # ── Reading a proto body, transcoding 5.2 to 5.4 ────────────────────────────────────────────────
@@ -2218,12 +2214,6 @@ PHRASES = {400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not 
            500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable',
            504: 'Gateway Timeout'}
 
-CODES = {1: 'ENVELOPE_MALFORMED', 2: 'LAYOUT_UNSUPPORTED', 3: 'KIND_UNSUPPORTED', 4: 'ENVELOPE_TOO_LARGE',
-         16: 'DESTINATION_UNKNOWN', 17: 'DESTINATION_UNREACHABLE', 18: 'SERVICE_UNKNOWN', 19: 'PROCEDURE_UNKNOWN',
-         20: 'CALL_UNKNOWN', 21: 'SUBSCRIPTION_UNKNOWN', 22: 'SUBSCRIPTION_UNSUPPORTED', 32: 'SESSION_REQUIRED',
-         33: 'ACCESS_DENIED', 34: 'PAYLOAD_TOO_LARGE', 35: 'CAPACITY_EXCEEDED', 36: 'CREDENTIAL_UNSUPPORTED',
-         48: 'CHUNK_INVALID', 49: 'CREDIT_EXCEEDED', 50: 'PAYLOAD_UNDECODABLE', 51: 'TRANSFER_STALLED',
-         52: 'PAYLOAD_INVALID', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST'}
 NUMBERS = {name: code for code, name in CODES.items()}
 
 # where a failure arose (7.5): its server, of the request; its client, before the call went; its
@@ -4092,13 +4082,6 @@ SERVICE_TEXT = {
                'requires': "the calls of require its resolver took",
                'reported': "the failures its server reported on its error (spec 9.0)"},
 }
-
-
-def unit_order(unit):
-    """A unit's place among an entry's: the companion's own in its order, then the spec's behind spec:."""
-    document, _, number = unit.rpartition(':')
-
-    return document, tuple(int(part) for part in number.split('.'))
 
 
 def ordered(entries, group):

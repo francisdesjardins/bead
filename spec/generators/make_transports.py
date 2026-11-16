@@ -10,7 +10,7 @@ from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
-from conformance import ROOT, write_json
+from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
 from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
 
@@ -36,18 +36,6 @@ PAGE = 'https://page.test'
 # where every case's wall clock starts, and that instant in milliseconds since the epoch
 WALL_CLOCK = '2026-01-01T00:00:00Z'
 EPOCH = int(datetime.fromisoformat(WALL_CLOCK.replace('Z', '+00:00')).timestamp()) * 1000
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def word(value, length):
-    return hexadecimal(value.to_bytes(length, 'big'))
-
-
-def text(value):
-    return hexadecimal(value.encode('utf-8'))
 
 
 def length_of(data):
@@ -176,15 +164,6 @@ def drawn(on='connect', *, listening=False, fields=None):
 
 def until(gauge, value):
     return {'until': {'gauge': gauge, 'is': value}}
-
-
-def armed(milliseconds):
-    """A timer armed on the server's clock, due that many milliseconds from now."""
-    return {'until': {'timer': milliseconds}}
-
-
-def advance(milliseconds):
-    return {'advance': milliseconds}
 
 
 def answered(on, envelope):
