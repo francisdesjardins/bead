@@ -1195,6 +1195,55 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 7.6
+    [Fact]
+    public async Task Ends_an_exchange_whose_host_throws_as_its_head_is_written_reported_and_answers_the_next()
+    {
+        // its host fails a refusal's head once, its 500 then answered with none of the refusal's
+        // fields, or each time, its exchange then aborted; or each time after a call that failed, the
+        // 500 of what no gate foresaw aborted alike
+        foreach (var (times, isCall) in new[] { (1, false), (int.MaxValue, false), (int.MaxValue, true) })
+        {
+            await using var service = await TranscodingService.Start();
+            var options = Exchanges.OptionsOf(service.Memory, null);
+            // * a clock that breaks as the call's body is read, past every gate
+            await using var gateway = new HttpGateway(isCall ? options with { Clock = new BrokenClock() } : options);
+            var reported = ReportedBy(gateway);
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var lifetime = new DeadlineLifetime(cancelling);
+            // a path no route matches, refused 404 as its head is written; or a call
+            var context = PaceContext(isCall ? "answer" : "problem", cancelling.Token);
+            using var body = new MemoryStream();
+
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Features.Set<IHttpResponseFeature>(new FailingHeadFeature(times));
+            context.Response.Body = body;
+
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+            if (times == 1)
+            {
+                Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+                Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", Encoding.UTF8.GetString(body.ToArray()));
+                Assert.False(context.Response.Headers.ContainsKey("bead-refusal"));
+                Assert.Equal(0, lifetime.Aborts);
+            }
+            else
+            {
+                Assert.Empty(body.ToArray());
+                Assert.Equal(1, lifetime.Aborts);
+            }
+
+            Assert.Equal([isCall ? "the clock broke" : "the host would not write its head"], reported);
+
+            var next = PaceContext("problem", Cancelled);
+
+            await gateway.Answer(next).WaitAsync(Patience, Cancelled);
+            Assert.Equal(StatusCodes.Status404NotFound, next.Response.StatusCode);
+            Assert.Single(reported);
+        }
+    }
+
     [Fact]
     public async Task Answers_a_route_s_variable_that_names_no_field_500_reported_none_of_its_words_in_the_problem()
     {
@@ -3209,6 +3258,87 @@ public sealed class HttpGatewayTests
             cancellationToken.ThrowIfCancellationRequested();
             Sizes.Add(buffer.Length);
             throw failure;
+        }
+    }
+
+    // a response whose host throws as its status is set, `times` times; the rest a plain feature's
+    private sealed class FailingHeadFeature(int times) : IHttpResponseFeature
+    {
+        private readonly HttpResponseFeature _feature = new();
+        private int _fails = times;
+
+        public int StatusCode
+        {
+            get
+            {
+                return _feature.StatusCode;
+            }
+            set
+            {
+                if (_fails > 0)
+                {
+                    _fails -= 1;
+
+                    throw new InvalidOperationException("the host would not write its head");
+                }
+
+                _feature.StatusCode = value;
+            }
+        }
+
+        public string? ReasonPhrase
+        {
+            get
+            {
+                return _feature.ReasonPhrase;
+            }
+            set
+            {
+                _feature.ReasonPhrase = value;
+            }
+        }
+
+        public IHeaderDictionary Headers
+        {
+            get
+            {
+                return _feature.Headers;
+            }
+            set
+            {
+                _feature.Headers = value;
+            }
+        }
+
+        [Obsolete("The body is the response body feature's.")]
+        public Stream Body
+        {
+            get
+            {
+                return _feature.Body;
+            }
+            set
+            {
+                _feature.Body = value;
+            }
+        }
+
+        public bool HasStarted
+        {
+            get
+            {
+                return _feature.HasStarted;
+            }
+        }
+
+        public void OnStarting(Func<object, Task> callback, object state)
+        {
+            _feature.OnStarting(callback, state);
+        }
+
+        public void OnCompleted(Func<object, Task> callback, object state)
+        {
+            _feature.OnCompleted(callback, state);
         }
     }
 

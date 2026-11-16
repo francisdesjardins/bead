@@ -115,39 +115,30 @@ fn holding() -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
     verdict_named(HOLDING)
 }
 
+// * the TypeScript side refuses a reading that is no whole number of milliseconds, its number's
+// fault; a `SystemTime` holds nanoseconds, so this side holds a reading to the millisecond below it
 #[test]
-#[ignore = "divergence: Rust truncates a fractional millisecond wall reading; TypeScript refuses it"]
-fn throws_for_a_reading_that_is_not_a_whole_number_of_milliseconds() {
+fn holds_a_reading_finer_than_a_millisecond_to_the_millisecond_below_it() {
     let (token, keys, audiences, now) = holding();
-    let whole = || now;
-    assert!(matches!(
+    let verdict = |reading: SystemTime| {
+        let read = || reading;
+
         verify_jwt(
             token.as_bytes(),
             &JwtAgainst {
                 audiences: &audiences,
                 keys: &keys,
-                now: &whole,
-            }
+                now: &read,
+            },
         )
-        .expect("the whole-millisecond fixture verifies"),
-        JwtVerdict::Holds { .. }
-    ));
-    let fractional = || {
-        now.checked_add(core::time::Duration::from_micros(500))
-            .expect("half a millisecond after the fixture's reading")
+        .expect("judged")
     };
-    let outcome = verify_jwt(
-        token.as_bytes(),
-        &JwtAgainst {
-            audiences: &audiences,
-            keys: &keys,
-            now: &fractional,
-        },
-    );
-    assert!(
-        outcome.is_err(),
-        "a fractional millisecond reading must be refused as a programmer error: {outcome:?}"
-    );
+    let finer = now
+        .checked_add(core::time::Duration::from_micros(999))
+        .expect("just short of a millisecond after the fixture's reading");
+
+    assert!(matches!(verdict(now), JwtVerdict::Holds { .. }));
+    assert_eq!(verdict(finer), verdict(now));
 }
 
 // the verdict vector `name`: its token, its keys, its audiences and its wall clock's reading

@@ -1692,7 +1692,26 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     return index === undefined ? undefined : ofMethod[index];
   };
 
-  const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
+  // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported once; a
+  // response whose head is unsent is answered 500, any other destroyed, as is one whose 500 throws
+  // too (transcoding 7.6)
+  const answerUnforeseen = (exchange: IExchange, error: unknown): void => {
+    report(error);
+
+    try {
+      if (!exchange.response.headersSent) {
+        answerProblem(exchange, { problem: problemOfOwn('failed', '') });
+
+        return;
+      }
+    } catch {
+      // its host failed the 500 as it failed the rest
+    }
+
+    exchange.response.destroy();
+  };
+
+  const route = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
     const target = requestTargetOf(request.url);
     const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
     const path = target === undefined ? undefined : rawPathOf(target.path);
@@ -1836,14 +1855,25 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     serve(exchange, { chosen, path, query: target.query }).catch((error: unknown) => {
-      // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
-      report(error);
-      answerProblem(exchange, {
-        problem: problemOfOwn('failed', ''),
-      });
+      answerUnforeseen(exchange, error);
     });
 
     return true;
+  };
+
+  // * a throw of its host's within its own turn, a refusal's writeHead, say, ends its exchange and
+  // never reaches Node's `request` emit
+  const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
+    try {
+      return route(request, response);
+    } catch (error) {
+      answerUnforeseen(
+        { address: 'local', isBodyRead: false, port: undefined, request, response },
+        error
+      );
+
+      return true;
+    }
   };
 
   /** Serves the document (11.1): `GET` and `HEAD`, its tag, and a 304 to a request that holds it. */

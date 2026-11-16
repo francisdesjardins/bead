@@ -336,45 +336,111 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Closes_a_connection_that_it_refused_twice_maximumAnsweringCalls_requests_in_a_row_past_the_resolvers_that_outlive_its_calls_nothing_settling_between_and_reports_it()
     {
-        var (server, _, held) = HoldingOf(1);
+        foreach (var isAtCall in new[] { false, true })
+        {
+            var (server, _, held) = HoldingOf(1);
+            var sending = new List<TaskCompletionSource>();
+
+            // what its close throws as it is called, or faults with as it settles, is reported
+            server.OnClose = (_) =>
+            {
+                var failure = new IOException("the transport would not close");
+
+                if (isAtCall)
+                {
+                    throw failure;
+                }
+
+                return Task.FromException(failure);
+            };
+            const string CloseDetail = "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed";
+
+            List<uint> RefusedOf()
+            {
+                return [.. FailuresOf(server).Select((failure) =>
+                {
+                    return failure.CallId;
+                })];
+            }
+
+            await server.Deliver(new Envelope { Header = RequestOf(1) }, "a");
+            await server.Deliver(CancelOf(1), "a");
+            await server.Deliver(new Envelope { Header = RequestOf(3) }, "a");
+
+            // the first of a run past both counts
+            await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+
+            // a settle, then a request refused at the calls answered alone: the run starts over
+            held[0].SetResult();
+            await server.Settle();
+            await server.Deliver(new Envelope { Header = RequestOf(7) }, "a");
+            await server.Deliver(CancelOf(3), "a");
+            await server.Deliver(new Envelope { Header = RequestOf(9) }, "a");
+
+            // past both again: once
+            await server.Deliver(new Envelope { Header = RequestOf(11) }, "a");
+            Assert.Equal([5u, 7u, 11u], RefusedOf());
+            Assert.Empty(server.Closed);
+            Assert.Empty(server.Reports);
+
+            // twice, in a row: reported at once, and closed once its transport settled that refusal
+            server.OnSend = (_) =>
+            {
+                var send = new TaskCompletionSource();
+
+                sending.Add(send);
+
+                return send.Task;
+            };
+            await server.Deliver(new Envelope { Header = RequestOf(13) }, "a");
+            Assert.Equal([((ushort)ProtocolCode.CapacityExceeded, CloseDetail)], server.Reports.Select((reason) =>
+            {
+                var failure = Assert.IsType<FailureException>(reason);
+
+                return (failure.Code, failure.Detail);
+            }));
+            Assert.Equal(["a"], server.ReportedOn);
+
+            // one more refused before the close lands closes nothing more
+            await server.Deliver(new Envelope { Header = RequestOf(15) }, "a");
+            Assert.Empty(server.Closed);
+
+            foreach (var send in sending)
+            {
+                send.SetResult();
+            }
+
+            await server.Settle();
+            Assert.Equal([5u, 7u, 11u, 13u, 15u], RefusedOf());
+            Assert.Equal((13u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"), FailuresOf(server)[^2]);
+            Assert.Equal(["a"], server.Closed.Select((closed) =>
+            {
+                return closed.ConnectionHandle;
+            }));
+            Assert.Equal(2, server.Reports.Count);
+            Assert.Equal("the transport would not close", Assert.IsType<IOException>(server.Reports[1]).Message);
+            Assert.Equal(["a", "a"], server.ReportedOn);
+        }
+    }
+
+    [Fact]
+    public async Task Closes_nothing_and_reports_nothing_more_of_a_connection_it_refused_twice_maximumAnsweringCalls_requests_in_a_row_once_its_router_was_disposed_before_that_close_came_due()
+    {
+        var (server, _, _) = HoldingOf(1);
         var sending = new List<TaskCompletionSource>();
 
-        // what its close faults with is reported
+        // a close made would be reported, as it faults
         server.OnClose = (_) =>
         {
             return Task.FromException(new IOException("the transport would not close"));
         };
-        const string CloseDetail = "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed";
-
-        List<uint> RefusedOf()
-        {
-            return [.. FailuresOf(server).Select((failure) =>
-            {
-                return failure.CallId;
-            })];
-        }
 
         await server.Deliver(new Envelope { Header = RequestOf(1) }, "a");
         await server.Deliver(CancelOf(1), "a");
         await server.Deliver(new Envelope { Header = RequestOf(3) }, "a");
-
-        // the first of a run past both counts
         await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
 
-        // a settle, then a request refused at the calls answered alone: the run starts over
-        held[0].SetResult();
-        await server.Settle();
-        await server.Deliver(new Envelope { Header = RequestOf(7) }, "a");
-        await server.Deliver(CancelOf(3), "a");
-        await server.Deliver(new Envelope { Header = RequestOf(9) }, "a");
-
-        // past both again: once
-        await server.Deliver(new Envelope { Header = RequestOf(11) }, "a");
-        Assert.Equal([5u, 7u, 11u], RefusedOf());
-        Assert.Empty(server.Closed);
-        Assert.Empty(server.Reports);
-
-        // twice, in a row: reported at once, and closed once its transport settled that refusal
+        // twice, in a row: reported at once, its close waiting on its transport
         server.OnSend = (_) =>
         {
             var send = new TaskCompletionSource();
@@ -383,17 +449,15 @@ public sealed partial class RouterCoreTests
 
             return send.Task;
         };
-        await server.Deliver(new Envelope { Header = RequestOf(13) }, "a");
-        Assert.Equal([((ushort)ProtocolCode.CapacityExceeded, CloseDetail)], server.Reports.Select((reason) =>
+        await server.Deliver(new Envelope { Header = RequestOf(7) }, "a");
+        Assert.Equal([(ushort)ProtocolCode.CapacityExceeded], server.Reports.Select((reason) =>
         {
-            var failure = Assert.IsType<FailureException>(reason);
-
-            return (failure.Code, failure.Detail);
+            return Assert.IsType<FailureException>(reason).Code;
         }));
-        Assert.Equal(["a"], server.ReportedOn);
 
-        // one more refused before the close lands closes nothing more
-        await server.Deliver(new Envelope { Header = RequestOf(15) }, "a");
+        // * disposed before the refusal settles: the close it comes to is none
+        server.Core.Dispose();
+        await server.Settle();
         Assert.Empty(server.Closed);
 
         foreach (var send in sending)
@@ -402,15 +466,9 @@ public sealed partial class RouterCoreTests
         }
 
         await server.Settle();
-        Assert.Equal([5u, 7u, 11u, 13u, 15u], RefusedOf());
-        Assert.Equal((13u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"), FailuresOf(server)[^2]);
-        Assert.Equal(["a"], server.Closed.Select((closed) =>
-        {
-            return closed.ConnectionHandle;
-        }));
-        Assert.Equal(2, server.Reports.Count);
-        Assert.Equal("the transport would not close", Assert.IsType<IOException>(server.Reports[1]).Message);
-        Assert.Equal(["a", "a"], server.ReportedOn);
+        Assert.Empty(server.Closed);
+        Assert.Single(server.Reports);
+        Assert.Equal(["a"], server.ReportedOn);
     }
 
     [Fact]
@@ -493,5 +551,41 @@ public sealed partial class RouterCoreTests
         }));
         Assert.Equal(["a"], server.ReportedOn);
         Assert.Equal((0L, 0L, 0L), await TrackedOf(server));
+    }
+
+    [Fact]
+    public async Task Reports_no_failure_of_a_resolver_its_side_answered_PROCEDURE_FAILED_once_its_router_was_disposed()
+    {
+        var server = new Peer(RouterSide.Server, Chunked with { MaximumAnsweringCalls = 4, MaximumEnvelopeBytes = 1_024 });
+        var resolver = server.Resolve();
+        var answering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? answered = null;
+
+        // a resolver answered PROCEDURE_FAILED when the test says, then held until it faults
+        resolver.Handling = async (props) =>
+        {
+            await answering.Task;
+            answered = server.Core.Respond(RouterAnswer.OfFailure(new Failure { Code = (ushort)ProtocolCode.ProcedureFailed, Scope = FailureScope.Protocol }), new AnswerTarget(props.ConnectionHandle, props.Header));
+            await holding.Task;
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(1) }, "a");
+
+        // * its answer comes after the dispose, which told it: never marked, its failure silent
+        server.Core.Dispose();
+        await server.Settle();
+        answering.SetResult();
+        await server.Settle();
+        Assert.NotNull(answered);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        holding.SetException(new InvalidOperationException("rejected"));
+        await server.Settle();
+        Assert.Empty(server.Sent);
+        Assert.Empty(server.Reports);
     }
 }

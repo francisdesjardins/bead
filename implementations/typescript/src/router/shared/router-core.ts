@@ -1291,9 +1291,13 @@ export const createRouterCore = <Handle extends string>(
     settle(resolution);
   };
 
-  // closes a connection its peer has this side refuse past what its resolvers outlive: what the
-  // port throws or rejects is reported
+  // closes a connection its peer has this side refuse past what its resolvers outlive, none once its
+  // router was disposed: what the port throws or rejects is reported
   const closeOf = (connectionHandle: Handle): void => {
+    if (isDisposed) {
+      return;
+    }
+
     const reportClose = (reason: unknown): void => {
       heard(() => {
         port.report(toError(reason), connectionHandle);

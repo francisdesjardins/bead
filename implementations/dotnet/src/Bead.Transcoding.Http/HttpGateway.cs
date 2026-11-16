@@ -250,11 +250,31 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
             Report(reason);
+            await AnswerUnforeseen(context);
+        }
+    }
 
-            if (!context.Response.HasStarted)
-            {
-                await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
-            }
+    // what no gate foresaw, answered 500 while its head is unsent, with none of the fields set before
+    // it; a head already sent, or a 500 that fails too, aborts its exchange, so no partial response
+    // reads as whole
+    private async Task AnswerUnforeseen(HttpContext context)
+    {
+        if (context.Response.HasStarted)
+        {
+            context.Abort();
+
+            return;
+        }
+
+        try
+        {
+            context.Response.Headers.Clear();
+            await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
+        }
+        catch (Exception failed) when (failed is not OutOfMemoryException)
+        {
+            // its host's failure told once already
+            context.Abort();
         }
     }
 
