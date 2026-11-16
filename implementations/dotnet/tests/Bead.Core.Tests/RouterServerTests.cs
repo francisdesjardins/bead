@@ -686,10 +686,13 @@ public sealed partial class RouterServerTests : IDisposable
             throw new InvalidOperationException("thrown");
         }));
 
-        // all three delivered before any settles
-        Deliver(First, RequestOf(1));
-        Deliver(Second, SubscribingOf(1));
-        _transport.DeliverText(First, "text");
+        // * all three delivered in one turn of the router's scheduler, before any is taken
+        _scheduler.Post(() =>
+        {
+            Deliver(First, RequestOf(1));
+            Deliver(Second, SubscribingOf(1));
+            _transport.DeliverText(First, "text");
+        });
         await Settle();
 
         // a refusal that cannot go out

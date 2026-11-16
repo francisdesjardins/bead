@@ -107,7 +107,7 @@ GATEWAY_WINDOW	-	-	GATEWAY_WINDOW [constant]	own: a gateway's stream window, 16,
 GatewayErrorListener	-	-	GatewayErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
 GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	GeneratedCode.SupportsVersion5 [constant]	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	rendered: constant (0007)
-GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	GeneratedCode.SupportsVersion6 [constant]	-	differs: The contract 6 with generated code
+GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	GeneratedCode.SupportsVersion6 [constant]	-	rendered: constant (0007)
 GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	GeneratedCode.SupportsVersion7 [constant]	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	rendered: constant (0007)
 GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	GeneratedCode.SupportsVersion8 [constant]	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	rendered: constant (0007)
 HEAD_DELAY_MILLISECONDS	HEAD_DELAY_MILLISECONDS [constant]	-	-	own: the delay of a request's head, a constant of spec 15.7 its tests import as they import BURIAL_MILLISECONDS, which the other sides keep private and write as the spec states it (0020)
