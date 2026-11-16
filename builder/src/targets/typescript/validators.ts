@@ -12,6 +12,7 @@
 import type { DescEnum, DescField, DescMessage } from '@bufbuild/protobuf';
 import type { GeneratedFile, Printable } from '@bufbuild/protoplugin';
 
+import { enumOfField, fieldOf } from '../../descriptors.ts';
 import type { FieldType, IFieldRulesEntry, ScalarName } from '../../model/blueprint.ts';
 import {
   type BoundsValue,
@@ -21,9 +22,12 @@ import {
   type INumber,
   type IRuleSite,
   type IValuePlan,
+  hasWork,
   LENGTH_CEILING,
+  scalarOf,
 } from '../../model/rules.ts';
 import { compilePattern, type IPatternTable } from '../../patterns/pattern.ts';
+import { literalOf } from './templates.ts';
 
 // types
 
@@ -55,13 +59,6 @@ const KEY_ORDER: Readonly<Record<string, 'string' | 'integer' | 'bool'>> = Objec
 });
 
 // helpers
-
-// a string as a single-quoted literal, whatever it holds
-const literalOf = (text: string): string => {
-  const escaped = JSON.stringify(text).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'");
-
-  return `'${escaped}'`;
-};
 
 // a JSON value of a rule's bounds as a frozen literal
 const frozenOf = (value: BoundsValue): string => {
@@ -96,14 +93,6 @@ const numberLiteralOf = (value: INumber): string => {
   }
 
   return value.text;
-};
-
-const scalarOf = (type: FieldType): ScalarName | undefined => {
-  if ('scalar' in type) {
-    return type.scalar;
-  }
-
-  return 'wrapper' in type ? type.wrapper : undefined;
 };
 
 // a part of a name, its characters but letters and digits taken as `_`
@@ -388,24 +377,6 @@ export const printValidators = (
     const print = (indent: string, parts: Printable): void => {
       lines.push([indent, parts, '\n']);
     };
-    const fieldOf = (entry: IFieldRulesEntry): DescField => {
-      const field = message.fields.find((each) => {
-        return each.number === entry.fieldNumber;
-      });
-
-      if (field === undefined) {
-        throw new Error(`${plan.fullName} holds no field ${String(entry.fieldNumber)}`);
-      }
-
-      return field;
-    };
-    const enumOfField = (field: DescField): DescEnum | undefined => {
-      return field.fieldKind === 'enum' ||
-        (field.fieldKind === 'list' && field.listKind === 'enum') ||
-        (field.fieldKind === 'map' && field.mapKind === 'enum')
-        ? field.enum
-        : undefined;
-    };
     const asStringOf = (field: DescField): boolean => {
       return 'longAsString' in field && field.longAsString;
     };
@@ -451,9 +422,6 @@ export const printValidators = (
         print(indent, '}');
       }
     };
-    const hasWork = (value: IValuePlan | undefined): boolean => {
-      return value !== undefined && (value.judgments.length > 0 || value.message !== undefined);
-    };
 
     // the condition a field is set by, as `required` and a message's oneof read it
     const setOf = (entry: IFieldRulesEntry, field: DescField): string => {
@@ -497,7 +465,7 @@ export const printValidators = (
 
     const printField = (plan: IFieldPlan): void => {
       const { entry } = plan;
-      const field = fieldOf(entry);
+      const field = fieldOf(message, entry);
       const name = literalOf(entry.fieldName);
       const site = `${base}$${partOf(entry.fieldName)}`;
       const enumOf = enumOfField(field);
@@ -744,7 +712,7 @@ export const printValidators = (
     // * the message's own rules, at its own path: its oneof rules, then each oneof's required
     plan.oneofRules.forEach((rule, at) => {
       const counted = rule.fields.map((entry) => {
-        return setPrintable(entry, fieldOf(entry));
+        return setPrintable(entry, fieldOf(message, entry));
       });
       const many = siteConstantOf(rule.many, `${base}$oneof${String(at)}`);
 

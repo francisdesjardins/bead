@@ -23,9 +23,10 @@ import type {
   IServiceEntry,
 } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { INDENT } from '../lines.ts';
 import type { IHttpInput } from '../target.ts';
 import { identifierOf, snakeIdentifierOf, toSnakeCase } from './names.ts';
-import { deprecatedOf, docOf, INDENT, literalOf } from './templates.ts';
+import { codecTypesOf, deprecatedOf, docOf, ERROR, errorsOf, literalOf } from './templates.ts';
 
 // types
 
@@ -51,19 +52,17 @@ export const HTTP_MODULE = 'bead_http';
 /** The type a service's HTTP client is, after its name, the one name the target adds in `bead_http`. */
 export const HTTP_CLIENT_SUFFIX = 'HttpClient';
 
-const ERROR = '::bead::ProgrammerError';
-const ERROR_LINK = `[\`ProgrammerError\`](${ERROR})`;
 // what a client's call fails with, the requester's own errors
 const CALL_ERRORS =
   "# Errors\n\nA [`CallError`](::bead::CallError): the failure its gateway answers, or one of this side's, as [`HttpRequester::call`](::bead::HttpRequester::call) gives them.";
 const ROUTE = '::bead::HttpRoute';
 const FORM = '::bead_protobuf::JsonForm';
 
-// the codec of each encoding that is no message's, and the variant of its payload in a route
-const NATIVE = Object.freeze({
-  raw: { codec: '::bead::RawCodec', payload: '::bead::HttpPayload::Raw' },
-  text: { codec: '::bead::TextCodec', payload: '::bead::HttpPayload::Text' },
-  json: { codec: '::bead::JsonCodec', payload: '::bead::HttpPayload::Json' },
+// the variant of each encoding's payload in a route, where it is no message's
+const PAYLOADS = Object.freeze({
+  raw: '::bead::HttpPayload::Raw',
+  text: '::bead::HttpPayload::Text',
+  json: '::bead::HttpPayload::Json',
 } as const);
 
 // each method a route takes, as the runtime's `HttpMethod` names it
@@ -79,10 +78,6 @@ const METHODS: Readonly<Record<HttpMethod, string>> = Object.freeze({
 
 const isMessage = (binding: IBinding): binding is IBinding & { readonly message: string } => {
   return binding.encoding === 'proto' && binding.message !== undefined;
-};
-
-const nativeOf = (binding: IBinding) => {
-  return NATIVE[binding.encoding as keyof typeof NATIVE];
 };
 
 // the bindings of a procedure: its request, its result, and its notification where it has one
@@ -117,21 +112,11 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
   const proceduresOf = (service: IServiceEntry): string => {
     return `${moduleOf(service)}${service.serviceName}Procedures`;
   };
-  const codecTypeOf = (binding: IBinding): string => {
-    return isMessage(binding)
-      ? `::bead_protobuf::ProtoCodec<${messageOf(binding.message)}>`
-      : nativeOf(binding).codec;
-  };
-  // the value a codec reads and writes: a message's own type, a native codec's by its trait
-  const valueOf = (binding: IBinding): string => {
-    return isMessage(binding)
-      ? messageOf(binding.message)
-      : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
-  };
+  const { codecTypeOf, codecValueOf } = codecTypesOf(messageOf);
   const payloadOf = (binding: IBinding): string => {
     return isMessage(binding)
       ? `::bead::HttpPayload::Message(form.form_of(::bead_protobuf::ProtoSchema::of::<${messageOf(binding.message)}>()))`
-      : nativeOf(binding).payload;
+      : PAYLOADS[binding.encoding as keyof typeof PAYLOADS];
   };
   const services = blueprint.services
     .map((service) => {
@@ -221,7 +206,9 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
           ? 'The routes, made once a process over the pool its messages embed, one JSON form for all.'
           : 'The routes, made once a process.',
         sections: [
-          `# Errors\n\nA ${ERROR_LINK} where a route does not hold, or a descriptor or a codec of its service does not.`,
+          errorsOf(
+            'where a route does not hold, or a descriptor or a codec of its service does not'
+          ),
         ],
       },
       INDENT
@@ -289,7 +276,9 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
       {
         summary: "Its gateway's URL and its options: a default authorization, its bounds, its TLS.",
         sections: [
-          `# Errors\n\nA ${ERROR_LINK} where the caller refuses its URL or its options${called.length === 0 ? '' : ', or the routes or a descriptor of its service do not hold'}.`,
+          errorsOf(
+            `where the caller refuses its URL or its options${called.length === 0 ? '' : ', or the routes or a descriptor of its service do not hold'}`
+          ),
         ],
       },
       INDENT
@@ -342,8 +331,8 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
     const methods = called.flatMap((procedure) => {
       const field = snakeIdentifierOf(procedure.procedureName);
       const procedureMark = deprecatedOf(procedure.deprecation ?? service.deprecation, INDENT);
-      const request = valueOf(procedure.request);
-      const result = valueOf(procedure.result);
+      const request = codecValueOf(procedure.request);
+      const result = codecValueOf(procedure.result);
       const parameters = `&self, request: &${request}, options: &::bead::HttpCallOptions`;
 
       return [
@@ -373,7 +362,7 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
                 INDENT
               ),
               ...procedureMark,
-              `${INDENT}pub fn ${subscriberOf(procedure)}(${parameters}) -> ::bead::HttpSubscription<${result}, ${valueOf(procedure.notification)}> {`,
+              `${INDENT}pub fn ${subscriberOf(procedure)}(${parameters}) -> ::bead::HttpSubscription<${result}, ${codecValueOf(procedure.notification)}> {`,
               `${at}self.${subscriberOf(procedure)}.call(request, options)`,
               `${INDENT}}`,
             ]),

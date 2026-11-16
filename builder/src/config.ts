@@ -252,9 +252,11 @@ const isText = (value: unknown): value is string => {
   return typeof value === 'string' && value !== '';
 };
 
-// an absolute URI, a scheme and what follows it (RFC 3986 §4.3), as the URL parser takes one
+// an absolute URI, a scheme and what follows it (RFC 3986 §4.3), as the URL parser takes one, of
+// printable ASCII alone as RFC 3986 §2 spells a URI: a control character or a lone surrogate would
+// be written differently by each language's target
 const isAbsoluteUri = (value: string): boolean => {
-  return /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/u.test(value) && URL.canParse(value);
+  return /^[A-Za-z][A-Za-z0-9+.-]*:[\x21-\x7E]+$/u.test(value) && URL.canParse(value);
 };
 
 // definition

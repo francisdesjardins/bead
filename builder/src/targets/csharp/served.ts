@@ -10,20 +10,15 @@
 // dependencies
 
 import type { ITransportCut } from '../../model/selection.ts';
+import { INDENT } from '../lines.ts';
+import { upperFirst } from '../names.ts';
 
 // constants
 
 /** The file an output whose server names its transports writes their procedures in. */
 export const SERVED_FILE = 'BeadServed.cs';
 
-const INDENT = '    ';
 const ADDRESSES = 'global::System.Collections.Generic.IReadOnlyList<global::Bead.ProcedureAddress>';
-
-// helpers
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 // definition
 

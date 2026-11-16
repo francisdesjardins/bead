@@ -9,9 +9,12 @@ import {
   classNamesOf,
   csharpNameOfFailure,
   csharpNamespaceOf,
+  lowerFirst,
   pascalOf,
+  pascalOfSnake,
   RUNTIME_TYPES,
   TYPESCRIPT_PROCEDURE_NAMES,
+  upperFirst,
   xmlExcludedOf,
 } from '../names.ts';
 
@@ -79,6 +82,14 @@ test("a failure's C# name: its words, each its first letter kept", () => {
   expect(csharpNameOfFailure('ON_PURPOSE')).toBe('OnPurpose');
   expect(csharpNameOfFailure('A_B1')).toBe(csharpNameOfFailure('A_B_1'));
   expect(csharpNameOfFailure('CODE')).toBe('Code');
+});
+
+test("a name's casings: its first character raised or lowered, a snake case name in Pascal case", () => {
+  expect(upperFirst('getBook')).toBe('GetBook');
+  expect(lowerFirst('GetBook')).toBe('getBook');
+  expect(upperFirst('')).toBe('');
+  expect(pascalOfSnake('hello_world')).toBe('HelloWorld');
+  expect(pascalOfSnake('a__b')).toBe('AB');
 });
 
 test('the names each target reserves', () => {

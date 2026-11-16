@@ -44,6 +44,7 @@ import type { IBlueprint } from '../../model/blueprint.ts';
 import { BEADC_FILES } from '../../roots.ts';
 import { withoutValidateOptions } from '../../validate-options.ts';
 import { IMAGE } from '../../wrappers.ts';
+import { INDENT } from '../lines.ts';
 import type { IGeneratedFile } from '../target.ts';
 import { identifierOf, packageToModFilename } from './names.ts';
 
@@ -525,7 +526,7 @@ export const messagesRootOf = (packages: readonly string[]): string => {
 
   const lines = [BUFFA_HEADER, ''];
   const emit = (node: INode, depth: number): void => {
-    const indent = '    '.repeat(depth);
+    const indent = INDENT.repeat(depth);
 
     for (const file of node.files) {
       lines.push(`${indent}include!("${file}");`);

@@ -24,6 +24,7 @@ import type {
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
+import { INDENT, statementOf } from '../lines.ts';
 import { deprecationTextOf } from '../target.ts';
 import { identifierOf, snakeIdentifierOf, toSnakeCase } from './names.ts';
 
@@ -41,6 +42,14 @@ export interface IRustTemplateOptions {
   readonly called: ReadonlySet<string> | undefined;
 }
 
+/** What a binding's codec is, as the service's file and the route table write it. */
+export interface IRustCodecTypes {
+  /** Its codec's type: `bead_protobuf`'s of its message, or a native one. */
+  readonly codecTypeOf: (binding: IBinding) => string;
+  /** The value its codec reads and writes: its message's own type, a native codec's by its trait. */
+  readonly codecValueOf: (binding: IBinding) => string;
+}
+
 // a field of a record: its documentation's and its marks' lines, then its declaration
 interface IField {
   readonly doc: readonly string[];
@@ -49,9 +58,6 @@ interface IField {
 
 // constants
 
-/** One level of indentation, rustfmt's. */
-export const INDENT = '    ';
-
 // the codec of each encoding that is no message's, a value of its own type
 const NATIVE = Object.freeze({
   raw: '::bead::RawCodec',
@@ -59,7 +65,9 @@ const NATIVE = Object.freeze({
   json: '::bead::JsonCodec',
 } as const);
 
-const ERROR = '::bead::ProgrammerError';
+/** The runtime's `ProgrammerError`, by its path from the crate's root. */
+export const ERROR = '::bead::ProgrammerError';
+
 const ERROR_LINK = `[\`ProgrammerError\`](${ERROR})`;
 
 // ! the characters rustc refuses in a comment or a literal: a lone CR, which ends no line of Rust's,
@@ -193,9 +201,27 @@ const admissionOf = (admission: AdmissionRule): string => {
   return `::bead::AdmissionRule::Hook(${literalOf(admission.hook)})`;
 };
 
-// the `# Errors` section of a function that answers a `ProgrammerError`
-const errorsOf = (cause: string): string => {
+/** The `# Errors` section of a function that answers a `ProgrammerError`, `cause` its case. */
+export const errorsOf = (cause: string): string => {
   return `# Errors\n\nA ${ERROR_LINK} ${cause}.`;
+};
+
+/** What a binding's codec is, each message by the path `messageOf` gives it. */
+export const codecTypesOf = (messageOf: (fullName: string) => string): IRustCodecTypes => {
+  const codecTypeOf = (binding: IBinding): string => {
+    return binding.encoding === 'proto' && binding.message !== undefined
+      ? `::bead_protobuf::ProtoCodec<${messageOf(binding.message)}>`
+      : NATIVE[binding.encoding as keyof typeof NATIVE];
+  };
+
+  return {
+    codecTypeOf,
+    codecValueOf: (binding) => {
+      return binding.encoding === 'proto' && binding.message !== undefined
+        ? messageOf(binding.message)
+        : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
+    },
+  };
 };
 
 // a struct of `fields` at the file's root, after its documentation and marks; a unit struct where
@@ -235,24 +261,6 @@ const recordValueOf = (
       return `${details.indent}${INDENT}${field}: ${value},`;
     }),
     `${details.indent}}`,
-  ];
-};
-
-// a `let` of `value`, its first line after `head`, its last ending the statement
-const letOf = (
-  head: string,
-  details: { readonly value: readonly string[]; readonly indent: string }
-) => {
-  const [first, ...rest] = details.value;
-
-  if (rest.length === 0) {
-    return [`${details.indent}${head}${String(first)};`];
-  }
-
-  return [
-    `${details.indent}${head}${String(first)}`,
-    ...rest.slice(0, -1),
-    `${String(rest.at(-1))};`,
   ];
 };
 
@@ -317,21 +325,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
   const fieldOf = (procedure: IProcedureEntry): string => {
     return snakeIdentifierOf(procedure.procedureName);
   };
-  const codecTypeOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? `::bead_protobuf::ProtoCodec<${options.messageOf(binding.message)}>`
-      : NATIVE[binding.encoding as keyof typeof NATIVE];
-  };
+  const { codecTypeOf, codecValueOf } = codecTypesOf(options.messageOf);
   const codecOf = (binding: IBinding): string => {
     return binding.encoding === 'proto' && binding.message !== undefined
       ? '::bead_protobuf::ProtoCodec::new()?'
       : NATIVE[binding.encoding as keyof typeof NATIVE];
-  };
-  // the value a codec reads and writes: a message's own type, a native codec's by its trait
-  const valueOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? options.messageOf(binding.message)
-      : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
   };
   const notificationOf = (procedure: IProcedureEntry): IBinding => {
     return procedure.notification ?? procedure.result;
@@ -602,7 +600,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}pub fn on_${toSnakeCase(procedure.procedureName)}<F, Fut>(&self, resolver: F) -> Result<(), ${ERROR}>`,
       `${INDENT}where`,
       `${INDENT}${INDENT}F: Fn(`,
-      `${INDENT}${INDENT}${INDENT}${INDENT}::bead::RequestProps<${valueOf(procedure.request)}>,`,
+      `${INDENT}${INDENT}${INDENT}${INDENT}::bead::RequestProps<${codecValueOf(procedure.request)}>,`,
       `${INDENT}${INDENT}${INDENT}${INDENT}::bead::Response<${codecTypeOf(procedure.result)}>,`,
       `${INDENT}${INDENT}${INDENT}) -> Fut`,
       `${INDENT}${INDENT}${INDENT}+ Send`,
@@ -920,11 +918,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}${INDENT}layer.fail_fast = options.fail_fast;`,
       `${INDENT}${INDENT}layer.validates = options.validates;`,
       '',
-      ...letOf('let service = ::bead::ServiceServer::new(', {
+      ...statementOf('let service = ::bead::ServiceServer::new(', {
         value: [...built.slice(0, -1), `${String(built.at(-1))}, &layer)?`],
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let command = ', {
+      ...statementOf('let command = ', {
         value: recordValueOf(`${name}Commands`, {
           fields: commands.map((procedure) => {
             return [
@@ -936,7 +934,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
         }),
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let notify = ', {
+      ...statementOf('let notify = ', {
         value: recordValueOf(`${name}Notifiers`, {
           fields: notifying.map((procedure) => {
             return [
@@ -1056,11 +1054,11 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}${INDENT}layer.fail_fast = options.fail_fast;`,
       `${INDENT}${INDENT}layer.validates = options.validates;`,
       '',
-      ...letOf('let service = ::bead::ServiceClient::new(', {
+      ...statementOf('let service = ::bead::ServiceClient::new(', {
         value: [...built.slice(0, -1), `${String(built.at(-1))}, client, &layer)?`],
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let request = ', {
+      ...statementOf('let request = ', {
         value: recordValueOf(`${name}Requesters`, {
           fields: answered.map((procedure) => {
             const descriptor =
@@ -1074,7 +1072,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
         }),
         indent: `${INDENT}${INDENT}`,
       }),
-      ...letOf('let notifications = ', {
+      ...statementOf('let notifications = ', {
         value: recordValueOf(`${name}Notifications`, {
           fields: notified.map((procedure) => {
             return [

@@ -37,6 +37,8 @@ import {
 import { rustGatewayRefusalsOf } from '../../model/check-rust.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { cutOf } from '../../model/selection.ts';
+import { INDENT } from '../lines.ts';
+import { pascalOfSnake } from '../names.ts';
 import {
   bindsMessages,
   headerOf,
@@ -64,7 +66,7 @@ import {
 import { EXTERNAL_INCLUDE_FILE, type IRustOptions } from './options.ts';
 import { HTTP_FILE, HTTP_MODULE, printRustHttp } from './http.ts';
 import { printRustServed, SERVED_FILE, SERVED_MODULE } from './served.ts';
-import { INDENT, printService } from './templates.ts';
+import { printService } from './templates.ts';
 import { printRustValidators } from './validators.ts';
 
 // constants
@@ -351,12 +353,7 @@ export const rustTarget: ITarget<IRustOptions> = Object.freeze({
             ...within.split('.').map((segment) => {
               return identifierOf(toSnakeCase(segment));
             }),
-            oneof
-              .split('_')
-              .map((part) => {
-                return `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
-              })
-              .join(''),
+            pascalOfSnake(oneof),
           ].join('::'),
           depth
         );

@@ -35,6 +35,7 @@ import {
   LEGACY_REQUIRED_FEATURE,
   VALIDATE_FEATURE,
 } from '../model/blueprint.ts';
+import { lowerFirst } from '../targets/names.ts';
 import { FORMAT, specVersion } from '../version.ts';
 import { type ISourcePosition, leadingOf, pathOf, positionOf } from './comments.ts';
 import {
@@ -86,10 +87,6 @@ export const PAYLOAD_TYPES: Readonly<Record<string, 'raw' | 'text' | 'json'>> = 
 });
 
 // helpers
-
-const lowerFirst = (name: string): string => {
-  return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
-};
 
 // an enum's name as its values' prefix: `InteropFailure` gives `INTEROP_FAILURE_`
 const prefixOf = (name: string): string => {

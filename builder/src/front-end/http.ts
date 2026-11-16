@@ -25,6 +25,7 @@ import {
 } from '@bufbuild/protobuf';
 import { FeatureSet_FieldPresence, MethodOptions_IdempotencyLevel } from '@bufbuild/protobuf/wkt';
 
+import { enumOfField, messageOfField } from '../descriptors.ts';
 import { diagnosticOf, type IDiagnostic } from '../diagnostics.ts';
 import { http as httpExtension } from '../generated/google/api/annotations_pb.ts';
 import type { HttpRule } from '../generated/google/api/http_pb.ts';
@@ -182,24 +183,6 @@ const fieldTypeOf = (
       }
     }
   }
-};
-
-// the message a field holds, a singular one's, an item's or a map value's
-const heldOf = (field: DescField): DescMessage | undefined => {
-  return field.fieldKind === 'message' ||
-    (field.fieldKind === 'list' && field.listKind === 'message') ||
-    (field.fieldKind === 'map' && field.mapKind === 'message')
-    ? field.message
-    : undefined;
-};
-
-// the enum a field names, a singular one's, an item's or a map value's
-const enumOf = (field: DescField): DescEnum | undefined => {
-  return field.fieldKind === 'enum' ||
-    (field.fieldKind === 'list' && field.listKind === 'enum') ||
-    (field.fieldKind === 'map' && field.mapKind === 'enum')
-    ? field.enum
-    : undefined;
 };
 
 /** Where a field is declared in its file, as source info paths name it. */
@@ -363,7 +346,7 @@ export const shapesOf = (roots: readonly DescMessage[]): IShapes => {
     messages.set(message.typeName, { desc: message, fields: fields.map(fieldEntryOf) });
 
     for (const field of fields) {
-      const named = enumOf(field);
+      const named = enumOfField(field);
 
       if (named !== undefined && named.typeName !== NULL_VALUE && !enums.has(named.typeName)) {
         enums.set(named.typeName, {
@@ -378,7 +361,7 @@ export const shapesOf = (roots: readonly DescMessage[]): IShapes => {
         });
       }
 
-      const held = heldOf(field);
+      const held = messageOfField(field);
 
       // * a well-known type stands by its name alone, and enters no entry of its own here: its form
       // is the mapping's
@@ -675,7 +658,7 @@ export const checkHttp = (input: IProtoInput): IDiagnostic[] => {
   // * an Any a binding reaches, once at each field that holds one
   for (const { desc } of shapes.messages.values()) {
     for (const field of desc.fields) {
-      if (heldOf(field)?.typeName === ANY && !WELL_KNOWN_MESSAGES.has(desc.typeName)) {
+      if (messageOfField(field)?.typeName === ANY && !WELL_KNOWN_MESSAGES.has(desc.typeName)) {
         report('HTTP_ANY', {
           file: desc.file,
           path: fieldPathOf(field),
