@@ -304,6 +304,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   head is unsent, its response destroyed otherwise or when that 500 throws too. The throw reached
   Node's `request` emit uncaught, and a 500 that threw after a failed call left a rejection
   unhandled.
+- The C# side's gateway answers what no gate foresaw with a 500 that carries none of the fields set
+  before it, a refusal's mark among them, and aborts its exchange when its head already went or
+  that 500 throws too: the 500 kept the mark, and a 500 that threw reached its host.
 
 ### Security
 

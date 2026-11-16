@@ -1199,9 +1199,9 @@ public sealed class HttpGatewayTests
     [Fact]
     public async Task Ends_an_exchange_whose_host_throws_as_its_head_is_written_reported_and_answers_the_next()
     {
-        // its host fails a refusal's head once, its 500 then answered, or each time, its 500's
-        // failure then left to its host; or each time after a call that failed, the 500 of what no
-        // gate foresaw left to its host alike
+        // its host fails a refusal's head once, its 500 then answered with none of the refusal's
+        // fields, or each time, its exchange then aborted; or each time after a call that failed, the
+        // 500 of what no gate foresaw aborted alike
         foreach (var (times, isCall) in new[] { (1, false), (int.MaxValue, false), (int.MaxValue, true) })
         {
             await using var service = await TranscodingService.Start();
@@ -1209,25 +1209,29 @@ public sealed class HttpGatewayTests
             // * a clock that breaks as the call's body is read, past every gate
             await using var gateway = new HttpGateway(isCall ? options with { Clock = new BrokenClock() } : options);
             var reported = ReportedBy(gateway);
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var lifetime = new DeadlineLifetime(cancelling);
             // a path no route matches, refused 404 as its head is written; or a call
-            var context = PaceContext(isCall ? "answer" : "problem", Cancelled);
+            var context = PaceContext(isCall ? "answer" : "problem", cancelling.Token);
             using var body = new MemoryStream();
 
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
             context.Features.Set<IHttpResponseFeature>(new FailingHeadFeature(times));
             context.Response.Body = body;
 
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
             if (times == 1)
             {
-                await gateway.Answer(context).WaitAsync(Patience, Cancelled);
                 Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
                 Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", Encoding.UTF8.GetString(body.ToArray()));
+                Assert.False(context.Response.Headers.ContainsKey("bead-refusal"));
+                Assert.Equal(0, lifetime.Aborts);
             }
             else
             {
-                Assert.Equal("the host would not write its head", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                {
-                    return gateway.Answer(context).WaitAsync(Patience, Cancelled);
-                })).Message);
+                Assert.Empty(body.ToArray());
+                Assert.Equal(1, lifetime.Aborts);
             }
 
             Assert.Equal([isCall ? "the clock broke" : "the host would not write its head"], reported);
