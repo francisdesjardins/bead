@@ -5,17 +5,14 @@ import hashlib
 import hmac
 import json
 import math
-import os
 import re
 import string
 
 import amqp_messages
+from conformance import write_json
 from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
                           width)
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vectors.json')
 
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 ZEROS = '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
@@ -1187,8 +1184,6 @@ document = {
                           for name, clauses, address, maximum, largest, size in amqp_publish_bounds],
 }
 
-with open(OUT, 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('vectors.json', document)
 
 print({key: len(value) for key, value in document.items() if isinstance(value, list) and key != '$comment'})

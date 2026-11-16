@@ -7,12 +7,9 @@ regular expression, whose $ may let a line terminator by, nor by a case mapping,
 sign as a k; a procedure's kind is held against what each way takes, as 16.11 states it.
 make_metrics.py takes its fold from here."""
 import json
-import os
 
+from conformance import write_json
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # ── Section 16 ──────────────────────────────────────────────────────────────────────────────────
 
@@ -331,9 +328,7 @@ document = {
 
 # written when run, and not when make_metrics.py takes its fold from here
 if __name__ == '__main__':
-    with open(ROOT + 'identities.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('identities.json', document)
 
     print(len(names), 'names,', len(identities), 'ids and revisions,', len(folds), 'folds and',
           len(procedure_kinds), 'procedure kinds, each name, id and kind declared', len(WAYS), 'ways')

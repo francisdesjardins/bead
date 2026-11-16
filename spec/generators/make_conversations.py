@@ -7,12 +7,11 @@ import os
 import re
 from datetime import datetime
 
+from conformance import ROOT, write_json
 from details import detail_of as violations_detail, judged, violation
 from make_codecs import payload_outcome
 from spec_version import spec_version
 
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
 # the interop service's API, its one service in its blueprint (decision 0022)
 API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
@@ -1894,9 +1893,7 @@ document = {
 
 # written when run, and not when make_metrics.py takes its steps from here
 if __name__ == '__main__':
-    with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('conversations.json', document)
 
     # * the conversation of an escaped name proves a reader only while no other payload a side's process
     # reads holds its shape: no entry of any conformance file but it names SILL, as text or as bytes

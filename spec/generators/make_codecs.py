@@ -16,16 +16,13 @@ reasons fails here, as does a written form that does not read back to itself. A 
 so that no escape this file builds is read before it is built."""
 import json
 import math
-import os
 import re
 import struct
 from decimal import Decimal, getcontext
 
+from conformance import ROOT, write_json
 from proto_wire import EGROUP, I32, I64, LEN, SGROUP, VARINT
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # a backslash, which opens a JSON escape
 B = chr(92)
@@ -1466,9 +1463,7 @@ document = {
 
 # * written when run, never when imported: make_conversations.py takes a request's reason from here
 if __name__ == '__main__':
-    with open(ROOT + 'codecs.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('codecs.json', document)
 
     print(len(payloads), 'payloads,', sum(entry['encoding'] == 'json' for entry in payloads), 'of them json and',
           sum(entry['encoding'] == 'proto' for entry in payloads), 'proto, and', len(values), 'values,',

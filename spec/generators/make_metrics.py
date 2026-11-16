@@ -2,15 +2,11 @@
 what each exit of a call or a notification the interop service's server reaches counts, step by step
 (spec/debugging.md, sections 7 to 12; decision 0013). The registry is written here a third time,
 beside the two sides, by the companion's rules."""
-import json
-import os
 
 import make_conversations as talk
+from conformance import write_json
 from debugging_version import debugging_version
 from make_identities import folded
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # ── The companion's tables ──────────────────────────────────────────────────────────────────────
 
@@ -845,8 +841,6 @@ document = {
     'exits': exits,
 }
 
-with open(ROOT + 'metrics.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('metrics.json', document)
 
 print(len(EXPOSITIONS), 'expositions and', len(exits), 'exits')

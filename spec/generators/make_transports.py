@@ -5,17 +5,15 @@ import hashlib
 import hmac
 import ipaddress
 import json
-import os
 import re
 from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
+from conformance import ROOT, write_json
 from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
 
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 # the interop service's API, its one service in its blueprint (decision 0022)
 API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
 SERVICE_ID = API['serviceId']
@@ -2729,9 +2727,7 @@ document = {
     'brokers': {MQTT: mqtt_broker(), AMQP: amqp_broker()},
 }
 
-with open(ROOT + 'transports.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('transports.json', document)
 
 print(len(cases), 'cases over HTTP,', len(websocket), 'over WebSocket,', len(played[IN_MEMORY]), 'over a broker,',
       len(played[MQTT]), 'over MQTT 5,', len(played[AMQP]), 'over AMQP 1.0,', len(responses), 'responses')

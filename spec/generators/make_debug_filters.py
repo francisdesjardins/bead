@@ -1,15 +1,11 @@
 """Writes spec/debug-filters.json: what a filter reads as, which calls and envelopes it keeps, or why it is
 refused, and what a filter given as a function does from event to event (spec/debugging.md, section 6;
 decision 0013). The filter is read here a third time, beside the two sides, by the grammar's words."""
-import json
-import os
 import re
 import tokenize
 
+from conformance import write_json
 from debugging_version import debugging_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # a comma, and the six characters C's isspace reads as white space in the C locale (6.2)
 SEPARATORS = frozenset(', \t\n\x0b\x0c\r')
@@ -354,8 +350,6 @@ with tokenize.open(__file__) as generator:
     for token in tokenize.generate_tokens(generator.readline):
         assert token.type not in WRITTEN or token.string.isascii(), token.start
 
-with open(ROOT + 'debug-filters.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=True, indent=2)
-    file.write('\n')
+write_json('debug-filters.json', document, ensure_ascii=True)
 
 print(len(FILTERS), 'debug filters and', len(SOURCES), 'given as functions')

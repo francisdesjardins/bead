@@ -27,12 +27,11 @@ import urllib.request
 
 import re2
 
+from conformance import ROOT, write_json, write_text
 from details import KEPT, LARGEST_COUNT, canonical, detail_of, es, judged, utf8, violation
 from proto_wire import LEN, f32, length_delimited, scalar_bytes, tag, varint
 from spec_version import spec_version
 
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 B = chr(92)
@@ -1838,12 +1837,9 @@ document = {
     'details': DETAILS,
 }
 
-with open(ROOT + 'validations.proto', 'w', encoding='utf-8', newline='\n') as file:
-    file.write(proto_file())
+write_text('validations.proto', proto_file())
 
-with open(ROOT + 'validations.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('validations.json', document)
 
 print(len(verdict_entries), 'verdicts and', len(DETAILS), 'details,', sum('write' in entry for entry in DETAILS), 'of them written and',
       sum('read' in entry for entry in DETAILS), 'read')

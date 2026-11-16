@@ -18,7 +18,6 @@ import calendar
 import hashlib
 import json
 import math
-import os
 import re
 import struct
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
@@ -29,12 +28,10 @@ from google.protobuf import field_mask_pb2, json_format, message_factory, struct
 from google.protobuf import wrappers_pb2  # noqa: F401
 
 from bounds import DEFAULTS
+from conformance import write_json, write_text
 from details import canonical, es
 from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
 from transcoding_version import transcoding_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 B = chr(92)
 PACKAGE = 'bead.transcoding.v1'
@@ -4149,18 +4146,11 @@ DOCUMENT_JSON = {
 }
 
 if __name__ == '__main__':
-    with open(ROOT + 'transcoding.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(proto_file())
-
-    with open(ROOT + 'transcoding-required.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(required_proto_file())
-
-    with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
-        # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor
-        # reads them as line ends
-        text = json.dumps(DOCUMENT_JSON, ensure_ascii=False, indent=2)
-        file.write(text.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
-        file.write('\n')
+    write_text('transcoding.proto', proto_file())
+    write_text('transcoding-required.proto', required_proto_file())
+    # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor reads
+    # them as line ends
+    write_json('transcoding.json', DOCUMENT_JSON, line_separators_escaped=True)
 
     print(', '.join(f'{len(DOCUMENT_JSON[group])} {group}' for group in
                     ('templates', 'readings', 'writings', 'bindings', 'failures', 'events', 'exchanges')) +
