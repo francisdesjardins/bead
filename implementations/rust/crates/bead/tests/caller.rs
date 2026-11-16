@@ -23,11 +23,11 @@ use bead::{
 };
 use bead_interop::transcoding::generated::bead_http::{HttpRoutes, TranscodingHttpClient};
 use bead_interop::transcoding::generated::messages::bead::transcoding::v1::{
-    Book, FailRequest, GetBookRequest, Needs, Requiring, TicksRequest,
+    Book, FailRequest, GetBookRequest, Needs, Requiring, Tick, TicksRequest,
 };
 use bead_interop::transcoding::generated::services::bead::transcoding::v1::TranscodingProcedures;
 use bead_interop::transcoding::{TranscodingFixture, TranscodingFixtureOptions, gateway_options};
-use bead_protobuf::{DynamicCodec, ProtoSchema};
+use bead_protobuf::{DynamicCodec, ProtoCodec, ProtoSchema};
 use buffa_types::google::protobuf::Empty;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -721,4 +721,1278 @@ async fn maps_an_unmarked_http_307_and_keeps_its_status_and_retry_after() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn maps_an_unmarked_http_418_and_keeps_its_status_and_retry_after() {
     unmarked(("418 I'm a teapot", ProtocolCode::DESTINATION_LOST)).await;
+}
+
+// ── A held listener ───────────────────────────────────────────────────────────
+
+// a listener that answers one connection with its head, then its body in chunks of `chunk`
+// octets, and holds its socket open until the caller lets it go
+struct Held {
+    port: u16,
+    requests: Arc<Mutex<Vec<String>>>,
+    released: tokio::sync::oneshot::Receiver<()>,
+}
+
+impl Held {
+    async fn new((status, media_type): (&str, &str), (body, chunk): (&[u8], usize)) -> Self {
+        let listener = TcpListener::bind((HOST, 0)).await.expect("bound");
+        let port = listener.local_addr().expect("its address").port();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let kept = Arc::clone(&requests);
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut answer = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: {media_type}\r\ntransfer-encoding: chunked\r\n\r\n"
+        )
+        .into_bytes();
+
+        for part in body.chunks(chunk) {
+            answer.extend_from_slice(format!("{:x}\r\n", part.len()).as_bytes());
+            answer.extend_from_slice(part);
+            answer.extend_from_slice(b"\r\n");
+        }
+
+        drop(spawn(async move {
+            let Ok((mut socket, _peer)) = listener.accept().await else {
+                return;
+            };
+            let request = request_of_socket(&mut socket).await;
+
+            locked(&kept).push(request);
+            drop(socket.write_all(&answer).await);
+            until_closed(&mut socket).await;
+            release.send(()).ok();
+        }));
+
+        Self {
+            port,
+            requests,
+            released,
+        }
+    }
+
+    fn url(&self) -> String {
+        format!("http://{HOST}:{}", self.port)
+    }
+
+    fn requests(&self) -> usize {
+        locked(&self.requests).len()
+    }
+
+    // once the caller closed its socket
+    async fn released(self) {
+        patience(PATIENCE, self.released)
+            .await
+            .expect("released in time")
+            .expect("its socket closed");
+    }
+}
+
+// what comes on `socket` let go, until its peer closes it
+async fn until_closed(socket: &mut TcpStream) {
+    let mut buffer = [0_u8; 64];
+
+    while let Ok(count) = socket.read(&mut buffer).await
+        && count > 0
+    {}
+}
+
+// what a stream gives until it ends: its events, then the error that ended it
+async fn subscribed<R, N>(
+    mut subscription: bead::HttpSubscription<R, N>,
+) -> (Vec<HttpEvent<R, N>>, Option<CallError>) {
+    let mut events = Vec::new();
+    let ended = patience(PATIENCE, async {
+        while let Some(entry) = subscription.next().await {
+            match entry {
+                Ok(event) => events.push(event),
+                Err(error) => return Some(error),
+            }
+        }
+
+        None
+    })
+    .await
+    .expect("settled in time");
+
+    (events, ended)
+}
+
+// a stream's failure, its code, scope, origin and detail
+fn told_of(ended: Option<CallError>) -> (u16, FailureScope, FailureOrigin, String) {
+    told(&failure_of(ended.expect("the error that ends it")))
+}
+
+// a route of the table, by its procedure's name
+fn route_named(name: &str) -> bead::HttpRoute {
+    HttpRoutes::get()
+        .expect("the table")
+        .all
+        .iter()
+        .find(|route| route.procedure().procedure().procedure_name == name)
+        .expect("its route")
+        .clone()
+}
+
+// `watch`'s route, its result and its notification given in their place
+fn watch_of((result, notification): (bead::HttpPayload, bead::HttpPayload)) -> bead::HttpRoute {
+    let route = route_named("watch");
+
+    bead::route_of(bead::HttpRouteInit {
+        procedure: route.procedure().clone(),
+        request: route.request().clone(),
+        result,
+        notification: Some(notification),
+        failures: route.failures().to_vec(),
+        no_side_effects: route.no_side_effects(),
+        routes: route.routes().to_vec(),
+    })
+    .expect("a route")
+}
+
+// `watch`'s procedure, its result read by `result` and its notifications by `notification`
+fn watch_descriptor<R: bead::PayloadCodec, N: bead::PayloadCodec>(
+    (result, notification): (R, N),
+) -> bead::NotifyingDescriptor<ProtoCodec<Empty>, R, N> {
+    let watch = &TranscodingProcedures::get().expect("its procedures").watch;
+    let described = watch.descriptor();
+
+    bead::notifying_of(
+        DescriptorInit {
+            procedure: described.procedure().clone(),
+            admission: described.admission(),
+            failures: described.failures().to_vec(),
+            request: described.request().clone(),
+            result,
+            validate: None,
+        },
+        notification,
+    )
+    .expect("watch's descriptor")
+}
+
+// a whole response of `status`, its media type and its body's octets
+fn octets_answer_of((status, media_type): (&str, &str), body: &[u8]) -> Vec<u8> {
+    let mut answer = answer_of(
+        (
+            status,
+            &[
+                &format!("content-type: {media_type}"),
+                &format!("content-length: {}", body.len()),
+            ],
+        ),
+        "",
+    );
+
+    answer.extend_from_slice(body);
+    answer
+}
+
+// ── The twins of a stub ───────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_fragmented_utf_8_and_crlf_events_and_releases_an_iteration_that_stops() {
+    let held = Held::new(
+        ("200 OK", "text/event-stream"),
+        (
+            b": heartbeat\r\nevent: result\r\nid: 1\r\ndata: {}\r\n\r\nid: 2\r\ndata: {\"remaining\":7}\r\n\r\n",
+            1,
+        ),
+    )
+    .await;
+    let client = client_of(&held.url(), &HttpCallerOptions::default());
+    let mut stream = client.subscribe_watch(&Empty::default(), &HttpCallOptions::default());
+    let mut received = Vec::new();
+
+    patience(PATIENCE, async {
+        while let Some(entry) = stream.next().await {
+            received.push(entry.expect("an event"));
+
+            if received.len() == 2 {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("read in time");
+
+    assert!(
+        matches!(received[0], HttpEvent::Result(_)),
+        "its result first: {received:?}"
+    );
+    assert!(
+        matches!(&received[1], HttpEvent::Notification(tick) if tick.remaining == 7),
+        "then its notification: {received:?}"
+    );
+
+    // * the iteration stops: its subscription dropped lets its response go, its socket closed
+    drop(stream);
+    held.released().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_notifications_before_the_result_and_a_second_result_and_releases_the_stream() {
+    for body in [
+        "data: {}\n\n",
+        "event: result\ndata: {}\n\nevent: result\ndata: {}\n\n",
+    ] {
+        let held = Held::new(
+            ("200 OK", "text/event-stream"),
+            (body.as_bytes(), body.len()),
+        )
+        .await;
+        let client = client_of(&held.url(), &HttpCallerOptions::default());
+        let (_events, ended) =
+            subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                .await;
+
+        assert_eq!(
+            told_of(ended).0,
+            code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+            "{body:?}"
+        );
+        held.released().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn passes_cancellation_to_http_dispatch_and_rejects_a_url_or_bound_outside_its_contract() {
+    // a listener that reads the request and never answers it, then tells when its socket closes
+    let listener = TcpListener::bind((HOST, 0)).await.expect("bound");
+    let port = listener.local_addr().expect("its address").port();
+    let (entered, entering) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+
+    drop(spawn(async move {
+        let Ok((mut socket, _peer)) = listener.accept().await else {
+            return;
+        };
+
+        drop(request_of_socket(&mut socket).await);
+        entered.send(()).ok();
+        until_closed(&mut socket).await;
+        release.send(()).ok();
+    }));
+
+    let client = client_of(
+        &format!("http://{HOST}:{port}"),
+        &HttpCallerOptions::default(),
+    );
+    let signal = tokio_util::sync::CancellationToken::new();
+    let mut options = HttpCallOptions::default();
+
+    options.signal = Some(signal.clone());
+
+    let waiting = client.json(&Value::Null, &options);
+
+    patience(PATIENCE, entering)
+        .await
+        .expect("its request in time")
+        .expect("its request");
+    signal.cancel();
+
+    assert!(
+        matches!(settled(waiting).await, Err(CallError::Cancelled(None))),
+        "a call its signal gave up"
+    );
+    // * its signal reached its dispatch: the exchange dropped, its socket closed
+    patience(PATIENCE, released)
+        .await
+        .expect("released in time")
+        .expect("its socket closed");
+
+    for url in [
+        "http://user:secret@localhost",
+        "http://localhost?x=1",
+        "http://localhost/#fragment",
+        "ftp://localhost",
+    ] {
+        assert!(
+            TranscodingHttpClient::new(url, &HttpCallerOptions::default()).is_err(),
+            "{url} is refused"
+        );
+    }
+
+    let mut bounded = HttpCallerOptions::default();
+
+    bounded.maximum_body_bytes = Some(0);
+
+    assert!(
+        TranscodingHttpClient::new("http://localhost", &bounded).is_err(),
+        "a bound of 0 is refused"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_text_and_raw_event_data_by_their_encodings() {
+    let held = Held::new(
+        ("200 OK", "text/event-stream"),
+        (
+            "event: result\ndata: \"Ada\\rJosé\"\n\ndata: \"AAH/\"\n\nevent: failure\ndata: {\"code\":7,\"scope\":\"protocol\"}\n\n"
+                .as_bytes(),
+            1,
+        ),
+    )
+    .await;
+    let route = watch_of((bead::HttpPayload::Text, bead::HttpPayload::Raw));
+    let caller = HttpCaller::new(&held.url(), &HttpCallerOptions::default()).expect("the caller");
+    let subscriber = caller
+        .subscriber_of(&route, &watch_descriptor((bead::TextCodec, bead::RawCodec)))
+        .expect("watch's subscriber");
+    let (events, ended) =
+        subscribed(subscriber.call(&Empty::default(), &HttpCallOptions::default())).await;
+    let (code, scope, ..) = told_of(ended);
+
+    assert_eq!((code, scope), (7, FailureScope::Protocol), "its failure");
+    assert_eq!(
+        events,
+        [
+            HttpEvent::Result("Ada\rJosé".to_owned()),
+            HttpEvent::Notification(bytes::Bytes::from_static(&[0, 1, 255])),
+        ],
+        "a text's data its text, a raw's its bytes in base64"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_a_truncated_stream_and_malformed_problems_without_another_call() {
+    let cases = [
+        (
+            "event: result\ndata: {}\n\n",
+            ("200 OK", "text/event-stream"),
+            (ProtocolCode::DESTINATION_LOST, FailureOrigin::Local),
+        ),
+        (
+            "{}",
+            ("400 Bad Request", "application/problem+json"),
+            (ProtocolCode::PAYLOAD_UNDECODABLE, FailureOrigin::Peer),
+        ),
+        (
+            "{\"code\":0,\"scope\":\"protocol\"}",
+            ("400 Bad Request", "application/problem+json"),
+            (ProtocolCode::PAYLOAD_UNDECODABLE, FailureOrigin::Local),
+        ),
+        (
+            "{}",
+            ("200 OK", "application/json"),
+            (ProtocolCode::PAYLOAD_UNDECODABLE, FailureOrigin::Local),
+        ),
+    ];
+
+    for (body, answered, (code, origin)) in cases {
+        let scripted = Scripted::new(vec![whole_answer_of(answered, body)]).await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let (_events, ended) =
+            subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                .await;
+        let (told_code, _scope, told_origin, _detail) = told_of(ended);
+
+        assert_eq!(
+            (told_code, told_origin),
+            (code_of(code), origin),
+            "{body} {answered:?}"
+        );
+        assert_eq!(scripted.requests().len(), 1, "{body} {answered:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_an_authorization_outside_http_field_values_before_dispatch() {
+    let scripted = Scripted::new(vec![whole_answer_of(
+        ("200 OK", "application/json"),
+        "null",
+    )])
+    .await;
+    let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+
+    for authorization in [
+        "Bearer bad\r\ninjected: value",
+        "\u{1}",
+        "Bearer José",
+        " Bearer good",
+        "Bearer good ",
+        "\tBearer good",
+        "Bearer good\t",
+    ] {
+        let refused =
+            settled(client.json(&Value::Null, &call_options_of((Some(authorization), false))))
+                .await
+                .expect_err("refused");
+
+        assert!(
+            matches!(refused, CallError::Refused(_)),
+            "{authorization:?} is its caller's bug: {refused:?}"
+        );
+    }
+
+    assert_eq!(scripted.requests(), Vec::<String>::new(), "nothing went");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_numeric_problem_codes_by_their_integer_value_and_refuses_another_json_kind() {
+    let undecodable = (
+        code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+        FailureScope::Protocol,
+        FailureOrigin::Local,
+    );
+    let application = (1, FailureScope::Application, FailureOrigin::Peer);
+    let cases = [
+        ("{\"code\":1.0,\"scope\":\"application\"}", application),
+        ("{\"code\":1e0,\"scope\":\"application\"}", application),
+        ("{\"code\":\"1\",\"scope\":\"application\"}", undecodable),
+        ("{\"code\":1,\"scope\":1}", undecodable),
+        (
+            "{\"code\":1,\"scope\":\"application\",\"detail\":2}",
+            undecodable,
+        ),
+    ];
+
+    for (body, expected) in cases {
+        let scripted = Scripted::new(vec![whole_answer_of(
+            ("400 Bad Request", "application/problem+json"),
+            body,
+        )])
+        .await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let failure = failed(client.json(&Value::Null, &HttpCallOptions::default())).await;
+
+        assert_eq!(
+            (failure.code().get(), failure.scope(), failure.origin()),
+            expected,
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_a_leading_stream_bom_and_media_types_without_case() {
+    let held = Held::new(
+        ("200 OK", "Text/Event-Stream"),
+        (
+            "\u{feff}event: result\r\ndata: {}\r\n\r\nevent: failure\r\ndata: {\"status\":502}\r\n\r\n"
+                .as_bytes(),
+            1,
+        ),
+    )
+    .await;
+    let client = client_of(&held.url(), &HttpCallerOptions::default());
+    let (events, ended) =
+        subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default())).await;
+    let (code, _scope, origin, _detail) = told_of(ended);
+
+    assert_eq!(
+        (code, origin),
+        (code_of(ProtocolCode::DESTINATION_LOST), FailureOrigin::Peer),
+        "its failure by its status"
+    );
+    assert!(
+        matches!(events[..], [HttpEvent::Result(_)]),
+        "its result alone: {events:?}"
+    );
+}
+
+// `watch`'s route, its result given in its place
+fn watch_resulting(result: bead::HttpPayload) -> bead::HttpRoute {
+    let notification = route_named("watch")
+        .notification()
+        .cloned()
+        .expect("watch notifies");
+
+    watch_of((result, notification))
+}
+
+// `watch`'s subscriber, its result read as raw bytes or as a text, its notifications as Ticks
+enum Resulting {
+    Raw(bead::HttpSubscriber<ProtoCodec<Empty>, bead::RawCodec, ProtoCodec<Tick>>),
+    Text(bead::HttpSubscriber<ProtoCodec<Empty>, bead::TextCodec, ProtoCodec<Tick>>),
+}
+
+// `watch`'s subscriber on a caller of `url`, its result read as `result` says
+fn raw_or_text_subscriber_of(url: &str, result: &bead::HttpPayload) -> Resulting {
+    let caller = HttpCaller::new(url, &HttpCallerOptions::default()).expect("the caller");
+    let route = watch_resulting(result.clone());
+    let notification = TranscodingProcedures::get()
+        .expect("its procedures")
+        .watch
+        .notification()
+        .clone();
+
+    if matches!(result, bead::HttpPayload::Raw) {
+        Resulting::Raw(
+            caller
+                .subscriber_of(&route, &watch_descriptor((bead::RawCodec, notification)))
+                .expect("watch's subscriber"),
+        )
+    } else {
+        Resulting::Text(
+            caller
+                .subscriber_of(&route, &watch_descriptor((bead::TextCodec, notification)))
+                .expect("watch's subscriber"),
+        )
+    }
+}
+
+// what `watch`'s stream on `url` ends with, its result read as `result`, and how many events came
+async fn raw_or_text_ended(url: &str, result: &bead::HttpPayload) -> (usize, Option<CallError>) {
+    let options = HttpCallOptions::default();
+
+    match raw_or_text_subscriber_of(url, result) {
+        Resulting::Raw(raw) => {
+            let (events, ended) = subscribed(raw.call(&Empty::default(), &options)).await;
+
+            (events.len(), ended)
+        }
+        Resulting::Text(text) => {
+            let (events, ended) = subscribed(text.call(&Empty::default(), &options)).await;
+
+            (events.len(), ended)
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wraps_malformed_json_utf_8_base64_and_event_framing_as_an_undecodable_payload() {
+    let watch = route_named("watch");
+    let descriptor = &TranscodingProcedures::get().expect("its procedures").watch;
+
+    for (body, is_raw) in [
+        ("event: result\ndata: {\n\n", false),
+        ("event: result\ndata: \"%%%\"\n\n", true),
+        ("event: message\ndata: {}\n\n", false),
+    ] {
+        let held = Held::new(("200 OK", "text/event-stream"), (body.as_bytes(), 1)).await;
+        let ended = if is_raw {
+            raw_or_text_ended(&held.url(), &bead::HttpPayload::Raw)
+                .await
+                .1
+        } else {
+            let caller =
+                HttpCaller::new(&held.url(), &HttpCallerOptions::default()).expect("the caller");
+            let subscriber = caller
+                .subscriber_of(&watch, descriptor)
+                .expect("watch's subscriber");
+
+            subscribed(subscriber.call(&Empty::default(), &HttpCallOptions::default()))
+                .await
+                .1
+        };
+        let (code, _scope, origin, _detail) = told_of(ended);
+
+        assert_eq!(
+            (code, origin),
+            (
+                code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+                FailureOrigin::Local
+            ),
+            "{body:?}"
+        );
+    }
+
+    for media_type in [
+        "application/json",
+        "application/problem+json",
+        "text/event-stream",
+    ] {
+        let status = if media_type == "application/problem+json" {
+            "400 Bad Request"
+        } else {
+            "200 OK"
+        };
+        let mut answer = answer_of((status, &[&format!("content-type: {media_type}")]), "");
+
+        answer.push(0xff);
+
+        let scripted = Scripted::new(vec![answer]).await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let failure = if media_type == "text/event-stream" {
+            failure_of(
+                subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                    .await
+                    .1
+                    .expect("its end"),
+            )
+        } else {
+            failed(client.json(&Value::Null, &HttpCallOptions::default())).await
+        };
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+                FailureScope::Protocol,
+                FailureOrigin::Local,
+                "the HTTP payload cannot be decoded".to_owned()
+            ),
+            "{media_type}"
+        );
+        assert!(
+            core::error::Error::source(&failure).is_some(),
+            "{media_type}: its cause kept"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_non_string_and_noncanonical_raw_event_data_and_releases_its_reader() {
+    for (data, detail) in [
+        ("null", "an HTTP text or raw event holds a JSON string"),
+        ("\"AB==\"", "an HTTP raw event holds standard padded base64"),
+    ] {
+        let body = format!("event: result\ndata: {data}\n\n");
+        let held = Held::new(("200 OK", "text/event-stream"), (body.as_bytes(), 1)).await;
+        let (received, ended) = raw_or_text_ended(&held.url(), &bead::HttpPayload::Raw).await;
+
+        assert_eq!(
+            told_of(ended),
+            (
+                code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+                FailureScope::Protocol,
+                FailureOrigin::Local,
+                detail.to_owned()
+            ),
+            "{data}"
+        );
+        assert_eq!(received, 0, "{data}: no event");
+        assert_eq!(held.requests(), 1, "{data}: one call");
+        held.released().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_invalid_result_media_and_malformed_json_without_another_call() {
+    // * a result of another media type is let go unread: its body never ends, its socket closed
+    let held = Held::new(("200 OK", "text/plain"), (b"null", 4)).await;
+    let client = client_of(&held.url(), &HttpCallerOptions::default());
+    let other = failed(client.json(&Value::Null, &HttpCallOptions::default())).await;
+
+    assert_eq!(
+        told(&other),
+        (
+            code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+            FailureScope::Protocol,
+            FailureOrigin::Local,
+            "the HTTP result has another media type".to_owned()
+        ),
+        "another media type"
+    );
+    assert_eq!(held.requests(), 1, "one call");
+    held.released().await;
+
+    let scripted = Scripted::new(vec![whole_answer_of(("200 OK", "application/json"), "{")]).await;
+    let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+    let malformed = failed(client.json(&Value::Null, &HttpCallOptions::default())).await;
+
+    assert_eq!(
+        told(&malformed),
+        (
+            code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+            FailureScope::Protocol,
+            FailureOrigin::Local,
+            "the HTTP payload cannot be decoded".to_owned()
+        ),
+        "malformed JSON"
+    );
+    assert_eq!(scripted.requests().len(), 1, "one call");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn maps_failed_response_reads_to_destination_lost_and_releases_their_readers() {
+    // * each body cut short of what its head promised, its socket closed: its read fails
+    for is_streaming in [false, true] {
+        let answer = if is_streaming {
+            answer_of(
+                (
+                    "200 OK",
+                    &[
+                        "content-type: text/event-stream",
+                        "transfer-encoding: chunked",
+                    ],
+                ),
+                "14\r\nevent: result\ndata: \r\n",
+            )
+        } else {
+            answer_of(
+                (
+                    "200 OK",
+                    &["content-type: application/json", "content-length: 10"],
+                ),
+                "nu",
+            )
+        };
+        let scripted = Scripted::new(vec![answer]).await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let (received, failure) = if is_streaming {
+            let (events, ended) =
+                subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                    .await;
+
+            (events.len(), failure_of(ended.expect("its end")))
+        } else {
+            (
+                0,
+                failed(client.json(&Value::Null, &HttpCallOptions::default())).await,
+            )
+        };
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(ProtocolCode::DESTINATION_LOST),
+                FailureScope::Protocol,
+                FailureOrigin::Local,
+                "the HTTP body ends before its answer".to_owned()
+            ),
+            "streaming {is_streaming}"
+        );
+        assert!(
+            core::error::Error::source(&failure).is_some(),
+            "streaming {is_streaming}: the read's error its cause"
+        );
+        assert_eq!(received, 0, "streaming {is_streaming}: no event");
+        assert_eq!(
+            scripted.requests().len(),
+            1,
+            "streaming {is_streaming}: one call"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounds_the_decoded_message_even_when_the_body_bound_is_larger() {
+    let maximum = bead::internal::limits_of(&bead::RouterLimitsOptions::default())
+        .expect("the default limits")
+        .maximum_envelope_bytes;
+    let length = usize::try_from(maximum.saturating_add(1)).expect("a length");
+    let scripted = Scripted::new(vec![octets_answer_of(
+        ("200 OK", "application/octet-stream"),
+        &vec![0; length],
+    )])
+    .await;
+    let mut bounded = HttpCallerOptions::default();
+
+    bounded.maximum_body_bytes = Some(maximum.saturating_add(1));
+
+    let client = client_of(&scripted.url(), &bounded);
+    let failure = failed(client.raw(&bytes::Bytes::new(), &HttpCallOptions::default())).await;
+
+    assert_eq!(
+        (failure.code().get(), failure.origin(), failure.detail()),
+        (
+            code_of(ProtocolCode::PAYLOAD_TOO_LARGE),
+            FailureOrigin::Local,
+            "the HTTP payload passes maximumEnvelopeBytes"
+        ),
+        "its message past the envelope's bound"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn maps_a_gateway_problem_without_a_refusal_by_its_status() {
+    let cases = [
+        (400, ProtocolCode::PAYLOAD_UNDECODABLE),
+        (401, ProtocolCode::SESSION_REQUIRED),
+        (403, ProtocolCode::ACCESS_DENIED),
+        (404, ProtocolCode::DESTINATION_UNREACHABLE),
+        (405, ProtocolCode::DESTINATION_UNREACHABLE),
+        (408, ProtocolCode::DESTINATION_UNREACHABLE),
+        (413, ProtocolCode::PAYLOAD_TOO_LARGE),
+        (415, ProtocolCode::PAYLOAD_UNDECODABLE),
+        (422, ProtocolCode::PAYLOAD_INVALID),
+        (429, ProtocolCode::CAPACITY_EXCEEDED),
+        (431, ProtocolCode::PAYLOAD_TOO_LARGE),
+        (500, ProtocolCode::DESTINATION_LOST),
+        (501, ProtocolCode::PROCEDURE_UNKNOWN),
+        (502, ProtocolCode::DESTINATION_LOST),
+        (503, ProtocolCode::DESTINATION_UNREACHABLE),
+        (504, ProtocolCode::DESTINATION_LOST),
+    ];
+
+    for (status, code) in cases {
+        let scripted = Scripted::new(vec![whole_answer_of(
+            (&format!("{status} Refused"), "application/problem+json"),
+            "{\"type\":\"about:blank\"}",
+        )])
+        .await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let failure = failed(client.json(&Value::Null, &HttpCallOptions::default())).await;
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(code),
+                FailureScope::Protocol,
+                FailureOrigin::Peer,
+                format!("the HTTP call answers {status}")
+            ),
+            "{status}"
+        );
+    }
+}
+
+// `json`'s route, its first default route changed as `change` says, or none
+fn json_routed(templates: Vec<bead::HttpRouteTemplate>) -> bead::HttpRoute {
+    let route = route_named("json");
+
+    bead::route_of(bead::HttpRouteInit {
+        procedure: route.procedure().clone(),
+        request: route.request().clone(),
+        result: route.result().clone(),
+        notification: None,
+        failures: route.failures().to_vec(),
+        no_side_effects: route.no_side_effects(),
+        routes: templates,
+    })
+    .expect("a route")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_invalid_low_level_call_inputs_before_http_dispatch() {
+    let scripted = Scripted::new(vec![whole_answer_of(
+        ("200 OK", "application/json"),
+        "null",
+    )])
+    .await;
+    let caller =
+        HttpCaller::new(&scripted.url(), &HttpCallerOptions::default()).expect("the caller");
+    let json = &TranscodingProcedures::get().expect("its procedures").json;
+    let generated = route_named("json");
+    let template = generated.routes()[0].clone();
+    let changed = |change: &dyn Fn(&mut bead::HttpRouteTemplate)| {
+        let mut changed = template.clone();
+
+        change(&mut changed);
+        vec![changed]
+    };
+    let choices = [
+        Vec::new(),
+        changed(&|template| template.method = bead::HttpMethod::Get),
+        changed(&|template| template.body = None),
+        changed(&|template| template.response_body = Some("field".to_owned())),
+        changed(&|template| template.template = "/items/{name}".to_owned()),
+    ];
+
+    for routes in choices {
+        let refused = caller
+            .requester_of(&json_routed(routes.clone()), json)
+            .expect_err("no default route");
+
+        assert_eq!(
+            refused.message(),
+            "an HTTP client calls a default POST route with a whole body and result",
+            "{routes:?}"
+        );
+    }
+
+    let elsewhere = caller
+        .requester_of(
+            &json_routed(changed(&|template| {
+                template.template = "https://elsewhere.example/call".to_owned();
+            })),
+            json,
+        )
+        .expect_err("off its origin");
+
+    assert_eq!(
+        elsewhere.message(),
+        "an HTTP route stays on its gateway origin",
+        "a route off its gateway's origin"
+    );
+
+    let requester = caller
+        .requester_of(&generated, json)
+        .expect("json's requester");
+
+    for authorization in [" Bearer x", "Bearer x ", "Bearer\nx", "\t", "É"] {
+        let refused =
+            settled(requester.call(&Value::Null, &call_options_of((Some(authorization), false))))
+                .await
+                .expect_err("refused");
+
+        assert!(
+            matches!(&refused, CallError::Refused(error)
+                if error.message() == "a credential holds visible ASCII, spaces and tabs alone, none first or last"),
+            "{authorization:?}: {refused:?}"
+        );
+    }
+
+    // * a stream of `json`'s procedure, which notifies nowhere on its route
+    let mut procedure = json.procedure().clone();
+
+    procedure.procedure_kind = Some(bead::ProcedureKind::Notifies);
+
+    let notifying = bead::notifying_of(
+        DescriptorInit {
+            procedure,
+            admission: json.admission(),
+            failures: json.failures().to_vec(),
+            request: bead::JsonCodec,
+            result: bead::JsonCodec,
+            validate: None,
+        },
+        bead::JsonCodec,
+    )
+    .expect("a notifying descriptor");
+    let refused = caller
+        .subscriber_of(&generated, &notifying)
+        .expect_err("no stream");
+
+    assert_eq!(
+        refused.message(),
+        "only a notifying HTTP procedure opens a stream",
+        "a stream of a procedure its route does not notify"
+    );
+    assert_eq!(scripted.requests(), Vec::<String>::new(), "nothing went");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_invalid_utf_8_on_a_terminated_event_line_and_releases_its_reader() {
+    let held = Held::new(
+        ("200 OK", "text/event-stream"),
+        (b"event: result\ndata: \xff\n\n", 1),
+    )
+    .await;
+    let client = client_of(&held.url(), &HttpCallerOptions::default());
+    let (events, ended) =
+        subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default())).await;
+    let failure = failure_of(ended.expect("its end"));
+
+    assert_eq!(
+        told(&failure),
+        (
+            code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+            FailureScope::Protocol,
+            FailureOrigin::Local,
+            "the HTTP payload cannot be decoded".to_owned()
+        ),
+        "a line of no UTF-8"
+    );
+    assert!(
+        core::error::Error::source(&failure)
+            .is_some_and(<dyn core::error::Error>::is::<std::string::FromUtf8Error>),
+        "its decoder's error its cause"
+    );
+    assert!(events.is_empty(), "no event: {events:?}");
+    assert_eq!(held.requests(), 1, "one call");
+    held.released().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn propagates_a_response_read_error_after_cancellation_without_mapping_it_to_a_failure() {
+    for is_streaming in [false, true] {
+        // a listener that writes a head and a part of its body, then, told to, closes its socket
+        // short of what its head promised: the read fails after the call is given up
+        let listener = TcpListener::bind((HOST, 0)).await.expect("bound");
+        let port = listener.local_addr().expect("its address").port();
+        let (wrote, written) = tokio::sync::oneshot::channel();
+        let (cut, cutting) = tokio::sync::oneshot::channel::<()>();
+        let answer = if is_streaming {
+            answer_of(
+                (
+                    "200 OK",
+                    &[
+                        "content-type: text/event-stream",
+                        "transfer-encoding: chunked",
+                    ],
+                ),
+                "14\r\nevent: result\ndata: \r\n",
+            )
+        } else {
+            answer_of(
+                (
+                    "200 OK",
+                    &["content-type: application/json", "content-length: 10"],
+                ),
+                "nu",
+            )
+        };
+
+        drop(spawn(async move {
+            let Ok((mut socket, _peer)) = listener.accept().await else {
+                return;
+            };
+
+            drop(request_of_socket(&mut socket).await);
+            drop(socket.write_all(&answer).await);
+
+            wrote.send(()).ok();
+
+            drop(cutting.await);
+        }));
+
+        let client = client_of(
+            &format!("http://{HOST}:{port}"),
+            &HttpCallerOptions::default(),
+        );
+        let signal = tokio_util::sync::CancellationToken::new();
+        let mut options = HttpCallOptions::default();
+
+        options.signal = Some(signal.clone());
+
+        let waiting: BoxFuture<Result<(), CallError>> = if is_streaming {
+            let subscription = client.subscribe_watch(&Empty::default(), &options);
+
+            Box::pin(async move {
+                let (events, ended) = subscribed(subscription).await;
+
+                assert!(events.is_empty(), "no event: {events:?}");
+                ended.map_or(Ok(()), Err)
+            })
+        } else {
+            let call = client.json(&Value::Null, &options);
+
+            Box::pin(async move { call.await.map(drop) })
+        };
+
+        patience(PATIENCE, written)
+            .await
+            .expect("written in time")
+            .expect("written");
+        signal.cancel();
+        cut.send(()).ok();
+
+        // * the call its signal gave up ends cancelled, the read's error never a failure of its own
+        assert!(
+            matches!(settled(waiting).await, Err(CallError::Cancelled(None))),
+            "streaming {is_streaming}: cancelled"
+        );
+        assert!(
+            signal.is_cancelled(),
+            "streaming {is_streaming}: its signal"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_malformed_json_in_native_stream_data_before_delivering_an_event() {
+    for result in [bead::HttpPayload::Text, bead::HttpPayload::Raw] {
+        let held = Held::new(
+            ("200 OK", "text/event-stream"),
+            (b"event: result\ndata: {\n\n", 1),
+        )
+        .await;
+        let (received, ended) = raw_or_text_ended(&held.url(), &result).await;
+        let failure = failure_of(ended.expect("its end"));
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+                FailureScope::Protocol,
+                FailureOrigin::Local,
+                "the HTTP payload cannot be decoded".to_owned()
+            ),
+            "{result:?}"
+        );
+        assert!(
+            core::error::Error::source(&failure).is_some(),
+            "{result:?}: its reader's refusal its cause"
+        );
+        assert_eq!(received, 0, "{result:?}: no event");
+        assert_eq!(held.requests(), 1, "{result:?}: one call");
+        held.released().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reads_an_empty_raw_result_and_maps_an_empty_non_problem_refusal_by_status() {
+    for status in ["200 OK", "503 Service Unavailable"] {
+        let scripted = Scripted::new(vec![answer_of(
+            (
+                status,
+                &[
+                    "content-type: application/octet-stream",
+                    "retry-after: 7",
+                    "content-length: 0",
+                ],
+            ),
+            "",
+        )])
+        .await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let answered = settled(client.raw(&bytes::Bytes::new(), &HttpCallOptions::default())).await;
+
+        if status == "200 OK" {
+            assert!(
+                answered.expect("its result").is_empty(),
+                "an empty raw result"
+            );
+        } else {
+            assert_eq!(
+                told(&failure_of(answered.expect_err("refused"))),
+                (
+                    code_of(ProtocolCode::DESTINATION_UNREACHABLE),
+                    FailureScope::Protocol,
+                    FailureOrigin::Peer,
+                    "the HTTP call answers 503; Retry-After: 7".to_owned()
+                ),
+                "an empty refusal by its status"
+            );
+        }
+
+        assert_eq!(scripted.requests().len(), 1, "{status}: one call");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejects_empty_responses_with_no_required_media_type_and_releases_their_content() {
+    let cases = [
+        (
+            (false, "200 OK"),
+            ProtocolCode::PAYLOAD_UNDECODABLE,
+            "the HTTP result has another media type",
+            FailureOrigin::Local,
+        ),
+        (
+            (true, "200 OK"),
+            ProtocolCode::PAYLOAD_UNDECODABLE,
+            "the HTTP subscription answers no event stream",
+            FailureOrigin::Local,
+        ),
+        (
+            (false, "503 Service Unavailable"),
+            ProtocolCode::DESTINATION_UNREACHABLE,
+            "the HTTP call answers 503",
+            FailureOrigin::Peer,
+        ),
+    ];
+
+    for ((is_streaming, status), code, detail, origin) in cases {
+        let scripted = Scripted::new(vec![answer_of((status, &["content-length: 0"]), "")]).await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let (received, failure) = if is_streaming {
+            let (events, ended) =
+                subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                    .await;
+
+            (events.len(), failure_of(ended.expect("its end")))
+        } else {
+            (
+                0,
+                failed(client.json(&Value::Null, &HttpCallOptions::default())).await,
+            )
+        };
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(code),
+                FailureScope::Protocol,
+                origin,
+                detail.to_owned()
+            ),
+            "{status} streaming {is_streaming}"
+        );
+        assert_eq!(received, 0, "{status}: no event");
+        assert_eq!(scripted.requests().len(), 1, "{status}: one call");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_an_empty_event_stream_from_a_supplied_executor_and_over_http() {
+    // * the caller takes no executor (decision 0052): the stream over HTTP alone
+    let scripted = Scripted::new(vec![whole_answer_of(("200 OK", "text/event-stream"), "")]).await;
+    let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+    let (events, ended) =
+        subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default())).await;
+
+    assert_eq!(
+        told_of(ended),
+        (
+            code_of(ProtocolCode::DESTINATION_LOST),
+            FailureScope::Protocol,
+            FailureOrigin::Local,
+            "the HTTP event stream ends without a failure".to_owned()
+        ),
+        "an empty stream over HTTP"
+    );
+    assert!(events.is_empty(), "no event: {events:?}");
+    assert_eq!(scripted.requests().len(), 1, "one call");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn maps_unmarked_http_statuses_without_treating_an_intermediary_as_its_gateway() {
+    let lost = ProtocolCode::DESTINATION_LOST;
+    let cases = [
+        (201, lost),
+        (204, lost),
+        (299, lost),
+        (300, lost),
+        (304, lost),
+        (399, lost),
+        (400, lost),
+        (401, ProtocolCode::SESSION_REQUIRED),
+        (403, ProtocolCode::ACCESS_DENIED),
+        (404, ProtocolCode::DESTINATION_UNREACHABLE),
+        (405, lost),
+        (408, lost),
+        (413, ProtocolCode::PAYLOAD_TOO_LARGE),
+        (415, lost),
+        (422, lost),
+        (429, ProtocolCode::CAPACITY_EXCEEDED),
+        (431, lost),
+        (500, lost),
+        (501, lost),
+        (502, lost),
+        (503, ProtocolCode::DESTINATION_UNREACHABLE),
+        (504, lost),
+        (599, lost),
+    ];
+
+    for (status, code) in cases {
+        let scripted = Scripted::new(vec![answer_of(
+            (
+                &format!("{status} Unmarked"),
+                &["retry-after: 7", "content-length: 0"],
+            ),
+            "",
+        )])
+        .await;
+        let client = client_of(&scripted.url(), &HttpCallerOptions::default());
+        let failure = failed(client.json(&Value::Null, &HttpCallOptions::default())).await;
+
+        assert_eq!(
+            told(&failure),
+            (
+                code_of(code),
+                FailureScope::Protocol,
+                FailureOrigin::Peer,
+                format!("the HTTP call answers {status}; Retry-After: 7")
+            ),
+            "{status}"
+        );
+        assert_eq!(scripted.requests().len(), 1, "{status}: one call");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_a_stream_failure_with_an_invalid_http_problem_status_and_no_bead_code() {
+    for data in [
+        "null",
+        "{}",
+        "{\"status\":99}",
+        "{\"status\":600}",
+        "{\"status\":1.5}",
+        "{\"status\":\"502\"}",
+        "{\"status\":null}",
+    ] {
+        let body = format!("event: failure\ndata: {data}\n\n");
+        let held = Held::new(("200 OK", "text/event-stream"), (body.as_bytes(), 1)).await;
+        let client = client_of(&held.url(), &HttpCallerOptions::default());
+        let (events, ended) =
+            subscribed(client.subscribe_watch(&Empty::default(), &HttpCallOptions::default()))
+                .await;
+
+        assert_eq!(
+            told_of(ended),
+            (
+                code_of(ProtocolCode::PAYLOAD_UNDECODABLE),
+                FailureScope::Protocol,
+                FailureOrigin::Local,
+                "the HTTP problem holds no Bead failure".to_owned()
+            ),
+            "{data}"
+        );
+        assert!(events.is_empty(), "{data}: no event");
+        assert_eq!(held.requests(), 1, "{data}: one call");
+        held.released().await;
+    }
 }

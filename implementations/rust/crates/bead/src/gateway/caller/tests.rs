@@ -616,6 +616,47 @@ async fn refuses_a_credential_in_the_clear_or_of_no_field_value_before_anything_
     }
 }
 
+#[tokio::test]
+async fn takes_tls_and_url_loopback_forms_for_an_authorized_call() {
+    // * the caller takes no executor to stub (decision 0052): each request is judged as it would
+    // go, its credential on it, nothing dialled
+    let service = Service::new();
+    let routes = service.routes();
+
+    for url in [
+        "https://example.com",
+        "http://LOCALHOST",
+        "http://app.localhost",
+        "http://127.1",
+        "http://127.0.0.1.",
+        "http://[::1]",
+    ] {
+        let caller = caller_of(
+            url,
+            &HttpCallerOptions {
+                authorization: Some("Bearer good".to_owned()),
+                ..HttpCallerOptions::default()
+            },
+        );
+        let echo = caller
+            .requester_of(&routes[0], &service.echo)
+            .expect("echo's requester");
+        let prepared = echo
+            .bound
+            .prepared(
+                (echo.descriptor.request(), &String::new()),
+                (&HttpCallOptions::default(), false),
+            )
+            .expect("a request that may go");
+
+        assert_eq!(
+            prepared.request.headers().get(AUTHORIZATION),
+            Some(&HeaderValue::from_static("Bearer good")),
+            "{url} carries its credential"
+        );
+    }
+}
+
 // a gateway's own problem, its words its own
 const GATE: &str = "{\"type\":\"about:blank\",\"detail\":\"by the gate\"}";
 
