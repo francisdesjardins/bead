@@ -292,7 +292,8 @@ internal sealed class WebSocketConnection
                 _abortFailure ??= reason;
             }
 
-            _ = _reading.CancelAsync();
+            // its task observed, as a client's dispose observes its own cancel
+            _ = _reading.CancelAsync().ContinueWith((completed) => { _ = completed.Exception; }, TaskScheduler.Default);
         }
     }
 

@@ -3219,6 +3219,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             },
         });
 
+        var told = Told();
         var (client, connectionHandle) = await Connect();
 
         using (client)
@@ -3229,6 +3230,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Empty(_server.ConnectionHandles);
             Assert.Empty(_server.Clients);
             Assert.Equal((false, connectionHandle), await Next(_closes));
+            // a close that cannot go out is its peer's I/O, which no error tells (spec 15.1); an error
+            // would be told before the close just heard
+            Assert.DoesNotContain(told, (each) =>
+            {
+                return each.Name == "error";
+            });
         }
     }
 
