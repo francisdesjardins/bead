@@ -4047,6 +4047,45 @@ test.describe('createRouterCore', () => {
       });
       core[Symbol.dispose]();
     });
+
+    test('reports no failure of a resolver its side answered PROCEDURE_FAILED once its router was disposed', async () => {
+      const { port, reported, sent } = createPort();
+      const core = createRouterCore(port, {
+        limits: { ...limits, maximumAnsweringCalls: 4, maximumEnvelopeBytes: 1_024 },
+      });
+      const answering = Promise.withResolvers<void>();
+      const holding = Promise.withResolvers<void>();
+      const answered: unknown[] = [];
+
+      // a resolver answered PROCEDURE_FAILED when the test says, then held until it rejects
+      core.registerResolver(
+        Object.assign(async (props: IRequestResolverProps<Handle>) => {
+          await answering.promise;
+          await core
+            .respond({ failure: port.failures.procedureFailed }, props)
+            .catch((reason: unknown) => {
+              answered.push(reason);
+            });
+          await holding.promise;
+        }, echo)
+      );
+
+      core.receive(requestOf(1), 'a');
+      await sleep(0);
+
+      // * its answer comes after the dispose, which told it: never marked, its failure silent
+      core[Symbol.dispose]();
+      answering.resolve();
+      await sleep(0);
+
+      expect(answered).toEqual([expect.any(DisconnectError)]);
+
+      holding.reject(new Error('rejected'));
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+      expect(reported).toEqual([]);
+    });
   });
 
   test.describe('the transfers it receives', () => {

@@ -504,4 +504,40 @@ public sealed partial class RouterCoreTests
         Assert.Equal(["a"], server.ReportedOn);
         Assert.Equal((0L, 0L, 0L), await TrackedOf(server));
     }
+
+    [Fact]
+    public async Task Reports_no_failure_of_a_resolver_its_side_answered_PROCEDURE_FAILED_once_its_router_was_disposed()
+    {
+        var server = new Peer(RouterSide.Server, Chunked with { MaximumAnsweringCalls = 4, MaximumEnvelopeBytes = 1_024 });
+        var resolver = server.Resolve();
+        var answering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? answered = null;
+
+        // a resolver answered PROCEDURE_FAILED when the test says, then held until it faults
+        resolver.Handling = async (props) =>
+        {
+            await answering.Task;
+            answered = server.Core.Respond(RouterAnswer.OfFailure(new Failure { Code = (ushort)ProtocolCode.ProcedureFailed, Scope = FailureScope.Protocol }), new AnswerTarget(props.ConnectionHandle, props.Header));
+            await holding.Task;
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(1) }, "a");
+
+        // * its answer comes after the dispose, which told it: never marked, its failure silent
+        server.Core.Dispose();
+        await server.Settle();
+        answering.SetResult();
+        await server.Settle();
+        Assert.NotNull(answered);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        holding.SetException(new InvalidOperationException("rejected"));
+        await server.Settle();
+        Assert.Empty(server.Sent);
+        Assert.Empty(server.Reports);
+    }
 }
