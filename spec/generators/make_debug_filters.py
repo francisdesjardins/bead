@@ -5,7 +5,7 @@ import re
 import tokenize
 
 from conformance import write_json
-from debugging_version import debugging_version
+from spec_version import debugging_version
 
 # a comma, and the six characters C's isspace reads as white space in the C locale (6.2)
 SEPARATORS = frozenset(', \t\n\x0b\x0c\r')

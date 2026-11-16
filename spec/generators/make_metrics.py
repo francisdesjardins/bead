@@ -5,8 +5,8 @@ beside the two sides, by the companion's rules."""
 
 import make_conversations as talk
 from conformance import CODES, write_json
-from debugging_version import debugging_version
 from make_identities import folded
+from spec_version import debugging_version
 
 # ── The companion's tables ──────────────────────────────────────────────────────────────────────
 

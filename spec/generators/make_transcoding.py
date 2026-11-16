@@ -31,7 +31,7 @@ from bounds import DEFAULTS
 from conformance import CODES, hexadecimal, unit_order, write_json, write_text
 from details import canonical, es, number_text
 from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
-from transcoding_version import transcoding_version
+from spec_version import transcoding_version
 
 B = chr(92)
 PACKAGE = 'bead.transcoding.v1'
