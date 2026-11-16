@@ -47,7 +47,7 @@ export interface IRustCodecTypes {
   /** Its codec's type: `bead_protobuf`'s of its message, or a native one. */
   readonly codecTypeOf: (binding: IBinding) => string;
   /** The value its codec reads and writes: its message's own type, a native codec's by its trait. */
-  readonly valueOf: (binding: IBinding) => string;
+  readonly codecValueOf: (binding: IBinding) => string;
 }
 
 // a field of a record: its documentation's and its marks' lines, then its declaration
@@ -65,7 +65,7 @@ const NATIVE = Object.freeze({
   json: '::bead::JsonCodec',
 } as const);
 
-/** The error a made item answers where its blueprint and the runtime disagree. */
+/** The runtime's `ProgrammerError`, by its path from the crate's root. */
 export const ERROR = '::bead::ProgrammerError';
 
 const ERROR_LINK = `[\`ProgrammerError\`](${ERROR})`;
@@ -216,7 +216,7 @@ export const codecTypesOf = (messageOf: (fullName: string) => string): IRustCode
 
   return {
     codecTypeOf,
-    valueOf: (binding) => {
+    codecValueOf: (binding) => {
       return binding.encoding === 'proto' && binding.message !== undefined
         ? messageOf(binding.message)
         : `<${codecTypeOf(binding)} as ::bead::PayloadCodec>::Value`;
@@ -325,7 +325,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
   const fieldOf = (procedure: IProcedureEntry): string => {
     return snakeIdentifierOf(procedure.procedureName);
   };
-  const { codecTypeOf, valueOf } = codecTypesOf(options.messageOf);
+  const { codecTypeOf, codecValueOf } = codecTypesOf(options.messageOf);
   const codecOf = (binding: IBinding): string => {
     return binding.encoding === 'proto' && binding.message !== undefined
       ? '::bead_protobuf::ProtoCodec::new()?'
@@ -600,7 +600,7 @@ export const printService = (service: IServiceEntry, options: IRustTemplateOptio
       `${INDENT}pub fn on_${toSnakeCase(procedure.procedureName)}<F, Fut>(&self, resolver: F) -> Result<(), ${ERROR}>`,
       `${INDENT}where`,
       `${INDENT}${INDENT}F: Fn(`,
-      `${INDENT}${INDENT}${INDENT}${INDENT}::bead::RequestProps<${valueOf(procedure.request)}>,`,
+      `${INDENT}${INDENT}${INDENT}${INDENT}::bead::RequestProps<${codecValueOf(procedure.request)}>,`,
       `${INDENT}${INDENT}${INDENT}${INDENT}::bead::Response<${codecTypeOf(procedure.result)}>,`,
       `${INDENT}${INDENT}${INDENT}) -> Fut`,
       `${INDENT}${INDENT}${INDENT}+ Send`,

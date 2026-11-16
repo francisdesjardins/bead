@@ -112,7 +112,7 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
   const proceduresOf = (service: IServiceEntry): string => {
     return `${moduleOf(service)}${service.serviceName}Procedures`;
   };
-  const { codecTypeOf, valueOf } = codecTypesOf(messageOf);
+  const { codecTypeOf, codecValueOf } = codecTypesOf(messageOf);
   const payloadOf = (binding: IBinding): string => {
     return isMessage(binding)
       ? `::bead::HttpPayload::Message(form.form_of(::bead_protobuf::ProtoSchema::of::<${messageOf(binding.message)}>()))`
@@ -331,8 +331,8 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
     const methods = called.flatMap((procedure) => {
       const field = snakeIdentifierOf(procedure.procedureName);
       const procedureMark = deprecatedOf(procedure.deprecation ?? service.deprecation, INDENT);
-      const request = valueOf(procedure.request);
-      const result = valueOf(procedure.result);
+      const request = codecValueOf(procedure.request);
+      const result = codecValueOf(procedure.result);
       const parameters = `&self, request: &${request}, options: &::bead::HttpCallOptions`;
 
       return [
@@ -362,7 +362,7 @@ export const printRustHttp = (options: IRustHttpOptions): string[] => {
                 INDENT
               ),
               ...procedureMark,
-              `${INDENT}pub fn ${subscriberOf(procedure)}(${parameters}) -> ::bead::HttpSubscription<${result}, ${valueOf(procedure.notification)}> {`,
+              `${INDENT}pub fn ${subscriberOf(procedure)}(${parameters}) -> ::bead::HttpSubscription<${result}, ${codecValueOf(procedure.notification)}> {`,
               `${at}self.${subscriberOf(procedure)}.call(request, options)`,
               `${INDENT}}`,
             ]),
