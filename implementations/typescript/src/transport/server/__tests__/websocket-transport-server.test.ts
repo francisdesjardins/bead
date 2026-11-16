@@ -2259,6 +2259,51 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     expect(closes).toEqual([[false, connectionHandle]]);
     await server.stop();
   });
+
+  test('ends a connection whose drop throws at its close timeout, telling what it threw once and its close, at a close and at a stop', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      closeTimeout: 10,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const closes: unknown[] = [];
+    const errors: unknown[] = [];
+
+    server.on('close', (...args) => {
+      closes.push(args);
+    });
+    server.on('error', (error, connectionHandle) => {
+      errors.push([error.message, connectionHandle]);
+    });
+
+    // neither answers its close, and neither closes as it is terminated
+    const closed = createFakeSocket({ onClose: 'ignore', onTerminate: 'throw' });
+    const stopped = createFakeSocket({ onClose: 'ignore', onTerminate: 'throw' });
+    const closedHandle = fake.connect(closed, { remotePort: 40_001, server });
+    const stoppedHandle = fake.connect(stopped, { remotePort: 40_002, server });
+
+    await expect(server.close(closedHandle)).resolves.toBe(true);
+    await server.stop();
+
+    expect([closed.wasTerminated, stopped.wasTerminated]).toEqual([true, true]);
+    expect(server.clients).toHaveLength(0);
+    expect(closes).toEqual([
+      [false, closedHandle],
+      [false, stoppedHandle],
+    ]);
+    expect(errors).toEqual([
+      ['terminate refused', closedHandle],
+      ['terminate refused', stoppedHandle],
+    ]);
+
+    // a socket that closes after its connection ended tells nothing more
+    closed.hear('close', 1006);
+    expect([closes.length, errors.length]).toEqual([2, 2]);
+  });
 });
 
 test.describe('WebSocketTransportServer, heartbeat', () => {

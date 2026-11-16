@@ -3258,6 +3258,41 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     expect(client.isClosed()).toBe(true);
   });
 
+  test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
+    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const connecting = client.connect({ host, port: 80 });
+    const socket = made[0];
+    const told: unknown[] = [];
+
+    client.on('error', (error) => {
+      told.push(['error', error.message]);
+    });
+    client.on('close', (...args) => {
+      told.push(['close', ...args]);
+    });
+
+    // no ping answered, and a socket that never closes as it is terminated
+    if (socket !== undefined) {
+      socket.terminateBehaviour = 'throw';
+    }
+
+    socket?.fireOpen();
+    await connecting;
+    await nextEvent(client, 'close');
+
+    expect(socket?.wasTerminated).toBe(true);
+    expect(told).toEqual([
+      ['error', 'terminate refused'],
+      ['close', false, false],
+    ]);
+    expect(client.isClosed()).toBe(true);
+
+    // a socket that closes after its connection ended tells nothing more
+    socket?.fireClose({ code: 1006, reason: '' });
+    expect(told).toHaveLength(2);
+  });
+
   test('beats every HEARTBEAT when told nothing', async () => {
     using timers = spyIntervals();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });

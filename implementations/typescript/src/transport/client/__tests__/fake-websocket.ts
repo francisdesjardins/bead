@@ -22,6 +22,8 @@ export interface IFakeWebSocket extends IWebSocketLike {
   answeredPings: number;
   /** The pings the socket was asked to send. */
   pings: number;
+  /** What `terminate()` does: close as a network does, or throw and never close. */
+  terminateBehaviour: 'close' | 'throw';
   wasTerminated: boolean;
 }
 
@@ -69,6 +71,7 @@ export const createFakeWebSocket = ({ canPing = false }: { canPing?: boolean } =
       },
       pings: 0,
       send: () => {},
+      terminateBehaviour: 'close',
       wasTerminated: false,
     };
 
@@ -96,6 +99,11 @@ export const createFakeWebSocket = ({ canPing = false }: { canPing?: boolean } =
           },
           terminate: () => {
             socket.wasTerminated = true;
+
+            if (socket.terminateBehaviour === 'throw') {
+              throw new Error('terminate refused');
+            }
+
             socket.fireClose({ code: 1006, reason: '' });
           },
         })

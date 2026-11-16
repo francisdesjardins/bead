@@ -18,6 +18,7 @@ import {
   ProgrammerError,
   notOpenOf,
   ReadyStateError,
+  toError,
   tooBigOf,
   wrapReason,
 } from '../shared/errors';
@@ -270,8 +271,12 @@ export const createWebSocketTransportClient = (
         }
       );
 
-      // a drop closes as a network does, and the open socket's `onclose` reports it
-      const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
+      // a drop closes as a network does, and the open socket's `onclose` reports it; one that throws
+      // is handed to `thrown`, which ends the connection
+      const beatOf = (
+        socket: IWebSocketLike,
+        thrown: (reason: unknown) => void
+      ): IHeartbeat | undefined => {
         if (
           socket.ping === undefined ||
           socket.on === undefined ||
@@ -282,7 +287,11 @@ export const createWebSocketTransportClient = (
 
         const beats = createHeartbeat(heartbeat, {
           drop: () => {
-            socket.terminate?.();
+            try {
+              socket.terminate?.();
+            } catch (reason) {
+              thrown(reason);
+            }
           },
           ping: () => {
             if (socket.readyState === WebSocket.OPEN) {
@@ -435,11 +444,22 @@ export const createWebSocketTransportClient = (
                   // the status and the mark of an upgrade the server refused, where it can be read
                   let refused: string | undefined;
 
-                  // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever
+                  // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever;
+                  // a `terminate` that throws fails the connect here, its cause what it threw, since
+                  // that socket may never close
                   socket.on?.('unexpected-response', (_request, response) => {
                     refused = refusalOf(response);
                     response.resume?.();
-                    socket.terminate?.();
+
+                    try {
+                      socket.terminate?.();
+                    } catch (reason) {
+                      reject(
+                        new ConnectError(`the server refused the upgrade: ${refused}`, {
+                          cause: reason,
+                        })
+                      );
+                    }
                   });
 
                   socket.binaryType = binaryType;
@@ -506,7 +526,7 @@ export const createWebSocketTransportClient = (
                       tell(CLOSE_EVENT, [false, false]);
                     };
 
-                    socket.onclose = () => {
+                    const closed = (): void => {
                       stopBeating();
                       hold.drop();
 
@@ -534,7 +554,16 @@ export const createWebSocketTransportClient = (
                       end();
                     };
 
-                    beating = beatOf(socket);
+                    socket.onclose = closed;
+                    // ! a heartbeat's drop that throws is the connection's error, and its end is
+                    // told here, since that socket may never close: what it does after goes unheard
+                    beating = beatOf(socket, (reason) => {
+                      failure ??= toError(reason);
+                      socket.onerror = noop;
+                      socket.onclose = noop;
+                      socket.onmessage = noop;
+                      closed();
+                    });
                     carried = written;
 
                     // * read no further until its connect ends, so nothing is heard before it, and
