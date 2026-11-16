@@ -3867,80 +3867,88 @@ test.describe('createRouterCore', () => {
     });
 
     test('closes a connection that it refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls, nothing settling between, and reports it', async () => {
-      const closed: Handle[] = [];
-      const { control, core, held, reported, sent } = createHolding(1, {
-        // what its close rejects with is reported
-        close: (connectionHandle) => {
-          closed.push(connectionHandle);
+      for (const isAtCall of [false, true]) {
+        const closed: Handle[] = [];
+        const { control, core, held, reported, sent } = createHolding(1, {
+          // what its close throws as it is called, or rejects with as it settles, is reported
+          close: (connectionHandle) => {
+            closed.push(connectionHandle);
 
-          return Promise.reject(new Error('the transport would not close'));
-        },
-      });
-      const closeDetail =
-        'the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed';
+            const failure = new Error('the transport would not close');
 
-      core.receive(requestOf(1), 'a');
-      await sleep(0);
-      core.receive(cancelOf(1), 'a');
-      core.receive(requestOf(3), 'a');
-      await sleep(0);
-      // the first of a run past both counts
-      core.receive(requestOf(5), 'a');
-      await sleep(0);
-      // a settle, then a request refused at the calls answered alone: the run starts over
-      held[0]?.resolve();
-      await sleep(0);
-      core.receive(requestOf(7), 'a');
-      core.receive(cancelOf(3), 'a');
-      core.receive(requestOf(9), 'a');
-      await sleep(0);
-      // past both again: once
-      core.receive(requestOf(11), 'a');
-      await sleep(0);
+            if (isAtCall) {
+              throw failure;
+            }
 
-      expect(
-        failuresOf(sent).map(([callId]) => {
-          return callId;
-        })
-      ).toEqual([5, 7, 11]);
-      expect(closed).toEqual([]);
-      expect(reported).toEqual([]);
+            return Promise.reject(failure);
+          },
+        });
+        const closeDetail =
+          'the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed';
 
-      // twice, in a row: reported at once, and closed once its transport settled that refusal
-      control.held = [];
-      core.receive(requestOf(13), 'a');
+        core.receive(requestOf(1), 'a');
+        await sleep(0);
+        core.receive(cancelOf(1), 'a');
+        core.receive(requestOf(3), 'a');
+        await sleep(0);
+        // the first of a run past both counts
+        core.receive(requestOf(5), 'a');
+        await sleep(0);
+        // a settle, then a request refused at the calls answered alone: the run starts over
+        held[0]?.resolve();
+        await sleep(0);
+        core.receive(requestOf(7), 'a');
+        core.receive(cancelOf(3), 'a');
+        core.receive(requestOf(9), 'a');
+        await sleep(0);
+        // past both again: once
+        core.receive(requestOf(11), 'a');
+        await sleep(0);
 
-      expect(codesOf(reported)).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'a']]);
-      expect(reported[0]?.[0]).toMatchObject({ detail: closeDetail });
+        expect(
+          failuresOf(sent).map(([callId]) => {
+            return callId;
+          })
+        ).toEqual([5, 7, 11]);
+        expect(closed).toEqual([]);
+        expect(reported).toEqual([]);
 
-      // one more refused before the close lands closes nothing more
-      core.receive(requestOf(15), 'a');
-      await sleep(0);
+        // twice, in a row: reported at once, and closed once its transport settled that refusal
+        control.held = [];
+        core.receive(requestOf(13), 'a');
 
-      expect(closed).toEqual([]);
+        expect(codesOf(reported)).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'a']]);
+        expect(reported[0]?.[0]).toMatchObject({ detail: closeDetail });
 
-      for (const { resolve } of control.held) {
-        resolve();
+        // one more refused before the close lands closes nothing more
+        core.receive(requestOf(15), 'a');
+        await sleep(0);
+
+        expect(closed).toEqual([]);
+
+        for (const { resolve } of control.held) {
+          resolve();
+        }
+
+        await sleep(0);
+
+        expect(
+          failuresOf(sent).map(([callId]) => {
+            return callId;
+          })
+        ).toEqual([5, 7, 11, 13, 15]);
+        expect(failuresOf(sent).at(-2)).toEqual([
+          13,
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the calls a connection answers and those its resolvers outlive are 2 at most',
+        ]);
+        expect(closed).toEqual(['a']);
+        expect(codesOf(reported)).toEqual([
+          [ProtocolCode.CAPACITY_EXCEEDED, 'a'],
+          ['the transport would not close', 'a'],
+        ]);
+        core[Symbol.dispose]();
       }
-
-      await sleep(0);
-
-      expect(
-        failuresOf(sent).map(([callId]) => {
-          return callId;
-        })
-      ).toEqual([5, 7, 11, 13, 15]);
-      expect(failuresOf(sent).at(-2)).toEqual([
-        13,
-        ProtocolCode.CAPACITY_EXCEEDED,
-        'the calls a connection answers and those its resolvers outlive are 2 at most',
-      ]);
-      expect(closed).toEqual(['a']);
-      expect(codesOf(reported)).toEqual([
-        [ProtocolCode.CAPACITY_EXCEEDED, 'a'],
-        ['the transport would not close', 'a'],
-      ]);
-      core[Symbol.dispose]();
     });
 
     test('tells every resolver still running on a connection as it closes, its call answered or not, and counts those that outlive it side-wide until they settle', async () => {
