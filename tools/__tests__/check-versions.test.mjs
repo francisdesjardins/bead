@@ -151,6 +151,9 @@ const repository = (template) => {
       'commit.gpgsign': 'false',
       'tag.gpgsign': 'false',
       'core.autocrlf': 'false',
+      // ! no maintenance after a commit: git detaches it, and it keeps .git/objects/maintenance.lock
+      // after the commit returns, so a copy of the template finds the lock listed, then gone
+      'maintenance.auto': 'false',
     })) {
       git('config', key, value);
     }
