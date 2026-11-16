@@ -18,6 +18,7 @@ use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
 use crate::{ServerTransport, TransportServerAddress};
 
+mod opened;
 mod reconnection;
 mod tls;
 

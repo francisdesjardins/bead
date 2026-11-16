@@ -1596,6 +1596,89 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             refusals);
     }
 
+    // a context that holds the first continuation posted to it, the one of a connect whose socket
+    // opened, for the test to run; each later one runs on the pool
+    private sealed class HeldOpen : SynchronizationContext
+    {
+        public TaskCompletionSource<Action> Posted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            if (!Posted.TrySetResult(() =>
+            {
+                d(state);
+            }))
+            {
+                ThreadPool.QueueUserWorkItem((_) =>
+                {
+                    d(state);
+                });
+            }
+        }
+    }
+
+    // a connect started under a context that holds its end once its socket opened
+    private static (Task Connecting, HeldOpen Held) ConnectHeld(WebSocketTransportClient client, WebSocketTransportClientConnectOptions target)
+    {
+        var held = new HeldOpen();
+        var previous = SynchronizationContext.Current;
+
+        SynchronizationContext.SetSynchronizationContext(held);
+
+        try
+        {
+            return (client.Connect(target), held);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    // spec 15.15
+    [Fact]
+    public async Task A_dispose_between_the_open_and_the_end_of_connect_is_not_undone()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient();
+        var closes = ClosesOf(client);
+        var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled };
+        var (connecting, held) = ConnectHeld(client, target);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (await Listener.Answer(peer, head))
+        {
+            // its socket open, the end of its connect held
+            var resume = await held.Posted.Task.WaitAsync(Patience, Cancelled);
+
+            await client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+            resume();
+
+            var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            // the guard's own, where the handshake's end wraps its reason
+            Assert.Equal(("the transport client was disposed as it connected", null), (failure.Message, failure.InnerException));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            Assert.True(await IsClosed(peer));
+            Assert.False(closes.Reader.TryRead(out _));
+        }
+
+        var again = client.Connect(target);
+        var (next, nextHead) = await listener.Next();
+
+        using (next)
+        using (await Listener.Answer(next, nextHead))
+        {
+            await again.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Open, client.ReadyState);
+            await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true });
+        }
+    }
+
     [Fact]
     public async Task Refuses_a_close_before_it_connects_and_once_closed()
     {
