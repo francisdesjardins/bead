@@ -253,13 +253,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side's does: a client that came again on that close could still meet 503 busy.
 - The TypeScript side's WebSocket server and client guard a socket's `terminate`, which a
   `WebSocketServer` or a `WebSocket` the application gives may throw: at a close timeout, after a
-  close that throws, at a bound's drop and at a heartbeat's. What it throws is the connection's one
-  error, the connection is ended and its close told, and a close resolves and a stop ends, where it
-  escaped and left the connection open. A refused upgrade whose `terminate` throws fails its
-  connect, what it threw the cause.
+  close that throws, at a bound's drop and at a heartbeat's. What it throws is the connection's
+  error, unless it had one; the connection is ended and its close told, and a close resolves and a
+  stop ends, where it escaped and left the connection open. The server gives the connection's place
+  back before its close is told and ends its TCP connection, and what a close throws is the
+  connection's error too. A refused upgrade whose `terminate` throws fails its connect, what it
+  threw the cause.
 - The C# side's WebSocket connection guards its socket's `Abort`: what it throws is the
-  connection's one error, its read is cancelled, and its close is told, where a close a stop awaits
-  threw at its close timeout.
+  connection's error, unless it had one, its read is cancelled, and its close is told, where a close
+  a stop awaits threw at its close timeout.
 - The Rust side's session request's debug text leaves out its transport credential and whether
   one was carried, keeping the connection and the request header.
 - The Rust side's JSON codec keeps its parser's refusal as the cause of a `not JSON` refusal,
