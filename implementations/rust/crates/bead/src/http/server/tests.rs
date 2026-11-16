@@ -70,6 +70,54 @@ async fn refuses_an_extension_method_on_the_wire_405_method_refused() {
     started.stop().await;
 }
 
+// a method is a case-sensitive token (RFC 9110 §9.1): `get` is none of the methods it takes
+#[tokio::test]
+async fn refuses_lowercase_methods_on_the_wire_405_method_refused() {
+    let started = started(&HttpTransportServerOptions {
+        origins: Some(vec![PAGE.to_owned()]),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let fields = [
+        format!("Origin: {PAGE}"),
+        "Access-Control-Request-Method: POST".to_owned(),
+        "Content-Length: 0".to_owned(),
+    ];
+    let fields: Vec<&str> = fields.iter().map(String::as_str).collect();
+
+    for method in ["get", "post", "delete", "head", "options"] {
+        let request = head_of((method, "/bead"), (started.port, &fields));
+        let answer = raw_answer_of(started.port, request.as_bytes()).await;
+
+        assert_eq!(
+            (answer.status, answer.refusal),
+            (405, Some(HTTP_REFUSALS.method.to_owned())),
+            "{method}"
+        );
+        assert_eq!(
+            answer.fields.get("allow").map(String::as_str),
+            Some("GET, POST, DELETE"),
+            "{method}: what it takes"
+        );
+    }
+
+    let refusals = started.recorder.refusals(5).await;
+
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    assert_eq!(
+        refusals
+            .iter()
+            .map(|refusal| (refusal.status, refusal.reason.as_str()))
+            .collect::<Vec<_>>(),
+        [(405, HTTP_REFUSALS.method); 5],
+        "each refusal told"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn closes_without_a_response_an_http_2_preface_where_http_1_1_alone_is_served() {
     let started = started(&HttpTransportServerOptions::default()).await;
