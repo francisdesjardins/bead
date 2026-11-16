@@ -3546,12 +3546,15 @@ test('finishes accepted document slices with no pending bytes before their callb
   callbacks[2]?.();
 });
 
-test('stops a document at its failed write callback without ending a partial response', async () => {
+test('stops a document silently when its client goes during a write', async () => {
   for (const inline of [true, false]) {
     const waiting = Promise.withResolvers<void>();
     const sizes: number[] = [];
     let complete: ((error?: Error | null) => void) | undefined;
     let destroy: (() => void) | undefined;
+    let isDestroyed = (): boolean => {
+      return false;
+    };
     let ends = 0;
     await using fixture = await startTranscoding({
       document: 'a'.repeat(2 * 64 * 1024 + 7),
@@ -3561,6 +3564,9 @@ test('stops a document at its failed write callback without ending a partial res
 
           destroy = () => {
             response.destroy();
+          };
+          isDestroyed = () => {
+            return response.destroyed;
           };
           response.end = () => {
             ends += 1;
@@ -3602,6 +3608,7 @@ test('stops a document at its failed write callback without ending a partial res
       expect(sizes).toEqual([65536]);
       expect(ends).toBe(0);
       expect(reported).toEqual([]);
+      expect(isDestroyed()).toBe(true);
     } finally {
       destroy?.();
     }
@@ -3640,6 +3647,86 @@ test('stops a document when its response write throws', async () => {
   expect(sizes).toEqual([65536]);
   expect(ends).toBe(0);
   expect(reported).toEqual(['the document write failed']);
+});
+
+test('stops a stream when its response write throws', async () => {
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+
+  process.on('unhandledRejection', onUnhandled);
+
+  try {
+    await using fixture = await startTranscoding({
+      clock,
+      heartbeat: 1_000,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            chunks.push(new TextDecoder().decode(chunk));
+
+            // * its result goes; the write of its first notification throws
+            if (chunks.length > 1) {
+              throw new Error('the stream write failed');
+            }
+
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const socket = opened(
+      fixture.port,
+      octetsOf(fixture.port, {
+        body: '{}',
+        lines: [
+          'POST /api/Transcoding/watch HTTP/1.1',
+          'content-type: application/json',
+          'accept: text/event-stream',
+        ],
+      })
+    );
+    let isClosed = false;
+
+    socket.on('close', () => {
+      isClosed = true;
+    });
+
+    try {
+      await readUntil(socket, 'data: {}\n\n');
+      await fixture.watched(2);
+      await until(() => {
+        return chunks.length === 2;
+      });
+      await clock.tickAsync(1_000);
+      await fixture.watched(1);
+      await sleep(50);
+
+      expect(chunks).toEqual([
+        'event: result\nid: 1\ndata: {}\n\n',
+        'id: 2\ndata: {"remaining":2}\n\n',
+      ]);
+      expect(reported).toEqual(['the stream write failed']);
+      expect(unhandled).toEqual([]);
+      await until(() => {
+        return isClosed && fixture.memory.clients.length === 0;
+      });
+    } finally {
+      socket.destroy();
+    }
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {
