@@ -672,6 +672,39 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task Requests_that_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
+    {
+        var gone = new IOException("gone");
+
+        Start();
+        Router.RegisterResolver(new RawResolver(Echo, (_) =>
+        {
+            return Task.FromException(new InvalidOperationException("rejected"));
+        }));
+        Router.RegisterResolver(new RawResolver(News, (_) =>
+        {
+            throw new InvalidOperationException("thrown");
+        }));
+
+        // all three delivered before any settles
+        Deliver(First, RequestOf(1));
+        Deliver(Second, SubscribingOf(1));
+        _transport.DeliverText(First, "text");
+        await Settle();
+
+        // a refusal that cannot go out
+        _transport.SendErrors[Second] = gone;
+        Deliver(Second, RequestOf(3, Echo with { ServiceId = 99 }));
+        await Settle();
+
+        Assert.Equal(["EnvelopeMalformed first", "rejected first", "thrown second", "gone second"], Reported());
+        Assert.Same(gone, _errors[3].Reason);
+        Assert.Equal(
+            ["first failure 1 ProcedureFailed", "second failure 1 ProcedureFailed", "second failure 3 ServiceUnknown"],
+            SentSince());
+    }
+
+    [Fact]
     public async Task Requests_of_the_server_s_own_parity_or_on_a_subscription_s_call_id_are_reported_on_their_connection_and_taken_on_another()
     {
         Start();
