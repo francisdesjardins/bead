@@ -4,9 +4,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
-use super::{Ends, OnReconnect, locked, never_started};
+use super::{Ends, OnConnection, OnMessage, OnReconnect, locked, message_of, never_started, taken};
 use crate::errors::TransportError;
 use crate::memory::MemoryTransportClientConnectOptions;
+use crate::router::types::{ConnectionHandle, TransportMessage};
 use crate::transport::{
     ReadyState, RouterClientTransport, ServerTransport, TransportClientDisconnectOptions,
     TransportClientReconnectDelay, TransportClientReconnectOptions,
@@ -714,4 +715,110 @@ async fn emits_reconnect_once_as_it_starts_open_or_closed_and_not_on_a_misuse() 
     assert_eq!(reconnects.load(Ordering::SeqCst), 2);
     client.dispose();
     ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
+async fn rejects_with_a_programmer_error_when_the_transport_was_never_connected() {
+    let ends = Ends::started().await;
+    let (client, _) = ends.client();
+    let error = client
+        .reconnect(&TransportClientReconnectOptions::default())
+        .err()
+        .expect("never connected");
+
+    assert!(matches!(&error, TransportError::Refused(_)));
+    assert_eq!(
+        error.to_string(),
+        "the transport client was never connected"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Uninitialized);
+    assert_eq!(attempts(&client), 0);
+    assert!(ends.server.clients().is_empty(), "none drawn");
+    ends.server.stop().await.expect("stopped");
+}
+
+// * an option left `None` is the one absence Rust has: each falls back to its default, five
+// attempts among them
+#[tokio::test]
+async fn an_explicit_undefined_option_falls_back_to_its_default() {
+    let (clock, client) = never_started().await;
+    let reconnecting = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+                maximum_attempts: None,
+                tap: None,
+                signal: None,
+            })
+            .expect("a reconnection"),
+    );
+
+    clock.settle().await;
+
+    let refused = reconnecting
+        .await
+        .expect("settled")
+        .expect_err("its server never started");
+
+    assert!(
+        matches!(&refused, TransportError::Reconnect(error) if error.attempts() == 5),
+        "out of its default five attempts: {refused:?}"
+    );
+    assert_eq!(attempts(&client), 1 + 5, "its connect and five attempts");
+    assert_eq!(client.ready_state(), ReadyState::Closed);
+}
+
+// the seam after its attempt opened and before its reconnection hears so: a message its server
+// sent as it drew the connection, told as it opens, whose listener cancels the reconnection
+#[tokio::test]
+async fn disconnects_and_rejects_with_a_cancel_error_when_the_signal_aborts_after_the_connect_resolved()
+ {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let cancelling = tokio_util::sync::CancellationToken::new();
+    let server = ends.server.clone();
+    let cancel = cancelling.clone();
+
+    ends.server
+        .listen(Arc::new(OnConnection(move |handle: &ConnectionHandle| {
+            server.send(message_of(&[1], None), handle).expect("sent");
+        })));
+    client.listen(Arc::new(OnMessage(move |_: &TransportMessage| {
+        cancel.cancel();
+    })));
+    ends.server_told();
+
+    let reconnection = client
+        .reconnect(&TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+            signal: Some(cancelling),
+            ..TransportClientReconnectOptions::default()
+        })
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+
+    let cancelled = reconnection.await.expect_err("cancelled");
+
+    ends.clock.settle().await;
+
+    assert!(matches!(&cancelled, TransportError::Cancelled { .. }));
+    assert_eq!(cancelled.to_string(), "the reconnection was cancelled");
+    assert_eq!(client.ready_state(), ReadyState::Closed);
+    assert_eq!(attempts(&client), 2, "its connect, then one attempt");
+    assert_eq!(
+        taken(&at_client),
+        ["reconnect", "heard 01 carrying None", "closed true false"],
+        "its open protocol let go, the one it opened disconnected"
+    );
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("closed {} false", super::FIRST),
+            format!("connection {}", super::SECOND),
+            format!("closed {} true", super::SECOND),
+        ],
+        "the first let go, the second disconnected"
+    );
+    assert!(ends.server.clients().is_empty(), "none held");
 }

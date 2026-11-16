@@ -672,6 +672,45 @@ async fn a_stop_reentered_from_a_close_listener_shares_the_stop_in_progress() {
 
 #[tokio::test]
 async fn a_cancelled_start_throws_disposes_what_it_built_and_can_start_again() {
+    compares_a_cancelled_start().await;
+}
+
+#[tokio::test]
+async fn an_abort_before_listening_rejects_the_start_with_a_cancel_error_closes_what_was_opened_and_can_start_again()
+ {
+    compares_a_cancelled_start().await;
+}
+
+#[tokio::test]
+async fn an_error_before_listening_rejects_the_start_and_closes_what_was_opened() {
+    let holder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = holder.local_addr().unwrap().port();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+    let held = TransportServerStartOptions {
+        address: Some("127.0.0.1".to_owned()),
+        port: Some(port),
+        ..TransportServerStartOptions::default()
+    };
+    let refused = server.start(&held).await.unwrap_err();
+    let RouterError::Other(error) = refused else {
+        panic!("an io error: {refused:?}");
+    };
+
+    assert_eq!(
+        error.downcast_ref::<io::Error>().map(io::Error::kind),
+        Some(io::ErrorKind::AddrInUse),
+        "its port held"
+    );
+    assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
+
+    // * nothing of it left: the port it was refused starts once let go
+    drop(holder);
+    server.start(&held).await.expect("started again");
+    stopped(&server).await;
+}
+
+// a start whose signal was cancelled before it listens
+async fn compares_a_cancelled_start() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let signal = CancellationToken::new();
 
@@ -903,6 +942,58 @@ async fn is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_i
         assert!(
             !server.carries_credential(&handle),
             "no credential toward a client"
+        );
+        stopped(&server).await;
+    }
+}
+
+// * none of its connections carries a credential; each is secure on a loopback host, or as its
+// application says of what stands in front of it
+#[tokio::test]
+async fn carries_no_credential_toward_a_connection_and_is_secure_on_a_loopback_host_it_listens_on_or_as_its_transport_says()
+ {
+    let unstarted = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+    let unheld: ConnectionHandle = Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1");
+
+    assert_eq!(
+        (
+            unstarted.carries_credential(&unheld),
+            unstarted.is_secure(&unheld)
+        ),
+        (false, false),
+        "nothing held before a start"
+    );
+
+    for (address, secure, is_secure) in [
+        (Some("127.0.0.1"), None, true),
+        (None, None, true),
+        (Some("0.0.0.0"), None, false),
+        (Some("0.0.0.0"), Some(true), true),
+    ] {
+        let server = WebSocketTransportServer::new(&WebSocketTransportServerOptions {
+            secure,
+            ..briefly_closing()
+        })
+        .unwrap();
+        let recorder = recorded(&server);
+        let bound = server
+            .start(&TransportServerStartOptions {
+                address: address.map(str::to_owned),
+                find_open_port: Some(true),
+                ..TransportServerStartOptions::default()
+            })
+            .await
+            .unwrap();
+        let _client = client(bound.port).await;
+        let handle = recorder.connections(1).await.remove(0);
+
+        assert_eq!(
+            (
+                server.carries_credential(&handle),
+                server.is_secure(&handle)
+            ),
+            (false, is_secure),
+            "on {address:?}, told {secure:?}"
         );
         stopped(&server).await;
     }
@@ -3174,6 +3265,71 @@ async fn beats_every_heartbeat_when_told_nothing() {
 
     assert_eq!(HEARTBEAT, Duration::from_secs(30), "its default");
     assert_eq!(stepping.dues(), vec![HEARTBEAT], "one beat armed");
+    stopped(&server).await;
+    reader.await.unwrap();
+}
+
+// * told nothing: on localhost, both loopbacks, port 80 when no port is drawn, each connection
+// pinged every 30 seconds, a close waiting 5 seconds, a message bound an envelope's limit
+#[tokio::test]
+async fn listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing() {
+    let start = TransportServerStartOptions::default();
+    let options = WebSocketTransportServerOptions::default();
+
+    assert_eq!(
+        (start.address.as_deref(), start.port, start.find_open_port),
+        (None, None, None),
+        "localhost, port 80, none drawn, as its options say when none"
+    );
+    assert_eq!(
+        (
+            options.heartbeat,
+            options.close_timeout,
+            options.maximum_message_bytes
+        ),
+        (None, None, None),
+        "nothing told"
+    );
+    assert_eq!(
+        (HEARTBEAT, CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES),
+        (Duration::from_secs(30), Duration::from_secs(5), 16_778_240),
+        "its defaults"
+    );
+
+    // started told nothing but a port to draw, a connection it takes is pinged every 30 seconds
+    let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let runtime = platform::runtime_of(None, "a test").unwrap();
+    let server = WebSocketTransportServer::on_platform(
+        (runtime, Arc::<SteppingClock>::clone(&stepping)),
+        &options,
+    )
+    .unwrap();
+    let recorder = recorded(&server);
+    let bound = patience(
+        PATIENCE,
+        server.start(&TransportServerStartOptions {
+            find_open_port: Some(true),
+            ..start
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let reader = reading(client(bound.port).await);
+
+    recorder.connections(1).await;
+
+    // where the IPv6 loopback is absent, the IPv4 one alone, reported as it is
+    assert!(
+        ["localhost", "127.0.0.1"].contains(&bound.address.as_str()),
+        "on localhost: {}",
+        bound.address
+    );
+    assert_eq!(
+        stepping.dues(),
+        vec![HEARTBEAT],
+        "one beat armed, of 30 seconds"
+    );
     stopped(&server).await;
     reader.await.unwrap();
 }

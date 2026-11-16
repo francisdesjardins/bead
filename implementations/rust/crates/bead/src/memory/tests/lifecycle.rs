@@ -28,6 +28,24 @@ fn cancelled() -> CancellationToken {
 }
 
 #[tokio::test]
+async fn starts_uninitialized_with_no_protocol() {
+    let ends = Ends::started().await;
+    let (client, _) = ends.client();
+
+    {
+        let state = locked(&client.inner.state);
+
+        assert_eq!(state.ready, ReadyState::Uninitialized, "uninitialized");
+        assert!(state.current.is_none(), "no connection");
+        assert!(state.last_connect.is_none(), "no target");
+        assert_eq!(state.serial, 0, "no connect made");
+    }
+
+    assert!(ends.server.clients().is_empty(), "none drawn");
+    ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
 async fn connect_with_a_signal_already_aborted_rejects_with_a_cancel_error_never_reaching_the_transport()
  {
     let ends = Ends::started().await;

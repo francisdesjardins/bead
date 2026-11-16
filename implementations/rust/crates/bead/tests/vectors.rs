@@ -898,54 +898,57 @@ fn mqtt_acknowledgement_codes() -> Result<Vec<Trial>, String> {
     let entries: Vec<MqttAcknowledgementCodes> = vectors::of("mqttAcknowledgementCodes")?;
 
     Ok(vec![
-        Trial::test("plays_mqtt_acknowledgement_codes", move || {
-            hold(entries.len() == 3, || format!("{} rows", entries.len()))?;
+        Trial::test(
+            "plays_mqtt_acknowledgement_codes_each_code_of_a_puback_a_suback_and_an_unsuback_named_refused_or_unreadable_as_its_packet_s_table_says",
+            move || {
+                hold(entries.len() == 3, || format!("{} rows", entries.len()))?;
 
-            for vector in &entries {
-                let name = &vector.name;
+                for vector in &entries {
+                    let name = &vector.name;
 
-                for code in 0..=u8::MAX {
-                    let bytes = acknowledgement_bytes(vector.kind, code);
-                    let is_named = vector.named.contains(&code);
+                    for code in 0..=u8::MAX {
+                        let bytes = acknowledgement_bytes(vector.kind, code);
+                        let is_named = vector.named.contains(&code);
 
-                    match read_packet(&bytes, LARGEST_PACKET_SIZE) {
-                        Ok(MqttReading::Packet { packet, .. }) => {
-                            let ((4, MqttPacket::Puback(read))
-                            | (9, MqttPacket::Suback(read))
-                            | (11, MqttPacket::Unsuback(read))) = (vector.kind, &packet)
-                            else {
-                                return Err(format!(
-                                    "{name}: 0x{code:02X} read as {packet:?}, no {}",
-                                    vector.packet
-                                )
-                                .into());
-                            };
+                        match read_packet(&bytes, LARGEST_PACKET_SIZE) {
+                            Ok(MqttReading::Packet { packet, .. }) => {
+                                let ((4, MqttPacket::Puback(read))
+                                | (9, MqttPacket::Suback(read))
+                                | (11, MqttPacket::Unsuback(read))) = (vector.kind, &packet)
+                                else {
+                                    return Err(format!(
+                                        "{name}: 0x{code:02X} read as {packet:?}, no {}",
+                                        vector.packet
+                                    )
+                                    .into());
+                                };
 
-                            // * named, or a refusal its adapter tells by a code of 0x80 or more
-                            hold(is_named || code >= 0x80, || {
-                                format!("{name}: 0x{code:02X}, unreadable, read")
-                            })?;
-                            hold(read.reason_code() == code, || {
-                                format!("{name}: 0x{code:02X} read as {:?}", read.reason_codes)
-                            })?;
-                        }
-                        Ok(MqttReading::Partial) => {
-                            return Err(format!("{name}: 0x{code:02X} wants more bytes").into());
-                        }
-                        Err(refusal) => {
-                            hold(!is_named && code < 0x80, || {
-                                format!("{name}: 0x{code:02X} refused: {refusal}")
-                            })?;
-                            hold(refusal.to_string().contains(&vector.packet), || {
-                                format!("{name}: 0x{code:02X} refused as {refusal}")
-                            })?;
+                                // * named, or a refusal its adapter tells by a code of 0x80 or more
+                                hold(is_named || code >= 0x80, || {
+                                    format!("{name}: 0x{code:02X}, unreadable, read")
+                                })?;
+                                hold(read.reason_code() == code, || {
+                                    format!("{name}: 0x{code:02X} read as {:?}", read.reason_codes)
+                                })?;
+                            }
+                            Ok(MqttReading::Partial) => {
+                                return Err(format!("{name}: 0x{code:02X} wants more bytes").into());
+                            }
+                            Err(refusal) => {
+                                hold(!is_named && code < 0x80, || {
+                                    format!("{name}: 0x{code:02X} refused: {refusal}")
+                                })?;
+                                hold(refusal.to_string().contains(&vector.packet), || {
+                                    format!("{name}: 0x{code:02X} refused as {refusal}")
+                                })?;
+                            }
                         }
                     }
                 }
-            }
 
-            Ok(())
-        })
+                Ok(())
+            },
+        )
         .with_kind("mqttAcknowledgementCodes"),
     ])
 }

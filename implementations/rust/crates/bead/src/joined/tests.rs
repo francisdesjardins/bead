@@ -1190,3 +1190,108 @@ async fn a_joined_transport_asks_of_procedures_only_when_one_of_its_transports_n
         "the WebSocket-typed one, given none, takes none"
     );
 }
+
+// a transport of `kind` whose stop waits for its gate, when it has one, then ends as `ending` says
+struct Stopping {
+    kind: &'static str,
+    gate: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    ending: Option<&'static str>,
+    calls: Mutex<Vec<String>>,
+}
+
+impl core::fmt::Debug for Stopping {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Stopping")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ServerTransport for Stopping {
+    fn send(
+        &self,
+        _message: TransportMessage,
+        _connection_handle: &ConnectionHandle,
+    ) -> Result<Sent, RouterError> {
+        Ok(Sent::Done)
+    }
+
+    fn close(&self, _connection_handle: &ConnectionHandle) -> BoxFuture<bool> {
+        Box::pin(async { true })
+    }
+
+    fn listen(&self, _listener: Arc<dyn ServerListener>) {}
+
+    fn unlisten(&self, _listener: &Arc<dyn ServerListener>) {}
+
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        let gate = locked(&self.gate).take();
+        let ending = self.ending;
+
+        locked(&self.calls).push("stop".to_owned());
+
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                drop(gate.await);
+            }
+
+            ending.map_or(Ok(()), |message| {
+                Err(RouterError::Other(Arc::new(std::io::Error::other(message))))
+            })
+        })
+    }
+
+    fn transport_type(&self) -> Option<&str> {
+        Some(self.kind)
+    }
+}
+
+// decision 0003: a join's stop is its dispose
+#[tokio::test]
+async fn fails_its_dispose_with_what_a_transport_it_joined_failed_to_stop_with_once_every_other_settled()
+ {
+    let (release, gate) = tokio::sync::oneshot::channel();
+    let failing = Arc::new(Stopping {
+        kind: "HTTP",
+        gate: Mutex::new(None),
+        ending: Some("a stop that fails"),
+        calls: Mutex::default(),
+    });
+    let other = Arc::new(Stopping {
+        kind: "WS",
+        gate: Mutex::new(Some(gate)),
+        ending: None,
+        calls: Mutex::default(),
+    });
+    let joined = JoinedServerTransport::new(vec![
+        Arc::<Stopping>::clone(&failing),
+        Arc::<Stopping>::clone(&other),
+    ])
+    .expect("a join");
+    let stopping = crate::testing::spawn(joined.stop());
+
+    crate::testing::yield_now().await;
+
+    // * the failing one failed already: its join waits on the other
+    assert!(!stopping.is_finished(), "not settled before the other");
+    assert_eq!(
+        (locked(&failing.calls).clone(), locked(&other.calls).clone()),
+        (vec!["stop".to_owned()], vec!["stop".to_owned()]),
+        "each asked to stop"
+    );
+
+    release.send(()).expect("released");
+
+    let refused = stopping.await.expect("settled").expect_err("its failure");
+
+    assert_eq!(
+        refused.to_string(),
+        "a stop that fails",
+        "what it failed with"
+    );
+}

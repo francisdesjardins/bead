@@ -404,3 +404,79 @@ fn names_a_kind_as_a_report_does_its_article_before_it_and_reads_an_advisory_par
         );
     }
 }
+
+// * the test kit's encoder, a test's own peer's: what it leaves out written as zeros, and a half
+// given as its 8 bytes of hexadecimal
+#[test]
+fn encodes_for_a_test_s_own_peer_a_field_it_leaves_out_as_zeros_and_refuses_a_half_that_is_not_8_bytes()
+ {
+    const HALF: &str = "11 12 13 14 15 16 17 18";
+
+    let prefix = |kind: u8| parcels::ParcelFields {
+        layout: 0xB1,
+        kind,
+        flags: None,
+        opener: HALF.to_owned(),
+        acceptor: HALF.to_owned(),
+        sequence: 3,
+        id: None,
+        incarnation: None,
+        bound: None,
+        status: None,
+        layouts: None,
+        credential: None,
+        carried: None,
+        answers: None,
+        code: None,
+    };
+    let gone = |incarnation: Option<&str>| parcels::ParcelFields {
+        id: Some("ada".to_owned()),
+        incarnation: incarnation.map(str::to_owned),
+        ..prefix(kinds::GONE)
+    };
+
+    for (left, whole) in [
+        (
+            prefix(kinds::PONG),
+            parcels::ParcelFields {
+                answers: Some(0),
+                ..prefix(kinds::PONG)
+            },
+        ),
+        (
+            prefix(kinds::CLOSE),
+            parcels::ParcelFields {
+                code: Some(0),
+                ..prefix(kinds::CLOSE)
+            },
+        ),
+        (
+            gone(None),
+            gone(Some("00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")),
+        ),
+    ] {
+        assert_eq!(
+            parcels::encode(&left),
+            parcels::encode(&whole),
+            "{}",
+            kind_named(left.kind)
+        );
+    }
+
+    for (opener, acceptor) in [
+        ("12 13 14 15 16 17 18", HALF),
+        (HALF, "12 13 14 15 16 17 18"),
+    ] {
+        let short = parcels::ParcelFields {
+            opener: opener.to_owned(),
+            acceptor: acceptor.to_owned(),
+            ..prefix(kinds::PING)
+        };
+
+        assert_eq!(
+            parcels::encode(&short),
+            Err("7 bytes, not 8".to_owned()),
+            "a half of 7 bytes"
+        );
+    }
+}

@@ -318,3 +318,66 @@ fn ready_state_names_reverses_it() {
         assert_eq!(state.name(), name);
     }
 }
+
+// * every bound `spec/transports.json` gives a default, as the transports take it when told none
+#[cfg(all(feature = "websocket", feature = "http"))]
+#[test]
+fn bounds_default_to_what_the_file_states() {
+    use core::time::Duration;
+
+    use serde_json::{Map, Value};
+
+    let file: Map<String, Value> =
+        crate::testing::files::read("transports.json").expect("spec/transports.json");
+    let stated = file
+        .get("defaults")
+        .and_then(Value::as_object)
+        .expect("its defaults");
+    let milliseconds = |duration: Duration| u64::try_from(duration.as_millis()).unwrap();
+    let taken: Map<String, Value> = [
+        ("bodyBytesBudget", crate::BODY_BYTES_BUDGET),
+        ("bodyGracePeriod", milliseconds(crate::BODY_GRACE_PERIOD)),
+        (
+            "connectionInactivityTimeout",
+            milliseconds(crate::CONNECTION_INACTIVITY_TIMEOUT),
+        ),
+        ("exchangeTimeout", milliseconds(crate::EXCHANGE_TIMEOUT)),
+        ("headersTimeout", milliseconds(crate::HEADERS_TIMEOUT)),
+        ("heartbeat", milliseconds(crate::HEARTBEAT)),
+        ("inactivityTimeout", milliseconds(crate::INACTIVITY_TIMEOUT)),
+        ("maximumBodyBytes", crate::MAXIMUM_BODY_BYTES),
+        ("maximumConnections", crate::MAXIMUM_CONNECTIONS),
+        (
+            "maximumConnectionsPerAddress",
+            crate::MAXIMUM_CONNECTIONS_PER_ADDRESS,
+        ),
+        ("maximumMessageBytes", crate::MAXIMUM_MESSAGE_BYTES),
+        ("maximumOutboxBytes", crate::MAXIMUM_OUTBOX_BYTES),
+        ("maximumUnsentBytes", crate::MAXIMUM_UNSENT_BYTES),
+        ("maximumWait", milliseconds(crate::MAXIMUM_WAIT)),
+        ("maximumWaitingExchanges", crate::MAXIMUM_WAITING_EXCHANGES),
+        (
+            "minimumBodyBytesPerSecond",
+            crate::MINIMUM_BODY_BYTES_PER_SECOND,
+        ),
+        (
+            "minimumSendBytesPerSecond",
+            crate::MINIMUM_SEND_BYTES_PER_SECOND,
+        ),
+        ("sendGracePeriod", milliseconds(crate::SEND_GRACE_PERIOD)),
+        ("acceptTimeout", milliseconds(crate::ACCEPT_TIMEOUT)),
+        (
+            "maximumEnvelopePartsBytes",
+            crate::MAXIMUM_ENVELOPE_PARTS_BYTES,
+        ),
+        (
+            "heldBytesBudget",
+            crate::broker::participant::HELD_BYTES_BUDGET,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, bound)| (name.to_owned(), Value::from(bound)))
+    .collect();
+
+    assert_eq!(&taken, stated, "each bound as the file states it");
+}
