@@ -299,6 +299,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callback fails, its client gone, destroys its response too, and is still not reported.
 - The C# side's gateway reports a stream's write that throws, once, and aborts its exchange, as it
   does a document's: the stream stayed open, its writes after it attempted, and nothing reported.
+- The TypeScript side closes no connection refused twice `maximumAnsweringCalls` requests in a row
+  once its router was disposed before that close came due, as the C# side does: it asked its
+  transport to close the connection, and reported what that close rejected with.
 
 ### Security
 
