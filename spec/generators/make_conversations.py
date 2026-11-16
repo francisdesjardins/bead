@@ -1,23 +1,17 @@
 """Writes spec/conversations.json: what a server of the interop service does with what a client sends."""
-import base64
-import hashlib
-import hmac
 import json
 import os
 import re
 from datetime import datetime
 
+from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
+from interop import API, PROCEDURES, SERVICE_ID
+from jws import compact, signed, unbase64url
 from make_codecs import payload_outcome
 from spec_version import spec_version
 
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
-# the interop service's API, its one service in its blueprint (decision 0022)
-API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
-SERVICE_ID = API['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 # each procedure's request's encoding, which reads its payload
 ENCODINGS = {procedure['procedureName']: procedure['request']['encoding'] for procedure in API['procedures']}
 # the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here
@@ -46,18 +40,6 @@ OUTSIDE_ASCII = '"Jos' + chr(0xE9) + ' a+b <x>"'
 # entry of a conformance file holds
 ESCAPED_NAME = 'a name that holds an escape is read as its escapes say, whatever a payload of its shape read on another connection held'
 SILL = 'onTheSill'
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def word(value, length):
-    return hexadecimal(value.to_bytes(length, 'big'))
-
-
-def text(value):
-    return hexadecimal(value.encode('utf-8'))
 
 
 def request(call_id, procedure, payload, *, service_id=SERVICE_ID, flags=0, words=3, tail=''):
@@ -113,15 +95,6 @@ def cancelled(call_id):
 
 def answer(call_id, value):
     return {'send': f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'}
-
-
-def armed(milliseconds):
-    """A timer armed on the server's clock, due that many milliseconds from now."""
-    return {'until': {'timer': milliseconds}}
-
-
-def advance(milliseconds):
-    return {'advance': milliseconds}
 
 
 def on(step, connection):
@@ -372,19 +345,6 @@ LEEWAY = 60_000
 HOUR, DAY = 3_600, 86_400
 
 
-def base64url(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-
-def unbase64url(text):
-    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
-
-
-def compact(value):
-    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
-    return json.dumps(value, separators=(',', ':')).encode('ascii')
-
-
 def access(issuer=ISSUERS['HS256'], *, exp=START + HOUR, iat=START, jti, aud=AUDIENCE, sub='grace'):
     """An access token's claims (RFC 9068 §2.2), exp and iat in seconds since the epoch."""
     return {'iss': issuer, 'sub': sub, 'aud': aud, 'exp': exp, 'iat': iat, 'jti': jti, 'client_id': 'bead-interop-client'}
@@ -394,10 +354,7 @@ def hs256(claims, jwk=HS_KEY):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac, typed at+jwt, and named
     by its key's kid when the key has one; its claims a JSON value, or their bytes as given."""
     header = {'alg': 'HS256', 'typ': 'at+jwt', **({'kid': jwk['kid']} if 'kid' in jwk else {})}
-    claims = claims if isinstance(claims, bytes) else compact(claims)
-    signing_input = base64url(compact(header)) + '.' + base64url(claims)
-    signature = hmac.new(unbase64url(jwk['k']), signing_input.encode('ascii'), hashlib.sha256).digest()
-    return signing_input + '.' + base64url(signature)
+    return signed(header, claims, unbase64url(jwk['k']))
 
 
 def jwt(token):
@@ -1894,9 +1851,7 @@ document = {
 
 # written when run, and not when make_metrics.py takes its steps from here
 if __name__ == '__main__':
-    with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('conversations.json', document)
 
     # * the conversation of an escaped name proves a reader only while no other payload a side's process
     # reads holds its shape: no entry of any conformance file but it names SILL, as text or as bytes

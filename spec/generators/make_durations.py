@@ -6,17 +6,13 @@ platform's own conversion — JavaScript's arithmetic on a double, .NET's TimeSp
 ticks, and Rust's Duration, rounded to the nanosecond — and fails on any outcome one reaches
 otherwise, unless that outcome, or its input, crosses a row of docs/support.md for that language;
 and on any input in seconds within a platform's error of a half: a tick, or half a nanosecond."""
-import json
 import math
-import os
 from decimal import Decimal
 from fractions import Fraction
 
 from bounds import DEFAULTS
+from conformance import unit_order, write_json
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # the ceiling, 2³¹ − 1 ms, as every platform's timers hold one alike
 CEILING = 2 ** 31 - 1
@@ -608,12 +604,6 @@ def outcome_of(value, place):
     return met
 
 
-def unit_order(unit):
-    """A unit's place: the spec's first, then a companion's, behind its name and a colon."""
-    document, _, number = unit.rpartition(':')
-    return document, tuple(int(part) for part in number.split('.'))
-
-
 def clauses_of(place):
     """The units a place cites: what it observes of each, and nothing else — 1.4, which holds and
     refuses its durations; the clause that says whether it may be without end, where 1.4 does not
@@ -696,9 +686,7 @@ document = {
                                             'observed', 'outcomes') if key in place} for place in places],
 }
 
-with open(ROOT + 'durations.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('durations.json', document)
 
 print(len(places), 'places,', sum(len(place['ways']) for place in places), 'ways,', len(inputs), 'inputs,',
       sum(len(place['outcomes']) for place in places), 'outcomes')

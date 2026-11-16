@@ -14,11 +14,8 @@ every body this reading takes or refuses, and reads back every body it writes: w
 it, the entry names the row of decision 0037's table that says why, and any other parting fails the
 generator. A backslash is chr(92), so that no escape this file builds is read before it is built."""
 import base64
-import calendar
-import hashlib
 import json
 import math
-import os
 import re
 import struct
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
@@ -28,12 +25,12 @@ from google.protobuf import any_pb2, descriptor_pb2, descriptor_pool, duration_p
 from google.protobuf import field_mask_pb2, json_format, message_factory, struct_pb2, timestamp_pb2  # noqa: F401
 from google.protobuf import wrappers_pb2  # noqa: F401
 
+import proto_text
 from bounds import DEFAULTS
-from details import canonical, es
-from transcoding_version import transcoding_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
+from conformance import CODES, hexadecimal, unit_order, write_json, write_text
+from details import canonical, es, number_text
+from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
+from spec_version import transcoding_version
 
 B = chr(92)
 PACKAGE = 'bead.transcoding.v1'
@@ -455,41 +452,24 @@ def proto_type(field):
 
 
 def declaration(field, indent):
-    if field.label == 'map':
-        head = f'map<{field.key}, {proto_type(field)}> {field.name} = {field.number}'
-    else:
-        prefix = 'repeated ' if field.label == 'repeated' else 'optional ' if field.optional else ''
-        head = f'{prefix}{proto_type(field)} {field.name} = {field.number}'
-
     options = [*([f'json_name = "{field.json_name}"'] if field.custom_json else []),
                *([field.rules] if field.rules else []),
                *(['features.field_presence = LEGACY_REQUIRED'] if field.required else []),
                *(['features.message_encoding = DELIMITED'] if field.delimited else [])]
 
-    return indent + head + (f' [{", ".join(options)}]' if options else '') + ';'
+    return proto_text.field_text(field, indent, type_name=proto_type(field),
+                                 label='repeated ' if field.label == 'repeated' else 'optional ' if field.optional else '',
+                                 options=options)
 
 
-def message_text(each):
-    lines = [f'// {each.note}', f'message {each.name} {{']
-    written = set()
+def type_text_of(each):
+    """A message's text, or an enum's."""
+    if isinstance(each, Enum):
+        return proto_text.enum_text(each.name, each.note, each.values,
+                                    options=[*(['  option allow_alias = true;'] if each.alias else []),
+                                             *(['  option features.enum_type = CLOSED;'] if each.closed else [])])
 
-    for field in each.fields:
-        if field.oneof is None:
-            lines.append(declaration(field, '  '))
-        elif field.oneof not in written:
-            written.add(field.oneof)
-            lines.append(f'  oneof {field.oneof} {{')
-            lines.extend(declaration(member, '    ') for member in each.fields if member.oneof == field.oneof)
-            lines.append('  }')
-
-    lines.append('}')
-    return '\n'.join(lines)
-
-
-def enum_text(each):
-    return '\n'.join([f'// {each.note}', f'enum {each.name} {{', *(['  option allow_alias = true;'] if each.alias else []),
-                      *(['  option features.enum_type = CLOSED;'] if each.closed else []),
-                      *[f'  {value} = {number};' for value, number in each.values], '}'])
+    return proto_text.message_text(each, declaration)
 
 
 def type_text(name):
@@ -550,121 +530,44 @@ def own_types(required_file):
 def required_proto_file():
     """spec/transcoding-required.proto: the messages of fields protobuf requires, and a closed enum, which
     spec/transcoding.proto, proto3, imports."""
-    return '\n'.join([
+    comments = [
         '// The messages spec/transcoding.json plays a gateway against that a proto3 file cannot declare, written with',
         '// its entries by spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision',
         '// 0042).',
-        'edition = "2023";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "google/protobuf/field_mask.proto";',
-        '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own_types(True)),
+    ]
+
+    return '\n'.join([
+        *proto_text.head(comments, 'edition = "2023";', PACKAGE, ['google/protobuf/field_mask.proto']),
+        '\n\n'.join(type_text_of(each) for each in own_types(True)),
         '',
     ])
 
 
 def proto_file():
-    own = own_types(False)
-
-    return '\n'.join([
+    comments = [
         '// The messages and the service spec/transcoding.json plays a gateway against, written with its entries by',
         '// spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision 0037).',
-        'syntax = "proto3";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "bead/options.proto";',
-        'import "buf/validate/validate.proto";',
-        'import "google/api/annotations.proto";',
-        'import "google/protobuf/any.proto";',
-        'import "google/protobuf/duration.proto";',
-        'import "google/protobuf/empty.proto";',
-        'import "google/protobuf/field_mask.proto";',
-        'import "google/protobuf/struct.proto";',
-        'import "google/protobuf/timestamp.proto";',
-        'import "google/protobuf/wrappers.proto";',
-        'import "transcoding-required.proto";',
-        '',
-        'option (bead.file) = {',
-        '  admission: {',
-        '    none: {}',
-        '  }',
-        '};',
-        '',
-        "// What a gateway answers, each procedure by its default routes and its rules.",
-        'service TranscodingService {',
-        '  option (bead.service) = {',
-        '    id: 1',
-        '    revision: 1',
-        '    failures: "TranscodingFailure"',
-        '  };',
-        '',
+    ]
+    imports = ['bead/options.proto', 'buf/validate/validate.proto', 'google/api/annotations.proto',
+               'google/protobuf/any.proto', 'google/protobuf/duration.proto', 'google/protobuf/empty.proto',
+               'google/protobuf/field_mask.proto', 'google/protobuf/struct.proto', 'google/protobuf/timestamp.proto',
+               'google/protobuf/wrappers.proto', 'transcoding-required.proto']
+
+    return '\n'.join([
+        *proto_text.head(comments, 'syntax = "proto3";', PACKAGE, imports),
+        *proto_text.ADMISSION_NONE,
+        *proto_text.service_head('TranscodingService',
+                                 'What a gateway answers, each procedure by its default routes and its rules.',
+                                 ['id: 1', 'revision: 1', 'failures: "TranscodingFailure"']),
         '\n\n'.join(rpc_text(procedure) for procedure in PROCEDURES),
         '}',
         '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own),
+        '\n\n'.join(type_text_of(each) for each in own_types(False)),
         '',
     ])
 
 
 # ── The encoder, protobuf's Encoding guide ──────────────────────────────────────────────────────
-
-VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
-
-
-def varint(value):
-    value &= (1 << 64) - 1
-    out = bytearray()
-
-    while True:
-        byte = value & 0x7F
-        value >>= 7
-
-        if value:
-            out.append(byte | 0x80)
-        else:
-            out.append(byte)
-            return bytes(out)
-
-
-def tag(number, wire):
-    return varint(number << 3 | wire)
-
-
-def scalar_bytes(kind, value):
-    """A scalar's record's body, and its wire type."""
-    if kind in ('int32', 'int64', 'uint32', 'uint64') or kind.startswith('enum:'):
-        return varint(value), VARINT
-    if kind == 'bool':
-        return varint(int(value)), VARINT
-    if kind == 'sint32':
-        return varint((value << 1) ^ (value >> 31)), VARINT
-    if kind == 'sint64':
-        return varint((value << 1) ^ (value >> 63)), VARINT
-    if kind == 'fixed32':
-        return struct.pack('<I', value), I32
-    if kind == 'sfixed32':
-        return struct.pack('<i', value), I32
-    if kind == 'float':
-        return struct.pack('<f', value), I32
-    if kind == 'fixed64':
-        return struct.pack('<Q', value), I64
-    if kind == 'sfixed64':
-        return struct.pack('<q', value), I64
-    if kind == 'double':
-        return struct.pack('<d', value), I64
-    if kind == 'string':
-        data = value.encode('utf-8')
-        return varint(len(data)) + data, LEN
-    if kind == 'bytes':
-        return varint(len(value)) + value, LEN
-    raise ValueError(kind)
-
-
-def length_delimited(data):
-    return varint(len(data)) + data
 
 
 def on_the_wire(kind, value):
@@ -722,10 +625,6 @@ def encode(each, value):
             out += record(field.number, field.kind, given, delimited=field.delimited)
 
     return out
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
 
 
 # ── Reading a proto body, transcoding 5.2 to 5.4 ────────────────────────────────────────────────
@@ -894,11 +793,6 @@ def read_text(data):
         raise Refused('a number past a double', 1)
 
     return value
-
-
-def f32(value):
-    """The 32-bit float nearest a double, a tie to the even; OverflowError past the largest finite one."""
-    return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
 ARTICLE_AN = re.compile(r'[aeioAEIO]|sint|sfixed')
@@ -1414,26 +1308,6 @@ def read_body(each, data):
 
 
 # ── Writing a proto result, Bead's proto JSON form, transcoding 5.6 and 5.7 ─────────────────────
-
-
-def number_text(digits, exponent):
-    """Number::toString of a positive number of these digits, its value int(digits) * 10 ** exponent."""
-    digits = digits.lstrip('0')
-    stripped = digits.rstrip('0')
-    exponent += len(digits) - len(stripped)
-    digits = stripped
-    k, n = len(digits), exponent + len(digits)
-
-    if k <= n <= 21:
-        return digits + '0' * (n - k)
-
-    if 0 < n <= 21:
-        return digits[:n] + '.' + digits[n:]
-
-    if -6 < n <= 0:
-        return '0.' + '0' * -n + digits
-
-    return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
 
 
 def float_neighbours(value):
@@ -2280,12 +2154,6 @@ PHRASES = {400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not 
            500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable',
            504: 'Gateway Timeout'}
 
-CODES = {1: 'ENVELOPE_MALFORMED', 2: 'LAYOUT_UNSUPPORTED', 3: 'KIND_UNSUPPORTED', 4: 'ENVELOPE_TOO_LARGE',
-         16: 'DESTINATION_UNKNOWN', 17: 'DESTINATION_UNREACHABLE', 18: 'SERVICE_UNKNOWN', 19: 'PROCEDURE_UNKNOWN',
-         20: 'CALL_UNKNOWN', 21: 'SUBSCRIPTION_UNKNOWN', 22: 'SUBSCRIPTION_UNSUPPORTED', 32: 'SESSION_REQUIRED',
-         33: 'ACCESS_DENIED', 34: 'PAYLOAD_TOO_LARGE', 35: 'CAPACITY_EXCEEDED', 36: 'CREDENTIAL_UNSUPPORTED',
-         48: 'CHUNK_INVALID', 49: 'CREDIT_EXCEEDED', 50: 'PAYLOAD_UNDECODABLE', 51: 'TRANSFER_STALLED',
-         52: 'PAYLOAD_INVALID', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST'}
 NUMBERS = {name: code for code, name in CODES.items()}
 
 # where a failure arose (7.5): its server, of the request; its client, before the call went; its
@@ -4156,13 +4024,6 @@ SERVICE_TEXT = {
 }
 
 
-def unit_order(unit):
-    """A unit's place among an entry's: the companion's own in its order, then the spec's behind spec:."""
-    document, _, number = unit.rpartition(':')
-
-    return document, tuple(int(part) for part in number.split('.'))
-
-
 def ordered(entries, group):
     """A group's entries, each name once, each entry's units once and in the companion's order."""
     names = [entry['name'] for entry in entries]
@@ -4208,18 +4069,11 @@ DOCUMENT_JSON = {
 }
 
 if __name__ == '__main__':
-    with open(ROOT + 'transcoding.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(proto_file())
-
-    with open(ROOT + 'transcoding-required.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(required_proto_file())
-
-    with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
-        # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor
-        # reads them as line ends
-        text = json.dumps(DOCUMENT_JSON, ensure_ascii=False, indent=2)
-        file.write(text.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
-        file.write('\n')
+    write_text('transcoding.proto', proto_file())
+    write_text('transcoding-required.proto', required_proto_file())
+    # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor reads
+    # them as line ends
+    write_json('transcoding.json', DOCUMENT_JSON, line_separators_escaped=True)
 
     print(', '.join(f'{len(DOCUMENT_JSON[group])} {group}' for group in
                     ('templates', 'readings', 'writings', 'bindings', 'failures', 'events', 'exchanges')) +

@@ -16,15 +16,14 @@ reasons fails here, as does a written form that does not read back to itself. A 
 so that no escape this file builds is read before it is built."""
 import json
 import math
-import os
 import re
 import struct
 from decimal import Decimal, getcontext
 
+from conformance import ROOT, hexadecimal, nested, write_json
+from details import Members, canonical, es, members_of, utf16
+from proto_wire import EGROUP, I32, I64, LEN, SGROUP, VARINT
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # a backslash, which opens a JSON escape
 B = chr(92)
@@ -54,10 +53,6 @@ NOT_HELD = "A value a side's type cannot hold"
 LEADING_FEFF = "A string's leading U+FEFF in a proto payload"
 
 
-class Members(list):
-    """An object's members as the bytes name them, in their order, a name given twice kept twice."""
-
-
 class Undefined:
     """What a language holds that JSON has no value for: JavaScript's undefined, a C# JsonElement of kind
     Undefined."""
@@ -73,46 +68,9 @@ class NotJSON(Exception):
 # ── The writer, 17.7 ────────────────────────────────────────────────────────────────────────────
 
 
-def es(value):
-    """ECMAScript's Number::toString of a finite double (ECMA-262, Number::toString), from repr's
-    shortest digits: what RFC 8785 3.2.2.3 writes a number as."""
-    if value == 0:
-        return '0'
-
-    if value < 0:
-        return '-' + es(-value)
-
-    _, digits, exponent = Decimal(repr(value)).as_tuple()
-    digits = ''.join(map(str, digits)).lstrip('0')
-    stripped = digits.rstrip('0')
-    exponent += len(digits) - len(stripped)
-    digits = stripped
-    k, n = len(digits), exponent + len(digits)
-
-    if k <= n <= 21:
-        return digits + '0' * (n - k)
-
-    if 0 < n <= 21:
-        return digits[:n] + '.' + digits[n:]
-
-    if -6 < n <= 0:
-        return '0.' + '0' * -n + digits
-
-    return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
-
-
 def has_surrogate(text):
     """Whether a string holds a surrogate alone: Python holds a pair as its one character."""
     return any(0xD800 <= ord(character) <= 0xDFFF for character in text)
-
-
-def utf16(name):
-    """A name's UTF-16 code units, which RFC 8785 3.2.3 sorts names by."""
-    return name.encode('utf-16-be', 'surrogatepass')
-
-
-def members_of(value):
-    return list(value) if isinstance(value, Members) else list(value.items())
 
 
 def write_reasons(value, depth=0):
@@ -154,32 +112,6 @@ def write_reasons(value, depth=0):
                 met(reason)
 
     return reasons
-
-
-def canonical(value):
-    """A value's canonical form (17.7, RFC 8785 3.2), of a value write_reasons refuses nothing of."""
-    if value is None:
-        return 'null'
-
-    if value is True:
-        return 'true'
-
-    if value is False:
-        return 'false'
-
-    if isinstance(value, (int, float)):
-        return es(float(value))
-
-    if isinstance(value, str):
-        # Python's dumps writes each character as JSON.stringify writes a well-formed string: " and the
-        # backslash, five control characters short, the others in lower-case hexadecimal
-        return json.dumps(value, ensure_ascii=False)
-
-    if isinstance(value, list) and not isinstance(value, Members):
-        return '[' + ','.join(canonical(item) for item in value) + ']'
-
-    members = sorted(members_of(value), key=lambda member: utf16(member[0]))
-    return '{' + ','.join(json.dumps(name, ensure_ascii=False) + ':' + canonical(item) for name, item in members) + '}'
 
 
 # ── The reader, 17.5 and 17.6 ───────────────────────────────────────────────────────────────────
@@ -288,9 +220,6 @@ def text_read(data):
 
 
 # ── The proto reader and writer, 17.9 ───────────────────────────────────────────────────────────
-
-# the wire types of protobuf's Encoding guide, "Message Structure"
-VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
 
 # Probe's fields by number, as spec/codecs.proto declares them: its name, its type, and the wire types
 # its records take, a repeated scalar of a numeric type its own and the length-delimited, packed or not
@@ -1104,10 +1033,6 @@ PROTO_DIFFERS = {
 }
 
 
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
 def payload_outcome(encoding, data):
     """The bytes written back of what was read, or for proto what was read, or the one reason it is
     refused for."""
@@ -1183,15 +1108,6 @@ FORMS = {
     'nameTwice': Members([('a', 1), ('a', 2)]),
     'undefined': UNDEFINED,
 }
-
-
-def nested(depth):
-    value = []
-
-    for _ in range(depth - 1):
-        value = [value]
-
-    return value
 
 
 # each value: its name, its encoding, its units, the value as the file gives it, and the languages
@@ -1468,9 +1384,7 @@ document = {
 
 # * written when run, never when imported: make_conversations.py takes a request's reason from here
 if __name__ == '__main__':
-    with open(ROOT + 'codecs.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('codecs.json', document)
 
     print(len(payloads), 'payloads,', sum(entry['encoding'] == 'json' for entry in payloads), 'of them json and',
           sum(entry['encoding'] == 'proto' for entry in payloads), 'proto, and', len(values), 'values,',

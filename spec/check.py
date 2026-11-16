@@ -71,9 +71,7 @@ from decimal import Decimal
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
-from generators.debugging_version import debugging_version
-from generators.spec_version import spec_version
-from generators.transcoding_version import transcoding_version
+from generators.spec_version import debugging_version, spec_version, transcoding_version
 
 SPEC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SPEC)

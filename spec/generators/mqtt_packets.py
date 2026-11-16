@@ -1,6 +1,7 @@
 """The count of spec 15.30: the bytes of an MQTT 5 PUBLISH, and the largest payload a message to a topic
 carries within a Maximum Packet Size, which spec/vectors.json's mqttPublishBounds and the bounds of
 spec/transports.json's cases over MQTT 5 both read from here, so the two files cannot disagree."""
+from conformance import largest
 
 # the largest Remaining Length a Variable Byte Integer holds, and the largest packet it makes, the
 # bound of a CONNACK that names none (MQTT 5.0 §1.5.5, §2.1.4)
@@ -42,16 +43,7 @@ def largest_payload(topic, maximum, *, qos=1, expiry=True):
         return (publish_bytes(topic_bytes, payload, qos=qos, expiry=expiry) <= maximum
                 and remaining_length(topic_bytes, payload, qos=qos, expiry=expiry) <= LARGEST_REMAINING)
 
-    if not fits(0):
-        return None
-
-    low, high = 0, LARGEST_REMAINING
-
-    while low < high:
-        middle = (low + high + 1) // 2
-        low, high = (middle, high) if fits(middle) else (low, middle - 1)
-
-    return low
+    return largest(fits, LARGEST_REMAINING)
 
 
 def receive_bound(topic, maximum=MAXIMUM_PACKET_SIZE):

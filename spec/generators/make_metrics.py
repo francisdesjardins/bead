@@ -2,27 +2,14 @@
 what each exit of a call or a notification the interop service's server reaches counts, step by step
 (spec/debugging.md, sections 7 to 12; decision 0013). The registry is written here a third time,
 beside the two sides, by the companion's rules."""
-import json
-import os
 
 import make_conversations as talk
-from debugging_version import debugging_version
+from conformance import CODES, write_json
 from make_identities import folded
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
+from spec_version import debugging_version
 
 # ── The companion's tables ──────────────────────────────────────────────────────────────────────
 
-# section 8 of spec.md: its codes, by number
-CODES = {
-    1: 'ENVELOPE_MALFORMED', 2: 'LAYOUT_UNSUPPORTED', 3: 'KIND_UNSUPPORTED', 4: 'ENVELOPE_TOO_LARGE',
-    16: 'DESTINATION_UNKNOWN', 17: 'DESTINATION_UNREACHABLE', 18: 'SERVICE_UNKNOWN', 19: 'PROCEDURE_UNKNOWN',
-    20: 'CALL_UNKNOWN', 21: 'SUBSCRIPTION_UNKNOWN', 22: 'SUBSCRIPTION_UNSUPPORTED',
-    32: 'SESSION_REQUIRED', 33: 'ACCESS_DENIED', 34: 'PAYLOAD_TOO_LARGE', 35: 'CAPACITY_EXCEEDED',
-    36: 'CREDENTIAL_UNSUPPORTED', 48: 'CHUNK_INVALID', 49: 'CREDIT_EXCEEDED', 50: 'PAYLOAD_UNDECODABLE',
-    51: 'TRANSFER_STALLED', 52: 'PAYLOAD_INVALID', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST',
-}
 APPLICATION, OTHER = 'application', '_OTHER'
 
 # a code's place among a family's series: none first, then by number, application and _OTHER last
@@ -845,8 +832,6 @@ document = {
     'exits': exits,
 }
 
-with open(ROOT + 'metrics.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('metrics.json', document)
 
 print(len(EXPOSITIONS), 'expositions and', len(exits), 'exits')

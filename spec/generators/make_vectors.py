@@ -2,20 +2,17 @@
 import base64
 import datetime
 import hashlib
-import hmac
 import json
 import math
-import os
 import re
 import string
 
 import amqp_messages
+from conformance import hexadecimal, nested, text, write_json
+from jws import base64url, compact, part, signed, unbase64url
 from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
                           width)
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vectors.json')
 
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 ZEROS = '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
@@ -24,14 +21,6 @@ MALFORMED = 1
 LAYOUT_UNSUPPORTED = 2
 KIND_UNSUPPORTED = 3
 ENVELOPE_TOO_LARGE = 4
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def ascii_hex(text):
-    return hexadecimal(text.encode('utf-8'))
 
 
 # ── The CREDENTIAL block ────────────────────────────────────────────────────────────────────────
@@ -305,8 +294,8 @@ header_refusals = [
 ]
 
 envelopes = [
-    ('a request, 14 bytes for 3/2/1 and "hi"', ['6.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}',
-     {'kind': 16, 'header': {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 2}, 'payload': ascii_hex('hi')}),
+    ('a request, 14 bytes for 3/2/1 and "hi"', ['6.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}',
+     {'kind': 16, 'header': {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 2}, 'payload': text('hi')}),
     ('a result', ['6.1'], 'A1 11 00 02  00 00 00 03 | 01 02',
      {'kind': 17, 'header': {'callId': 3, 'kind': 17}, 'payload': '01 02'}),
     ('a notification with no payload', ['6.1'], 'A1 13 00 02  00 00 00 0D',
@@ -314,10 +303,10 @@ envelopes = [
     ('a cancel, nothing after its header', ['6.4'], 'A1 16 00 02  00 00 00 05',
      {'kind': 22, 'header': {'callId': 5, 'kind': 22}}),
     ('a protocol failure, its record after the header', ['6.2', '7.1'],
-     f'A1 12 00 02  00 00 00 03 | 00 13 00 00  {ascii_hex("no procedure 1 in service 2")}',
+     f'A1 12 00 02  00 00 00 03 | 00 13 00 00  {text("no procedure 1 in service 2")}',
      {'kind': 18, 'header': {'callId': 3, 'kind': 18},
       'failure': {'code': 19, 'detail': 'no procedure 1 in service 2', 'relays': 0, 'scope': 0}}),
-    ('an application failure', ['6.2', '7.2'], f'A1 12 00 02  00 00 00 03 | 00 15 00 01  {ascii_hex("out of range")}',
+    ('an application failure', ['6.2', '7.2'], f'A1 12 00 02  00 00 00 03 | 00 15 00 01  {text("out of range")}',
      {'kind': 18, 'header': {'callId': 3, 'kind': 18},
       'failure': {'code': 21, 'detail': 'out of range', 'relays': 0, 'scope': 1}}),
     ('the smallest failure, 12 bytes', ['6.2', '7.1'], 'A1 12 00 02  00 00 00 03 | 00 13 00 00',
@@ -328,11 +317,11 @@ envelopes = [
     ('a result opening a transfer of nothing', ['4.6', '6.1'], 'A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 00',
      {'kind': 17, 'header': {'callId': 2, 'kind': 17, 'total': 0}, 'payload': ''}),
     ('a request presenting a JWT, its payload after the padding', ['4.4.3', '6.1'],
-     f'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | {ascii_hex("hi")}',
+     f'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | {text("hi")}',
      {'kind': 16, 'header': {'callId': 3, 'credential': {'scheme': 'JWT', 'token': 'a'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2},
-      'payload': ascii_hex('hi')}),
+      'payload': text('hi')}),
     ('a failure announcing that its session ended, its record after the block', ['4.4.1', '6.2'],
-     f'A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  {ascii_hex("no session")}',
+     f'A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  {text("no session")}',
      {'kind': 18, 'header': {'callId': 3, 'credential': ENDED, 'kind': 18},
       'failure': {'code': 32, 'detail': 'no session', 'relays': 0, 'scope': 0}}),
     ('a chunk with more to come', ['4.9', '6.3'], 'A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 05 | 01 02 03',
@@ -359,17 +348,17 @@ envelope_refusals = [
      'a credit carries no payload, not 1 bytes'),
     # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
     # vector that fails two checks cites 5.1's order
-    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, None,
+    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,
      ENVELOPE_TOO_LARGE, 'an envelope is 13 bytes at most, not 14'),
-    ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13,
+    ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13,
      None, ENVELOPE_TOO_LARGE, None),
     ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, None, MALFORMED, None),
-    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, None,
+    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,
      MALFORMED, None),
     # 12.2: a request and a result, whole or an opening, held to chunkBytes by the kind byte 1 names,
     # whatever their layout; the detail names the kind whenever chunkBytes held it, even a chunkBytes
     # as large as the envelope's bound
-    ('a request past chunkBytes', ['5.1.2', '12.2', '12.2.2'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', None, 13,
+    ('a request past chunkBytes', ['5.1.2', '12.2', '12.2.2'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', None, 13,
      ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
     ("a request's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'],
      'A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 00 00 01 00 | 68', None, 20, ENVELOPE_TOO_LARGE,
@@ -379,17 +368,17 @@ envelope_refusals = [
     ("a result's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'], 'A1 11 04 04  00 00 00 04  00 00 00 00 00 00 01 00 | 68', None, 16,
      ENVELOPE_TOO_LARGE, 'a result is 16 bytes at most, not 17'),
     ("a request of a layout to come past chunkBytes, its kind's bound checked before its layout", ['5.1', '5.1.2', '12.2'],
-     f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', None, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+     f'A2 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', None, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
     ("a request past a chunkBytes as large as the envelope's bound names a request", ['5.1.2', '12.2'],
-     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
 ]
 
 failures = [
     ('the relays as they came, and no detail as empty', ['7.1', '7.5'], '00 12 03 00', None, {'code': 18, 'detail': '', 'relays': 3, 'scope': 0}),
     ('the last code, of the application', ['7.2'], 'FF FF 00 01', None, {'code': 65535, 'detail': '', 'relays': 0, 'scope': 1}),
-    ('a detail cut at 5 bytes, back to the start of the character cut', ['7.3'], f'00 13 00 00  {ascii_hex("abcdéf")}', 5,
+    ('a detail cut at 5 bytes, back to the start of the character cut', ['7.3'], f'00 13 00 00  {text("abcdéf")}', 5,
      {'code': 19, 'detail': 'abcd', 'relays': 0, 'scope': 0}),
-    ('a detail cut at 3 bytes, on a character boundary', ['7.3'], f'00 13 00 00  {ascii_hex("abcdéf")}', 3,
+    ('a detail cut at 3 bytes, on a character boundary', ['7.3'], f'00 13 00 00  {text("abcdéf")}', 3,
      {'code': 19, 'detail': 'abc', 'relays': 0, 'scope': 0}),
     # the cut steps back over one character at most, to a lead byte three bytes back at most whose
     # sequence crosses it; a cut that falls on a stray continuation byte stays where it fell
@@ -420,19 +409,6 @@ failure_refusals = [
 
 
 # ── The verdicts of JWTs (section 13.8) ─────────────────────────────────────────────────────────
-
-
-def base64url(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-
-def unbase64url(text):
-    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
-
-
-def compact(value):
-    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
-    return json.dumps(value, separators=(',', ':')).encode('ascii')
 
 
 def thumbprint(jwk):
@@ -533,15 +509,9 @@ HS = key(TRUST, 'HS256', HMAC_KEY)
 HS_BY_THUMBPRINT = key(TRUST, 'HS256', {**HMAC_KEY, 'kid': thumbprint(HMAC_KEY)})
 
 
-def part(value):
-    """A header or a claims set, from a JSON value or from its bytes as given."""
-    return base64url(value if isinstance(value, bytes) else compact(value))
-
-
 def hs256(header, claims, secret=unbase64url(HMAC_KEY['k'])):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac."""
-    signing_input = part(header) + '.' + part(claims)
-    return signing_input + '.' + base64url(hmac.new(secret, signing_input.encode('ascii'), hashlib.sha256).digest())
+    return signed(header, claims, secret)
 
 
 def access(issuer=TRUST, **claims):
@@ -611,13 +581,6 @@ HS_TOKEN = hs256(AT_JWT, access())
 PAST_A_DOUBLE = compact(access()).replace(f'"exp":{EXP}'.encode('ascii'), b'"exp":1e400')
 assert b'"exp":1e400' in PAST_A_DOUBLE and float('1e400') == math.inf
 
-
-def nested(levels):
-    """A claim's value of arrays nested levels deep, below the claims set's own depth of 1."""
-    value = []
-    for _ in range(levels - 1):
-        value = [value]
-    return value
 
 jwt_verdicts = [
     # typ: an ID token of the same issuer, under the same key, refused; its twin taken
@@ -803,7 +766,7 @@ LONGEST_ID = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_'
 assert len(LONGEST_ID) == 64
 
 # what a DATA carries: an envelope of vectors' own, whole, or cut in two parts
-CARRIED = f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}'
+CARRIED = f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}'
 FIRST_PART, LAST_PART = 'A1 10 00 03  00 00 00 03', '00 02 00 01  68 69'
 CREDENTIAL = 'Interop sub=ada'
 
@@ -818,7 +781,7 @@ def parcel_of(kind, sequence, body='', *, flags=0, opener=OPENER, acceptor=ACCEP
 def identity_of(identifier, incarnation=INCARNATION, bound=None):
     """An OPEN's or an ACCEPT's body: its id's length and its id, its incarnation, its receive bound;
     a GONE's, its incarnation then its id, when bound is None."""
-    named = f'{len(identifier):02X}' + (f' {ascii_hex(identifier)}' if identifier else '')
+    named = f'{len(identifier):02X}' + (f' {text(identifier)}' if identifier else '')
     return f'{named}  {incarnation}  {hexadecimal(bound.to_bytes(4, "big"))}' if bound is not None else f'{incarnation}  {named}'
 
 
@@ -828,7 +791,7 @@ def fields_of(kind, sequence, *, flags=0, opener=OPENER, acceptor=ACCEPTOR, layo
 
 
 def credential_of(credential):
-    return f'{hexadecimal(len(credential).to_bytes(2, "big"))}  {ascii_hex(credential)}'
+    return f'{hexadecimal(len(credential).to_bytes(2, "big"))}  {text(credential)}'
 
 
 # each kind, read to its fields and written back to its bytes; written false for one a reader reads and
@@ -912,7 +875,7 @@ parcel_refusals = [
     ('a first byte of 0xB0', ['15.17'], parcel_of(PING, 2, layout=0xB0), NO_PARCEL),
     ('a first byte of 0xC0', ['15.17'], parcel_of(PING, 2, layout=0xC0), NO_PARCEL),
     ('an envelope of 28 bytes, its first byte 0xA1', ['15.17'],
-     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("0123456789abcdef")}', NO_PARCEL),
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("0123456789abcdef")}', NO_PARCEL),
     ('a kind of 0x00, never one', ['15.17'], parcel_of(0x00, 3), DOES_NOT_READ),
     ('a kind to come, 0x0A', ['15.17'], parcel_of(0x0A, 3), DOES_NOT_READ),
     ('a kind to come, 0x7F', ['15.17'], parcel_of(0x7F, 3), DOES_NOT_READ),
@@ -967,7 +930,7 @@ parcel_refusals = [
     ('a REFUSE 503 with a byte after its status', ['15.17', ROW[REFUSE]],
      parcel_of(REFUSE, 1, '01 F7  00', acceptor=NO_HALF), DOES_NOT_READ),
     ('a DATA marked CREDENTIAL whose credential runs past its bytes', ['15.17', ROW[DATA]],
-     parcel_of(DATA, 3, f'00 40  {ascii_hex("Interop")}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
+     parcel_of(DATA, 3, f'00 40  {text("Interop")}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
     ('a DATA marked CREDENTIAL whose credential is empty', ['15.17', ROW[DATA]],
      parcel_of(DATA, 3, f'00 00  {CARRIED}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
     ('a DATA carrying nothing', ['15.17', ROW[DATA]], parcel_of(DATA, 3), DOES_NOT_READ),
@@ -1187,8 +1150,6 @@ document = {
                           for name, clauses, address, maximum, largest, size in amqp_publish_bounds],
 }
 
-with open(OUT, 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('vectors.json', document)
 
 print({key: len(value) for key, value in document.items() if isinstance(value, list) and key != '$comment'})

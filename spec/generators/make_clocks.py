@@ -1,12 +1,8 @@
 """Writes spec/clocks.json: what every side's test clock does when a case advances it, so that advance
 means one thing in every conformance file (decision 0011)."""
-import json
-import os
 
+from conformance import write_json
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 WALL_CLOCK = '2026-01-01T00:00:00Z'
 
@@ -73,8 +69,6 @@ document = {
     'cases': [{'name': name, 'steps': steps} for name, steps in cases],
 }
 
-with open(ROOT + 'clocks.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('clocks.json', document)
 
 print(len(cases), 'clock cases')
