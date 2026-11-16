@@ -3008,7 +3008,7 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
-    public async Task Stops_a_document_when_its_response_write_throws()
+    public async Task Stops_a_document_silently_when_its_client_goes_during_a_write()
     {
         var bytes = Enumerable.Repeat((byte)'a', 2 * 65536 + 7).ToArray();
         await using var service = await TranscodingService.Start();
@@ -3017,7 +3017,7 @@ public sealed class HttpGatewayTests
         var lifetime = new DeadlineLifetime(cancelling);
         var context = PaceContext("document", cancelling.Token);
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
-        using var body = new FailedDocumentBody();
+        using var body = new FailedDocumentBody(new IOException("the document write failed"));
         context.Response.Body = body;
         var reported = ReportedBy(gateway);
 
@@ -3027,6 +3027,27 @@ public sealed class HttpGatewayTests
         Assert.Equal([65536], body.Sizes);
         Assert.Equal(0, lifetime.Aborts);
         Assert.Empty(reported);
+    }
+
+    [Fact]
+    public async Task Stops_a_document_when_its_response_write_throws()
+    {
+        var bytes = Enumerable.Repeat((byte)'a', 2 * 65536 + 7).ToArray();
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = bytes });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var context = PaceContext("document", cancelling.Token);
+        using var body = new FailedDocumentBody(new InvalidOperationException("the document write failed"));
+        // * its head counts as sent once its body is written to, as on a host, so no problem follows the report
+        context.Features.Set<IHttpResponseFeature>(new WrittenResponseFeature(() => { return body.Sizes.Count > 0; }));
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(body.ToArray());
+        Assert.Equal([65536], body.Sizes);
+        Assert.Equal(["the document write failed"], reported);
     }
 
     [Fact]
@@ -3120,7 +3141,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    private sealed class FailedDocumentBody : MemoryStream
+    private sealed class FailedDocumentBody(Exception failure) : MemoryStream
     {
         public List<int> Sizes { get; } = [];
 
@@ -3128,7 +3149,19 @@ public sealed class HttpGatewayTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Sizes.Add(buffer.Length);
-            throw new IOException("the document write failed");
+            throw failure;
+        }
+    }
+
+    // a response started once its body was written to, as a host's is
+    private sealed class WrittenResponseFeature(Func<bool> isWritten) : HttpResponseFeature
+    {
+        public override bool HasStarted
+        {
+            get
+            {
+                return isWritten();
+            }
         }
     }
 

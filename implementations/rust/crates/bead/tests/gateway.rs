@@ -5669,9 +5669,9 @@ async fn bounds_an_accepted_slice_until_its_pending_bytes_are_flushed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn stops_a_document_when_its_response_write_throws() {
-    // * the Rust form: a host whose write fails lets its body go, which stops the document; its
-    // host's error is its own, so the gateway reports none, as the C# side's
+async fn stops_a_document_silently_when_its_client_goes_during_a_write() {
+    // * hyper drops the body without saying why, so the gateway cannot tell a host's bug from its
+    // client going, and reports none
     let document = Bytes::from(vec![b'a'; 2 * 65_536 + 7]);
     let fixture = started_with((
         |options: &mut HttpGatewayOptions| {
