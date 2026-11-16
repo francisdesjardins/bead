@@ -136,6 +136,18 @@ and AMQP 1.0 on RabbitMQ 4 its second
   a project that binds `proto` brings protobuf-es, an optional peer, one over MQTT 5 brings
   MQTT.js, another, and one over AMQP 1.0 brings rhea, a third.
 
+Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
+reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec whose
+conformance files every language plays; a builder that writes each language's typed sides from one
+`.proto`; a DevTools panel that reads a page's calls; a dissenter bound to argue against every
+change the others agree on. Each can be taken into another project, and each has the record that
+says why it is so, in [`docs/decisions/`](docs/decisions/README.md).
+
+Bead is built to production standards: a spec every side plays, the three sides calling each other
+in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold a side,
+and its pages held to WCAG 2.2 AA. It is not yet proven in production, and before 1.0.0 a minor may
+still break.
+
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
 already joins services and devices, MQTT 5's and AMQP 1.0's. Think of a dashboard
