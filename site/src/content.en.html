@@ -98,7 +98,7 @@
         </tr>
         <tr>
           <th scope="row">The fields</th>
-          <td>One field a byte, or an aligned word</td>
+          <td>Fields of 1, 2, 4 or 8 bytes, at fixed offsets in 4-byte words</td>
           <td>Each field read whole at its offset; a flag is one bit to test</td>
         </tr>
         <tr>
@@ -151,8 +151,8 @@
   <p>
     Bead is built to production standards: a spec every side plays, the three sides calling each
     other in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold
-    a side, and its pages held to WCAG 2.2 AA. It is not yet proven in production, and before 1.0.0
-    a minor may still break.
+    a side, and its pages held to WCAG 2.2 AA. It is not proven in production, and before 1.0.0 a
+    minor may break.
   </p>
 </section>
 
@@ -170,11 +170,12 @@
   <p>
     The flags of the low nibble add blocks, in the order of their bits. DESTINATION
     (<code>0x02</code>) names a relay’s target in 4 bytes. TRANSFER (<code>0x04</code>) gives a
-    transfer’s total in 8 bytes. CREDENTIAL (<code>0x08</code>) comes last, the only one of
-    variable length: a scheme, a length, the bytes, then zeros up to the next word, like a TLS
-    extension. The flags of the high nibble add nothing: SUBSCRIPTION (<code>0x10</code>), PACED
-    (<code>0x20</code>) and MORE (<code>0x40</code>). The bits <code>0x01</code> and
-    <code>0x80</code> are reserved. A header holds 1,020 bytes at most (§2 to §4).
+    transfer’s total in 8 bytes. CREDENTIAL (<code>0x08</code>) comes last, and it is the only
+    block whose length varies. It is laid out as a TLS extension is: a scheme on 2 bytes, a length
+    on 2, the bytes, then zeros up to the next word. The flags of the high nibble add nothing:
+    SUBSCRIPTION (<code>0x10</code>), PACED (<code>0x20</code>) and MORE (<code>0x40</code>). The
+    bits <code>0x01</code> and <code>0x80</code> are kept for flags to come. A header holds 1,020
+    bytes at most (§2 to §4).
   </p>
   {{header}}
   <div class="table-wrap" tabindex="0">
@@ -234,7 +235,7 @@
     </table>
   </div>
   <p class="space">
-    A peer dispatches every envelope it can read by its kind. A REQUEST passes its gates, then goes
+    A peer dispatches every envelope it can read by its kind. A REQUEST passes its checks (§9.2), then goes
     to its procedure. A RESULT or a FAILURE settles the call waiting on that callId. A NOTIFICATION
     goes to that callId’s subscription. A CHUNK takes its place in its transfer, and a CREDIT moves
     a transfer being sent, or a paced subscription, forward. A CANCEL makes the peer forget the
@@ -274,13 +275,14 @@
     on the spot with <code>CAPACITY_EXCEEDED</code>.
   </p>
   <p>
-    A peer has the other answer 64 calls at once on a connection,
+    By default, a peer has the other answer at most 64 calls at once on a connection,
     <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
-    refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything past
-    its prefix (§9.2). A resolver still running once its call was answered or cancelled keeps a
-    place apart until it settles, as many again as the bound, so a peer that cancels all it sends
-    piles up no work.
+    refuses one more request with <code>CAPACITY_EXCEEDED</code> once its header reads, before it
+    looks at its route, its credential or its payload (§9.2). A resolver that still runs once its
+    call was answered or cancelled counts until it settles. The calls being answered and those
+    resolvers never pass twice the bound together, so a peer that cancels every request it sends
+    never has more resolvers running than twice the bound.
   </p>
   <p>
     An answer goes once, and only while its call is open. One that arrives after a cancel or a
@@ -301,24 +303,25 @@
   <p>
     The flags’ bit <code>0x01</code> says the code belongs to the procedure, so a service’s code 19
     never passes for <code>PROCEDURE_UNKNOWN</code>. The detail holds 1,024 bytes at most by
-    default, <code>maximumDetailBytes</code>. A failure a side answers for an error of its own, a
-    resolver that throws for instance, carries no detail: the error stays with that side, reported
-    to its application.
+    default, <code>maximumDetailBytes</code>. A failure that answers a side’s own error, such as a
+    resolver that throws, carries no detail. The error stays with that side, which reports it to
+    its application.
   </p>
   {{bytes of="failure"}}
   <p class="space">
     The protocol’s codes go in blocks of 16, by the stage reached: the envelope, the route, the
     admission, the payload, the procedure. A peer that does not know a code knows its stage at
-    least. Each failure meets one of four fates. A code marked with two meets one or the other,
-    according to the side that raises it.
+    least. Each failure meets one of five fates. A code marked with several meets one of them,
+    according to the side that raises it and what it refuses.
   </p>
   <ul class="fates" aria-label="A failure’s fate">
     <li><span class="fate fate-answered">answered</span>sent to the peer, on the request’s callId</li>
     <li><span class="fate fate-reported">reported</span>raised locally, never sent</li>
     <li><span class="fate fate-rejected">rejected</span>the call fails before it goes</li>
+    <li><span class="fate fate-ended">ended</span>the requester ends its call with it, on an answer it cannot take</li>
     <li>
-      <span class="fate fate-gate">gate</span>answered if <a href="#porte">the gate</a> allows it,
-      reported otherwise
+      <span class="fate fate-gate">gate</span><span>as <a href="#porte">the gate</a> says: answered,
+      ended for an answer of the layout <code>0xA1</code>, reported otherwise</span>
     </li>
   </ul>
   {{failures}}
@@ -340,10 +343,10 @@
   </p>
   <p>
     A REQUEST whose prefix reads, of the peer’s parity and on a free callId, receives a FAILURE on
-    that callId. A RESULT or a FAILURE that does not read fails the call it aimed at, and the peer
-    receives a CANCEL. A CHUNK that does not read ends its transfer with
-    <code>CHUNK_INVALID</code>. Everything else is reported locally, never answered. What arrives
-    late on a reserved callId is dropped in silence.
+    that callId. A RESULT or a FAILURE of the layout <code>0xA1</code> that does not read fails the
+    call waiting on it, and the peer receives a CANCEL. A CHUNK of that layout that does not read
+    ends its transfer with <code>CHUNK_INVALID</code>. Everything else is reported locally, never
+    answered. What arrives late on a reserved callId is dropped in silence.
   </p>
   <figure class="figure">
     <figcaption>The gate</figcaption>
@@ -377,7 +380,9 @@
   <p class="space">
     Each line is a JSON object in RFC 8785’s canonical form: the field’s path, the rule’s id as
     protovalidate names it, its bounds and its message. The last line counts the violations left
-    out, <code>{"more":N}</code>. The offending value never travels, since it may be a secret.
+    out, <code>{"more":N}</code>. The offending value never travels, since it may be a secret. A
+    map’s key is the one exception: the path names an entry by its key, 64 bytes of it at most
+    (§18.4).
   </p>
   <figure class="figure">
     <figcaption>A request its rules refuse, then a value judged before it goes</figcaption>
@@ -390,9 +395,9 @@
       scalar or an enum; a number’s bounds and a float’s finiteness; a list of values, for a number,
       a string or an enum; the lengths, prefix, suffix and contents of a string or of bytes, and a
       string’s pattern; an enum’s defined values; a list’s and a map’s rules; and
-      <code>oneof</code>. It refuses any other rule, CEL and a pattern of bytes among them,
-      <code>VALIDATE_RULE_UNSUPPORTED</code>, and ignores none: a rule written and not played would
-      let through what a protovalidate server refuses.
+      <code>oneof</code>. It refuses any other rule with <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL
+      and a pattern of bytes among them. It ignores none: a rule written and not played would let
+      through what a protovalidate server refuses.
     </p>
     <p>
       A pattern follows RE2’s syntax and is judged in linear time, with no backtracking (CWE-1333).
@@ -443,9 +448,9 @@
     With PACED beside SUBSCRIPTION, the server sends only the notifications the client has
     granted. The client grants as its callbacks finish, promises included: with a window of one, the
     next notification once they are done with the previous one; with a wider window, as far as that
-    window past what they finished, renewed at its half. It grants with a CREDIT that carries PACED:
-    a count of notifications, as RSocket’s <code>REQUEST_N</code> is, but absolute, as a transfer’s
-    credit is.
+    window past what they finished, renewed at its half. It grants with a CREDIT that carries PACED.
+    That credit counts notifications, as RSocket’s <code>REQUEST_N</code> does, but it is absolute,
+    as a transfer’s credit is.
   </p>
   <p>
     Past its credit, a notification waits in a queue. The server can give it a key. A notification
@@ -578,7 +583,7 @@
   <h3 id="sessions-jwt">A JWT, verified one way</h3>
   <p>
     A JWT is an access token of RFC 9068’s profile, and every side verifies it the same way, as RFC
-    8725 recommends. Its <code>typ</code> is <code>at+jwt</code>, which rules out an identity token
+    8725 recommends. Its <code>typ</code> is <code>at+jwt</code>, or <code>application/at+jwt</code>, which rules out an identity token
     from the same issuer. Its key is one of those the application gives, each with its issuer and a
     single algorithm, ES256 or HS256. Its <code>iss</code> must be that key’s issuer, its
     <code>exp</code> must hold with 60 s of leeway, and its <code>aud</code> must name the peer’s
@@ -591,7 +596,7 @@
     <p>
       An application can give a key set for some issuers. Bead asks for it when no known key carries
       the token’s <code>kid</code>, at most once a minute per issuer, so that no peer has it queried
-      at will. The keys received hold for ten minutes. At most 64 calls of one issuer wait for its
+      at will. The keys received hold for ten minutes. By default, at most 64 calls of one issuer wait for its
       next ask, then the next call receives <code>CAPACITY_EXCEEDED</code>; a call that waits on an
       ask under way is never counted. Bead fetches nothing by itself: the function
       that brings the keys belongs to the application (§13.9).
@@ -612,22 +617,22 @@
   <p>
     A client presents a default credential, given in its options, or a credential of a call’s own.
     A call can also present none. ELSEWHERE leaves the credential to the transport: the
-    <code>Authorization</code> field of each <code>POST</code> over HTTP, or that of the handshake
-    of a WebSocket client outside a browser.
+    <code>Authorization</code> field of each <code>POST</code> over HTTP, that of the handshake of
+    a WebSocket client outside a browser, the parcel that carries a request over a broker, or what
+    an in-memory client hands with each request.
   </p>
   <p>
     When a call that presented the default receives <code>SESSION_REQUIRED</code>, the client
-    withdraws that default and tells the application, <code>credentialWithdrawn</code>. A failure
-    that ends a subscription already answered withdraws nothing, since the credential may still
-    hold. Until it
-    gives a new one, each call that would present it fails before it goes. No call thus falls in
-    silence into another session. For the same reason, an admission answers
-    <code>ACCESS_DENIED</code>, never <code>SESSION_REQUIRED</code>, to a call that presented a
-    credential.
+    withdraws that default and tells the application, <code>credentialWithdrawn</code>. Until the
+    application gives a new one, each call that would present it fails before it goes. No call
+    thus falls in silence into another session. A failure that ends a subscription already answered
+    withdraws nothing, since the credential may still hold. For the same reason, an admission
+    answers <code>ACCESS_DENIED</code>, never <code>SESSION_REQUIRED</code>, to a call that
+    presented a credential.
   </p>
   <p>
-    A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code> or
-    <code>https</code>. On the machine, the loopback, a Web Worker or a router of the same process
+    A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
+    <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
     are enough. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.
@@ -752,7 +757,7 @@
           <tr>
             <td><code>maximumAnsweringCalls</code></td>
             <td class="code-num">64</td>
-            <td>The calls a connection has answered at once</td>
+            <td>The calls a peer has the other answer at once on a connection</td>
           </tr>
           <tr>
             <td><code>maximumUntakenEnvelopes</code>, <code>…Bytes</code></td>
@@ -764,8 +769,9 @@
     </div>
     <p class="space">
       The transport delimits its messages, carries both directions and delivers each envelope once,
-      in order. Knowing whether a connection lives is its job too, and Bead has no ping of its own.
-      <a href="#http">WebSocket</a> does all of it (§12.2, §15.1).
+      in order. Knowing whether a connection lives is its job too: no envelope of Bead’s is a ping.
+      <a href="#http">WebSocket</a> does all of it (§12.2, §15.1). Over a broker, Bead keeps its own
+      heartbeat (§15.21).
     </p>
   </details>
 </section>
@@ -806,7 +812,7 @@
       </thead>
       <tbody>
         <tr>
-          <td>A result, or the target’s failure</td>
+          <td>A result, or the destination’s failure</td>
           <td>That result, or that failure counted one relay more</td>
         </tr>
         <tr>
@@ -825,8 +831,8 @@
     </table>
   </div>
   <p class="space">
-    These two codes are an HTTP gateway’s 503 and 502, as Bead’s gateway answers them, and what
-    gRPC’s retry rules rest on.
+    Bead’s gateway answers these two codes with 503 and 502, as an HTTP gateway does. gRPC’s retry
+    rules turn on the same difference: whether the procedure may have run.
   </p>
   <details class="more">
     <summary>What a relay does not do, and what its requesters share</summary>
@@ -939,9 +945,9 @@
     conformance conversations through a pair of this transport.
   </p>
   <p>
-    The joined transport, <code>joinTransports</code> on the TypeScript side and
-    <code>JoinedServerTransport</code> on the C# and Rust sides, gives one router, one admission, one handling
-    of sessions, and each service offered once, whatever the call’s transport. Each connection
+    The joined transport gives one router, one admission, one handling of sessions, and each
+    service offered once, whatever the call’s transport. It is <code>joinTransports</code> on the
+    TypeScript side, and <code>JoinedServerTransport</code> on the C# and Rust sides. Each connection
     stays its transport’s. That is how the <a href="#transcodage">HTTP/JSON gateway</a> calls its
     application’s server. Each transport takes the procedures it is given, every one by default: a
     request to any other is answered as one to no procedure, <code>PROCEDURE_UNKNOWN</code> or
@@ -966,7 +972,8 @@
     A participant is a side’s link to its broker. Its identifier is the identity the broker
     authenticates, and its inbox, the topic <code>bead/i/&lt;id&gt;</code>, receives all that comes
     to it. A server serves a name, <code>bead/s/&lt;name&gt;</code>, alone or in a group of
-    participants that share it.
+    participants that share it. MQTT 5 writes these topics with slashes. AMQP 1.0 writes them with
+    dots, <code>bead.i.&lt;id&gt;</code> and <code>bead.s.&lt;name&gt;</code>.
   </p>
   <p>
     A broker often joins services and devices already. Bead adds what topics alone lack: calls with
@@ -996,12 +1003,13 @@
     <h3 id="courtier-mqtt">Over MQTT 5</h3>
     <p>
       Each participant is a clean link, which the broker does not keep past its connection: Clean
-      Start and a session that expires at 0. Each parcel is a PUBLISH at QoS 1. A name a group serves
-      is a shared subscription, <code>$share/&lt;name&gt;/bead/s/&lt;name&gt;</code>. Each packet
-      is counted to the byte under each end’s maximum size. A participant’s will announces its
-      departure to the peers. The TypeScript side goes through MQTT.js, the C# side through
-      MQTTnet, the Rust side through a client of its own, the feature <code>mqtt</code> of its core,
-      over TCP, TLS or a WebSocket. All three are played against Mosquitto.
+      Start and a session that expires at 0. Each parcel is a PUBLISH at QoS 1, or at QoS 0 on a
+      link set to deliver at most once. A name a group serves is a shared subscription,
+      <code>$share/&lt;name&gt;/bead/s/&lt;name&gt;</code>. Each packet is counted to the byte
+      under each end’s maximum size. A participant’s will announces its departure to the peers.
+      The TypeScript side goes through MQTT.js, and the C# side through MQTTnet. The Rust side goes
+      through a client of its own, the feature <code>mqtt</code> of its core. A link runs over TCP,
+      TLS or a WebSocket, and all three sides are played against Mosquitto.
     </p>
     <h3 id="courtier-amqp">Over AMQP 1.0</h3>
     <p>
@@ -1058,9 +1066,9 @@
     Each procedure a client calls answers at
     <code>POST /api/&lt;Service&gt;/&lt;procedure&gt;</code>. It also answers <code>GET</code> when
     the <code>.proto</code> marks it <code>idempotency_level = NO_SIDE_EFFECTS</code>, the Connect
-    protocol’s rule. Besides, each <code>google.api.http</code> rule of its method, the standard
-    grpc-gateway and Envoy read, adds a REST route beside the default ones. An unknown path receives
-    404, a method refused 405.
+    protocol’s rule. Each <code>google.api.http</code> rule of its method also adds a REST route
+    beside the default ones. Those rules are the standard grpc-gateway and Envoy read. An unknown
+    path receives 404, a method refused 405.
   </p>
   <details class="more">
     <summary>The matching, the binding and the OpenAPI document</summary>
@@ -1071,9 +1079,10 @@
       <code>update_mask</code> gets one from its body’s keys, as AIP-134 has it.
     </p>
     <p>
-      <code>beadc</code> writes the route table of each side, and one OpenAPI
-      3.1.1 document of the procedures an output’s <code>gateway</code> selects, the whole blueprint by default, the same
-      bytes whatever writes it. The gateway serves it at
+      <code>beadc</code> writes the route table of each side. It also writes one OpenAPI 3.1.1
+      document: of the procedures an output’s <code>gateway</code> selects, or of the whole
+      blueprint by default. One blueprint gives the same bytes, whatever writes it. The gateway
+      serves it at
       <code>/openapi.json</code>, with an <code>etag</code>. A payload’s rules are written there in
       JSON Schema 2020-12’s words. The detail is in the companion’s §3, §4 and §11.
     </p>
@@ -1082,10 +1091,11 @@
   <p>
     A <code>proto</code> payload is written in protobuf’s JSON mapping. A <code>json</code> payload
     passes as it is, a <code>text</code> one as <code>text/plain</code>, a <code>raw</code> one as
-    <code>application/octet-stream</code>. The reference libraries do not agree on that mapping, so
-    Bead has its own reader and writer, on each side. It writes one form: no white space, the
-    members in the order of their field numbers, a map’s entries sorted. In CI, protobuf’s
-    conformance suite, in binary and in JSON, plays that mapping on every side.
+    <code>application/octet-stream</code>. The stock protobuf libraries do not agree on that
+    mapping, so Bead has its own reader and writer, on each side. It writes one form: no white
+    space, the members in the order of their field numbers, a map’s entries sorted. In CI,
+    protobuf’s conformance suite plays that mapping on every side through its JSON tests, and each
+    side’s codec through its binary ones.
   </p>
   <h3 id="transcodage-echecs">A failure, a problem</h3>
   <p>
@@ -1116,8 +1126,9 @@
   <details class="more" id="transcodage-portes">
     <summary>Its gates and its bounds</summary>
     <p>
-      The gateway judges a request by the HTTP transport’s gates, in the same order, then adds Fetch
-      Metadata: a request with no <code>origin</code> from another site is refused 403, but a
+      The gateway judges a request by the HTTP transport’s gates, in the same order, and adds a gate
+      of Fetch Metadata after the origin’s: a request with no <code>origin</code> from another site
+      is refused 403, but a
       navigation to the document or to the <code>GET</code> of a procedure marked
       <code>NO_SIDE_EFFECTS</code>. A call waits 5 s for its answer by
       default, then receives 504, and no field of the request changes that timeout. A request
@@ -1132,17 +1143,18 @@
   <h3 id="transcodage-client">The client beadc writes</h3>
   <p>
     With <code>gateway</code>, <code>beadc</code> also writes a typed client of the default
-    routes of the procedures it selects, over <code>fetch</code> on the TypeScript side and over
-    <code>HttpClient</code> on the C# side. It reads each problem as a Bead failure, and a stream as an async sequence. The interop
-    calls each side’s gateway with the other side’s client.
+    routes of the procedures it selects: over <code>fetch</code> on the TypeScript side, over
+    <code>HttpClient</code> on the C# side, and over hyper on the Rust side. It reads each problem
+    as a Bead failure, and a stream as an async sequence. The interop calls each side’s gateway with
+    the client of each other side.
   </p>
 </section>
 
 <section id="securite" data-toc="Security">
   <h2 id="securite-h">Security, plainly</h2>
   <p class="gist">
-    A Bead server keeps itself behind five gates, from the outermost to the innermost. Each gate
-    answers one question, and each refusal says why.
+    A Bead server keeps itself behind six gates, from the outermost to the innermost. Each gate
+    answers one question, and each refusal but the address’s says why.
   </p>
   <p>
     The listening address says who can reach the server. The hosts and the origins say which
@@ -1306,7 +1318,7 @@
       <code>origins</code> names, and to no other. It never allows a cookie: no response carries
       <code>Access-Control-Allow-Credentials</code>, since Bead’s credential is never a cookie. No
       browser asks CORS for a WebSocket handshake, and <code>origins</code> alone judges it. A
-      gateway in front of the server that adds CORS fields of its own breaks each page listed.
+      proxy in front of the server that appends CORS fields of its own breaks each page listed.
     </p>
   </details>
   <details class="more" id="securite-adresse">
@@ -1415,18 +1427,19 @@
 <section id="debogage" data-toc="Debugging">
   <h2 id="debogage-h">Debugging</h2>
   <p class="gist">
-    Two listeners tell what goes by: one each step of a call, the other each envelope. While no one
-    listens, they cost nothing.
+    Three listeners tell what goes by: one each step of a call, one each envelope, and over a broker
+    one each parcel. While no one listens, they cost nothing.
   </p>
   <p>
     The service manager’s <code>debug</code> event tells each step of a call: its direction,
     <code>tx</code> going out and <code>rx</code> coming back, its type, its procedure, its callId,
     what went and came back, decoded, and its duration. Each router’s <code>debug</code> tells each
-    envelope, its header copied without its credential.
+    envelope, its header copied without its credential. A broker participant’s <code>debug</code>
+    tells its parcels, its link’s transitions, its names and its reports.
   </p>
   <p>
     With no listener and no registry, a call reads no clock and allocates nothing for debugging:
-    one check per call, one per envelope. A listener that throws never changes a call. Its error goes to the
+    one check per call, one per envelope, one per parcel. A listener that throws never changes a call. Its error goes to the
     <code>error</code> event, and the call keeps the same outcome and the same bytes on the wire.
   </p>
   <p>
@@ -1436,8 +1449,8 @@
     a leak, and fails. Each end-to-end test ends on a server back to zero.
   </p>
   <p>
-    Debugging stays beside the wire, in a companion, <code>spec/debugging.md</code>
-    {{fact of="debugging"}}. A constrained side can leave it out of its build and still conform to
+    Debugging stays beside the wire, in a companion, <code>spec/debugging.md</code>, under its own
+    version, {{fact of="debugging"}}. A constrained side can leave it out of its build and still conform to
     the wire.
   </p>
 
@@ -1568,7 +1581,7 @@
     </li>
     <li>
       <strong>Any other bit</strong
-      ><span>A flag its kind does not take, or a reserved bit, makes the envelope malformed.</span>
+      ><span>A flag its kind does not take, or a kept bit, makes the envelope malformed.</span>
     </li>
   </ul>
 </section>
@@ -1584,9 +1597,9 @@
   </p>
   {{implementations}}
   <p class="space">
-    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. Its WebSocket,
-    HTTP and MQTT 5 transports and its gateway meet the other two sides in the interop, both
-    ways. The core also compiles for
+    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. Its WebSocket
+    and HTTP transports, its MQTT 5 binding and its gateway meet the other two sides in the
+    interop, both ways. The core also compiles for
     <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
@@ -1598,9 +1611,11 @@
     imposes on all.
   </p>
   <p>
-    The sides also measure themselves, on the loopback. TypeScript and C# measure the same layers
-    in the same units: the codec, an <code>echo</code> over HTTP and over WebSocket, paced
-    notifications, a 20 MiB transfer. Rust measures its in-memory calls. On each release’s branch,
+    The sides also measure themselves. TypeScript and C# measure the same layers in the same
+    units: the envelope’s codec, a JSON payload, protobuf’s JSON mapping, an <code>echo</code> over
+    HTTP, over WebSocket and in memory, paced notifications and a 20 MiB transfer. Rust measures its
+    codec, its JSON mapping and its <code>echo</code> in memory; its layers on the loopback are
+    ahead. On each release’s branch,
     CI measures each side against the last release, both trees in turn on one machine, and compares
     them: a regression is read and judged, never a gate.
   </p>
@@ -1636,8 +1651,9 @@
         {{fact of="unitsDebugging"}} for debugging and {{fact of="unitsTranscoding"}} for
         transcoding, each held by the sha256 fingerprint of its text.</li>
       <li><strong>The vectors</strong>: {{fact of="vectors"}}, in {{fact of="vectorGroups"}}
-        groups, each header’s bytes and what a reader refuses, a JWT’s verdicts and a broker’s
-        parcels.</li>
+        groups, each header’s bytes and what a reader refuses, a JWT’s verdicts, a broker’s
+        parcels, and the MQTT 5 PUBLISH and the AMQP 1.0 message that carry one, counted to the
+        byte.</li>
       <li><strong>The conversations</strong>: {{fact of="conversations"}} exchanges between clients
         and the interop server, relays included.</li>
       <li><strong>The transports’ cases</strong>: {{fact of="transportCases"}} exchanges over HTTP,
@@ -1679,11 +1695,11 @@
   </p>
   <h3 id="methode-horloge">Time passed in</h3>
   <p>
-    A call’s timeout, and the rest of what the specification times, each side takes from a clock it
-    is given; a heartbeat, and what bounds a platform’s own socket, parser, close or connect, run on
-    the real clock. The TypeScript side takes a clock, the part of the globals it calls, so a test
-    gives it a clock it advances by hand, and a timeout fires when the test says so;
-    <code>spec/clocks.json</code> holds what every side’s test clock does:
+    Each side takes a call’s timeout, and everything else the specification times, from a clock it
+    is given. A heartbeat runs on the real clock, and so do the bounds of a platform’s own socket,
+    parser and close. <code>spec/clocks.json</code> holds what every side’s test clock does. The
+    TypeScript side’s clock is the part of the globals it calls, so a test gives it a clock it
+    advances by hand, and a timeout fires when the test says so:
   </p>
   {{excerpt path="implementations/typescript/src/transport/shared/clock.ts" lines="export interface IClock -> =}"}}
   <p class="space">
@@ -1707,17 +1723,17 @@
   </p>
   <h3 id="methode-agents">AI agents, in scripted waves</h3>
   <p>
-    Beyond the TypeScript side, much of the code is written by AI agents working under the
-    repository’s rules — the other implementations, the generator, many of the spec’s readings of
-    standards — in waves the scripts of <a href="{{tree path=".claude/workflows"}}"><code>.claude/workflows/</code></a>
+    Beyond the TypeScript side, much of the code is written by AI agents under the repository’s
+    rules: the other implementations, the generator, and many of the spec’s readings of standards.
+    They work in waves, which the scripts of <a href="{{tree path=".claude/workflows"}}"><code>.claude/workflows/</code></a>
     describe. A change that reaches across the languages first meets a design round in which one
     agent is bound to disagree, the Tenth Man. Each of its objections is answered, accepted or
     refused with its reason, in the decision record, under
     <a href="{{tree path="docs/decisions"}}"><code>docs/decisions/</code></a>. Then each language is
     implemented and integrated, and every gate runs. I decide the real dilemmas and make every
-    commit. The ideas, the protocol’s design and the TypeScript side are mine; where a side departs
-    from TypeScript’s idioms or the spec reads a standard, tests and those reviews checked it, not a
-    specialist, and corrections are welcome.
+    commit. The ideas, the protocol’s design and the TypeScript side are mine. The idioms of the
+    other languages, and the spec’s readings of standards, were checked by the tests and the design
+    rounds, not by a specialist. Corrections are welcome.
   </p>
 </section>
 
@@ -1725,14 +1741,14 @@
   <h2 id="suite-h">What is ahead</h2>
   <ul class="rules">
     <li>
-      <strong>Rust in full</strong
+      <strong>Rust’s AMQP 1.0 and service manager</strong
       ><span>Its AMQP 1.0 binding, and its service manager over a router of the application’s
         own.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
-      ><span>The rules across several fields, a subset <code>beadc</code> compiles, then a string’s
-        well-known formats.</span>
+      ><span>The rules across several fields, a subset <code>beadc</code> compiles, then the rest of
+        the rules it refuses, a string’s well-known formats among them.</span>
     </li>
     <li>
       <strong>The close code</strong
@@ -1781,8 +1797,8 @@
 <section id="code" data-toc="In the code">
   <h2 id="code-h">In the code</h2>
   <p class="gist">
-    Bead lives in the router, the middle layer. The transport below moves bytes without reading
-    them, and the services above call and answer without seeing a byte.
+    Bead lives in the router, the middle layer. The transport below moves the envelopes and reads
+    no more of one than its prefix. The services above call and answer without seeing a byte.
   </p>
   <figure class="figure">
     <figcaption>Where Bead lives</figcaption>

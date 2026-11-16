@@ -335,12 +335,13 @@ export const STAGES = Object.freeze([
   [64, 79, ['procedure', 'procédure']],
 ]);
 
-// a failure's fate: answered to the peer, reported locally, rejected before it goes, or as the gate
-// lets it; a code may have two
+// a failure's fate: answered to the peer, reported locally, rejected before it goes, ended by the
+// requester on an answer it cannot take, or as the gate lets it; a code may have several
 export const FATES = Object.freeze({
   answered: ['answered', 'répondu'],
   reported: ['reported', 'signalé'],
   rejected: ['rejected', 'rejeté'],
+  ended: ['ended', 'terminé'],
   gate: ['gate', 'porte'],
 });
 
@@ -459,7 +460,7 @@ export const FAILURES = Object.freeze([
   [
     'PAYLOAD_TOO_LARGE',
     34,
-    ['answered', 'rejected'],
+    ['answered', 'reported', 'rejected', 'ended'],
     [
       'The payload, or a transfer’s total, is past its procedure’s or its router’s limit, 16 MiB by default.',
       'La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.',
@@ -468,7 +469,7 @@ export const FAILURES = Object.freeze([
   [
     'CAPACITY_EXCEEDED',
     35,
-    ['answered', 'rejected'],
+    ['answered', 'rejected', 'ended'],
     [
       'Too many calls at once, no free callId left, or a full queue or budget.',
       'Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.',
@@ -486,7 +487,7 @@ export const FAILURES = Object.freeze([
   [
     'CHUNK_INVALID',
     48,
-    'answered',
+    ['answered', 'ended'],
     [
       'A chunk outside the rules: empty, misplaced, of the wrong size or past the total.',
       'Un morceau hors des règles : vide, mal placé, de la mauvaise taille ou au-delà du total.',
@@ -495,13 +496,13 @@ export const FAILURES = Object.freeze([
   [
     'CREDIT_EXCEEDED',
     49,
-    'answered',
+    ['answered', 'ended'],
     ['A chunk past the credit granted.', 'Un morceau dépasse le crédit accordé.'],
   ],
   [
     'PAYLOAD_UNDECODABLE',
     50,
-    'answered',
+    ['answered', 'reported', 'ended'],
     ['The procedure’s codec refuses the payload.', 'Le codec de la procédure refuse la charge.'],
   ],
   [
@@ -527,8 +528,8 @@ export const FAILURES = Object.freeze([
     64,
     'answered',
     [
-      'The procedure, its admission or a credential’s verifier failed.',
-      'La procédure, son admission ou le vérificateur d’un justificatif a échoué.',
+      'The procedure, its admission or a credential’s verifier failed, a rule could not judge, or the result does not write or is too large to go.',
+      'La procédure, son admission ou le vérificateur d’un justificatif a échoué, une règle n’a pas pu juger, ou le résultat ne s’écrit pas ou est trop gros pour partir.',
     ],
   ],
   [

@@ -6,10 +6,13 @@ flowchart TB
   chk -- refus --> err["constats<br/>fichier:ligne:colonne"]
   chk -- passe --> ts["cible TypeScript<br/>serveur, client, validateurs<br/>et table des routes"]
   chk -- passe --> cs["cible C#<br/>serveur, client, validateurs<br/>et table des routes"]
+  chk -- passe --> rs["cible Rust<br/>serveur, client, validateurs<br/>et table des routes"]
   chk -- passe --> oas["un document<br/>OpenAPI 3.1.1, embarqué<br/>octet pour octet"]
   oas --> ts
   oas --> cs
-  buf --> msg["les messages<br/>protoc-gen-es, protoc C#"]
+  oas --> rs
+  buf --> msg["les messages<br/>protoc-gen-es, protoc C#,<br/>protoc-gen-buffa"]
   msg --> ts
   msg --> cs
+  msg --> rs
   bp -. "contre la dernière version" .-> brk["beadc breaking<br/>WIRE ou API,<br/>HTTP sous les deux"]
