@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
 ### Added
 
 - `tools/check-citations.mjs`, in CI's Commits job: every test the support matrix cites, by its
@@ -77,6 +79,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.15.0 (`spec-v0.15.0`), its companion, `spec/debugging.md`, to 0.10.0
+  (`debugging-v0.10.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.5.0
+  (`transcoding-v0.5.0`).
 - Bead's page and its demo are served at their own domain, https://beadproto.dev/, the demo at
   `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
   ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
@@ -3111,7 +3116,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.13.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.14.0...develop
+[0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0

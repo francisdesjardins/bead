@@ -97,6 +97,8 @@ Bead.Transport.Http.HttpTransportClientOptions.MaximumBodyBytes.get -> int?
 Bead.Transport.Http.HttpTransportClientOptions.MaximumBodyBytes.init -> void
 Bead.Transport.Http.HttpTransportClientOptions.Pause.get -> System.TimeSpan
 Bead.Transport.Http.HttpTransportClientOptions.Pause.init -> void
+Bead.Transport.Http.HttpTransportClientOptions.Tls.get -> Bead.TlsOptions?
+Bead.Transport.Http.HttpTransportClientOptions.Tls.init -> void
 Bead.Transport.Http.HttpTransportClientOptions.Wait.get -> System.TimeSpan
 Bead.Transport.Http.HttpTransportClientOptions.Wait.init -> void
 Bead.Transport.Http.HttpTransportServer

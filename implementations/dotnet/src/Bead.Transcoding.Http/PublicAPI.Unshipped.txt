@@ -1,3 +1,1 @@
 #nullable enable
-Bead.Transcoding.Http.HttpGatewayOptions.Limits.get -> Bead.RouterLimits?
-Bead.Transcoding.Http.HttpGatewayOptions.Limits.init -> void

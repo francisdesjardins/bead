@@ -704,6 +704,7 @@ Bead.IRouterClientTransport
 Bead.IRouterClientTransport.Carries(string! credential) -> bool
 Bead.IRouterClientTransport.Clock.get -> System.TimeProvider!
 Bead.IRouterClientTransport.Close -> System.Action<bool, bool>?
+Bead.IRouterClientTransport.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.IRouterClientTransport.IsSecure.get -> bool
 Bead.IRouterClientTransport.Message -> System.Action<Bead.TransportMessage>?
 Bead.IRouterClientTransport.Pause() -> void
@@ -730,6 +731,7 @@ Bead.IRouterServerTransport
 Bead.IRouterServerTransport.CarriesCredential(string! connectionHandle) -> bool
 Bead.IRouterServerTransport.Clock.get -> System.TimeProvider!
 Bead.IRouterServerTransport.Close -> System.Action<bool, string!>?
+Bead.IRouterServerTransport.CloseConnection(string! connectionHandle) -> System.Threading.Tasks.Task<bool>!
 Bead.IRouterServerTransport.Connection -> System.Action<string!>?
 Bead.IRouterServerTransport.IsSecure(string! connectionHandle) -> bool
 Bead.IRouterServerTransport.IsTwoWay(string! connectionHandle) -> bool
@@ -1782,6 +1784,16 @@ Bead.Subscriber.Equals(Bead.Subscriber other) -> bool
 Bead.Subscriber.Identifier.get -> Bead.SessionIdentifier?
 Bead.Subscriber.Identifier.init -> void
 Bead.Subscriber.Subscriber() -> void
+Bead.TlsOptions
+Bead.TlsOptions.<Clone>$() -> Bead.TlsOptions!
+Bead.TlsOptions.Authorities.get -> string?
+Bead.TlsOptions.Authorities.init -> void
+Bead.TlsOptions.Certificate.get -> string?
+Bead.TlsOptions.Certificate.init -> void
+Bead.TlsOptions.Equals(Bead.TlsOptions? other) -> bool
+Bead.TlsOptions.Key.get -> string?
+Bead.TlsOptions.Key.init -> void
+Bead.TlsOptions.TlsOptions() -> void
 Bead.TracedEnvelope
 Bead.TracedEnvelope.ConnectionHandle.get -> string!
 Bead.TracedEnvelope.ConnectionHandle.init -> void
@@ -2205,6 +2217,9 @@ override Bead.SessionRequest.ToString() -> string!
 override Bead.SessionToken.GetHashCode() -> int
 override Bead.SessionToken.ToString() -> string!
 override Bead.Subscriber.GetHashCode() -> int
+override Bead.TlsOptions.Equals(object? obj) -> bool
+override Bead.TlsOptions.GetHashCode() -> int
+override Bead.TlsOptions.ToString() -> string!
 override Bead.TracedEnvelope.GetHashCode() -> int
 override Bead.TransportClientDisconnectOptions.Equals(object? obj) -> bool
 override Bead.TransportClientDisconnectOptions.GetHashCode() -> int
@@ -2466,6 +2481,8 @@ static Bead.SessionToken.operator !=(Bead.SessionToken left, Bead.SessionToken r
 static Bead.SessionToken.operator ==(Bead.SessionToken left, Bead.SessionToken right) -> bool
 static Bead.Subscriber.operator !=(Bead.Subscriber left, Bead.Subscriber right) -> bool
 static Bead.Subscriber.operator ==(Bead.Subscriber left, Bead.Subscriber right) -> bool
+static Bead.TlsOptions.operator !=(Bead.TlsOptions? left, Bead.TlsOptions? right) -> bool
+static Bead.TlsOptions.operator ==(Bead.TlsOptions? left, Bead.TlsOptions? right) -> bool
 static Bead.TracedEnvelope.operator !=(Bead.TracedEnvelope left, Bead.TracedEnvelope right) -> bool
 static Bead.TracedEnvelope.operator ==(Bead.TracedEnvelope left, Bead.TracedEnvelope right) -> bool
 static Bead.TransportClientDisconnectOptions.operator !=(Bead.TransportClientDisconnectOptions? left, Bead.TransportClientDisconnectOptions? right) -> bool

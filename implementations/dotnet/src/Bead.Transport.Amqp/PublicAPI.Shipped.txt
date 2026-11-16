@@ -38,27 +38,14 @@ Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.get -> string?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.init -> void
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.init -> void
-Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.Transport.Amqp.AmqpBrokerTlsOptions?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.TlsOptions?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.init -> void
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Uri.get -> System.Uri!
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Uri.init -> void
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.VirtualHost.get -> string?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.VirtualHost.init -> void
-Bead.Transport.Amqp.AmqpBrokerTlsOptions
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.<Clone>$() -> Bead.Transport.Amqp.AmqpBrokerTlsOptions!
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.AmqpBrokerTlsOptions() -> void
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.init -> void
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(Bead.Transport.Amqp.AmqpBrokerTlsOptions? other) -> bool
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
-Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.init -> void
 override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Equals(object? obj) -> bool
 override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.GetHashCode() -> int
 override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.ToString() -> string!
-override Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(object? obj) -> bool
-override Bead.Transport.Amqp.AmqpBrokerTlsOptions.GetHashCode() -> int
-override Bead.Transport.Amqp.AmqpBrokerTlsOptions.ToString() -> string!
 static Bead.Transport.Amqp.AmqpBrokerAdapterOptions.operator !=(Bead.Transport.Amqp.AmqpBrokerAdapterOptions? left, Bead.Transport.Amqp.AmqpBrokerAdapterOptions? right) -> bool
 static Bead.Transport.Amqp.AmqpBrokerAdapterOptions.operator ==(Bead.Transport.Amqp.AmqpBrokerAdapterOptions? left, Bead.Transport.Amqp.AmqpBrokerAdapterOptions? right) -> bool
-static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator !=(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool
-static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator ==(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool
