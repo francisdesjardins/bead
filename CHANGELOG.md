@@ -246,7 +246,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   §4.1 and the C# and Rust sides do: its connect resolves, what came before the close is heard
   after it, and its close is told once, where the connect failed after the message was heard. A
   dispose as it opened fails the connect in the dispose's words, and a reconnection that a close
-  listener began then keeps its socket.
+  listener began then keeps its socket. A reconnection's attempt whose socket closes before its
+  connect ends now counts as reconnected, its close told once, as on the other sides, where it
+  failed and the reconnection tried again.
 - The C# side's WebSocket server gives a connection's place back before it tells its close, as the
   TypeScript side's does: a client that came again on that close could still meet 503 busy.
 - The Rust side's session request's debug text leaves out its transport credential and whether
