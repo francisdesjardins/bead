@@ -74,6 +74,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The DevTools extension's privacy policy, at beadproto.dev's `/privacy/`, in English and in French,
   linked from the page's footer: what the extension reads, keeps and sends. Its build refuses a key
   of the extension's manifest that the policy does not state.
+- `tools/flow.mjs finish`, which finishes a feature branch once CI has passed on its head: merged
+  into `develop` with `--no-ff`, `develop` pushed, and the branch on `origin`, its worktree and the
+  local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
+  nothing, and `--dry-run` makes every check and changes nothing.
 
 ### Changed
 

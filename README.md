@@ -199,7 +199,7 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
+tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
   fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
   protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
@@ -1119,6 +1119,25 @@ Two run before each commit, once a clone opts in with `git config core.hooksPath
 `pre-commit` holds the staged root files to their format, when the TypeScript side is installed,
 and `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
+
+## Finishing a feature
+
+A `feature/*` branch is finished by `tools/flow.mjs finish`, from a clone on `develop` or the one
+`--repo` names, each step checked before the next. It holds the branch to being on `origin`,
+`develop` to being clean and at `origin/develop`, a worktree that has the branch checked out to
+being clean, and the branch's head on `origin` to a run of `ci.yml` that passed, awaiting one still
+going. It then merges that head into `develop` with `--no-ff`, git's hooks run, and leaves a
+conflict to whoever resolves it. It pushes `develop` and awaits CI's run of the merge; when a newer
+push cancelled that run, it follows the newest run whose commit contains the merge. On that run's
+success alone, it deletes the branch on `origin`, the worktree, its `node_modules` folders first,
+and the local branch; on its failure, it names the failed jobs and deletes nothing. It never pushes
+`main` or a tag, and refuses a `release/*` or a `hotfix/*` branch, which
+[Releasing](#releasing) finishes. `--dry-run` fetches, makes every check and says what it would do.
+
+```sh
+node tools/flow.mjs finish feature/<name> --dry-run
+node tools/flow.mjs finish feature/<name>
+```
 
 ## Releasing
 
