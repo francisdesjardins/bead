@@ -4596,3 +4596,130 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_hold
 
     fixture.dispose().await.expect("disposed");
 }
+
+const UNDECODABLE_502: &str = "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}";
+
+// ── Its streams, their writes and their results ───────────────────────────────
+
+// `ticks`' route, at `template` alone, its result and its notification told they are `told`'s
+fn ticks_told(
+    template: &str,
+    (result, notification): (bead::HttpPayload, bead::HttpPayload),
+) -> bead::HttpRoute {
+    let ticks = route_named("ticks");
+
+    bead::route_of(bead::HttpRouteInit {
+        procedure: ticks.procedure().clone(),
+        request: ticks.request().clone(),
+        result,
+        notification: Some(notification),
+        failures: ticks.failures().to_vec(),
+        no_side_effects: ticks.no_side_effects(),
+        routes: vec![bead::HttpRouteTemplate {
+            method: bead::HttpMethod::Post,
+            template: template.to_owned(),
+            body: Some("*".to_owned()),
+            response_body: None,
+        }],
+    })
+    .expect("a route")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writes_a_text_or_a_raw_stream_s_data_as_a_json_string_and_a_result_it_cannot_read_as_a_call_s_failure()
+ {
+    // * ticks served thrice more, its result and its notifications told they are raw, text, or an
+    // Edges
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            let edges = route_named("echoEdges").result().clone();
+            let tick = route_named("ticks")
+                .notification()
+                .cloned()
+                .expect("ticks notifies");
+            let (raw, text) = (bead::HttpPayload::Raw, bead::HttpPayload::Text);
+
+            options.routes.extend([
+                ticks_told("/raw-ticks", (raw.clone(), raw)),
+                ticks_told("/text-ticks", (text.clone(), text)),
+                ticks_told("/edges-ticks", (edges, tick)),
+            ]);
+        },
+        true,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&heard);
+
+    // * a listener that panics: what it panicked with dropped, the listener after it told, the
+    // exchange answering on (spec 15.1)
+    fixture
+        .gateway
+        .on_error(Arc::new(|_error| panic!("a listener broke")));
+    fixture.gateway.on_error(Arc::new(move |error| {
+        locked(&hearing).push(error.to_string());
+    }));
+
+    let ticked = |path: &'static str, from: i32| {
+        let port = fixture.port;
+
+        async move {
+            let body = format!("{{\"from\":{from}}}");
+
+            posted(
+                port,
+                &Post {
+                    path,
+                    fields: &["accept: text/event-stream"],
+                    body: &body,
+                },
+            )
+            .await
+        }
+    };
+
+    // its result, each notification and the failure that ends them, in their order, none overtaken
+    for (path, from, begun) in [
+        (
+            "/raw-ticks",
+            2,
+            "event: result\nid: 1\ndata: \"CAI=\"\n\nid: 2\ndata: \"CAE=\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n",
+        ),
+        (
+            "/text-ticks",
+            2,
+            "event: result\nid: 1\ndata: \"\\b\\u0002\"\n\nid: 2\ndata: \"\\b\\u0001\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n",
+        ),
+        // a subscription its server drops right behind its result: the result first, then the
+        // failure
+        (
+            "/text-ticks",
+            0,
+            "event: result\nid: 1\ndata: \"\"\n\nevent: failure\nid: 2\n",
+        ),
+    ] {
+        let body = text_of(&ticked(path, from).await);
+
+        assert!(body.starts_with(begun), "{path} from {from}: {body}");
+    }
+
+    assert_eq!(*locked(&reported), Vec::<String>::new());
+
+    // a result its stock library refuses, or a text one not UTF-8: 502, nothing of the stream
+    // written, reported
+    for (path, from) in [("/edges-ticks", 2), ("/text-ticks", -1)] {
+        let answered = ticked(path, from).await;
+
+        assert_eq!(
+            (answered.head.status, text_of(&answered)),
+            (502, UNDECODABLE_502.to_owned()),
+            "{path} from {from}"
+        );
+    }
+
+    assert_eq!(locked(&reported).len(), 2);
+    assert_eq!(*locked(&heard), *locked(&reported));
+
+    fixture.dispose().await.expect("disposed");
+}
