@@ -450,9 +450,18 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         return frame;
     }
 
-    /// <summary>A socket whose close throws, as one already broken can; the rest is the socket it wraps.</summary>
+    /// <summary>
+    /// A socket whose close throws, as one already broken can, or whose close goes out and whose
+    /// abort throws, aborting nothing; the rest is the socket it wraps.
+    /// </summary>
     private sealed class StubbornWebSocket(WebSocket socket) : WebSocket
     {
+        /// <summary>Whether its close goes out; it throws unless told.</summary>
+        public bool Closes { get; init; }
+
+        /// <summary>Whether its abort throws, leaving the socket it wraps as it was.</summary>
+        public bool RefusesAbort { get; init; }
+
         public override WebSocketCloseStatus? CloseStatus
         {
             get
@@ -487,17 +496,22 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         public override void Abort()
         {
+            if (RefusesAbort)
+            {
+                throw new InvalidOperationException("abort refused");
+            }
+
             socket.Abort();
         }
 
         public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
         {
-            return Task.FromException(new WebSocketException("the close cannot go out"));
+            return Closes ? socket.CloseAsync(closeStatus, statusDescription, cancellationToken) : Task.FromException(new WebSocketException("the close cannot go out"));
         }
 
         public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
         {
-            return Task.FromException(new WebSocketException("the close cannot go out"));
+            return Closes ? socket.CloseOutputAsync(closeStatus, statusDescription, cancellationToken) : Task.FromException(new WebSocketException("the close cannot go out"));
         }
 
         public override void Dispose()
@@ -3215,6 +3229,49 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Empty(_server.ConnectionHandles);
             Assert.Empty(_server.Clients);
             Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    [Fact]
+    public async Task Ends_a_connection_whose_drop_throws_at_its_close_timeout_telling_what_it_threw_once_and_its_close_at_a_close_and_at_a_stop()
+    {
+        var stubborn = new ConcurrentQueue<StubbornWebSocket>();
+
+        await Start(new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) })
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                var refusing = new StubbornWebSocket(socket) { Closes = true, RefusesAbort = true };
+
+                stubborn.Enqueue(refusing);
+
+                return (refusing, connectionHandle);
+            },
+        });
+
+        var told = Told();
+        // neither peer reads, so neither answers its close
+        var (closed, closedHandle) = await Connect();
+        var (stopped, stoppedHandle) = await Connect();
+
+        using (closed)
+        using (stopped)
+        {
+            Assert.True(await _server.CloseConnection(closedHandle).WaitAsync(Patience, Cancelled));
+            await _server.Stop().WaitAsync(Patience, Cancelled);
+
+            Assert.Empty(_server.ConnectionHandles);
+            Assert.Empty(_server.Clients);
+            Assert.Equal(
+                [("error", "abort refused", closedHandle), ("close", null, closedHandle), ("error", "abort refused", stoppedHandle), ("close", null, stoppedHandle)],
+                told.Select((each) =>
+                {
+                    return (each.Name, each.Reason?.Message, each.ConnectionHandle);
+                }));
+            Assert.All(stubborn, (socket) =>
+            {
+                Assert.Equal(WebSocketState.Aborted, socket.State);
+            });
         }
     }
 

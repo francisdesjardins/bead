@@ -1055,7 +1055,17 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             try { _ = disposed.CancelAsync().ContinueWith((completed) => { _ = completed.Exception; }, TaskScheduler.Default); }
             catch (ObjectDisposedException) { /* the connect's own ending releases its source */ }
         }
-        connecting?.Abort();
+        // ! a drop always completes: a socket still connecting is held by no connection, so what its
+        // abort throws has no error to carry it
+        try
+        {
+            connecting?.Abort();
+        }
+        catch (Exception)
+        {
+            // the dispose goes on
+        }
+
         disconnecting?.TrySetResult(true);
 
         if (connection is not null)
@@ -1139,7 +1149,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         // * its end: its one error, a message past its bound named by it and its value, then its
         // close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
-        failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : null;
+        failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : connection.AbortFailure;
 
         if (failure is not null)
         {

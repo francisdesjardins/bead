@@ -128,7 +128,7 @@ public sealed class WebSocketConnectionTests
 
         connection.End();
         await connection.Send(new byte[] { 1, 2, 3 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
-        await connection.CloseQuietly(WebSocketCloseStatus.NormalClosure).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await connection.Close(WebSocketCloseStatus.NormalClosure).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
         Assert.Empty(socket.Sent);
         Assert.Equal(0, socket.Aborts);
@@ -257,31 +257,22 @@ public sealed class WebSocketConnectionTests
         }
     }
 
-    [Theory]
-    [InlineData("websocket")]
-    [InlineData("disposed")]
-    [InlineData("invalid")]
-    [InlineData("io")]
-    public async Task Settles_a_quiet_close_when_its_socket_throws_during_abort(string kind)
+    [Fact]
+    public async Task Settles_a_close_when_its_socket_throws_during_abort_keeping_what_it_threw()
     {
-        var failure = kind switch
-        {
-            "websocket" => (Exception)new WebSocketException("the socket breaks during abort"),
-            "disposed" => new ObjectDisposedException("socket"),
-            "invalid" => new InvalidOperationException("the socket cannot abort"),
-            "io" => new IOException("the socket breaks during abort"),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-        };
+        // what no socket of the platform's throws: whatever its abort throws, the close settles
+        var failure = new NotSupportedException("the socket cannot abort");
         using var socket = new HeldWebSocket { AbortFailure = failure };
         var connection = new WebSocketConnection(socket, (64, TimeSpan.FromMilliseconds(1)));
 
         try
         {
             // the peer never answers: the platform close timeout expires, without a competing end
-            await connection.CloseQuietly(WebSocketCloseStatus.NormalClosure).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            await connection.Close(WebSocketCloseStatus.NormalClosure).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
             Assert.Equal(WebSocketState.Aborted, socket.State);
             Assert.Equal(1, socket.Aborts);
+            Assert.Same(failure, connection.AbortFailure);
             Assert.True(connection.IsEndedHere);
             Assert.False(connection.IsTooBig);
             Assert.Null(connection.Dropped);
