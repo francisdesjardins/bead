@@ -221,18 +221,24 @@ test.describe('mountScenes', () => {
     // the drawer the desktop opened is the sheet, open, on a phone
     await expect(page.locator('#wire-sheet')).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator('#wire-body')).toBeVisible();
-    const covered = await page.evaluate(() => {
-      const tabs = (document.getElementById('scene-tabs') as HTMLElement).getBoundingClientRect();
-      const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
-      const y = Math.max(tabs.top, sheet.top) + 2;
-      return {
-        reaches: sheet.top < tabs.bottom,
-        onTop: document
-          .getElementById('wire')
-          ?.contains(document.elementFromPoint(tabs.left + 40, y)),
-      };
-    });
-    expect(covered).toEqual({ reaches: true, onTop: true });
+    // ! the sheet grows as the refusal's envelopes reach the wire's log, after its status shows
+    await expect
+      .poll(() => {
+        return page.evaluate(() => {
+          const tabs = (
+            document.getElementById('scene-tabs') as HTMLElement
+          ).getBoundingClientRect();
+          const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
+          const y = Math.max(tabs.top, sheet.top) + 2;
+          return {
+            reaches: sheet.top < tabs.bottom,
+            onTop: document
+              .getElementById('wire')
+              ?.contains(document.elementFromPoint(tabs.left + 40, y)),
+          };
+        });
+      })
+      .toEqual({ reaches: true, onTop: true });
 
     // * and the strip's disclosure, opened, lies over the sheet
     await page.locator('#status-toggle').click();
