@@ -9,14 +9,11 @@ from datetime import datetime
 
 from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
+from interop import API, PROCEDURES, SERVICE_ID
 from make_codecs import payload_outcome
 from spec_version import spec_version
 
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
-# the interop service's API, its one service in its blueprint (decision 0022)
-API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
-SERVICE_ID = API['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 # each procedure's request's encoding, which reads its payload
 ENCODINGS = {procedure['procedureName']: procedure['request']['encoding'] for procedure in API['procedures']}
 # the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here

@@ -10,14 +10,10 @@ from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
-from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
+from conformance import advance, armed, hexadecimal, text, word, write_json
+from interop import PROCEDURES, SERVICE_ID
 from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
-
-# the interop service's API, its one service in its blueprint (decision 0022)
-API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
-SERVICE_ID = API['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 
 REQUEST, RESULT, FAILURE, NOTIFICATION = 16, 17, 18, 19
 PROTOCOL = 0
