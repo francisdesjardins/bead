@@ -1,12 +1,13 @@
 // ── beadc ─────────────────────────────────────────────────────────────────────
 
-// beadc's command line: `check`, `blueprint`, `generate`, `breaking`, `init`, `wrapper` and `version`
-// (decision 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1
+// beadc's command line: `check`, `blueprint`, `generate`, `breaking`, `init`, `wrapper`, `clean` and
+// `version` (decision 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1
 // on an error — a warning too under `--fail-on-warning`, a difference under `blueprint --check` or
 // `generate --check`, a breaking finding — or 2 when the input or the call is one beadc cannot
 // take, a path the file system refuses among them, in one line. `generate` and `init` alone load the
 // targets, by a dynamic import: they load a TypeScript compiler, which the other commands never
-// need.
+// need. Each run works in a work area of its own under the system's temporary folder, and first
+// sweeps the stale areas of runs gone; `clean` sweeps them on demand.
 //
 //   node src/cli.ts check [<root or blueprint>]
 //   node src/cli.ts blueprint [<root or blueprint>] -o <file> [--descriptor-set-out <file>]
@@ -16,6 +17,7 @@
 //     [--category WIRE|API]
 //   node src/cli.ts init <name> [--language typescript|csharp|rust]...
 //   node src/cli.ts wrapper beadc.sh|beadc.ps1
+//   node src/cli.ts clean [--all]
 //   node src/cli.ts version
 
 // dependencies
@@ -49,6 +51,7 @@ import { formDifferencesOf, formOf, type IFormDifference } from './model/form.ts
 import { displayOf } from './roots.ts';
 import { Category, isRuleName, RULES, Severity } from './rules.ts';
 import { beadcVersion, versionLines } from './version.ts';
+import { removeWorkAreaOnSignals, sweepWorkAreas, workAreasFolder } from './work-area.ts';
 import { isWrapperName, WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
@@ -91,12 +94,15 @@ const USAGE = [
   '                                holds the input to an earlier release, writing nothing',
   '  init <name>                   writes a project here, its .proto, its beadc.yaml and its wrappers',
   "  wrapper beadc.sh|beadc.ps1    prints a wrapper that runs beadc's image",
+  "  clean [--all]                 takes out the work areas of runs gone, under the system's",
+  '                                temporary folder; --all those without a marker too, a minute old',
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
   '       --category WIRE|API (breaking, API by default), --except <RULE>@<subject> or',
   '       buf:<RULE>@<path> (breaking, any finding: a subject as its line prints it)',
-  '       --language typescript|csharp|rust (init, repeated; each when none is named)',
+  '       --language typescript|csharp|rust (init, repeated; each when none is named),',
+  '       --all (clean), --help (this usage)',
 ].join('\n');
 
 // what GitHub titles a difference under each --check
@@ -152,9 +158,9 @@ const sourceOf = (
   };
 };
 
-const checkSource = (source: Source, config?: IConfig): IChecked => {
+const checkSource = (source: Source): IChecked => {
   return 'proto' in source
-    ? checkRoots(source.proto, config === undefined ? {} : { folder: config.folder })
+    ? checkRoots(source.proto)
     : checkBlueprintFile(source.blueprint, { file: displayOf(source.blueprint) });
 };
 
@@ -236,13 +242,11 @@ const formDifferenceOf = (difference: IFormDifference, file: string): IFormDiffe
 };
 
 const runCheck = (call: ICall): Exit => {
-  return report(checkSource(call.source, call.config).diagnostics, call)
-    ? Exit.FINDINGS
-    : Exit.DONE;
+  return report(checkSource(call.source).diagnostics, call) ? Exit.FINDINGS : Exit.DONE;
 };
 
 const runBlueprint = (call: ICall): Exit => {
-  const checked = checkSource(call.source, call.config);
+  const checked = checkSource(call.source);
   const failed = report(checked.diagnostics, call);
 
   if (checked.blueprint === undefined || failed) {
@@ -301,7 +305,7 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
     throw new InputError("generate writes beadc.yaml's outputs, and takes no input of its own");
   }
 
-  const checked = checkSource(call.source, call.config);
+  const checked = checkSource(call.source);
 
   if (report(checked.diagnostics, call)) {
     return Exit.FINDINGS;
@@ -378,6 +382,35 @@ const runInit = async (name: string | undefined, languages: readonly string[]): 
   }
 
   return Exit.DONE;
+};
+
+const runClean = (all: boolean): Exit => {
+  const swept = sweepWorkAreas({ all });
+
+  for (const { path, bytes } of swept) {
+    print(`beadc: clean takes out ${path}, ${String(bytes)} bytes`);
+  }
+
+  const bytes = swept.reduce((sum, area) => {
+    return sum + area.bytes;
+  }, 0);
+
+  print(
+    swept.length === 0
+      ? `beadc: clean finds no work area to take out in ${workAreasFolder()}`
+      : `beadc: clean took out ${String(swept.length)} work area${swept.length === 1 ? '' : 's'}, ${String(bytes)} bytes`
+  );
+
+  return Exit.DONE;
+};
+
+// * each run sweeps the areas of runs gone first; what it cannot read or take out waits for the next
+const sweepFirst = (): void => {
+  try {
+    sweepWorkAreas();
+  } catch {
+    // ! a sweep never fails the run it comes before
+  }
 };
 
 const runWrapper = (name: string | undefined): Exit => {
@@ -474,9 +507,16 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
         language: { type: 'string', multiple: true },
         against: { type: 'string' },
         category: { type: 'string' },
+        all: { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' },
       },
     });
     const [command, input, ...rest] = positionals;
+
+    if (values.help === true) {
+      print(USAGE);
+      return Exit.DONE;
+    }
 
     if (rest.length > 0) {
       throw new InputError(`one input at most, not ${String(rest.length + 1)}`);
@@ -489,6 +529,20 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
     if (values.language !== undefined && command !== 'init') {
       throw new InputError(`--language is init's, not ${command}'s`);
     }
+
+    if (values.all !== undefined && command !== 'clean') {
+      throw new InputError(`--all is clean's, not ${command}'s`);
+    }
+
+    if (command === 'clean') {
+      if (input !== undefined) {
+        throw new InputError('clean takes no input: it takes out the work areas of runs gone');
+      }
+
+      return runClean(values.all === true);
+    }
+
+    sweepFirst();
 
     for (const flag of ['against', 'category'] as const) {
       if (values[flag] !== undefined && command !== 'breaking') {
@@ -549,5 +603,6 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
 };
 
 if (import.meta.main) {
+  removeWorkAreaOnSignals();
   process.exitCode = await run(process.argv.slice(2));
 }

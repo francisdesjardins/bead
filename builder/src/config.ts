@@ -168,7 +168,10 @@ interface IDocument {
 /** The file beadc reads its project from. */
 export const CONFIG_FILE = 'beadc.yaml';
 
-/** The folder beadc keeps its own files in, beside `beadc.yaml`, which `init`'s `.gitignore` ignores. */
+/**
+ * The folder beside `beadc.yaml` that holds the editor's copy of beadc's options, which `init`'s
+ * `.gitignore` ignores and buf never compiles from a root.
+ */
 export const BEADC_FOLDER = '.beadc';
 
 const KEYS = new Set(['version', 'source', 'blueprint', 'outputs', 'clean', 'http', 'openapi']);
