@@ -1952,6 +1952,11 @@ impl Raw {
 }
 
 async fn raw() -> Raw {
+    raw_writing(Vec::new()).await
+}
+
+// a raw server that writes `after` with each 101, in one write, which its client reads in one read
+async fn raw_writing(after: Vec<u8>) -> Raw {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (take, upgraded) = mpsc::unbounded_channel();
@@ -1970,16 +1975,13 @@ async fn raw() -> Raw {
                 })
                 .unwrap_or_default();
             let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+            let mut written = format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+            )
+            .into_bytes();
 
-            socket
-                .write_all(
-                    format!(
-                        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
-                    )
-                    .as_bytes(),
-                )
-                .await
-                .unwrap();
+            written.extend_from_slice(&after);
+            socket.write_all(&written).await.unwrap();
             take.send(socket).ok();
         }
     });

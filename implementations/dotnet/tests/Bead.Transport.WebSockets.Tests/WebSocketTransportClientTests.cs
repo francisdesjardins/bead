@@ -1679,6 +1679,53 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
+    [Fact]
+    public async Task Opens_on_a_101_written_together_with_a_close_hears_what_came_before_it_once_open_and_tells_one_close()
+    {
+        // unmasked, as a server sends them
+        byte[] message = [0x82, 0x01, 0x2A];
+        byte[] close = [0x88, 0x02, 0x03, 0xE8];
+
+        foreach (var frames in new byte[][] { close, [.. message, .. close] })
+        {
+            using var listener = new Listener(IPAddress.Loopback);
+            await using var client = new WebSocketTransportClient();
+            var (told, closed) = EndOf(client);
+
+            client.Message += (heard) =>
+            {
+                lock (told)
+                {
+                    told.Add((Convert.ToHexString(heard.Bytes.Span), client.ReadyState));
+                }
+            };
+
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                // the 101 and its frames in one write, which the client reads in one read
+                byte[] written = [.. Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {Listener.AcceptOf(head)}\r\n\r\n"), .. frames];
+
+                await peer.GetStream().WriteAsync(written, Cancelled);
+                await connecting.WaitAsync(Patience, Cancelled);
+
+                // its close answered, the server ends its socket
+                Assert.Equal(1000, await CloseCodeOf(peer.GetStream()));
+                peer.Client.Shutdown(SocketShutdown.Send);
+                await closed.WaitAsync(Patience, Cancelled);
+            }
+
+            // * what came before the close, heard open, then one unclean close
+            object[] expected = frames.Length == close.Length ? [(false, false)] : [("2A", ReadyState.Open), (false, false)];
+
+            Assert.Equal(expected, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
     [Fact]
     public async Task Refuses_a_close_before_it_connects_and_once_closed()
     {
