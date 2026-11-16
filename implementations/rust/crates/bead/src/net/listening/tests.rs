@@ -196,3 +196,21 @@ async fn ends_its_accepting_and_lets_its_listener_go_once_dropped_without_its_st
     until(|| Arc::strong_count(&watched.alive) == 1).await;
     assert!(stepping.dues().is_empty(), "its pause disarmed");
 }
+
+// * a start told no port listens on HTTP's, 80, held here without binding it
+#[test]
+fn listens_on_port_80_when_its_start_names_none_and_on_the_port_it_names_otherwise() {
+    assert_eq!(
+        port_of(&TransportServerStartOptions::default()),
+        80,
+        "none named"
+    );
+    assert_eq!(
+        port_of(&TransportServerStartOptions {
+            port: Some(8080),
+            ..TransportServerStartOptions::default()
+        }),
+        8080,
+        "8080 named"
+    );
+}

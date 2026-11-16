@@ -31,6 +31,11 @@ mod tests;
 // the port a start names none of listens on, HTTP's
 const PORT: u16 = 80;
 
+/// The port a start's `options` ask for: theirs, or HTTP's when they name none.
+fn port_of(options: &TransportServerStartOptions) -> u16 {
+    options.port.unwrap_or(PORT)
+}
+
 /// What an io error stands for, as a start reports it.
 pub(crate) fn io_error(error: io::Error) -> RouterError {
     RouterError::Other(Arc::new(error))
@@ -190,10 +195,7 @@ pub(crate) fn bind(
         runtime,
         (
             options,
-            &LoopbackBinding::new(
-                options.port.unwrap_or(PORT),
-                options.find_open_port.unwrap_or(false),
-            ),
+            &LoopbackBinding::new(port_of(options), options.find_open_port.unwrap_or(false)),
         ),
     )
 }
@@ -220,7 +222,7 @@ pub(crate) fn bind_with_loopback(
         ))));
     }
 
-    let port = options.port.unwrap_or(PORT);
+    let port = port_of(options);
     let find_open_port = options.find_open_port.unwrap_or(false);
     let (bound, reported) = if address == LOCALHOST {
         let bound = bind_loopbacks(
