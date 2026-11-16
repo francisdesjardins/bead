@@ -313,6 +313,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side closes no connection refused twice `maximumAnsweringCalls` requests in a row once
   its router was disposed before that close came due, as the C# side does: it asked its transport
   to close the connection.
+- The Rust side reads its monotonic clock at the end of each counted call a closing connection
+  answered, as the TypeScript and C# sides do: those calls shared one reading, short of the two
+  readings a counted call takes (debugging 3.3).
 
 ### Security
 
