@@ -31,6 +31,8 @@ export const createFakeSocket = (behaviour?: {
   onClose?: 'answer' | 'ignore' | 'throw';
   /** Whether the peer answers a ping; it does not by default. */
   onPing?: 'answer' | 'ignore';
+  /** A terminate that throws, as a socket an application gives may: the socket never closes. */
+  onTerminate?: 'throw';
 }) => {
   const emitter = new EventEmitter();
   const socket: IFakeSocket = {
@@ -69,6 +71,9 @@ export const createFakeSocket = (behaviour?: {
     sent: [],
     terminate: () => {
       socket.wasTerminated = true;
+      if (behaviour?.onTerminate === 'throw') {
+        throw new Error('terminate refused');
+      }
       emitter.emit('close', 1006);
     },
   };

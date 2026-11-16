@@ -5,7 +5,7 @@ import { createServer as createTlsServer } from 'node:https';
 import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
-import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
   CancelError,
   ConnectError,
@@ -3258,6 +3258,41 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     expect(client.isClosed()).toBe(true);
   });
 
+  test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
+    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const connecting = client.connect({ host, port: 80 });
+    const socket = made[0];
+    const told: unknown[] = [];
+
+    client.on('error', (error) => {
+      told.push(['error', error.message]);
+    });
+    client.on('close', (...args) => {
+      told.push(['close', ...args]);
+    });
+
+    // no ping answered, and a socket that never closes as it is terminated
+    if (socket !== undefined) {
+      socket.terminateBehaviour = 'throw';
+    }
+
+    socket?.fireOpen();
+    await connecting;
+    await nextEvent(client, 'close');
+
+    expect(socket?.wasTerminated).toBe(true);
+    expect(told).toEqual([
+      ['error', 'terminate refused'],
+      ['close', false, false],
+    ]);
+    expect(client.isClosed()).toBe(true);
+
+    // a socket that closes after its connection ended tells nothing more
+    socket?.fireClose({ code: 1006, reason: '' });
+    expect(told).toHaveLength(2);
+  });
+
   test('beats every HEARTBEAT when told nothing', async () => {
     using timers = spyIntervals();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
@@ -3444,6 +3479,42 @@ test.describe('WebSocketTransportClient, an upgrade refused', () => {
       // `ws`'s own, which ended the socket
       expect((reason as ConnectError).cause).toBeInstanceOf(Error);
       expect(client.isClosed()).toBe(true);
+    }
+  });
+
+  test('fails its connect on an upgrade refused whose socket’s terminate throws, what it threw the cause', async () => {
+    await using refusing = await startRefusing(FORBIDDEN);
+    const stubborn: WsWebSocket[] = [];
+    // `ws`'s own socket, which throws as it is terminated, ending nothing
+    const StubbornWs = class extends WsClient {
+      override terminate(): void {
+        stubborn.push(this);
+
+        throw new Error('terminate refused');
+      }
+    };
+    const client = createWebSocketTransportClient({
+      WebSocket: StubbornWs as unknown as IWebSocketConstructor,
+    });
+
+    try {
+      const reason: unknown = await client
+        .connect({ host, port: refusing.port })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect(reason).toBeInstanceOf(ConnectError);
+      expect((reason as ConnectError).message).toBe(
+        'the server refused the upgrade: 403 host-refused'
+      );
+      expect((reason as ConnectError).cause).toEqual(new Error('terminate refused'));
+      expect(stubborn).toHaveLength(1);
+      expect(client.isClosed()).toBe(true);
+    } finally {
+      for (const socket of stubborn) {
+        WsClient.prototype.terminate.call(socket);
+      }
     }
   });
 

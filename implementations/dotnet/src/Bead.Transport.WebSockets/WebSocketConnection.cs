@@ -11,6 +11,10 @@ namespace Bead.Transport.WebSockets;
 /// its close — the peer's answered at once, this side's waited for within its timeout, then
 /// dropped.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "its read's source holds no timer, no wait handle and no link: cancelled once at most, it needs no dispose")]
 internal sealed class WebSocketConnection
 {
     private readonly (int MaximumMessageBytes, TimeSpan CloseTimeout) _bounds;
@@ -20,15 +24,19 @@ internal sealed class WebSocketConnection
         Channel.CreateUnbounded<(ReadOnlyMemory<byte>, WebSocketCloseStatus?, TaskCompletionSource)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // cancelled once its socket's abort threw, since that socket may never end its read
+    private readonly CancellationTokenSource _reading = new();
+
     // what waits for the socket — handed it, in the channel or under SendAsync — and how this side
     // ended the connection of its own, when it did: dropped behind a bound, and why; failed with
-    // 1009; aborted past its close timeout; and whether it ended, past which nothing drops it; under
-    // the lock
+    // 1009; aborted past its close timeout; what its abort threw; and whether it ended, past which
+    // nothing drops it; under the lock
     private readonly Lock _gate = new();
     private long _unsent;
     private string? _dropped;
     private bool _isTooBig;
     private bool _isAbandoned;
+    private Exception? _abortFailure;
     private bool _isEnded;
 
     // * its read's gate (spec 15.12, decision 0046): shut while its router paused it, what its read
@@ -96,9 +104,24 @@ internal sealed class WebSocketConnection
     }
 
     /// <summary>
-    /// Whether this side ended it of its own: dropped behind a bound, failed with 1009, or aborted
-    /// past its close timeout. What its socket meets after says nothing more, and its close is
-    /// unclean, whatever the peer answers.
+    /// What its socket threw as this side aborted it, which its side reports as the connection's
+    /// error when nothing came before it; none while its abort threw nothing.
+    /// </summary>
+    public Exception? AbortFailure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _abortFailure;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether this side ended it of its own: dropped behind a bound, failed with 1009, aborted
+    /// past its close timeout, or aborted by a socket that threw. What its socket meets after says
+    /// nothing more, and its close is unclean, whatever the peer answers.
     /// </summary>
     public bool IsEndedHere
     {
@@ -106,7 +129,7 @@ internal sealed class WebSocketConnection
         {
             lock (_gate)
             {
-                return _dropped is not null || _isTooBig || _isAbandoned;
+                return _dropped is not null || _isTooBig || _isAbandoned || _abortFailure is not null;
             }
         }
     }
@@ -251,7 +274,27 @@ internal sealed class WebSocketConnection
     {
         _sendPace?.Stop();
         OpenGate(true);
-        Socket.Abort();
+        Abort();
+    }
+
+    // ! a drop always completes: what its socket throws as it is aborted is kept, the connection's
+    // error, and its read is cancelled, since that socket may never end it
+    private void Abort()
+    {
+        try
+        {
+            Socket.Abort();
+        }
+        catch (Exception reason)
+        {
+            lock (_gate)
+            {
+                _abortFailure ??= reason;
+            }
+
+            // its task observed, as a client's dispose observes its own cancel
+            _ = _reading.CancelAsync().ContinueWith((completed) => { _ = completed.Exception; }, TaskScheduler.Default);
+        }
     }
 
     /// <summary>
@@ -344,24 +387,11 @@ internal sealed class WebSocketConnection
                 _isAbandoned = true;
             }
 
-            Socket.Abort();
+            Abort();
         }
         else
         {
             await elapsed.CancelAsync();
-        }
-    }
-
-    // a close sent on its own, nothing waiting on it: what its socket meets going says nothing
-    public async Task CloseQuietly(WebSocketCloseStatus status)
-    {
-        try
-        {
-            await Close(status);
-        }
-        catch (Exception reason) when (reason is WebSocketException or ObjectDisposedException or InvalidOperationException or IOException)
-        {
-            // a socket already gone takes no close
         }
     }
 
@@ -404,7 +434,7 @@ internal sealed class WebSocketConnection
                     }
                 }
 
-                var received = await Socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None);
+                var received = await Socket.ReceiveAsync(buffer.AsMemory(), _reading.Token);
 
                 if (received.MessageType == WebSocketMessageType.Close)
                 {
@@ -433,7 +463,7 @@ internal sealed class WebSocketConnection
                         _isTooBig = true;
                     }
 
-                    _ = CloseQuietly(WebSocketCloseStatus.MessageTooBig);
+                    _ = Close(WebSocketCloseStatus.MessageTooBig);
 
                     continue;
                 }
@@ -510,7 +540,7 @@ internal sealed class WebSocketConnection
                 // TypeScript side drops it
                 if (close is not null)
                 {
-                    Socket.Abort();
+                    Abort();
                 }
             }
             finally

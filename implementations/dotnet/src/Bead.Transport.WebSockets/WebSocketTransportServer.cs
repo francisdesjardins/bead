@@ -915,7 +915,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // ! no handle is given twice: one already held is a bug of the draw, and the socket goes
         if (!_connections.TryAdd(connectionHandle, held))
         {
-            socket.Abort();
+            try
+            {
+                socket.Abort();
+            }
+            catch (Exception)
+            {
+                // a socket no connection holds has no error to carry what its abort threw
+            }
 
             throw new InvalidOperationException($"the handle {connectionHandle} names a connection already held");
         }
@@ -925,7 +932,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // the host's stop waits on this request until it ends, within its shutdown timeout
         if (_life.IsStopping)
         {
-            _ = connection.CloseQuietly(WebSocketCloseStatus.EndpointUnavailable);
+            _ = connection.Close(WebSocketCloseStatus.EndpointUnavailable);
         }
 
         Exception? failure = null;
@@ -972,8 +979,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
     // what this side ended a connection of its own for, named by its bound in the spec's spelling
     // and its value (spec 15.3, 15.12): a drop, the socket aborted, its I/O cut short; a message
-    // past its bound, data it does not take, as SignalR reports a message past its own; none
-    // otherwise
+    // past its bound, data it does not take, as SignalR reports a message past its own; then what
+    // its socket threw as it was aborted; none otherwise
     private static Exception? FailureOf(WebSocketConnection connection, string connectionHandle)
     {
         if (connection.Dropped is { } why)
@@ -981,7 +988,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             return ServerBounds.DroppedOf(connectionHandle, why);
         }
 
-        return connection.IsTooBig ? connection.TooBigOf(connectionHandle) : null;
+        return connection.IsTooBig ? connection.TooBigOf(connectionHandle) : connection.AbortFailure;
     }
 
     // * a connection's end, told once its read ended, its close or its abort begun: its one error,

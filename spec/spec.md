@@ -1290,13 +1290,19 @@ and where its script threw it, its server told the close unclean; a broker conne
 a bound or a parcel that does not read, naming it, and a message a broker's participant takes that
 is no parcel, which it drops and which ends no connection (sections 15.17, 15.19, 15.20) — and what
 a listener throws, as it throws: a connection's own once, as it ends, its close or its drop begun,
-so that no listener's throw keeps it open, and before its close, which is then unclean. It reports
-no peer that drops without its closing handshake, its TCP connection ended or reset, nor, over a
-broker, a RESET, a GONE or its participant's link lost (section 15.21), nor one its heartbeat drops,
-nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
-server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it, unclean, but for a client's own `disconnect`
-left unanswered, whose close is told as the `disconnect` asked.
+so that no listener's throw keeps it open, and before its close, which is then unclean. A drop
+always ends its connection. What a connection's socket throws as its transport drops it, or as it
+sends its close, is that connection's own error, reported as it ends unless it had one: the
+connection ends all the same, its close unclean though its socket may never close, and what it held,
+its place among them (section 15.2), is given back before its close is told. What a socket throws
+before a connection holds it is reported nowhere, but a client's upgrade's, which fails its connect,
+its cause. A transport reports no peer that drops without its closing handshake, its TCP connection
+ended or reset, nor, over a broker, a RESET, a GONE or its participant's link lost (section 15.21),
+nor one its heartbeat drops, nor its own drop of a peer that never answered a close within its close
+timeout, but for what its socket throws as it drops either, nor, over HTTP, a server gone, a refusal
+of its own, an answer of another type, an exchange lost or a listen given up past its inactivity
+timeout: each one's close tells it, unclean, but for a client's own `disconnect` left unanswered,
+whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
