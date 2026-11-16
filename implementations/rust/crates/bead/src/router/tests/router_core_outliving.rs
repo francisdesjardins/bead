@@ -11,7 +11,7 @@ use super::router_core_sessions::{receive, session};
 use super::{Handed, cancel_of, locked};
 use crate::constants::{CredentialScheme, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, RequestHeader};
-use crate::errors::ResolverError;
+use crate::errors::{CallError, ResolverError};
 use crate::failure::Failure;
 use crate::router::core::{self as router_core, Handler, Resolution, ResolveFn, Resolved};
 use crate::router::types::{RouterAnswer, RouterError, RouterLimitsOptions, SignalReason};
@@ -796,4 +796,67 @@ async fn reports_the_failure_of_a_resolver_its_side_answered_procedure_failed_on
         "the failure answered PROCEDURE_FAILED reported alone: {reported:?}"
     );
     assert_eq!(tracked_of(peer).await, [0, 0, 0]);
+}
+
+// spec 9.0, 9.10
+#[tokio::test]
+async fn reports_no_failure_of_a_resolver_its_side_answered_procedure_failed_once_its_router_was_disposed()
+ {
+    let peer = Peer::new(RouterSide::Server, &limits_of(4));
+    let (answers, answering) = oneshot::channel::<()>();
+    let (rejects, rejecting) = oneshot::channel::<()>();
+    let gates = Arc::new(Mutex::new(Some((answering, rejecting))));
+    let outcomes: Arc<Mutex<Vec<Result<(), CallError>>>> = Arc::default();
+    let telling = Arc::clone(&outcomes);
+
+    // a resolver answered PROCEDURE_FAILED when the test says, then held until it rejects
+    let resolve: ResolveFn = Arc::new(move |props| {
+        let answerer = Arc::clone(&props.answerer);
+        let gates = locked(&gates).take();
+        let telling = Arc::clone(&telling);
+
+        Box::pin(async move {
+            let (answering, rejecting) = gates.expect("one call handed");
+
+            answering.await.ok();
+
+            let outcome = answerer
+                .respond(RouterAnswer::Failure(
+                    Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server).record(),
+                ))
+                .await;
+
+            locked(&telling).push(outcome);
+            rejecting.await.ok();
+
+            Err(ResolverError::other(std::io::Error::other("rejected")))
+        })
+    });
+
+    registered(&peer, handler_of(resolve)).await;
+    receive_all(&peer, (vec![request(1)], "a")).await;
+    peer.settle().await;
+
+    // * its answer comes after the dispose, which told it: never marked, its failure silent
+    peer.owner
+        .run(router_core::dispose)
+        .await
+        .expect("the core disposed");
+    answers.send(()).ok();
+    peer.settle().await;
+
+    assert!(
+        matches!(
+            locked(&outcomes).as_slice(),
+            [Err(CallError::Disconnected(_))]
+        ),
+        "its answer failed as disposed: {:?}",
+        locked(&outcomes)
+    );
+
+    rejects.send(()).ok();
+    peer.settle().await;
+
+    assert_eq!(peer.sent().await, []);
+    assert_eq!(reports_of(&peer).await, []);
 }
