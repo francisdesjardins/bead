@@ -87,6 +87,76 @@ const pick = (pair, language) => {
   return pair[LANGUAGES.indexOf(language)];
 };
 
+// ── Templates ─────────────────────────────────────────────────────────────────
+
+// a placeholder of a template: `{{name}}`, `{{name a="…" b="…"}}`, or `{{s:key}}`, a string of the page
+const PLACEHOLDER = /\{\{([\w-]+(?::\w+)?)((?:\s+\w+="[^"]*")*)\s*\}\}/gu;
+
+// what reads as a placeholder once a template is filled: one no filler took
+const LEFT = /\{\{[\w:-]+[^}]*\}\}/gu;
+
+// the attributes of a placeholder, `{{name a="…" b="…"}}`
+const attributesOf = (text) => {
+  return Object.fromEntries(
+    [...text.matchAll(/(\w+)="([^"]*)"/gu)].map(([, key, value]) => {
+      return [key, value];
+    })
+  );
+};
+
+// a filler that gives markup: HTML, a sheet, a script or a script's JSON. Its markup goes in as it
+// is; every other filler gives text, which is escaped.
+const raw = (filler) => {
+  return Object.freeze({ raw: filler });
+};
+
+// the markup's state at the end of `text`, given its state at the start: whether it is inside a
+// tag of the HTML, `<a …>`, and in which quote of an attribute's value
+const markupAfter = (text, state) => {
+  let { inside, quote } = state;
+  for (const character of text) {
+    if (!inside) {
+      inside = character === '<';
+    } else if (quote !== '') {
+      quote = character === quote ? '' : quote;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      inside = false;
+    }
+  }
+  return { inside, quote };
+};
+
+// ! a template's placeholders filled in one pass, each by the filler of its name, which takes its
+// attributes. A filler's text is escaped for where the placeholder stands: as an attribute value
+// inside an HTML tag, as text outside one. A raw filler's markup goes in as it is. What a filler
+// gives is never read for placeholders. A name with no filler, or a placeholder left once filled,
+// is refused.
+const fill = (template, fillers) => {
+  let state = { inside: false, quote: '' };
+  let at = 0;
+  const filled = template.replace(PLACEHOLDER, (placeholder, name, rest, offset) => {
+    state = markupAfter(template.slice(at, offset), state);
+    at = offset + placeholder.length;
+    if (!Object.hasOwn(fillers, name)) {
+      throw new Error(`build: no placeholder ${placeholder}`);
+    }
+    const filler = fillers[name];
+    const attributes = attributesOf(rest);
+    if (typeof filler !== 'function') {
+      return filler.raw(attributes);
+    }
+    const text = filler(attributes);
+    return state.inside ? escapeAttribute(text) : escape(text);
+  });
+  const left = filled.match(LEFT);
+  if (left !== null) {
+    throw new Error(`build: placeholders left: ${[...new Set(left)].join(', ')}`);
+  }
+  return filled;
+};
+
 // a number as each language groups its digits: a comma, or a no-break space
 const grouped = (value, language) => {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/gu, language === 'fr' ? ' ' : ',');
@@ -629,61 +699,59 @@ const diagramOf = (name, language) => {
 
 // ── Content ───────────────────────────────────────────────────────────────────
 
-// the attributes of a placeholder, `{{name a="…" b="…"}}`
-const attributesOf = (text) => {
-  return Object.fromEntries(
-    [...text.matchAll(/(\w+)="([^"]*)"/gu)].map(([, key, value]) => {
-      return [key, value];
-    })
-  );
-};
-
-const fill = (template, language, known) => {
-  return template.replace(/\{\{(\w+)((?:\s+\w+="[^"]*")*)\s*\}\}/gu, (placeholder, name, rest) => {
-    const attributes = attributesOf(rest);
-    switch (name) {
-      case 'bytes':
-        return bytesOf(attributes.of, language, attributes.hero === 'true');
-      case 'header':
-        return headerOf(language);
-      case 'failures':
-        return failuresOf(language);
-      case 'statuses':
-        return statusesOf(language);
-      case 'wire':
-        return wireOf(language);
-      case 'implementations':
-        return implementationsOf(language);
-      case 'diagram':
-        return diagramOf(attributes.of, language);
-      case 'code':
-        return codeBlock(snippetOf(attributes.of, language), attributes.language ?? 'typescript');
-      case 'exposition':
-        return codeBlock(expositionOf(), 'plaintext');
-      case 'excerpt': {
-        const ranges = attributes.lines.split(';;').map((range) => {
-          return range.split('->').map((end) => {
-            return end.trim();
-          });
+// the fillers of the main page's content in `language`, its facts those read from the repository
+const contentFillers = (language, known) => {
+  return {
+    bytes: raw((attributes) => {
+      return bytesOf(attributes.of, language, attributes.hero === 'true');
+    }),
+    header: raw(() => {
+      return headerOf(language);
+    }),
+    failures: raw(() => {
+      return failuresOf(language);
+    }),
+    statuses: raw(() => {
+      return statusesOf(language);
+    }),
+    wire: raw(() => {
+      return wireOf(language);
+    }),
+    implementations: raw(() => {
+      return implementationsOf(language);
+    }),
+    diagram: raw((attributes) => {
+      return diagramOf(attributes.of, language);
+    }),
+    code: raw((attributes) => {
+      return codeBlock(snippetOf(attributes.of, language), attributes.language ?? 'typescript');
+    }),
+    exposition: raw(() => {
+      return codeBlock(expositionOf(), 'plaintext');
+    }),
+    excerpt: raw((attributes) => {
+      const ranges = attributes.lines.split(';;').map((range) => {
+        return range.split('->').map((end) => {
+          return end.trim();
         });
-        const caption = `<figcaption><a href="${BLOB}${attributes.path}"><code>${escape(attributes.path)}</code></a></figcaption>`;
-        return `<figure class="excerpt">${codeBlock(excerptOf(attributes.path, ranges), attributes.language ?? 'typescript')}${caption}</figure>`;
+      });
+      const caption = `<figcaption><a href="${escapeAttribute(`${BLOB}${attributes.path}`)}"><code>${escape(attributes.path)}</code></a></figcaption>`;
+      return `<figure class="excerpt">${codeBlock(excerptOf(attributes.path, ranges), attributes.language ?? 'typescript')}${caption}</figure>`;
+    }),
+    blob: (attributes) => {
+      return `${BLOB}${attributes.path}`;
+    },
+    tree: (attributes) => {
+      return `${TREE}${attributes.path}`;
+    },
+    fact: (attributes) => {
+      const value = known[attributes.of];
+      if (value === undefined) {
+        throw new Error(`build: no fact ${attributes.of}`);
       }
-      case 'blob':
-        return `${BLOB}${attributes.path}`;
-      case 'tree':
-        return `${TREE}${attributes.path}`;
-      case 'fact': {
-        const value = known[attributes.of];
-        if (value === undefined) {
-          throw new Error(`build: no fact ${attributes.of}`);
-        }
-        return typeof value === 'number' ? grouped(value, language) : value;
-      }
-      default:
-        throw new Error(`build: no placeholder ${placeholder}`);
-    }
-  });
+      return typeof value === 'number' ? grouped(value, language) : value;
+    },
+  };
 };
 
 // the table of contents, from each section's id and its `data-toc`, which it then drops
@@ -761,14 +829,27 @@ const PRIVACY_STRINGS = Object.freeze({
 const pageOf = (language, { strings, content: filled }) => {
   const other = language === 'en' ? 'fr' : 'en';
   const { items, content } = contentsOf(language === 'fr' ? typeset(filled) : filled);
-  const chrome = read(join(SRC, 'chrome.html'))
-    .replaceAll('{{lang}}', language)
-    .replaceAll('{{other}}', other)
-    .replace(/\{\{s:(\w+)\}\}/gu, (_, key) => {
-      return escapeAttribute(strings[key]);
-    })
-    .replace('{{toc}}', items)
-    .replace('{{content}}', content);
+  const chrome = fill(read(join(SRC, 'chrome.html')), {
+    ...Object.fromEntries(
+      Object.entries(strings).map(([key, text]) => {
+        return [
+          `s:${key}`,
+          () => {
+            return text;
+          },
+        ];
+      })
+    ),
+    other: () => {
+      return other;
+    },
+    toc: raw(() => {
+      return items;
+    }),
+    content: raw(() => {
+      return content;
+    }),
+  });
   return chrome.trim();
 };
 
@@ -784,8 +865,10 @@ const sheetsOf = (paths) => {
 // the not-found page: Bead's skin and its bar on penumbra's sheets, under its own styles, and no
 // script
 export const buildNotFound = () => {
-  return read(join(SRC, '404.html')).replace('{{stack}}', () => {
-    return sheetsOf(STACK);
+  return fill(read(join(SRC, '404.html')), {
+    stack: raw(() => {
+      return sheetsOf(STACK);
+    }),
   });
 };
 
@@ -796,7 +879,7 @@ const mainContentOf = (language, known) => {
   if (template.split('{{implementations}}').length !== 2) {
     throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
   }
-  return fill(template, language, known);
+  return fill(template, contentFillers(language, known));
 };
 
 // one document of both languages in the shell: English in the page, French in a template the page
@@ -822,43 +905,41 @@ const documentOf = ({ address, strings, contents }) => {
       ];
     })
   );
-  const page = read(join(SRC, 'shell.html'))
-    .replace('{{style}}', () => {
+  return fill(read(join(SRC, 'shell.html')), {
+    style: raw(() => {
       // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
       // over them
       return sheetsOf([...STACK, join(SRC, 'styles.css')]);
-    })
-    .replace('{{head-script}}', () => {
+    }),
+    'head-script': raw(() => {
       return read(join(SRC, 'head.js')).trim();
-    })
-    .replace('{{theme-script}}', () => {
+    }),
+    'theme-script': raw(() => {
       // * the theme as the demo keeps it too, one script for both
       return read(join(PENUMBRA, 'theme.js')).trim();
-    })
-    .replace('{{page-script}}', () => {
+    }),
+    'page-script': raw(() => {
       return read(join(SRC, 'page.js')).trim();
-    })
-    .replace('{{heads}}', () => {
+    }),
+    heads: raw(() => {
       return JSON.stringify(heads).replaceAll('<', '\\u003c');
-    })
-    .replaceAll('{{title}}', () => {
-      return escapeAttribute(strings.en.title);
-    })
-    .replaceAll('{{description}}', () => {
-      return escapeAttribute(strings.en.description);
-    })
-    .replaceAll('{{address}}', address)
-    .replace('{{page-en}}', () => {
+    }),
+    title: () => {
+      return strings.en.title;
+    },
+    description: () => {
+      return strings.en.description;
+    },
+    address: () => {
+      return address;
+    },
+    'page-en': raw(() => {
       return pages.en;
-    })
-    .replace('{{page-fr}}', () => {
+    }),
+    'page-fr': raw(() => {
       return pages.fr;
-    });
-  const left = page.match(/\{\{[\w:-]+[^}]*\}\}/gu);
-  if (left !== null) {
-    throw new Error(`build: placeholders left: ${[...new Set(left)].join(', ')}`);
-  }
-  return page;
+    }),
+  });
 };
 
 export const build = () => {
@@ -943,7 +1024,7 @@ export const buildPrivacy = () => {
     strings: PRIVACY_STRINGS,
     contents: Object.fromEntries(
       LANGUAGES.map((language) => {
-        return [language, read(join(SRC, `privacy.${language}.html`))];
+        return [language, fill(read(join(SRC, `privacy.${language}.html`)), {})];
       })
     ),
   });
