@@ -11,7 +11,7 @@
   and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `gateway` and
   `beadc breaking`'s `HTTP`; each runtime's transcoding layer, its gateway and the HTTP client each
   output with `gateway` writes, section 12; the interop over each gateway, each side's client
-  against the other side's gateway and the two served documents compared byte for byte; and
+  against each other side's gateway and the served documents compared byte for byte; and
   protobuf's conformance suite's JSON tests through each side's mapping. The in-memory transport and
   the joined transport a gateway calls through are
   [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s;
@@ -262,7 +262,7 @@ tells it from one that kept it.
   problem by section 9's line between a call never tried, `DESTINATION_UNREACHABLE`, and one that
   may have run, `DESTINATION_LOST`; a passed bound `PAYLOAD_TOO_LARGE`, a cut stream
   `DESTINATION_LOST`, a body it cannot read `PAYLOAD_UNDECODABLE`. It reconnects no stream and sends
-  no `Last-Event-ID`; each side's client calls the other side's gateway in the interop.
+  no `Last-Event-ID`; each side's client calls each other side's gateway in the interop.
 - **Where it is stated**: a companion, `spec/transcoding.md`, on the spec's axis under a version of
   its own, its file repeating `transcodingVersion`, tagged `transcoding-v`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): a gateway is beside the

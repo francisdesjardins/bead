@@ -236,6 +236,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its sticky scene tabs, where it could sit under them. The DevTools panel's Broker table fits
   its pane at 1280 px, its parts cut where they run long and whole in the row's detail, and the
   Timeline lists its calls newest first, row for row as the Calls list does.
+- The documents are brought to 0.14.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's gateway and beadc target among what holds.
 
 ### Removed
 

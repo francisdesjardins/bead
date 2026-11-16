@@ -79,7 +79,7 @@ each joins as a feature a reader must know.
 - **A protoc plugin per language**, each with its own front end: the front end written once per
   language, and two languages' readings of one option to keep alike.
 - **A front end in C# over Google.Protobuf's descriptors, or in Go over `protogen`**: a toolchain the
-  TypeScript side does not have, for the tool both sides use.
+  TypeScript side does not have, for the tool every side uses.
 - **A front end over protobufjs's parser**, which does not follow protoc's grammar.
 - **One front end, TypeScript on Node, over `@bufbuild/protobuf`'s descriptors, writing one blueprint
   every target reads. Chosen.** Node is every contributor's already, for the TypeScript side and the
@@ -300,15 +300,19 @@ it marks one or names a deprecated message, protoc-gen-es's `/* eslint-disable *
 protoc-gen-es writes in every file: the TypeScript side's lint holds beadc's output to its rules
 wherever nothing is marked. `generate` refuses two files it would write at one path, over every
 output, the paths compared case-folded. It removes nothing unless `beadc.yaml` sets `clean`, buf's
-opt-in, protoc never removing a file. Without `clean`, a `_bead.ts` or a `*Bead.cs` under beadc's
-own header that the source no longer gives, which nothing but beadc writes, is named by `generate`
-and left, and fails `generate --check`, so a service a source dropped never ships in silence; a file
-under protoc's or protoc-gen-es's header, a project's own as much as beadc's, is not named. Under
-`clean` it takes out of each output's folder a file of a kind it writes that this run does not, read
-by its first lines in both targets, a `_bead.ts` or a `*Bead.cs` with beadc's header, a `_pb.ts`
-with protoc-gen-es's, a `.cs` with protoc's at the path protoc gives its source, and prints each:
-under `clean` the generated files' kinds in an output's folder are beadc's alone, and a project's
-own files stay, where buf's `clean` empties the folder. Messages are the stock generators' —
+opt-in, protoc never removing a file. The files beadc owns are those under its header: a `_bead.ts`,
+`bead_http.ts` or `bead_served.ts` in TypeScript, a `.cs` in C# and a `.rs` in Rust. Without
+`clean`, such a file that the source no longer gives, which nothing but beadc writes, is named by
+`generate` and left, and fails `generate --check`, so a service a source dropped never ships in
+silence. A file under protoc's, protoc-gen-es's or Buffa's header, a project's own as much as
+beadc's, is not named. Under `clean` it takes out of each output's folder a file of a kind it
+writes that this run does not, read by its first lines in every target, and prints each. Those
+kinds are the files beadc owns and, where messages are generated, a `_pb.ts` with protoc-gen-es's
+header, a `.cs` with protoc's at the path protoc gives its source and a `.rs` with Buffa's under a
+Rust output's `messages/`. Under `clean`, a file of those kinds in an output's folder is beadc's to
+take, whichever generator wrote it. A project's other files stay, where buf's `clean` empties the
+folder. Messages are the stock
+generators' —
 protoc-gen-es with `erasable_syntax=true`, run in beadc's process, protoc's C# generator over
 buf's set, and protoc-gen-buffa, pinned, over the same set, for Rust — or `external`, a project's
 own generator writing them, for Rust through `bead_protobuf_build::config_of`. An output with
@@ -319,8 +323,8 @@ the procedures it selects
 and embeds the OpenAPI document of them byte for byte, in the blueprint's own form, the one
 `beadc.yaml`'s `openapi:` writes of the blueprint where it selects every procedure; any other
 output writes neither and embeds nothing, so no assembly carries a document it never serves, and a
-target that generates no HTTP is refused such an output, `HTTP_UNGENERATED`, the Rust target until
-its gateway's stage. An output's `http` and
+target that generates no HTTP is refused such an output, `HTTP_UNGENERATED`; each of beadc's three
+targets generates it. An output's `http` and
 `httpRuntime` are refused, naming `gateway: {}` and `gateway.runtime` (0048).
 
 **Generated code passes its language's gates but its formatter.** `*_bead.ts` passes oxlint, its
@@ -372,7 +376,7 @@ service's id and revision, and each procedure's id, kind, bindings, admission, f
 of description; `tools/release.mjs` moves its `specVersion` as it moves every conformance file's
 that repeats one ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)). Its schema,
 `spec/schemas/interop-blueprint.schema.json`, is the format's with `requires` empty and one service:
-the generators and both sides' interop read that one service and no feature, and the day one reads a
+the generators and every side's interop read that one service and no feature, and the day one reads a
 feature, it lifts the pin.
 `spec/interop-service.json` states, for each of those procedures by its name and in
 their order, what it takes, what it answers, what it admits where its admission is not `none` and

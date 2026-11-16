@@ -74,8 +74,11 @@ TypeScript client against the C# server; over WebSocket, over HTTP and over MQTT
 against every side's server, and the TypeScript and C# clients against the Rust server
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
 [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
-and the TypeScript and C# sides' generated HTTP clients call each other's gateway, the two served
-OpenAPI documents compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds
+and each side's generated HTTP client calls each other side's gateway, the served OpenAPI
+documents compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts` and the Rust client's
+gateway trials of `bead-interop-server`, `<side>::gateway::…`;
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
+Each side finds
 the others from the directory that holds `spec/spec.md`, and starts their servers. Where another
 runtime is missing, the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip
 into a failure, and CI sets it. The Rust server is the binary `BEAD_INTEROP_RUST_SERVER` names,

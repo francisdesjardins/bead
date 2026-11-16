@@ -732,9 +732,11 @@ its unit, `// spec 15.13`, in a module's `tests.rs` beside it or a crate's `test
 `refuses_to_join_two_transports_of_one_type`,
 `stops_every_transport_it_joined_and_sums_their_gauges` and
 `serves_one_service_offered_once_to_a_client_of_each_transport`; and what of a broker no case
-reaches, in `bead/src/broker/tests.rs`, by the other sides' sentences above. Those of a unit ahead
-for it, spec 15.10 and 15.12 and the transcoding's, come with the stage that brings it. Beside
-them, its own: an operation that takes effect as it is made, its future only waiting,
+reaches, in `bead/src/broker/tests.rs`, by the other sides' sentences above. Its twins of spec
+15.10 are in `bead/src/http/client/tests/listening.rs`, and those of 15.12 in the tests of its
+transports and of its router. The transcoding's are in `bead/tests/gateway.rs` and
+`bead/tests/caller.rs`. Beside them, its own:
+an operation that takes effect as it is made, its future only waiting,
 `sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in`,
 `a_call_s_future_dropped_unpolled_still_sends_its_call` and
 `a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_before_it`, and the

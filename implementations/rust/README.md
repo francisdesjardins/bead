@@ -11,17 +11,21 @@ every duration held as spec 1.4 holds it; the trace, the filter and the registry
 participant's trace of its parcels; the WebSocket and HTTP transports, server and client, features
 of the core over tokio's sockets, and the in-memory transport; the broker's core over an in-memory
 broker, its MQTT 5 binding, a feature of the core and a client of its own, and the joined transport;
-the `proto` payload's codec on Buffa; and its HTTP/JSON gateway and its caller, features of the core
-on hyper, protobuf's JSON read and written by Bead's own mapping, a feature of `bead-protobuf` —
-playing every conformance file it reaches, each part it
-lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that
-brings it. The rules its code keeps — one owner per router, traits and composition, no unsafe code,
-two parameters then an options struct, every warning an error — are
+the `proto` payload's codec on Buffa and the validators' runtime; and its HTTP/JSON gateway and its
+caller, features of the core on hyper, protobuf's JSON read and written by Bead's own mapping, a
+feature of `bead-protobuf`. beadc writes for it each package's typed server and client beside the
+messages Buffa writes, the validators of a blueprint's rules, and an output's route table, document
+and HTTP client. It plays every conformance file it reaches, each part it lacks a row of
+[`docs/support.md`](../../docs/support.md)'s differences, ahead. The rules its code keeps — one
+owner per router, traits and composition, no unsafe code, two parameters then an options struct,
+every warning an error — are
 [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s;
 its sockets are
 [decision 0049](../../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s,
 its broker bindings
 [decision 0050](../../docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s,
+what beadc writes for it
+[decision 0051](../../docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)'s,
 its gateway [decision 0052](../../docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s.
 
 ## Build and test

@@ -465,18 +465,18 @@ objections, all accepted.
 ### On the resolvers a call's end leaves running
 
 The resolvers a call's end leaves running met the Tenth Man at xhigh effort, in a round of their
-own, on a finding of a review of the Rust side: HTTP/2's Rapid Reset at the layer of calls, 200
-resolvers running under a bound of 2, probed on the TypeScript and Rust sides and read in the C#
-code. The draft kept the count of the calls answered and added a second one beside it: a cancelled
-call whose resolver runs on, counted until it settles, within twice `maximumAnsweringCalls`, as
-Kestrel tracks streams. The dissenter checked each claim against the code and against probes of its
-own. Of its eight objections, five were accepted, three in part and none refused: the second count
-became every resolver that outlives its call, answered or cancelled; a connection whose count stays
-full is closed and the close reported; a resolver whose call ended before its turn is handed
-nothing; a received transfer keeps its place the same way; and RFC 9113 is cited for the close
-alone. What no standard settles took the round's recommendation: the resolvers that outlive a closed
-connection stay ahead, for the round of 0030's fit of the bound per address, whose key, an address
-or a participant's id, carries both. Each objection, with the answer it got:
+own. Its subject is HTTP/2's Rapid Reset at the layer of calls: 200 resolvers run under a bound of
+2, probed on the TypeScript and Rust sides and read in the C# code. The table answers a draft that
+kept the count of the calls answered and counted beside it a cancelled call whose resolver runs on,
+until it settles, within twice `maximumAnsweringCalls`, as Kestrel tracks streams. The dissenter
+checks each objection against the code and against probes of its own. Of its eight objections, five
+are accepted, three in part and none refused. The second count is every resolver that outlives its
+call, answered or cancelled. A connection whose count stays full is closed and the close reported.
+A resolver whose call ended before its turn is handed nothing. A received transfer keeps its place
+among twice `maximumTransfers` the same way. RFC 9113 is cited for the close alone. The resolvers
+that outlive a closed connection, which no standard settles, stay ahead, for the round of 0030's
+fit of the bound per address, whose key, an address or a participant's id, carries both. Each
+objection, with the answer it got:
 
 | Objection                                                                                                                                                                                                                                                                                                                                                                                                                                          | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -491,17 +491,17 @@ or a participant's id, carries both. Each objection, with the answer it got:
 
 ### On the report a close owes a resolver it tells
 
-A close tells each resolver whose call ended before (9.10), and a resolver told by its signal
-before its failure comes is not reported (0013). A call its side answers `PROCEDURE_FAILED`, a
-service's callback that failed, still has its resolver running as that answer goes, and a peer
-that closes on that answer, as a gateway closes each exchange's connection, can tell the resolver
-before its failure reaches its router: the report 9.0 owes then rests on a mark, never on the order
-of the turns, which the Rust side's resolvers, run off its owner, leave open. The draft reported
-every failure whose call ended before its signal was aborted. It met the Tenth Man at xhigh effort.
-Of six objections, three were accepted, two in part and one refused: the router marks a call as it
-hands its transport a `PROCEDURE_FAILED` answer, never once disposed, and reports its resolver's
-failure whatever tells it after; any other resolver told before its failure came stays silent. Each
-objection, with the answer it got:
+The report a close owes a resolver it tells met the Tenth Man at xhigh effort. A close tells each
+resolver whose call ended before (9.10), and a resolver told by its signal before its failure comes
+is not reported (0013). A call its side answers `PROCEDURE_FAILED`, a service's callback that
+failed, still has its resolver running as that answer goes. A peer that closes on that answer, as a
+gateway closes each exchange's connection, can tell the resolver before its failure reaches its
+router. The report 9.0 owes then rests on a mark, never on the order of the turns, which the Rust
+side's resolvers, run off its owner, leave open. The table answers a draft that reported every
+failure whose call ended before its signal was aborted. Of six objections, three are accepted, two
+in part and one refused. The router marks a call as it hands its transport a `PROCEDURE_FAILED`
+answer, never once disposed, and reports its resolver's failure whatever tells it after. Any other
+resolver told before its failure came stays silent. Each objection, with the answer it got:
 
 | Objection                                                                                                                                                                                                                             | Answer                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

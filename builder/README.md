@@ -11,8 +11,8 @@ each target compiles into a validator of its language
 `beadc check` refuses a `.proto` or a blueprint by rule name; `beadc blueprint` writes a blueprint
 in its one form, and with `--check` holds one to it; `beadc generate` writes, from a blueprint, a
 typed server where only resolvers are written and a client holding a requester of each procedure by
-its name, in TypeScript and in C#, and with `--check` holds them to it; `beadc breaking` holds a
-project to its last release. The format's schema is the spec's,
+its name, in TypeScript, in C# and in Rust, and with `--check` holds them to it; `beadc breaking`
+holds a project to its last release. The format's schema is the spec's,
 [`spec/schemas/bead-blueprint.schema.json`](../spec/schemas/bead-blueprint.schema.json), and the
 interop's blueprint, [`spec/interop-blueprint.json`](../spec/interop-blueprint.json), is what
 [`test/fixtures/bead/interop/v1/interop.proto`](test/fixtures/bead/interop/v1/interop.proto) gives,
@@ -229,8 +229,9 @@ transport's (`SELECTOR_UNMATCHED`, which names the Bead form of a selector copie
 select none, `[]` written being no slip (`SELECTION_EMPTY`); and a `gateway` that selects no route
 (`GATEWAY_EMPTY`).
 
-A split output is the goldens under [`test/golden/typescript/subsets/`](test/golden/typescript/subsets/)
-and [`test/golden/csharp/subsets/`](test/golden/csharp/subsets/), which both targets write from
+A split output is the goldens under [`test/golden/typescript/subsets/`](test/golden/typescript/subsets/),
+[`test/golden/csharp/subsets/`](test/golden/csharp/subsets/) and
+[`test/golden/rust/subsets/`](test/golden/rust/subsets/), which the three targets write from
 [`test/golden/subsets.blueprint.json`](test/golden/subsets.blueprint.json), the C# side's in a
 namespace of their own, `Bead.Subsets.V1`: Shop's orders served, its readers called, its readers'
 routes a gateway's, three transports, one of them taking none, and Auth, which no side selects,
@@ -421,10 +422,10 @@ as Buf publishes it, Apache-2.0, its licence in
 - **A field protobuf requires**, of `LEGACY_REQUIRED` presence, proto2's `required` or an edition's
   `features.field_presence = LEGACY_REQUIRED`, is `legacyRequired: true` among its message's
   `fields`, its `presence` `explicit`, and `requires` names `legacy-required`: a message that leaves
-  one unset neither reads nor writes on either side, and a gateway refuses it where its server would
+  one unset neither reads nor writes on any side, and a gateway refuses it where its server would
   (spec 17.9.7,
   [decision 0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
-  Both targets generate the feature; a reader that does not know it refuses the blueprint.
+  Every target generates the feature; a reader that does not know it refuses the blueprint.
 - **A description** is the leading comment of a service, an rpc or a failure's value: each line's
   text after its marker, one space taken off, its end trimmed, carriage returns read as line feeds;
   a paragraph's lines joined by one space, paragraphs by a blank line. Trailing and detached comments
@@ -459,7 +460,7 @@ as the C# client reserves `Subscribe<Procedure>`.
 **A description** is written by every official target, and C#'s documentation comments are XML:
 `DESCRIPTION_TARGET` refuses, on every blueprint, a description holding a character XML 1.0 holds in
 no document, raw or by reference, C0's controls but tab, LF and CR, and U+FFFE and U+FFFF, rather
-than one target dropping it and the two sides' documentation differing.
+than one target dropping it and the targets' documentation differing.
 
 ## The TypeScript target
 
@@ -1313,4 +1314,5 @@ protoc and environment; then the image, which `yarn test` runs through each wrap
 project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
 by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
 C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
-generator.
+generator. The Rust side's `rust` job compiles the Rust goldens whole under that side's lints, as an
+application mounts them, through `bead-goldens`.

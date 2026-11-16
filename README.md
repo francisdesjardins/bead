@@ -54,8 +54,8 @@ build on a commit, pinned. Publication is ahead.
 ## At a glance
 
 A service is declared once, in a `.proto` with Bead's options, and `beadc` generates its server and
-its client in TypeScript and in C#. What is left to write is the resolvers and the calls, here
-abridged from [`examples/hello`](examples/hello), whose C# half writes the same:
+its client in TypeScript, in C# and in Rust. What is left to write is the resolvers and the calls,
+here abridged from [`examples/hello`](examples/hello), whose C# and Rust halves write the same:
 
 ```ts
 // the server: its admission hooks, by the names the .proto gives them, and a resolver that asks
@@ -132,9 +132,9 @@ and AMQP 1.0 on RabbitMQ 4 its second
   implementation plays them, the Rust side the part it reaches; the three call each other in CI over
   WebSocket, HTTP and MQTT 5, and the TypeScript and C# ones over AMQP 1.0 too, and through each
   other's gateway.
-- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
-  a project that binds `proto` brings protobuf-es, an optional peer, one over MQTT 5 brings
-  MQTT.js, another, and one over AMQP 1.0 brings rhea, a third.
+- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
+  Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
+  MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
 
 Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
 reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec whose
@@ -145,8 +145,8 @@ says why it is so, in [`docs/decisions/`](docs/decisions/README.md).
 
 Bead is built to production standards: a spec every side plays, the three sides calling each other
 in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold a side,
-and its pages held to WCAG 2.2 AA. It is not yet proven in production, and before 1.0.0 a minor may
-still break.
+and its pages held to WCAG 2.2 AA. It is not proven in production, and before 1.0.0 a minor may
+break.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
@@ -386,20 +386,23 @@ under one `#[expect]` of the workspace's lints.
 
 In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
 `.proto` or a blueprint by rule name, writes a blueprint in its form, holds a project to its last
-release, `beadc breaking`, and generates a typed server and client, in TypeScript and in C#: each
-side's interop is its output
+release, `beadc breaking`, and generates a typed server and client, in TypeScript, in C# and in
+Rust: each side's interop is its output
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
 `.yarn/releases/`, buf from its lockfile, and protoc, which writes the C# messages, by its pin,
-`protoc.json`, whose archive `tools/fetch-protoc.mjs` fetches and checks by its sha256. Node runs
-`src/cli.ts` as written.
+`protoc.json`, whose archive `tools/fetch-protoc.mjs` fetches and checks by its sha256.
+protoc-gen-buffa writes the Rust messages by its pin, `protoc-gen-buffa.json`, whose binary
+`tools/fetch-protoc-gen-buffa.mjs` fetches and checks by its sha256. Node runs `src/cli.ts` as
+written.
 
 ```sh
 cd builder
 yarn install --immutable
 export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
+export BEADC_PROTOC_GEN_BUFFA="$(node tools/fetch-protoc-gen-buffa.mjs)"   # protoc-gen-buffa, by its pin
 yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
-yarn test         # beadc's tests, the interop's .proto and its blueprint, and both targets' goldens among them
+yarn test         # beadc's tests, the interop's .proto and its blueprint, and the three targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
@@ -515,8 +518,8 @@ transports, a call opened in each of its tabs. CI's `typescript` job runs it ove
 beadproto.dev is a Cloudflare Worker that serves files alone, `beadproto`, which `wrangler.jsonc`
 configures: no script, no workers.dev address, no preview address, and a path nothing answers a 404. `deploy.mjs` assembles `out/` from the files it lists, and nothing else: the page at `/`, the
 demo's static build at `/playground/`, built there from its sources, Bead's mark and the page's
-faces, the 404 page, and, written as it assembles, `_redirects`, which sends each old path under
-`/bead/` to where it is now in one 301, `_headers`, the security headers and a Content-Security-Policy
+faces, the 404 page, and, written as it assembles, `_redirects`, which sends `/bead` and each path
+under it to the same path at the root in one 301, `_headers`, the security headers and a Content-Security-Policy
 that names the page's inline scripts by their hashes, `robots.txt` and `sitemap.xml`. Then it
 uploads `out/` by the Wrangler `package.json` pins:
 
@@ -1233,7 +1236,8 @@ the wrappers' lint, each linter at its pin); `examples` on Node 26 and on 24.9, 
 TypeScript half declares (what each example copies, or takes from beadc's wrapper and init, held to
 its source; beadc on Node holding `examples/hello`'s generated files; buf's lint and layout over its
 `.proto`; each half's gates and both its builds; then each client against each server, both modes of
-each half, thirty-six pairs, the TypeScript and C# servers' gateway asked after its client);
+each half, thirty-six pairs on Node 26 and the TypeScript and C# halves' sixteen on 24.9, each
+server's gateway asked after its client);
 `protobuf-conformance`
 (protobuf's conformance suite, its runner by its pin's sha512, through each side's generated `proto`
 codec and its JSON, each held to its failure list and the floor, the C# and Rust testees' format,

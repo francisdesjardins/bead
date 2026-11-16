@@ -329,8 +329,9 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
   exchange's `differs` excuses its player from each.
 - **A build with a socket feature needs a C compiler**, aws-lc-rs's; the core with no feature does
   not.
-- **CI lints the core's library four ways**, with no feature, with `websocket` alone, with `http`
-  alone and with all, and checks the browser's target by its features, no socket among them.
+- **CI lints the core's library** with no feature, with each of `websocket`, `http`, `mqtt`,
+  `transcoding` and `gateway` alone, and with all, and checks the browser's target by its features,
+  no socket among them.
 - **Ahead**: a Rust client in a page, over the page's `WebSocket` and `fetch`, with the open row
   `The core in a page and in a worker`; the Rust bench's loopback layers, beside the in-memory one.
 
