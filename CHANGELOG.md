@@ -24,6 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
   `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
   9.4.10, 9.6.8).
+- `docs/maintaining.md`, the maintainer's guide: each gate with its command and its CI job, the
+  order to run them before a push, each workflow of `.claude/workflows/` and the procedure that
+  does the same by hand, the everyday chores and the release step by step.
 
 ### Changed
 
