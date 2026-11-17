@@ -113,38 +113,38 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@bufbuild/protobuf@npm:2.16.0":
-  version: 2.16.0
-  resolution: "@bufbuild/protobuf@npm:2.16.0"
-  checksum: 10c0/ba3bc677e801a71d9cf0bdc138174144e493706efec3a47865eb07e956423315a80ff12301f6835d352202ae4d6599f2946a7c67338cf0079ed2a06af1a18097
+"@bufbuild/protobuf@npm:2.17.0":
+  version: 2.17.0
+  resolution: "@bufbuild/protobuf@npm:2.17.0"
+  checksum: 10c0/29140e179408e9ed8601843f6c423658bd130e5cc2e4da470b7a305e4500054872f6f5f62884dc8a1652e85beed19bd5ba6d9482c323e773db84a6c26c183957
   languageName: node
   linkType: hard
 
-"@bufbuild/protoc-gen-es@npm:2.16.0":
-  version: 2.16.0
-  resolution: "@bufbuild/protoc-gen-es@npm:2.16.0"
+"@bufbuild/protoc-gen-es@npm:2.17.0":
+  version: 2.17.0
+  resolution: "@bufbuild/protoc-gen-es@npm:2.17.0"
   dependencies:
-    "@bufbuild/protobuf": "npm:2.16.0"
-    "@bufbuild/protoplugin": "npm:2.16.0"
+    "@bufbuild/protobuf": "npm:2.17.0"
+    "@bufbuild/protoplugin": "npm:2.17.0"
   peerDependencies:
-    "@bufbuild/protobuf": 2.16.0
+    "@bufbuild/protobuf": 2.17.0
   peerDependenciesMeta:
     "@bufbuild/protobuf":
       optional: true
   bin:
     protoc-gen-es: bin/protoc-gen-es
-  checksum: 10c0/ff13ec3f32017c60df9530303d31b3e86f0a684d7af0620ffacc0ffcc2e8c31e445ca1dcfcf11d0809201e6535c604d0d9ce303b24f734a0919b1c0d8e1c71d9
+  checksum: 10c0/1ed1a81b7282d5da2b79c75daed6a2a61852125ae09b828ca68f2900d6dedef8d24c06b42e8550a1398d84f13fd37e600dcbc78d7134b96e194895614fc41e37
   languageName: node
   linkType: hard
 
-"@bufbuild/protoplugin@npm:2.16.0":
-  version: 2.16.0
-  resolution: "@bufbuild/protoplugin@npm:2.16.0"
+"@bufbuild/protoplugin@npm:2.17.0":
+  version: 2.17.0
+  resolution: "@bufbuild/protoplugin@npm:2.17.0"
   dependencies:
-    "@bufbuild/protobuf": "npm:2.16.0"
+    "@bufbuild/protobuf": "npm:2.17.0"
     "@typescript/vfs": "npm:^1.6.2"
     typescript: "npm:5.4.5"
-  checksum: 10c0/ad2b348fccefefc45deeb37bd6a0d7137f6aa6a1ef452fc3dc177858b31d7b72291e9e970689ae120e25488894ebb935dfc40498f3932240a508d985b2f0c752
+  checksum: 10c0/b21f05f42afbe2fe6f3ad1a5b91707d4b10506901541102c1a7e17ea5a940bcfda8398a0984553cd5fc11e6eefebfbc30ee3e51280e672457bfc603f80be84e3
   languageName: node
   linkType: hard
 
@@ -336,8 +336,8 @@ __metadata:
   dependencies:
     "@axe-core/playwright": "npm:4.14.0"
     "@bufbuild/buf": "npm:1.75.0"
-    "@bufbuild/protobuf": "npm:2.16.0"
-    "@bufbuild/protoc-gen-es": "npm:2.16.0"
+    "@bufbuild/protobuf": "npm:2.17.0"
+    "@bufbuild/protoc-gen-es": "npm:2.17.0"
     "@playwright/test": "npm:1.65.0"
     "@sinonjs/fake-timers": "npm:15.4.0"
     "@types/node": "npm:^24.19.2"

@@ -754,13 +754,7 @@
         "text": "FEFF 0061",
         "number": 0,
         "nested": 0
-      },
-      "differs": [
-        {
-          "row": "A string's leading U+FEFF in a proto payload",
-          "language": "TypeScript"
-        }
-      ]
+      }
     },
     {
       "name": "U+FEFF after a string's first character",
