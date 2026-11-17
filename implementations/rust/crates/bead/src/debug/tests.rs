@@ -221,9 +221,8 @@ async fn request_steps() {
 
     serve_echo(&pair, Some(Duration::from_millis(30)));
 
-    let mut payload = json!({ "text": "hello" });
     let call = asking(manager)
-        .call(payload.clone(), &RequestOptions::default())
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("echo called");
 
     pair.clock.advance(Duration::from_millis(30)).await;
@@ -233,9 +232,6 @@ async fn request_steps() {
         json!({ "text": "hello" }),
         "its payload"
     );
-
-    payload["text"] = Value::from("changed after");
-    assert_eq!(payload["text"], "changed after");
 
     let heard = locked(&heard).clone();
     let steps: Vec<_> = heard
@@ -1182,7 +1178,7 @@ fn matches_a_whole_name_and_takes_every_other_character_literally() {
 // grammar names, which hold no other; one given as words naming another is refused as it is made
 // debugging 6.8
 #[test]
-fn refuses_a_filter_given_whole_in_the_grammar_s_names_as_it_is_made() {
+fn refuses_a_filter_given_as_words_naming_another_in_the_grammar_s_names_as_it_is_made() {
     let refusal_of = |spec: &str| {
         FilterKeeper::new(DebugFilterSource::Given(GivenFilter::Spec(spec.to_owned())))
             .expect_err(spec)
