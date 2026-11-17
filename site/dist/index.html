@@ -2610,8 +2610,8 @@ message CountDownRequest {
   </p>
   <p>
     WebSocket does all that Bead asks of a transport: it delimits messages, carries both directions
-    and delivers in order. Each end, where its platform lets it, sends a PING every 30 s and closes
-    a connection left without an answer: a peer gone without a word ends in a close, instead of
+    and delivers in order. Each end, where its platform lets it, sends a PING on a connection silent
+    for 30 s and drops it if no answer comes: a peer gone without a word is dropped, instead of
     staying open forever. The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
   </p>
@@ -3574,7 +3574,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         byte.</li>
       <li><strong>The conversations</strong>: 210 exchanges between clients
         and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 275 exchanges over HTTP,
+      <li><strong>The transports’ cases</strong>: 279 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
       <li><strong>The durations</strong>: 35 places that take a duration,
         and what each makes of 19 inputs.</li>
@@ -3586,7 +3586,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Transcoding</strong>: 26 templates, 192
         readings, 78 writings, 66 bindings,
         46 failures, 10 event streams and
-        90 exchanges.</li>
+        91 exchanges.</li>
       <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors, and
         <code>tools/fuzz.mjs</code> fuzzes each side’s parsers, guided by coverage.</li>
     </ul>
@@ -4781,9 +4781,9 @@ message CountDownRequest {
   </p>
   <p>
     WebSocket fait tout ce que Bead demande à un transport : il délimite les messages, porte les
-    deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, y envoie un PING
-    toutes les 30 s et coupe une connexion restée sans réponse : un pair parti sans un mot finit en
-    fermeture, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
+    deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, envoie un PING
+    sur une connexion restée silencieuse 30 s et la coupe si aucune réponse ne vient : un pair
+    parti sans un mot est coupé, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455).
   </p>
@@ -5775,7 +5775,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         portent une, comptés à l’octet.</li>
       <li><strong>Les conversations</strong> : 210 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 275 échanges HTTP,
+      <li><strong>Les cas des transports</strong> : 279 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>
       <li><strong>Les durées</strong> : 35 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
@@ -5787,7 +5787,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Le transcodage</strong> : 26 gabarits,
         192 lectures, 78 écritures,
         66 liaisons, 46 échecs,
-        10 flux d’évènements et 90 échanges.</li>
+        10 flux d’évènements et 91 échanges.</li>
       <li><strong>Le fuzzing</strong> : chaque suite passe ses lecteurs au fuzzing sur des
         mutations des vecteurs, et <code>tools/fuzz.mjs</code> y passe les analyseurs de chaque
         côté, guidé par la couverture.</li>
