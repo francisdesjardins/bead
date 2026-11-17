@@ -48,6 +48,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
   a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
   0053).
+- Spec 15.39 holds a client over TLS to its server's name: under the authorities given or its
+  platform's roots, it takes a certificate only where a `dNSName` or an `iPAddress` of its
+  subjectAltName names the host its URL names, never its common name (RFC 9525 §6), and under the
+  authorities given it checks no revocation; a certificate it refuses fails its connect. Twins on
+  every side's WebSocket and HTTP clients and MQTT 5 and AMQP 1.0 adapters play it under two leaves
+  `spec/pki` gains, one naming `localhost` alone, one 127.0.0.1 alone (decision 0053).
 - The demo's Packages tab plans Rust packages, beadc's third target, and adds a package in each
   language from one row. Each language's server is offered the transports its side has, as the
   support matrix gives them: the Web Worker is the TypeScript side's alone, and AMQP 1.0 is not
@@ -346,6 +352,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side reads its monotonic clock at the end of each counted call a closing connection
   answered, as the TypeScript and C# sides do: those calls shared one reading, short of the two
   readings a counted call takes (debugging 3.3).
+- The C# side's MQTT 5 adapter judges its broker by the authorities it is given over `wss` as over
+  `mqtts`, by the same check as its AMQP 1.0 adapter's: MQTTnet's WebSocket channel read none of
+  them, and refused a broker they certify. Under them it checks no revocation, as every other side
+  and path does, where it checked it over `mqtts` (decision 0053).
+- The TypeScript side's AMQP 1.0 adapter links over `amqps` to an IP address: rhea named the
+  address as the TLS server name, which Node refuses, so the link never opened.
 
 ### Security
 
