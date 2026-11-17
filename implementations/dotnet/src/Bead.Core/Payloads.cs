@@ -30,16 +30,17 @@ internal static class Payloads
     private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     // ! a name given twice refuses the JSON, and the 65th level refuses it as it is read, before
-    // anything deeper is built: a JWT's header and claims set (13.8 step 1)
+    // anything deeper is built: a JWT's header and claims set (13.8 step 1), and a json payload's
+    // quick read
     internal static readonly JsonDocumentOptions Strictly = new()
     {
         AllowDuplicateProperties = false,
         MaxDepth = Depth,
     };
 
-    // ! a json payload's: every member kept, in its text's order, so the walk after the parse meets a
-    // name twice where its text gives it (17.5, after item 7); 64 deep, which the count before the
-    // parse holds already
+    // ! a json payload's ordered read: every member kept, in its text's order, so the walk after the
+    // parse meets a name twice where its text gives it (17.5, after item 7); 64 deep, which the count
+    // before the parse holds already
     private static readonly JsonDocumentOptions AsWritten = new()
     {
         AllowDuplicateProperties = true,
@@ -216,6 +217,96 @@ internal static class Payloads
         return double.Parse(JsonMarshal.GetRawUtf8Value(value), NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
+    // * a json payload's value, read the quick way: a strict parse, then the canonical write, which
+    // between them meet every fault 17.5 refuses. Null where either refuses anything, the ordered
+    // read then naming the reason. What this read accepts, the ordered read accepts too, with the
+    // same value
+    private static JsonElement? ReadQuickly(ReadOnlyMemory<byte> payload)
+    {
+        JsonDocument document;
+
+        try
+        {
+            // ! the overload of memory: the one of a stream skips a byte order mark
+            document = JsonDocument.Parse(payload, Strictly);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            // ! the check of names given twice reads each name, and one holding a surrogate alone
+            // throws this, not a JsonException
+            return null;
+        }
+
+        using (document)
+        {
+            try
+            {
+                return CanonicalOf(document, payload);
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+        }
+    }
+
+    // a json payload's value, read in 17.5's order, so a payload of two faults is refused with the
+    // first: nested past 64, then not JSON, then the first fault its text meets
+    private static JsonElement ReadInOrder(ReadOnlyMemory<byte> payload)
+    {
+        // * before the parse, so a peer never chooses how deep it goes
+        if (IsTooDeep(payload.Span))
+        {
+            throw new FormatException(NestedPast64);
+        }
+
+        JsonDocument document;
+
+        try
+        {
+            // ! the overload of memory: the one of a stream skips a byte order mark
+            document = JsonDocument.Parse(payload, AsWritten);
+        }
+        catch (JsonException reason)
+        {
+            throw new FormatException(NotJson, reason);
+        }
+
+        using (document)
+        {
+            if (FirstFault(document.RootElement) is { } fault)
+            {
+                throw new FormatException(fault);
+            }
+
+            return CanonicalOf(document, payload);
+        }
+    }
+
+    // the value of a document read of a payload, its canonical form's
+    private static JsonElement CanonicalOf(JsonDocument document, ReadOnlyMemory<byte> payload)
+    {
+        // the canonical form is about as long as the payload, so its buffer grows rarely
+        var canonical = new Canonical(Read, Math.Max(payload.Length, 1));
+
+        canonical.Write(document.RootElement, 0);
+
+        // * the value handed on is the canonical form's: 1.0 is 1, and a number's digits past a
+        // double's are gone, as on every side
+        if (canonical.Bytes.Span.SequenceEqual(payload.Span))
+        {
+            return document.RootElement.Clone();
+        }
+
+        using var written = JsonDocument.Parse(canonical.Bytes);
+
+        return written.RootElement.Clone();
+    }
+
     // definition
 
     /// <summary>
@@ -275,47 +366,8 @@ internal static class Payloads
             throw new FormatException(AByteOrderMark);
         }
 
-        // * before the parse, so a peer never chooses how deep it goes
-        if (IsTooDeep(payload.Span))
-        {
-            throw new FormatException(NestedPast64);
-        }
-
-        JsonDocument document;
-
-        try
-        {
-            // ! the overload of memory: the one of a stream skips a byte order mark
-            document = JsonDocument.Parse(payload, AsWritten);
-        }
-        catch (JsonException reason)
-        {
-            throw new FormatException(NotJson, reason);
-        }
-
-        using (document)
-        {
-            if (FirstFault(document.RootElement) is { } fault)
-            {
-                throw new FormatException(fault);
-            }
-
-            // the canonical form is about as long as the payload, so its buffer grows rarely
-            var canonical = new Canonical(Read, Math.Max(payload.Length, 1));
-
-            canonical.Write(document.RootElement, 0);
-
-            // * the value handed on is the canonical form's: 1.0 is 1, and a number's digits past a
-            // double's are gone, as on every side
-            if (canonical.Bytes.Span.SequenceEqual(payload.Span))
-            {
-                return document.RootElement.Clone();
-            }
-
-            using var written = JsonDocument.Parse(canonical.Bytes);
-
-            return written.RootElement.Clone();
-        }
+        // * only a payload refused pays for the read in 17.5's order
+        return ReadQuickly(payload) ?? ReadInOrder(payload);
     }
 
     /// <summary>
