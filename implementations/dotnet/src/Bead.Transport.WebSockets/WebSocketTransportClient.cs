@@ -733,6 +733,30 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             });
     }
 
+    // whether its upgrade's answer names its subprotocol as the client takes it (spec 15.2): in
+    // exactly one field line, equal to an offer byte for byte (RFC 6455 §4.1, §11.3.4); offered
+    // none, in no field line at all, an empty one included
+    private static bool TakesItsSubprotocol(ClientWebSocket socket, IReadOnlyList<string>? offered)
+    {
+        var lines = (socket.HttpResponseHeaders ?? new Dictionary<string, IEnumerable<string>>())
+            .Where((field) =>
+            {
+                return string.Equals(field.Key, "Sec-WebSocket-Protocol", StringComparison.OrdinalIgnoreCase);
+            })
+            .SelectMany((field) =>
+            {
+                return field.Value;
+            })
+            .ToList();
+
+        if (offered is not { Count: > 0 })
+        {
+            return lines.Count == 0;
+        }
+
+        return lines.Count == 1 && offered.Contains(lines[0], StringComparer.Ordinal);
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -978,11 +1002,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names an extension never offered (RFC 6455 §4.1)");
             }
 
-            // ! ClientWebSocket opens on a 101 that names none of the subprotocols it offered: the
-            // client fails the connection (spec 15.2; WHATWG WebSockets §2.2), as a page's does
-            if (options.Protocols is { Count: > 0 } && socket.SubProtocol is null)
+            // ! ClientWebSocket opens on a 101 that names none of the subprotocols it offered, matches
+            // one in any case, reads one of two lines, and opens on an empty one when it offered
+            // none: the client reads the 101's own lines and fails the connection (spec 15.2)
+            if (!TakesItsSubprotocol(socket, options.Protocols))
             {
-                throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names none of the subprotocols offered (WHATWG WebSockets §2.2)");
+                throw new WebSocketException(WebSocketError.HeaderError, options.Protocols is { Count: > 0 }
+                    ? "the server's upgrade names none of the subprotocols offered in one field line (spec 15.2)"
+                    : "the server's upgrade names a subprotocol, none offered (spec 15.2)");
             }
 
             lock (_gate)
