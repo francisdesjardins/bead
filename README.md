@@ -1307,6 +1307,8 @@ know better are welcome.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+- [`docs/maintaining.md`](docs/maintaining.md) is the maintainer's guide: the gates and their
+  order, each workflow done by hand, the everyday chores and the release.
 - A comment a reader must not miss opens with its tag, after its marker (`//`, `#`), as the
   [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments)
   extension shows them: `!` an alert, a trap or an invariant that breaks something when changed;

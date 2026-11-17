@@ -31,6 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   case or an exit expects with a detail other than the empty one (spec 9.0). The generators give
   that empty detail by default, and the 23 expectations that gave none, in
   `spec/conversations.json`, `spec/transports.json` and `spec/metrics.json`, now pin it.
+- `docs/maintaining.md`, the maintainer's guide: each gate with its command and its CI job, the
+  order to run them before a push, each workflow of `.claude/workflows/` and the procedure that
+  does the same by hand, the everyday chores and the release step by step.
 
 ### Changed
 
@@ -98,6 +101,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a `Content-Encoding` of `identity` in two lines 415.
 - The TypeScript side reads those fields from a request's raw lines over HTTP/2 as over HTTP/1.1,
   where Node kept the first line alone of a `Content-Encoding` over HTTP/2.
+- The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it
+  and the other sides do, on protobuf-es 2.17.0, which its peer range now asks for: `spec/codecs.json`
+  excuses it no longer, and the `proto` differential takes the entry as a seed.
 
 ## [0.14.0] - 2026-11-16
 

@@ -335,10 +335,9 @@ test.describe('the codecs', () => {
         .map(({ name }) => {
           return name;
         })
-    ).toEqual(["a string's leading U+FEFF", 'an object naming a member twice']);
+    ).toEqual(['an object naming a member twice']);
 
-    // * each value one no JavaScript value holds, which this side cannot build; the payload, protobuf-es's
-    // own reading, which the test below holds
+    // * each value one no JavaScript value holds, which this side cannot build
     for (const entry of CODECS.values.filter((value) => {
       return isExcused(value);
     })) {
@@ -430,15 +429,7 @@ test.describe('the codecs', () => {
     });
   }
 
-  // * the matrix's rows of protobuf-es: where it parts from 17.9.4, and where Bead states no rule
-
-  test("a string's leading U+FEFF in a proto payload, as protobuf-es strips it", () => {
-    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 04 EF BB BF 61')))).toEqual({
-      nested: 0,
-      number: 0,
-      text: '0061',
-    });
-  });
+  // * the matrix's rows of protobuf-es, where Bead states no rule
 
   test('a proto string holding a surrogate alone, as protobuf-es writes it', () => {
     // U+FFFD in its place, where a text or a json writer refuses it
