@@ -376,19 +376,14 @@ internal static partial class EnvelopeCodec
     }
 
     // the credential of the block at `offset`, whose length the header's already holds. Throws
-    // for padding that is not zero, a scheme its kind does not take, a length that is not its
-    // scheme's, and an OPAQUE token of 16 zero bytes
+    // for a scheme its kind does not take, a length that is not its scheme's, an OPAQUE token of
+    // 16 zero bytes, and padding that is not zero, in that order
     private static Credential CredentialAt(ReadOnlySpan<byte> bytes, (int Offset, HeaderReading Header) reading)
     {
         var (offset, (_, kind, _, side)) = reading;
         var scheme = (CredentialScheme)BinaryPrimitives.ReadUInt16BigEndian(bytes[offset..]);
         var length = BinaryPrimitives.ReadUInt16BigEndian(bytes[(offset + 2)..]);
         var credential = bytes.Slice(offset + Credential.HeadBytes, length);
-
-        if (bytes[(offset + Credential.HeadBytes + length)..(offset + BlockBytesOf(length))].ContainsAnyExcept((byte)0))
-        {
-            throw MalformedOf(side, "a credential's padding is zero bytes");
-        }
 
         if (KindRefusalOf(kind, scheme) is { } kindRefusal)
         {
@@ -398,6 +393,11 @@ internal static partial class EnvelopeCodec
         if (BrokenRuleOf(scheme, credential) is { } brokenRule)
         {
             throw MalformedOf(side, brokenRule);
+        }
+
+        if (bytes[(offset + Credential.HeadBytes + length)..(offset + BlockBytesOf(length))].ContainsAnyExcept((byte)0))
+        {
+            throw MalformedOf(side, "a credential's padding is zero bytes");
         }
 
         return scheme switch

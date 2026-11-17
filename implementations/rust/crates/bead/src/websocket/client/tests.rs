@@ -1119,6 +1119,37 @@ async fn defers_its_credential_provider_until_after_connect_returns() {
     client.dispose();
 }
 
+#[test]
+fn prints_no_credential_nor_its_provider() {
+    let given = WebSocketTransportClientConnectOptions {
+        credential: Some(BEARER.to_owned()),
+        ..WebSocketTransportClientConnectOptions::new(LOOPBACK, 8080)
+    };
+    let shown = format!("{given:?}");
+
+    assert!(
+        !shown.contains(BEARER),
+        "its credential is not printed: {shown}"
+    );
+    assert!(
+        shown.contains("has_credential: true, has_credential_provider: false"),
+        "the presence of a credential is visible: {shown}"
+    );
+
+    let asked = WebSocketTransportClientConnectOptions {
+        credential: None,
+        credential_provider: Some(Arc::new(|_signal| {
+            Box::pin(async { Ok(BEARER.to_owned()) })
+        })),
+        ..given
+    };
+
+    assert!(
+        format!("{asked:?}").contains("has_credential: false, has_credential_provider: true"),
+        "the presence of a provider is visible"
+    );
+}
+
 // spec 15.15
 #[tokio::test]
 async fn writes_no_credential_that_settles_in_the_turn_its_client_is_disposed() {

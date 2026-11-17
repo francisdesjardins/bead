@@ -66,7 +66,7 @@ const ENDED: &str = "the HTTP body ends before its answer";
 
 /// What a gateway's caller presents and reads by: its default authorization, its bound, its TLS
 /// and its runtime.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct HttpCallerOptions {
     /// The `authorization` field every call presents, unless it gives its own or omits it: none
@@ -85,7 +85,7 @@ pub struct HttpCallerOptions {
 }
 
 /// What one call presents, and what gives it up.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct HttpCallOptions {
     /// The `authorization` field this call presents in place of its caller's: its caller's when
@@ -97,6 +97,30 @@ pub struct HttpCallOptions {
     /// What gives the call up, or its stream: its exchange dropped, and its call ended
     /// [`CallError::Cancelled`].
     pub signal: Option<CancellationToken>,
+}
+
+impl fmt::Debug for HttpCallerOptions {
+    // ! whether it carries an authorization, never the authorization
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HttpCallerOptions")
+            .field("has_authorization", &self.authorization.is_some())
+            .field("maximum_body_bytes", &self.maximum_body_bytes)
+            .field("has_client_config", &self.client_config.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for HttpCallOptions {
+    // ! whether it carries an authorization, never the authorization
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HttpCallOptions")
+            .field("has_authorization", &self.authorization.is_some())
+            .field("without_authorization", &self.without_authorization)
+            .field("signal", &self.signal)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One event of a stream: its result, first, then each notification.

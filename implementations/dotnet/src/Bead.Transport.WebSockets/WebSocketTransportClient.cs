@@ -128,6 +128,15 @@ public sealed record WebSocketTransportClientConnectOptions
     /// connect's alone: a reconnection replays the rest of these options, never this token.
     /// </summary>
     public CancellationToken CancellationToken { get; init; }
+
+    // every member as the compiler writes it, but its credential and its provider, of which whether one is set
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential reaches no log, no exception's message and no debugger
+        builder.Append(CultureInfo.InvariantCulture, $"Host = {Host}, Port = {Port}, Secured = {Secured}, Pathname = {Pathname}, Protocols = {Protocols}, Timeout = {Timeout}, Credential = {(Credential is null ? "none" : "set")}, CredentialProvider = {(CredentialProvider is null ? "none" : "set")}, CancellationToken = {CancellationToken}");
+
+        return true;
+    }
 }
 
 /// <summary>

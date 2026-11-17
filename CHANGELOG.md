@@ -19,6 +19,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped
   with no lookup and no allocation, and a counted call allocates not a byte more than an uncounted
   one, which a gate counts through a counting allocator (debugging §3.3, §3.4).
+- The C# side judges a `CREDENTIAL` block's scheme and length before its padding, as section 4.4
+  lists them and the other sides do: a block that breaks both is refused in the words of its scheme
+  or its length.
+- The C# side's `WebSocketTransportClientConnectOptions`, `HttpCallerOptions` and `HttpCallOptions`,
+  and the Rust side's `HttpCallerOptions` and `HttpCallOptions`, print whether a credential is set,
+  never the credential.
+- Under `bearer-jwt`, the TypeScript and Rust gateways take one or more spaces after `Bearer` and
+  nothing else, as RFC 6750 §2.1 writes it and the C# side holds: a tab there is answered 401
+  `invalid_request`, where it presented its token.
 
 ## [0.14.0] - 2026-11-16
 

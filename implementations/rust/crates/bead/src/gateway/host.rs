@@ -791,16 +791,17 @@ fn matches_tag(fields: &Fields<'_>, etag: &str) -> bool {
         })
 }
 
-// a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it
+// a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it: `"Bearer" 1*SP
+// b64token`, spaces alone between the two
 fn bearer_of(value: &str) -> Option<&str> {
     let scheme = value.get(..6)?;
     let rest = value.get(6..)?;
 
-    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with([' ', '\t']) {
+    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with(' ') {
         return None;
     }
 
-    let token = rest.trim_start_matches([' ', '\t']);
+    let token = rest.trim_start_matches(' ');
 
     (!token.is_empty()).then(|| token.trim())
 }

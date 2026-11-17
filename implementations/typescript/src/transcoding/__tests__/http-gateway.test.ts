@@ -539,6 +539,23 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   ).toBe(431);
 });
 
+// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
+test('answers 401 to a tab after Bearer, its separator one or more spaces', async () => {
+  await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+
+  expect(
+    await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer\ta.b.c' } })
+  ).toMatchObject({
+    headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+    status: 401,
+  });
+  // two spaces present the token, which a server with no JWT verifier refuses
+  expect(
+    (await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer  a.b.c' } })).status
+  ).toBe(500);
+});
+
 test('refuses a request with no Origin from a page of another site, and a navigation to an unmarked get rule', async () => {
   await using fixture = await startTranscoding({ origins: [ORIGIN] });
   const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' };

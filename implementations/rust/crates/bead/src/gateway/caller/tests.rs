@@ -485,6 +485,49 @@ async fn resolves_each_default_route_under_its_base_path_and_refuses_another_pro
     );
 }
 
+#[test]
+fn prints_no_authorization_in_its_options() {
+    let given = HttpCallerOptions {
+        authorization: Some("Bearer good".to_owned()),
+        maximum_body_bytes: Some(64),
+        ..HttpCallerOptions::default()
+    };
+    let shown = format!("{given:?}");
+
+    assert!(
+        !shown.contains("good"),
+        "its authorization is not printed: {shown}"
+    );
+    assert_eq!(
+        shown,
+        "HttpCallerOptions { has_authorization: true, maximum_body_bytes: Some(64), has_client_config: false, .. }"
+    );
+    assert!(
+        format!("{:?}", HttpCallerOptions::default()).contains("has_authorization: false"),
+        "the absence of an authorization is visible"
+    );
+}
+
+#[test]
+fn prints_no_authorization_in_a_call_s_options() {
+    let given = HttpCallOptions {
+        authorization: Some("Bearer good".to_owned()),
+        ..HttpCallOptions::default()
+    };
+    let shown = format!("{given:?}");
+
+    assert!(
+        !shown.contains("good"),
+        "its authorization is not printed: {shown}"
+    );
+    assert!(
+        shown.starts_with(
+            "HttpCallOptions { has_authorization: true, without_authorization: None, signal: None"
+        ),
+        "{shown}"
+    );
+}
+
 #[tokio::test]
 async fn presents_its_credential_or_the_call_s_own_and_none_when_empty_or_omitted() {
     let service = Service::new();
