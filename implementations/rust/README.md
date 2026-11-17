@@ -370,6 +370,9 @@ entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.jso
 `spec/transcoding.json` in `crates/bead-protobuf/tests/transcoding.rs`, its exchanges through a
 gateway on its own listener over a real socket, but the one its `differs` excuses the side from.
 The gateway's and the caller's twins are `crates/bead/tests/gateway.rs` and `tests/caller.rs`.
+`crates/bead/tests/allocations.rs`, a binary of its own whose global allocator is `stats_alloc`'s
+counting one, holds a counted call to allocating not a byte more than an uncounted one (debugging
+3.3, 3.4).
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory

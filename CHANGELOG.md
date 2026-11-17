@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-17
+
 ### Added
 
 - `tools/flow.mjs finish`, which finishes a feature branch once CI has passed on its head: merged
@@ -37,6 +39,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.16.0 (`spec-v0.16.0`), its companion, `spec/debugging.md`, to 0.11.0
+  (`debugging-v0.11.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.6.0
+  (`transcoding-v0.6.0`).
 - Spec 7.6 states what binds a failure's detail: the words the spec gives, which every side MUST
   write, and elsewhere the words the conformance files give. The details of 2.3, 9.2's step 5 and
   9.2's step 6 are a MUST, and the comments of `spec/vectors.json` and `spec/conversations.json`
@@ -80,6 +85,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   two faults with the same reason, which 23 payloads of `spec/codecs.json` and two conversations of
   `spec/conversations.json` play. The support matrix's open row on it gives way to one on a
   gateway's body of two faults, whose three readers refuse with the first fault they meet.
+- The documents are brought to 0.15.0: the records and the READMEs state what holds and where Bead
+  goes, the twins' gate, `tools/flow.mjs finish` and the Rust side's counted call among what holds.
+- The guides for teams are brought to 0.15.0, their code built and run again: the C# resolver
+  catches a command's `TimeoutException`, the page's call waits on its operator past its 5 s
+  default, a client given `protocols` fails its connect by spec 15.2, and the Rust side's gateway
+  is among its parts.
 
 ### Removed
 
@@ -3260,7 +3271,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.14.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.15.0...develop
+[0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0

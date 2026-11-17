@@ -301,8 +301,9 @@ and it gates nothing: what the clause bounds, the readings and the allocations, 
   them, shows a counted call allocating not a byte more than an uncounted one, and pins what a call
   allocates with nobody listening. On the Rust side, a counting allocator a dev-dependency holds,
   the global allocator of a test binary of its own, shows the same of a call made and answered. The
-  TypeScript side has no allocation count a test reads; it, and the Rust side for what a call
-  allocates with nobody listening, hold that part by inspection, a row of the matrix.
+  TypeScript side has no allocation count a test reads, and holds that part by inspection. So does
+  the Rust side for what a call allocates while nobody listens. The matrix's row "What a call
+  allocates for debugging" holds both.
 - **Two build switches**, for a constrained profile: one leaves out the trace and the filter, the
   other the registry, each alone or both, so a 1 kHz loop that wants its dashboard builds the
   registry without the trace. A C side takes them as its preprocessor's, in its own record. Every

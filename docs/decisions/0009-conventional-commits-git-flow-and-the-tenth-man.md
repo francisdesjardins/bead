@@ -27,7 +27,10 @@ investigation behind it.
 **Branches follow git-flow, as Vincent Driessen describes it**: `main` holds what was released,
 `develop` what comes next; a `feature/*` branch starts from `develop` and ends in it; a `release/*`
 branch prepares a version from `develop` and ends in both, its tag on `main`; a `hotfix/*` branch
-starts from `main` and ends in both. git-flow's `finish` writes the merges, and tags a version `v*`
+starts from `main` and ends in both. A `feature/*` branch is finished by `tools/flow.mjs finish`
+once CI has passed on its head: it is merged into `develop` with `--no-ff`, and the branch is
+deleted once CI has passed on the merge. A `release/*` or a `hotfix/*` branch keeps git-flow's
+`finish`, which writes its merges and tags a version `v*`
 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
 **The CHANGELOG follows Keep a Changelog 1.1.0.** There is one, `CHANGELOG.md` at the root, for

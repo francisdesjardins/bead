@@ -158,29 +158,30 @@ An HTTP server's and a WebSocket server's are counted apart, each by its own ser
 
 **What waits for a server's socket is held to a pace**, Kestrel's rule, on every server's answers: a
 WebSocket's every envelope, an HTTP exchange's answer, a listen's batch. Each envelope of _S_ bytes
-handed moves its connection's deadline to the later of now plus max(`sendGracePeriod`,
-_S_ / `minimumSendBytesPerSecond`) and the deadline before plus _S_ / `minimumSendBytesPerSecond`;
-checked each second while anything waits, a socket that holds something past its deadline drops its
+handed moves its connection's deadline to the later of now plus max(`sendGracePeriod`, _S_ /
+`minimumSendBytesPerSecond`) and the deadline before plus _S_ / `minimumSendBytesPerSecond`; checked
+each second while anything waits, a socket that holds something past its deadline drops its
 connection, over HTTP its exchange lost, a `POST`'s answer and a listen's batch alike, which closes
-the connection at both ends (spec 15.7). Kestrel's numbers, 240 bytes a second past 5 s,
-give a burst of 100 MiB days and a reader stopped behind a small backlog its grace. **At a
-WebSocket's address a bound besides**, `maximumUnsentBytes`, above what a peer that keeps every rule
-can be owed at once — the answers to the calls it has answered and the server's own commands to it,
+the connection at both ends (spec 15.7). Kestrel's numbers, 240 bytes a second past 5 s, give a
+burst of 100 MiB days and a reader stopped behind a small backlog its grace. **At a WebSocket's
+address a bound besides**, `maximumUnsentBytes`, above what a peer that keeps every rule can be owed
+at once — the answers to the calls it has answered and the server's own commands to it,
 `maximumAnsweringCalls` × `chunkBytes` each, the transfers it receives, `maximumTransfers` ×
 `windowBytes`, and two envelopes of the server's own, as an HTTP outbox holds: 2 × 64 × 1,048,576 +
 4 × 4,194,304 + 2 × 16,778,240 = 184,551,424 at the defaults, the WebSocket facades deriving it from
 their router's limits as they derive the message limit. An envelope that would take what waits past
-it drops the connection. The heartbeat stays as 15.3 has it, the judge of a reader stopped behind a
-large backlog that sends nothing, whose allowance at the pace runs long; the pace and the bound
-stand beside it, since the heartbeat is the platform's ping, .NET's `KeepAliveTimeout` on the C#
-side, which Bead cannot make finer, and may be never. **Each drop is reported**, naming its connection and its bound, on the
-transport's `error` before its `close`, so an operator tells it from a network that failed (RFC 6455
-§7.1.7), and an HTTP outbox's overflow alike; a WebSocket so dropped closes with no closing
-handshake, unclean, since a peer that does not read would read no close frame waiting behind its
-backlog. The three run on the platform's clock, as the heartbeat does, since each bounds what the
-platform's socket does ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s
-exception). The C# HTTP transport sets Kestrel's `MinResponseDataRate` to none, Bead's rule in its
-place: Kestrel's would abort unreported, its bound unnamed.
+it drops the connection. The heartbeat stays as 15.3 has it: it judges a reader that stops behind a
+large backlog and sends nothing. Such a reader's allowance at the pace runs long. The pace and the
+bound stand beside the heartbeat, because the heartbeat is the platform's ping, .NET's
+`KeepAliveTimeout` on the C# side. Bead cannot make that ping finer, and the heartbeat may be never.
+**Each drop is reported**, naming its connection and its bound, on the transport's `error` before
+its `close`, so an operator tells it from a network that failed (RFC 6455 §7.1.7), and an HTTP
+outbox's overflow alike; a WebSocket so dropped closes with no closing handshake, unclean, since a
+peer that does not read would read no close frame waiting behind its backlog. The three run on the
+platform's clock, as the heartbeat does, since each bounds what the platform's socket does
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s exception). The C# HTTP
+transport sets Kestrel's `MinResponseDataRate` to none, Bead's rule in its place: Kestrel's would
+abort unreported, its bound unnamed.
 
 **A head is held to `headersTimeout`, 30 s**, never without end, on both transports' servers, its
 408 unmarked and told by none, past its time and within 2 seconds of it, on the platform's clock. On
@@ -288,13 +289,13 @@ server does: behind one it neither names nor counts, every client is the proxy's
 The bound counts the users behind one NAT as one and an IPv6 network's addresses as many, on both
 transports alike.
 
-**What every socket holds together is 10,000 × 176 MiB at most.** Within a beat, a reader stopped
-behind a large burst holds its backlog until the heartbeat drops it; where the heartbeat is never,
-the bound alone holds it. A body at exactly 240 bytes a second holds its socket and its place as
-long as it keeps the rate, as Kestrel's, IIS's and Apache's rules let it; the bound per address
-bounds how many. A client's own queue toward a server that stops reading is its application's. Over
-HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and hyper's `h2` bound
-their own way, and no test holds.
+**What every socket holds together is 10,000 × 176 MiB at most.** Within a beat, a reader that stops
+behind a large burst and sends nothing holds its backlog until the heartbeat drops it; where the
+heartbeat is never, the bound alone holds it. A body at exactly 240 bytes a second holds its socket
+and its place as long as it keeps the rate, as Kestrel's, IIS's and Apache's rules let it; the bound
+per address bounds how many. A client's own queue toward a server that stops reading is its
+application's. Over HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and
+hyper's `h2` bound their own way, and no test holds.
 
 **The bound holds on a connection.** A peer that closes and opens again leaves its outliving
 resolvers behind, counted side-wide by `outlivingResolvers` until they settle. A new connection

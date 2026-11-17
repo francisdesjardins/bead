@@ -234,8 +234,8 @@ Implicit presence keeps `text` and `number` as proto3 has them, so the entries o
 fields read and write as they would under proto3; `counts` is packed, edition 2023's default;
 `delimited` is a group on the wire. The fields of these records take 10 to 13, since entries read 4
 to 6, 9 and 15 as fields `Probe` does not declare, and a message field's name is never `nested`,
-which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under buf, and Grpc.Tools
-2.84.0 each compile it. A row's `read` gives, beside the top `Probe`'s text, number and depth, its
+which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.17.0 under buf, and Grpc.Tools
+2.85.0 each compile it. A row's `read` gives, beside the top `Probe`'s text, number and depth, its
 `counts` and `stamps`, each key of `children` to its value's text, number and depth, and
 `delimited`'s, each where it holds any.
 
@@ -394,10 +394,9 @@ its dynamic codec is given, plays the entries, and answers the suite through its
 language after it** checks by its own library's descriptors, plays the entries, and adds its testee
 to the suite.
 
-**Out of scope**: the writer's surrogate; and the upstream
-reports, protobuf-es's points, its packed reading, its map entries, its depth count and its wire
-types, which wait, by the user's word. Google.Protobuf's unknown ordering is tracked by protobuf
-already.
+**Out of scope**: the writer's surrogate; and the upstream reports, protobuf-es's points, its packed
+reading, its map entries, its depth count and its wire types, which wait, by the user's word.
+Google.Protobuf's unknown ordering is tracked by protobuf already.
 
 ## The Tenth Man
 

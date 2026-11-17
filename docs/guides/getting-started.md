@@ -93,9 +93,9 @@ for every language beadc targets, Rust's included; name the two you use. When yo
 project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since git on Windows records
 no mode.
 
-Tagging the image under the name the wrappers carry, `docker tag beadc:local
-ghcr.io/francisdesjardins/beadc:<version>` (`./beadc.sh version` prints it), runs it with no
-`BEADC_IMAGE` at all. Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass
+To run the image with no `BEADC_IMAGE`, tag it with the name the wrappers carry, `docker tag
+beadc:local ghcr.io/francisdesjardins/beadc:<version>`; `./beadc.sh version` prints the version.
+Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass
 -File ./beadc.ps1 generate` runs it.
 
 ## 3. Write the contract
@@ -209,11 +209,13 @@ enum StationFailure {
 ```
 
 Bead keeps `stream` for its own, so an `rpc` that streams is refused, and so is one with no
-`(bead.procedure)`, its id not to be guessed. `./beadc.sh check` says so, with the place:
+`(bead.procedure)`, its id not to be guessed. `./beadc.sh check` says so, with the place. With
+`WatchTelemetry` returning `stream TelemetrySample` and the option taken off `PromptOperator`, the
+file above gives:
 
 ```text
-proto/station/v1/station.proto:36:3: error STREAM_RESERVED: station.v1.StationService.WatchTelemetry streams, which Bead keeps for its own streams
 proto/station/v1/station.proto:28:3: error PROCEDURE_OPTIONS: station.v1.StationService.PromptOperator has no (bead.procedure): its id cannot be guessed
+proto/station/v1/station.proto:32:3: error STREAM_RESERVED: station.v1.StationService.WatchTelemetry streams, which Bead keeps for its own streams
 ```
 
 Every rule beadc holds a `.proto` to is in [The rules](../../builder/README.md#the-rules).
@@ -334,7 +336,9 @@ restore:
 The resolvers are the only service code you write. `GetStationStatus` refuses a station it does
 not know with the service's own failure, then sends `PromptOperator` to the caller's own
 connection and waits for its answer before it answers. A command waits 5 seconds when none is
-given; a person answers slower, so this one waits 30. `WatchTelemetry` answers, which subscribes
+given; a person answers slower, so this one waits 30. A command unanswered in time throws
+`TimeoutException`, not a `FailureException`. Left uncaught, it ends the call `PROCEDURE_FAILED`,
+so the resolver catches it and answers all the same. `WatchTelemetry` answers, which subscribes
 the caller, then notifies its samples to that connection alone, each under the station's key.
 
 `dotnet/StationResolvers.cs`:
@@ -370,23 +374,36 @@ public static class StationResolvers
                 return;
             }
 
-            // * the command goes to the caller's own connection, mid-call: the call answers once the
-            // operator has
-            var answer = await station.Command.PromptOperator(new PromptOperatorRequest { Question = $"Read {stationId}'s status?" })(
-                new CommandOptions
-                {
-                    ConnectionHandle = request.ConnectionHandle,
-                    // ! 5 seconds when none is given: a person answers slower than that
-                    Timeout = TimeSpan.FromSeconds(30),
-                });
+            string operatorAnswer;
 
-            Console.Error.Write($"server: promptOperator answered acknowledged={answer.Acknowledged} note=\"{answer.Note}\"\n");
+            try
+            {
+                // * the command goes to the caller's own connection, mid-call: the call answers once
+                // the operator has
+                var answer = await station.Command.PromptOperator(new PromptOperatorRequest { Question = $"Read {stationId}'s status?" })(
+                    new CommandOptions
+                    {
+                        ConnectionHandle = request.ConnectionHandle,
+                        // ! 5 seconds when none is given: a person answers slower than that
+                        Timeout = TimeSpan.FromSeconds(30),
+                    });
+
+                Console.Error.Write($"server: promptOperator answered acknowledged={answer.Acknowledged} note=\"{answer.Note}\"\n");
+                operatorAnswer = answer.Acknowledged ? $"acknowledged: {answer.Note}" : "declined";
+            }
+            // ! a command unanswered in time throws TimeoutException, not FailureException: uncaught,
+            // the call answers PROCEDURE_FAILED
+            catch (TimeoutException exception)
+            {
+                Console.Error.Write($"server: promptOperator timed out: {exception.Message}\n");
+                operatorAnswer = "no answer";
+            }
 
             await response.Answer(new GetStationStatusResponse
             {
                 StationId = stationId,
                 Online = true,
-                OperatorAnswer = answer.Acknowledged ? $"acknowledged: {answer.Note}" : "declined",
+                OperatorAnswer = operatorAnswer,
             });
         });
 
@@ -512,7 +529,7 @@ dotnet run -c Release -- 8080
 Its first line says its two ports, the metrics port chosen free:
 
 ```text
-{"port":8080,"metrics":59546}
+{"port":8080,"metrics":53364}
 ```
 
 It serves until its standard input closes.
@@ -719,7 +736,7 @@ client: promptOperator asked "Read ST-001's status?"
 client: getStationStatus ST-001 answered online=true operatorAnswer="acknowledged: checked by Node" (prompts so far: 1)
 client: getStationStatus "station one" refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"pattern\":\"^ST-[0-9]{3}$\"},\"fieldPath\":\"station_id\",\"message\":\"does not match regex pattern `^ST-[0-9]{3}$`\",\"ruleId\":\"string.pattern\"}\n{\"more\":0}" (prompts so far: 1)
 client: getStationStatus ST-999 failed UNKNOWN_STATION, detail: no station ST-999 (prompts so far: 1)
-client: watchTelemetry ST-001 received sequences 1 5 9 13 17 20 of 20 sent, at most 1 callback at a time
+client: watchTelemetry ST-001 received sequences 1 6 10 14 18 20 of 20 sent, at most 1 callback at a time
 client: watchTelemetry samples=50 refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"gte\":1,\"lte\":20},\"fieldPath\":\"samples\",\"message\":\"must be greater than or equal to 1 and less than or equal to 20\",\"ruleId\":\"int32.gte_lte\"}\n{\"more\":0}"
 ```
 
@@ -739,7 +756,9 @@ What each line shows:
 ### In a page
 
 The page answers `promptOperator` with a dialog, so the operator answers while the server's call
-waits, and shows the latest sample as it comes.
+waits, and shows the latest sample as it comes. A call waits 5 seconds for its answer when given
+no timeout. `getStationStatus` waits on the operator, so the page gives it 60 seconds, longer than
+the server's 30 for its command.
 
 `typescript/src/page.ts`:
 
@@ -773,7 +792,9 @@ station.on('promptOperator', async (request, response) => {
 // ! the page's own origin must be in the server's Origins, or the upgrade is refused 403
 await client.connect({ host: '127.0.0.1', port });
 
-const status = await station.getStationStatus({ stationId: 'ST-001' })();
+// ! a call waits 5 s for its answer when none is given: this one waits on a person, past the
+// server's 30 s for the command
+const status = await station.getStationStatus({ stationId: 'ST-001' })({ timeout: 60_000 });
 
 log(`getStationStatus: online=${status.online} operatorAnswer="${status.operatorAnswer}"`);
 
@@ -835,9 +856,9 @@ A page needs its origin listed, which Node does not: the server's `Origins` name
 `http://127.0.0.1:5173` is refused 403 `origin-refused`, which the server's `Refusal` event reports,
 while the page's `WebSocket` reads nothing past its close, 1006.
 
-No server chooses a subprotocol, so a page's `connect` names none: the client given none offers
-none. One given `protocols` fails its connect, as a page's `WebSocket` fails an upgrade whose 101
-names none of what it offered.
+No server selects a subprotocol, so a page's `connect` names none: the client given none offers
+none. One given `protocols` fails its connect, since the server's upgrade names none of what it
+offered ([the specification](../../spec/spec.md#websocket), 15.2).
 
 Build it and serve the `typescript/` folder from `http://localhost:5173` with any static server
 that serves `index.html` and `dist/page.js`, then open `http://localhost:5173/?port=8080`:

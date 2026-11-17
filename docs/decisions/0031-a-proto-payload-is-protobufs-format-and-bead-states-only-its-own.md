@@ -35,10 +35,10 @@ know what of the format is Bead's to state, and what is protobuf's.
 **What the stock libraries do.** Probed on 2026-10-05: protobuf-es 2.16.0 and Google.Protobuf 3.36.2
 agree on every outcome a protobuf payload's reader meets first — a premature end, a string that is
 not UTF-8, an unknown field, an empty payload — and on a message field set to the empty message,
-written `1A 00` on both. They part on a string's leading U+FEFF, on a field they know arriving at
-another wire type, and on where they count nesting from: protobuf-es counts the top message,
-Google.Protobuf the nested ones alone; each takes its bound as an option, and with one set
-explicitly both take 100 messages below the top and refuse 101.
+written `1A 00` on both. They part on a field they know arriving at another wire type, and on where
+they count nesting from: protobuf-es counts the top message, Google.Protobuf the nested ones alone;
+each takes its bound as an option, and with one set explicitly both take 100 messages below the top
+and refuse 101.
 
 ### The options weighed
 

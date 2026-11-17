@@ -623,16 +623,16 @@ each held by `tools/names.tsv` ([0047](0047-every-side-shows-one-public-surface.
 
 **JSON** ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)): **Bead's own
 reader**, a strict RFC 8259 tokenizer that counts the depth over the whole text, then reads it in
-one pass and refuses with the first of spec 17.5's faults it meets; a whole number within 64 bits
-read as an integer, any other as the nearest double, both written back
-through the double; **`serde_json::Value`** the value; **Bead's own canonical writer**, numbers by
-`ryu-js`, RFC 8785; and **`bead::json::to_value`**, Bead's own `serde::Serializer`, the resolver's
-documented road from its type to a `json` payload, which refuses a double that is not finite at any
-depth where `serde_json` writes `null`. What the type cannot hold — a surrogate alone, a name twice,
-`undefined` — is excused by its row; NaN and Infinity are played. **`JsonOf<T>`** reads a `json`
-payload as the application's own type through serde, and refuses a JSON value not of it in words of
-its own, `not its type`, as a codec an application writes does (spec 17.2), serde's in its cause:
-the type is the application's, and the matrix's row says so. Its other refusals say 17.2's words.
+one pass and refuses with the first of spec 17.5's faults it meets; a number read as 0016 states, an
+integer or the nearest double, and written back through the double; **`serde_json::Value`** the
+value; **Bead's own canonical writer**, numbers by `ryu-js`, RFC 8785; and
+**`bead::json::to_value`**, Bead's own `serde::Serializer`, the resolver's documented road from its
+type to a `json` payload, which refuses a double that is not finite at any depth where `serde_json`
+writes `null`. What the type cannot hold — a surrogate alone, a name twice, `undefined` — is excused
+by its row; NaN and Infinity are played. **`JsonOf<T>`** reads a `json` payload as the application's
+own type through serde, and refuses a JSON value not of it in words of its own, `not its type`, as a
+codec an application writes does (spec 17.2), serde's in its cause: the type is the application's,
+and the matrix's row says so. Its other refusals say 17.2's words.
 
 **A `JWT`'s verification** on RustCrypto: ES256 by `p256`, its signature R‖S's 64 bytes and nothing
 else, HS256 by `hmac`'s constant-time check; pure Rust, so the core with no feature needs no C toolchain
