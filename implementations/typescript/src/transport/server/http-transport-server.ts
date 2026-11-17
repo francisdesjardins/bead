@@ -73,6 +73,7 @@ import {
   type IEnd,
   type IExchangeIn,
   isBeadBody,
+  joinedOf,
   linesOf,
   listeningOf,
   preflightOf,
@@ -1045,7 +1046,7 @@ export const createHTTPTransportServer = (
 
         // an exchange from the server's own origin, by a host it takes by name, or one it was told;
         // one with no `Origin` comes from anywhere, and any client that sends one is judged by it
-        const origin = headerOf(request, 'origin');
+        const origin = joinedOf(request, 'origin');
 
         if (!isTakenOrigin(origin, { host: ownAuthorityOf(authority, hosts), origins })) {
           return (finish(exchange, { reason: HTTP_REFUSALS.ORIGIN, status: 403 }), undefined);
@@ -1081,7 +1082,7 @@ export const createHTTPTransportServer = (
           return (finish(exchange, refused), undefined);
         }
 
-        const connectionToken = headerOf(request, CONNECTION_TOKEN_HEADER);
+        const connectionToken = joinedOf(request, CONNECTION_TOKEN_HEADER);
 
         if (connectionToken === undefined && request.method === 'POST') {
           if (!isBeadBody(request)) {

@@ -31,7 +31,9 @@ export const host = '127.0.0.1';
 
 /**
  * A request as Node hands it over, of `fields` in their order and nothing else: `headers` keeps a
- * field's first line, `rawHeaders` every one.
+ * field's first line, as Node's HTTP/2 keeps one it holds to one value, and `rawHeaders` every one.
+ * Where Node's HTTP/1.1 joins other fields' lines in `headers`, this keeps the first: a judged field
+ * is read from `rawHeaders` alone, `headers` for a field's presence and its length.
  */
 export const requestLikeOf = (fields: readonly (readonly [string, string])[]): IHTTPRequestLike => {
   const headers: Record<string, string> = {};

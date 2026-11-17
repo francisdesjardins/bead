@@ -898,7 +898,8 @@ impl ServerInner {
 
         // an exchange from the server's own origin, by a host it takes by name, or one it was
         // told; one with no `Origin` comes from anywhere
-        let origin = fields.header_of("origin");
+        let origin = fields.joined_of("origin");
+        let origin = origin.as_deref();
         let origins = &self.settings.origins;
 
         if !is_taken_origin(
@@ -933,7 +934,9 @@ impl ServerInner {
         // a preflight is no refusal: nothing tells it
         if listed.is_some()
             && method == Method::OPTIONS
-            && fields.header_of("access-control-request-method").is_some()
+            && fields
+                .first_line_of("access-control-request-method")
+                .is_some()
         {
             let (head, answered) = oneshot::channel();
 
@@ -949,7 +952,7 @@ impl ServerInner {
             return self.finished((&facts, Answering::of(listed, flow)), &refused);
         }
 
-        let token = fields.header_of(CONNECTION_TOKEN_HEADER);
+        let token = fields.joined_of(CONNECTION_TOKEN_HEADER);
 
         if token.is_none() && method == Method::POST {
             if !fields.is_bead_body() {
@@ -971,7 +974,7 @@ impl ServerInner {
         // none is held once a stop began: an exchange learns its connection is gone, as the
         // stop's close would tell it, nothing of it handed on
         let handle = (self.life.ready_state() == ReadyState::Open)
-            .then(|| locked(&self.state).by_token.get(token).cloned())
+            .then(|| locked(&self.state).by_token.get(token.as_str()).cloned())
             .flatten();
         let Some(handle) = handle else {
             return self.finished((&facts, Answering::of(listed, flow)), &unknown_connection());

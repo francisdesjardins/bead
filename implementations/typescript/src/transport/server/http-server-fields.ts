@@ -98,6 +98,8 @@ export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
 
 // helpers
 
+// the first line of the field `name` as Node keeps it in `headers`: read for a field's presence
+// and for what HTTP holds to one line, never for a field spec 15.12 joins
 export const headerOf = (request: IHTTPRequestLike, name: string): string | undefined => {
   const value = request.headers[name];
 
@@ -134,6 +136,14 @@ export const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   }
 
   return values;
+};
+
+// a field's lines joined in their order by `, ` (RFC 9110 §5.3, spec 15.12); none without a line
+// ! from `rawHeaders`: over HTTP/2, `headers` keeps a single-value field's first line alone
+export const joinedOf = (request: IHTTPRequestLike, name: string): string | undefined => {
+  const lines = linesOf(request, name);
+
+  return lines.length === 0 ? undefined : lines.join(', ');
 };
 
 // a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
@@ -209,10 +219,13 @@ export const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefi
   });
 };
 
-// a body of Bead's media type, parameters aside, sent as it is
+// a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
+// Content-Encoding, or one whose lines joined are `identity` (spec 15.12)
 export const isBeadBody = (request: IHTTPRequestLike): boolean => {
-  const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
-  const encoding = headerOf(request, 'content-encoding')?.trim().toLowerCase();
+  // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
+  const types = linesOf(request, 'content-type');
+  const type = types.length === 1 ? types[0]?.split(';')[0]?.trim().toLowerCase() : undefined;
+  const encoding = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
 
   return type === BEAD_MEDIA_TYPE && (encoding === undefined || encoding === 'identity');
 };

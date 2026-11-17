@@ -381,6 +381,73 @@ async fn names_its_host_over_http_2_by_its_authority_a_host_beside_it_ignored_fo
     named.stop().await;
 }
 
+// spec 15.12: each field read as over HTTP/1.1, its lines joined, a type in one line alone
+#[tokio::test]
+async fn refuses_over_http_2_a_connect_whose_origin_or_content_encoding_comes_in_two_lines_403_and_415()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own_text = format!("{HOST}:{port}");
+    let own = own_text.as_str();
+    let own_origin_text = format!("https://{own}");
+    let own_origin = own_origin_text.as_str();
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+    let type_refused = TlsAnswer::of(415, Some(HTTP_REFUSALS.type_refused));
+
+    assert_eq!(
+        [
+            http2_of(
+                port,
+                &[
+                    (":authority", own),
+                    bead,
+                    ("origin", own_origin),
+                    ("origin", "https://elsewhere.test")
+                ]
+            )
+            .await,
+            http2_of(
+                port,
+                &[
+                    (":authority", own),
+                    bead,
+                    ("content-encoding", "identity"),
+                    ("content-encoding", "identity")
+                ]
+            )
+            .await,
+            http2_of(
+                port,
+                &[
+                    (":authority", own),
+                    bead,
+                    ("content-encoding", "identity"),
+                    ("content-encoding", "gzip")
+                ]
+            )
+            .await,
+            http2_of(
+                port,
+                &[
+                    (":authority", own),
+                    bead,
+                    ("origin", own_origin),
+                    ("content-encoding", "identity")
+                ]
+            )
+            .await,
+        ],
+        [
+            TlsAnswer::of(403, Some(HTTP_REFUSALS.origin)),
+            type_refused.clone(),
+            type_refused,
+            TlsAnswer::of(201, None),
+        ],
+        "two Origin lines, own first; identity twice; identity then gzip; one line of each"
+    );
+    started.stop().await;
+}
+
 // ! hyper's HTTP/2 takes `max_header_list_size` alone, 16 KiB as RFC 9113 §6.5.2 counts it, 32
 // bytes more a field: the 100 fields HTTP/1.1 is held to bound no HTTP/2 head, a row of
 // docs/support.md

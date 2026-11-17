@@ -1585,11 +1585,14 @@ public sealed class HttpGateway : IAsyncDisposable
 
     // ── Fields ──────────────────────────────────────────────────────────────────────────────────
 
+    // a header as the request gives it, its lines joined in their order by ", " (spec 15.12); none
+    // when absent, which is not empty
+    // ! joined here, as the other sides join them: StringValues.ToString() joins by ","
     private static string? HeaderOf(HttpRequest request, string name)
     {
         var values = request.Headers[name];
 
-        return values.Count == 0 ? null : values.ToString();
+        return values.Count == 0 ? null : string.Join(", ", values.AsEnumerable());
     }
 
     // whether the server it is mounted on read a body before it, wholly or in part (transcoding
