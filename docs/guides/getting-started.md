@@ -771,9 +771,7 @@ station.on('promptOperator', async (request, response) => {
 });
 
 // ! the page's own origin must be in the server's Origins, or the upgrade is refused 403
-// ! `protocols: []`: without it, Chromium offers the subprotocol "undefined", which the C# server
-// does not answer, and the upgrade fails
-await client.connect({ host: '127.0.0.1', port, protocols: [] });
+await client.connect({ host: '127.0.0.1', port });
 
 const status = await station.getStationStatus({ stationId: 'ST-001' })();
 
@@ -832,16 +830,14 @@ document.body.dataset.done = 'true';
 </html>
 ```
 
-Two things a page needs that Node does not:
+A page needs its origin listed, which Node does not: the server's `Origins` names
+`http://localhost:5173`, so the page is served from exactly that origin. The same page from
+`http://127.0.0.1:5173` is refused 403 `origin-refused`, which the server's `Refusal` event reports,
+while the page's `WebSocket` reads nothing past its close, 1006.
 
-- **Its origin listed.** The server's `Origins` names `http://localhost:5173`, so the page is
-  served from exactly that origin: the same page from `http://127.0.0.1:5173` is refused 403
-  `origin-refused`, which the server's `Refusal` event reports, while the page's `WebSocket` reads
-  nothing past its close, 1006.
-- **`protocols: []` on `connect`.** Without it, Chromium (seen on 156) offers a WebSocket
-  subprotocol named `undefined`, which the C# server does not choose, and the handshake fails:
-  "Sent non-empty 'Sec-WebSocket-Protocol' header but no response was received". A client in Node
-  needs nothing.
+No server chooses a subprotocol, so a page's `connect` names none: the client given none offers
+none. One given `protocols` fails its connect, as a page's `WebSocket` fails an upgrade whose 101
+names none of what it offered.
 
 Build it and serve the `typescript/` folder from `http://localhost:5173` with any static server
 that serves `index.html` and `dist/page.js`, then open `http://localhost:5173/?port=8080`:

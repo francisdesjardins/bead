@@ -306,6 +306,51 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
       }
 
+      // spec 15.2; WHATWG WebSockets §2.2
+      test('fails its connect on a 101 that names none of the subprotocols it offered', async () => {
+        const http = createNodeServer();
+        const upgraded = Promise.withResolvers<Socket>();
+        const offered = Promise.withResolvers<string | undefined>();
+
+        // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+        http.on('upgrade', (request, socket) => {
+          const accept = createHash('sha1')
+            .update(
+              `${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
+            )
+            .digest('base64');
+
+          offered.resolve(request.headers['sec-websocket-protocol']);
+          socket.on('error', () => {});
+          socket.resume();
+          socket.write(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+          );
+          upgraded.resolve(socket as Socket);
+        });
+        http.listen(0, host);
+        await once(http, 'listening');
+
+        try {
+          await expect(
+            client.connect({
+              host,
+              port: (http.address() as AddressInfo).port,
+              protocols: ['chat', 'bead'],
+            })
+          ).rejects.toBeInstanceOf(ConnectError);
+          expect([(await offered.promise)?.split(/ *, */), client.isClosed()]).toEqual([
+            ['chat', 'bead'],
+            true,
+          ]);
+        } finally {
+          (await upgraded.promise).destroy();
+          await new Promise((resolve) => {
+            http.close(resolve);
+          });
+        }
+      });
+
       // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens: `ws` opens on one
       // that lists another beside upgrade, where the global WebSocket, .NET's client and tungstenite
       // refuse it; a row of docs/support.md

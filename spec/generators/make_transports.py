@@ -1118,6 +1118,12 @@ websocket = [
         expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
                                       'access-control-allow-origin': None, 'vary': None}),
         message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    # 15.2: a server selects no subprotocol and no extension, whatever its upgrade offers (RFC 6455 §4.2.2)
+    ('an upgrade offering subprotocols is taken 101, naming none, and served', ['15.2'], {}, [
+        handshake('socket', {'sec-websocket-protocol': 'chat, bead', 'sec-websocket-extensions': 'permessage-deflate'}),
+        expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
+                                      'sec-websocket-protocol': None, 'sec-websocket-extensions': None}),
+        message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.2.2', '15.2.7', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
         heard('socket', envelope=result(1, '"x"'))]),
@@ -2600,12 +2606,11 @@ def mqtt_broker():
 
     return {
         '$comment': [
-            "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, its shared subscriptions offered, and its users, each authenticated by the run's password, its Client Identifier tied to its user.",
+            "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, and its users, each authenticated by the run's password, its Client Identifier tied to its user. It offers shared subscriptions, which no setting of Mosquitto's turns off.",
             "Its access control is spec 15.31's for them: a participant reads its own inbox and its will writes its own departure; every participant writes any inbox and reads any departure; and every user reads and writes every name, so that a peer plays an acceptor. Its queues are lifted, its receive maximum toward a participant none, and it persists nothing.",
         ],
         'maximumPacketSize': MQTT_BROKER_PACKET_SIZE,
         'retainAvailable': False,
-        'sharedSubscriptions': True,
         'users': sorted(users),
     }
 

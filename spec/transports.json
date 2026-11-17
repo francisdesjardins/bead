@@ -9876,6 +9876,49 @@
       ]
     },
     {
+      "name": "an upgrade offering subprotocols is taken 101, naming none, and served",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-protocol: chat, bead\r\nsec-websocket-extensions: permessage-deflate\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+              "sec-websocket-protocol": null,
+              "sec-websocket-extensions": null
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
       "name": "an upgrade's host and origin are compared in any ASCII case",
       "clauses": [
         "15.2",
@@ -34307,12 +34350,11 @@
   "brokers": {
     "mqtt": {
       "$comment": [
-        "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, its shared subscriptions offered, and its users, each authenticated by the run's password, its Client Identifier tied to its user.",
+        "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, and its users, each authenticated by the run's password, its Client Identifier tied to its user. It offers shared subscriptions, which no setting of Mosquitto's turns off.",
         "Its access control is spec 15.31's for them: a participant reads its own inbox and its will writes its own departure; every participant writes any inbox and reads any departure; and every user reads and writes every name, so that a peer plays an acceptor. Its queues are lifted, its receive maximum toward a participant none, and it persists nothing."
       ],
       "maximumPacketSize": 4096,
       "retainAvailable": false,
-      "sharedSubscriptions": true,
       "users": [
         "ada",
         "bob",

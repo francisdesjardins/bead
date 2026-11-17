@@ -13,9 +13,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into `develop` with `--no-ff`, `develop` pushed, and the branch on `origin`, its worktree and the
   local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
   nothing, and `--dry-run` makes every check and changes nothing.
+- `tools/check-citations.mjs` holds each language cell of the support matrix's differences to a
+  citation or a word of its legend, "not tested", "not probed", "not available" or "no
+  counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
+  47; the legend defines the four words, and the 32 cells that said none of them say what holds.
+
+### Changed
+
+- A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers, and a
+  client that offered subprotocols fails an upgrade whose 101 names none of them (spec 15.2, RFC
+  6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
+  and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
+  `spec/transports.json` plays it.
+
+### Removed
+
+- `spec/transports.json`'s `brokers.mqtt.sharedSubscriptions`, which no tool read: the Mosquitto
+  the cases play against offers shared subscriptions, with no setting to turn them off.
 
 ### Fixed
 
+- The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
+  the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped
   with no lookup and no allocation, and a counted call allocates not a byte more than an uncounted
   one, which a gate counts through a counting allocator (debugging §3.3, §3.4).
