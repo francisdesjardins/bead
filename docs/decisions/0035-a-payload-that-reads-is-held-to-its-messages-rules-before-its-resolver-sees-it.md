@@ -100,7 +100,8 @@ its `bounds`, and counts the rest; a reader keeps every whole line a cut leaves,
 closing line tells it that what was left out is not counted (18.7). No byte of the wire moves: the
 envelope, its layout and every vector stay. The offending value stays off the wire, on the
 violation the side that judged holds: the requester holds what it sent, and a value may be a
-secret, or past the detail's bound.
+secret, or past the detail's bound. A map's key is the one exception: the path names an entry by
+its key, cut at 64 bytes (18.4).
 
 **A path and an order are Bead's own**, since protovalidate fixes neither: a path renders its
 fields' names, an item's index and an entry's key, a string key in RFC 8785's form, cut at 64
