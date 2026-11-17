@@ -2045,6 +2045,63 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
 }
 
 #[tokio::test]
+async fn calls_each_listener_though_one_throws_reporting_a_client_s_throw_with_no_connection() {
+    struct Throwing;
+
+    impl ClientListener for Throwing {
+        fn on_close(&self, _was_clean: bool, _is_quick: bool) {
+            panic!("a listener that throws");
+        }
+
+        fn on_reconnect(&self) {
+            panic!("a listener that throws");
+        }
+    }
+
+    let ends = Ends::started().await;
+    let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
+        clock: Some(Arc::clone(&ends.shared)),
+    })
+    .expect("a client");
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+
+    let told: Told = Arc::default();
+
+    // * the throwing listener comes first, as in the source fixture
+    client.listen(Arc::new(Throwing));
+    client.listen(Arc::new(AtClient {
+        told: Arc::clone(&told),
+    }));
+    client.inner.tell(|listener| listener.on_close(true, false));
+
+    let reconnecting = client
+        .reconnect(&TransportClientReconnectOptions::default())
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+    reconnecting.await.expect("reconnected");
+
+    assert_eq!(
+        taken(&told),
+        [
+            "error a listener panicked: a listener that throws",
+            "closed true false",
+            "error a listener panicked: a listener that throws",
+            "reconnect",
+        ],
+        "both events reach the next listener; each panic is reported once without a handle"
+    );
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("disconnected");
+}
+
+#[tokio::test]
 async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_connection() {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);

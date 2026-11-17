@@ -3,3 +3,4 @@ beadc.ps1 text eol=lf
 gen/** text eol=lf linguist-generated=true
 typescript/gen/** text eol=lf linguist-generated=true
 dotnet/gen/** text eol=lf linguist-generated=true
+rust/src/generated/** text eol=lf linguist-generated=true

@@ -47,8 +47,8 @@ public sealed record RouterLimits
     }
 
     /// <summary>
-    /// The bytes every transfer the router receives holds together, reserved as its credit grants
-    /// them.
+    /// The bytes the transfers the router receives reserve together: each one's total, from its
+    /// admission until its payload is whole or it ends.
     /// </summary>
     public int BufferedBytesBudget { get; init; } = 268_435_456;
 
@@ -100,7 +100,8 @@ public sealed record RouterLimits
 
     /// <summary>
     /// How long a transfer waits for its next chunk or credit before it stalls: from 1 to 2³¹ − 1
-    /// milliseconds, rounded to the nearest whole one, never zero nor infinite.
+    /// milliseconds, rounded to the nearest whole one, never zero nor infinite. Half of it, in whole
+    /// milliseconds rounded down, is how long an opening waits for the budget.
     /// </summary>
     public TimeSpan TransferInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 

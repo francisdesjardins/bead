@@ -2,20 +2,17 @@
 import base64
 import datetime
 import hashlib
-import hmac
 import json
 import math
-import os
 import re
 import string
 
 import amqp_messages
+from conformance import hexadecimal, nested, text, write_json
+from jws import base64url, compact, part, signed, unbase64url
 from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
                           width)
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vectors.json')
 
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 ZEROS = '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
@@ -24,14 +21,6 @@ MALFORMED = 1
 LAYOUT_UNSUPPORTED = 2
 KIND_UNSUPPORTED = 3
 ENVELOPE_TOO_LARGE = 4
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def ascii_hex(text):
-    return hexadecimal(text.encode('utf-8'))
 
 
 # ── The CREDENTIAL block ────────────────────────────────────────────────────────────────────────
@@ -305,8 +294,8 @@ header_refusals = [
 ]
 
 envelopes = [
-    ('a request, 14 bytes for 3/2/1 and "hi"', ['6.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}',
-     {'kind': 16, 'header': {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 2}, 'payload': ascii_hex('hi')}),
+    ('a request, 14 bytes for 3/2/1 and "hi"', ['6.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}',
+     {'kind': 16, 'header': {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 2}, 'payload': text('hi')}),
     ('a result', ['6.1'], 'A1 11 00 02  00 00 00 03 | 01 02',
      {'kind': 17, 'header': {'callId': 3, 'kind': 17}, 'payload': '01 02'}),
     ('a notification with no payload', ['6.1'], 'A1 13 00 02  00 00 00 0D',
@@ -314,10 +303,10 @@ envelopes = [
     ('a cancel, nothing after its header', ['6.4'], 'A1 16 00 02  00 00 00 05',
      {'kind': 22, 'header': {'callId': 5, 'kind': 22}}),
     ('a protocol failure, its record after the header', ['6.2', '7.1'],
-     f'A1 12 00 02  00 00 00 03 | 00 13 00 00  {ascii_hex("no procedure 1 in service 2")}',
+     f'A1 12 00 02  00 00 00 03 | 00 13 00 00  {text("no procedure 1 in service 2")}',
      {'kind': 18, 'header': {'callId': 3, 'kind': 18},
       'failure': {'code': 19, 'detail': 'no procedure 1 in service 2', 'relays': 0, 'scope': 0}}),
-    ('an application failure', ['6.2', '7.2'], f'A1 12 00 02  00 00 00 03 | 00 15 00 01  {ascii_hex("out of range")}',
+    ('an application failure', ['6.2', '7.2'], f'A1 12 00 02  00 00 00 03 | 00 15 00 01  {text("out of range")}',
      {'kind': 18, 'header': {'callId': 3, 'kind': 18},
       'failure': {'code': 21, 'detail': 'out of range', 'relays': 0, 'scope': 1}}),
     ('the smallest failure, 12 bytes', ['6.2', '7.1'], 'A1 12 00 02  00 00 00 03 | 00 13 00 00',
@@ -328,40 +317,68 @@ envelopes = [
     ('a result opening a transfer of nothing', ['4.6', '6.1'], 'A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 00',
      {'kind': 17, 'header': {'callId': 2, 'kind': 17, 'total': 0}, 'payload': ''}),
     ('a request presenting a JWT, its payload after the padding', ['4.4.3', '6.1'],
-     f'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | {ascii_hex("hi")}',
+     f'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | {text("hi")}',
      {'kind': 16, 'header': {'callId': 3, 'credential': {'scheme': 'JWT', 'token': 'a'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2},
-      'payload': ascii_hex('hi')}),
+      'payload': text('hi')}),
     ('a failure announcing that its session ended, its record after the block', ['4.4.1', '6.2'],
-     f'A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  {ascii_hex("no session")}',
+     f'A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  {text("no session")}',
      {'kind': 18, 'header': {'callId': 3, 'credential': ENDED, 'kind': 18},
       'failure': {'code': 32, 'detail': 'no session', 'relays': 0, 'scope': 0}}),
     ('a chunk with more to come', ['4.9', '6.3'], 'A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 05 | 01 02 03',
      {'kind': 20, 'header': {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 5}, 'payload': '01 02 03'}),
     ('a credit, nothing after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 0A',
      {'kind': 21, 'header': {'callId': 7, 'creditEnd': 10, 'kind': 21}}),
+    # 12.2: a reader holds a request and a result to chunkBytes, and any other envelope to
+    # maximumEnvelopeBytes, a chunk to chunkBytes within its transfer alone; each a byte past it here
+    ('a chunk past chunkBytes reads, held to it within its transfer', ['12.2', '12.2.2', '12.6.1'],
+     'A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 2C | 68 69',
+     {'kind': 20, 'header': {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 44}, 'payload': '68 69'}, 17),
+    ('a notification past chunkBytes reads', ['12.2'], 'A1 13 00 02  00 00 00 04 | 68 69',
+     {'kind': 19, 'header': {'callId': 4, 'kind': 19}, 'payload': '68 69'}, 9),
+    ('a failure past chunkBytes reads', ['12.2'], 'A1 12 00 02  00 00 00 05 | 00 13 00 00',
+     {'kind': 18, 'header': {'callId': 5, 'kind': 18}, 'failure': {'code': 19, 'detail': '', 'relays': 0, 'scope': 0}}, 11),
 ]
 
 envelope_refusals = [
-    ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, MALFORMED, 'a cancel carries no payload, not 1 bytes'),
-    ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, MALFORMED, 'a chunk carries one byte at least'),
-    ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, MALFORMED,
+    ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, None, MALFORMED,
+     'a cancel carries no payload, not 1 bytes'),
+    ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, None, MALFORMED,
+     'a chunk carries one byte at least'),
+    ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, None, MALFORMED,
      'a credit carries no payload, not 1 bytes'),
     # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
     # vector that fails two checks cites 5.1's order
-    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, ENVELOPE_TOO_LARGE,
-     'an envelope is 13 bytes at most, not 14'),
-    ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13,
-     ENVELOPE_TOO_LARGE, None),
-    ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, MALFORMED, None),
-    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, MALFORMED, None),
+    ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,
+     ENVELOPE_TOO_LARGE, 'an envelope is 13 bytes at most, not 14'),
+    ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13,
+     None, ENVELOPE_TOO_LARGE, None),
+    ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, None, MALFORMED, None),
+    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,
+     MALFORMED, None),
+    # 12.2: a request and a result, whole or an opening, held to chunkBytes by the kind byte 1 names,
+    # whatever their layout; the detail names the kind whenever chunkBytes held it, even a chunkBytes
+    # as large as the envelope's bound
+    ('a request past chunkBytes', ['5.1.2', '12.2', '12.2.2'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', None, 13,
+     ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+    ("a request's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'],
+     'A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 00 00 01 00 | 68', None, 20, ENVELOPE_TOO_LARGE,
+     'a request is 20 bytes at most, not 21'),
+    ('a result past chunkBytes', ['5.1.2', '12.2', '12.2.2'], 'A1 11 00 02  00 00 00 04 | 68 69 6A 6B 6C 6D', None, 13, ENVELOPE_TOO_LARGE,
+     'a result is 13 bytes at most, not 14'),
+    ("a result's opening past chunkBytes", ['5.1.2', '12.2', '12.2.2'], 'A1 11 04 04  00 00 00 04  00 00 00 00 00 00 01 00 | 68', None, 16,
+     ENVELOPE_TOO_LARGE, 'a result is 16 bytes at most, not 17'),
+    ("a request of a layout to come past chunkBytes, its kind's bound checked before its layout", ['5.1', '5.1.2', '12.2'],
+     f'A2 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', None, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
+    ("a request past a chunkBytes as large as the envelope's bound names a request", ['5.1.2', '12.2'],
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, 13, ENVELOPE_TOO_LARGE, 'a request is 13 bytes at most, not 14'),
 ]
 
 failures = [
     ('the relays as they came, and no detail as empty', ['7.1', '7.5'], '00 12 03 00', None, {'code': 18, 'detail': '', 'relays': 3, 'scope': 0}),
     ('the last code, of the application', ['7.2'], 'FF FF 00 01', None, {'code': 65535, 'detail': '', 'relays': 0, 'scope': 1}),
-    ('a detail cut at 5 bytes, back to the start of the character cut', ['7.3'], f'00 13 00 00  {ascii_hex("abcdéf")}', 5,
+    ('a detail cut at 5 bytes, back to the start of the character cut', ['7.3'], f'00 13 00 00  {text("abcdéf")}', 5,
      {'code': 19, 'detail': 'abcd', 'relays': 0, 'scope': 0}),
-    ('a detail cut at 3 bytes, on a character boundary', ['7.3'], f'00 13 00 00  {ascii_hex("abcdéf")}', 3,
+    ('a detail cut at 3 bytes, on a character boundary', ['7.3'], f'00 13 00 00  {text("abcdéf")}', 3,
      {'code': 19, 'detail': 'abc', 'relays': 0, 'scope': 0}),
     # the cut steps back over one character at most, to a lead byte three bytes back at most whose
     # sequence crosses it; a cut that falls on a stray continuation byte stays where it fell
@@ -392,19 +409,6 @@ failure_refusals = [
 
 
 # ── The verdicts of JWTs (section 13.8) ─────────────────────────────────────────────────────────
-
-
-def base64url(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-
-def unbase64url(text):
-    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
-
-
-def compact(value):
-    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
-    return json.dumps(value, separators=(',', ':')).encode('ascii')
 
 
 def thumbprint(jwk):
@@ -505,15 +509,9 @@ HS = key(TRUST, 'HS256', HMAC_KEY)
 HS_BY_THUMBPRINT = key(TRUST, 'HS256', {**HMAC_KEY, 'kid': thumbprint(HMAC_KEY)})
 
 
-def part(value):
-    """A header or a claims set, from a JSON value or from its bytes as given."""
-    return base64url(value if isinstance(value, bytes) else compact(value))
-
-
 def hs256(header, claims, secret=unbase64url(HMAC_KEY['k'])):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac."""
-    signing_input = part(header) + '.' + part(claims)
-    return signing_input + '.' + base64url(hmac.new(secret, signing_input.encode('ascii'), hashlib.sha256).digest())
+    return signed(header, claims, secret)
 
 
 def access(issuer=TRUST, **claims):
@@ -583,13 +581,6 @@ HS_TOKEN = hs256(AT_JWT, access())
 PAST_A_DOUBLE = compact(access()).replace(f'"exp":{EXP}'.encode('ascii'), b'"exp":1e400')
 assert b'"exp":1e400' in PAST_A_DOUBLE and float('1e400') == math.inf
 
-
-def nested(levels):
-    """A claim's value of arrays nested levels deep, below the claims set's own depth of 1."""
-    value = []
-    for _ in range(levels - 1):
-        value = [value]
-    return value
 
 jwt_verdicts = [
     # typ: an ID token of the same issuer, under the same key, refused; its twin taken
@@ -775,7 +766,7 @@ LONGEST_ID = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_'
 assert len(LONGEST_ID) == 64
 
 # what a DATA carries: an envelope of vectors' own, whole, or cut in two parts
-CARRIED = f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}'
+CARRIED = f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}'
 FIRST_PART, LAST_PART = 'A1 10 00 03  00 00 00 03', '00 02 00 01  68 69'
 CREDENTIAL = 'Interop sub=ada'
 
@@ -790,7 +781,7 @@ def parcel_of(kind, sequence, body='', *, flags=0, opener=OPENER, acceptor=ACCEP
 def identity_of(identifier, incarnation=INCARNATION, bound=None):
     """An OPEN's or an ACCEPT's body: its id's length and its id, its incarnation, its receive bound;
     a GONE's, its incarnation then its id, when bound is None."""
-    named = f'{len(identifier):02X}' + (f' {ascii_hex(identifier)}' if identifier else '')
+    named = f'{len(identifier):02X}' + (f' {text(identifier)}' if identifier else '')
     return f'{named}  {incarnation}  {hexadecimal(bound.to_bytes(4, "big"))}' if bound is not None else f'{incarnation}  {named}'
 
 
@@ -800,7 +791,7 @@ def fields_of(kind, sequence, *, flags=0, opener=OPENER, acceptor=ACCEPTOR, layo
 
 
 def credential_of(credential):
-    return f'{hexadecimal(len(credential).to_bytes(2, "big"))}  {ascii_hex(credential)}'
+    return f'{hexadecimal(len(credential).to_bytes(2, "big"))}  {text(credential)}'
 
 
 # each kind, read to its fields and written back to its bytes; written false for one a reader reads and
@@ -884,7 +875,7 @@ parcel_refusals = [
     ('a first byte of 0xB0', ['15.17'], parcel_of(PING, 2, layout=0xB0), NO_PARCEL),
     ('a first byte of 0xC0', ['15.17'], parcel_of(PING, 2, layout=0xC0), NO_PARCEL),
     ('an envelope of 28 bytes, its first byte 0xA1', ['15.17'],
-     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("0123456789abcdef")}', NO_PARCEL),
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("0123456789abcdef")}', NO_PARCEL),
     ('a kind of 0x00, never one', ['15.17'], parcel_of(0x00, 3), DOES_NOT_READ),
     ('a kind to come, 0x0A', ['15.17'], parcel_of(0x0A, 3), DOES_NOT_READ),
     ('a kind to come, 0x7F', ['15.17'], parcel_of(0x7F, 3), DOES_NOT_READ),
@@ -939,7 +930,7 @@ parcel_refusals = [
     ('a REFUSE 503 with a byte after its status', ['15.17', ROW[REFUSE]],
      parcel_of(REFUSE, 1, '01 F7  00', acceptor=NO_HALF), DOES_NOT_READ),
     ('a DATA marked CREDENTIAL whose credential runs past its bytes', ['15.17', ROW[DATA]],
-     parcel_of(DATA, 3, f'00 40  {ascii_hex("Interop")}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
+     parcel_of(DATA, 3, f'00 40  {text("Interop")}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
     ('a DATA marked CREDENTIAL whose credential is empty', ['15.17', ROW[DATA]],
      parcel_of(DATA, 3, f'00 00  {CARRIED}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
     ('a DATA carrying nothing', ['15.17', ROW[DATA]], parcel_of(DATA, 3), DOES_NOT_READ),
@@ -992,6 +983,27 @@ mqtt_publish_bounds = [publish_bound(topic, maximum, qos, expiry)
 mqtt_publish_bounds.append(('no payload fits: ' + publish_bound(SERVER_INBOX, 24, 1, True)[0], ['15.30'],
                             SERVER_INBOX, 24, 1, True, None, None))
 assert mqtt_publish_bounds[-1][6] is None and publish_bytes(len(SERVER_INBOX), 0, qos=1, expiry=True) == 25
+
+
+# ── An MQTT 5 acknowledgement's Reason Codes (sections 15.27 to 15.29) ──────────────────────────
+
+# each acknowledgement a participant reads, by its fixed header's packet type, and the Reason Codes its
+# table names (MQTT 5.0 §3.4.2.1, §3.9.3 and §3.11.3): a code it names is read as named, one of 0x80 or
+# more it does not name refuses its request all the same (§2.4, §4.13.2), and one under 0x80 it does
+# not name is a Protocol Error, a packet its client cannot read ([MQTT-3.4.2-1], [MQTT-3.9.3-2],
+# [MQTT-3.11.3-2])
+mqtt_acknowledgement_codes = [
+    ("a PUBACK's Reason Codes, its table's", ['15.28', '15.29'], 'PUBACK', 4,
+     [0x00, 0x10, 0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99]),
+    ("a SUBACK's Reason Codes, its table's", ['15.27', '15.29'], 'SUBACK', 9,
+     [0x00, 0x01, 0x02, 0x80, 0x83, 0x87, 0x8F, 0x91, 0x97, 0x9E, 0xA1, 0xA2]),
+    ("an UNSUBACK's Reason Codes, its table's", ['15.27', '15.29'], 'UNSUBACK', 11,
+     [0x00, 0x11, 0x80, 0x83, 0x87, 0x8F, 0x91]),
+]
+# ! every table names its every refusal from 0x80, and 0x95 none: Mosquitto 2.1.2's PUBACK past its
+# message_size_limit is a refusal no table names
+assert all(0x80 in named and 0x95 not in named and named == sorted(set(named))
+           for _, _, _, _, named in mqtt_acknowledgement_codes)
 
 
 # ── An AMQP 1.0 message's bytes (sections 15.35 and 15.37) ──────────────────────────────────────
@@ -1085,7 +1097,7 @@ document = {
         "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
         'kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.',
         "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
-        "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
+        "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
         "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
@@ -1094,6 +1106,7 @@ document = {
         "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
         "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
         "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+        "An MQTT 5 acknowledgement's codes are a PUBACK's, a SUBACK's or an UNSUBACK's, by packet and by type, its fixed header's packet type, 4, 9 or 11, and named, the Reason Codes its table names (sections 15.27 to 15.29): a side plays every code from 0x00 to 0xFF of each, read as its table names it where named holds it, a refusal of its request where it is 0x80 or more, and otherwise a packet its client cannot read.",
         "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
         "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike.",
     ],
@@ -1105,9 +1118,11 @@ document = {
     'prefixRefusals': [entry(name=name, clauses=clauses, bytes=data, code=MALFORMED) for name, clauses, data in prefix_refusals],
     'headerRefusals': [entry(name=name, clauses=step_seven(clauses, code, detail), bytes=data, code=code, detail=detail)
                        for name, clauses, data, code, detail in header_refusals],
-    'envelopes': [entry(name=name, clauses=clauses, bytes=data, envelope=envelope) for name, clauses, data, envelope in envelopes],
-    'envelopeRefusals': [entry(name=name, clauses=clauses, bytes=data, maximumEnvelopeBytes=maximum, code=code, detail=detail)
-                         for name, clauses, data, maximum, code, detail in envelope_refusals],
+    'envelopes': [entry(name=name, clauses=clauses, bytes=data, chunkBytes=chunk[0] if chunk else None, envelope=envelope)
+                  for name, clauses, data, envelope, *chunk in envelopes],
+    'envelopeRefusals': [entry(name=name, clauses=clauses, bytes=data, maximumEnvelopeBytes=maximum, chunkBytes=chunk, code=code,
+                               detail=detail)
+                         for name, clauses, data, maximum, chunk, code, detail in envelope_refusals],
     'failures': [entry(name=name, clauses=clauses, record=record, maximumDetailBytes=maximum, failure=failure)
                  for name, clauses, record, maximum, failure in failures],
     'failureRefusals': [entry(name=name, clauses=clauses, record=record, code=MALFORMED) for name, clauses, record in failure_refusals],
@@ -1125,6 +1140,8 @@ document = {
     'mqttPublishBounds': [{'name': name, 'clauses': clauses, 'topic': topic, 'maximumPacketSize': maximum, 'qos': qos,
                            'expiry': expiry, 'largestPayload': largest, 'packetBytes': packet}
                           for name, clauses, topic, maximum, qos, expiry, largest, packet in mqtt_publish_bounds],
+    'mqttAcknowledgementCodes': [{'name': name, 'clauses': clauses, 'packet': packet, 'type': kind, 'named': named}
+                                 for name, clauses, packet, kind, named in mqtt_acknowledgement_codes],
     'amqpMessages': [entry(name=name, clauses=clauses, to=to, payloadLength=payload, payloadByte=PAYLOAD_BYTE, ttl=ttl,
                            bytes=data)
                      for name, clauses, to, payload, ttl, data in amqp_message_vectors],
@@ -1133,8 +1150,6 @@ document = {
                           for name, clauses, address, maximum, largest, size in amqp_publish_bounds],
 }
 
-with open(OUT, 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('vectors.json', document)
 
 print({key: len(value) for key, value in document.items() if isinstance(value, list) and key != '$comment'})

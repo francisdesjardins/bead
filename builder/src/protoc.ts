@@ -23,7 +23,6 @@ import { join, relative, sep } from 'node:path';
 import { fromBinary } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 
-import { temporaryFolderOf } from './config-files.ts';
 import { InputError } from './diagnostics.ts';
 import type { IBlueprint } from './model/blueprint.ts';
 import { BEADC_FILES } from './roots.ts';
@@ -32,6 +31,7 @@ import type { IGeneratedFile } from './targets/target.ts';
 import { withoutHttpOptions } from './http-options.ts';
 import { withoutValidateOptions } from './validate-options.ts';
 import { IMAGE } from './wrappers.ts';
+import { temporaryFolderOf } from './work-area.ts';
 
 // types
 
@@ -178,15 +178,13 @@ export const requireProtoc = (): IFoundProtoc => {
 /**
  * The C# files of the messages `blueprint` binds, from `set`, buf's FileDescriptorSet of its
  * `.proto` source, each at its namespace's folder as protoc writes it: none, and no protoc looked
- * for, when it binds none of a file of its own; protoc's files written under `options.folder`'s
- * `.beadc/`, the project's, where it names one. Throws an {@link InputError} for no protoc, one off
- * its pin, or protoc's own refusal, in its words.
+ * for, when it binds none of a file of its own; protoc's files written in the run's work area.
+ * Throws an {@link InputError} for no protoc, one off its pin, or protoc's own refusal, in its words.
  */
 export const generateCSharpMessages = (
   given: Uint8Array,
   options: {
     readonly blueprint: IBlueprint;
-    readonly folder?: string;
     readonly keepValidateOptions?: boolean;
     readonly keepHttpOptions?: boolean;
   }
@@ -224,10 +222,7 @@ export const generateCSharpMessages = (
   }
 
   const protoc = requireProtoc();
-  const folder = temporaryFolderOf(
-    'protoc-',
-    options.folder === undefined ? {} : { folder: options.folder }
-  );
+  const folder = temporaryFolderOf('protoc-');
   // in the set's order, which is buf's, beadc's own files in a run of their own
   const ordered = descriptors.file
     .map((file) => {

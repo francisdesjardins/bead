@@ -7,6 +7,7 @@ import mqtt, {
   type IClientOptions,
   type IDisconnectPacket,
   type IPublishPacket,
+  type KeepaliveManager,
   type MqttClient,
   type Packet,
 } from 'mqtt';
@@ -15,6 +16,8 @@ import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
 import {
+  ACKNOWLEDGEMENT_TYPES,
+  type AcknowledgementType,
   groupFilterOf,
   LARGEST_PACKET_SIZE,
   largestPayload,
@@ -22,9 +25,10 @@ import {
   publishBytes,
   topicOf,
 } from './mqtt-packets';
-import { guardPacketSize } from './mqtt-packet-guard';
+import { guardPackets } from './mqtt-packet-guard';
 import { isSecureUrl } from './secure';
 import { withSlicedSends } from './sliced-sends';
+import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -34,11 +38,18 @@ import type {
   IBrokerPublication,
   IBrokerStart,
   IBrokerSubscription,
+  ITlsOptions,
 } from './types';
 
 export { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 export { MAXIMUM_PACKET_SIZE } from './mqtt-packets';
-export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } from './types';
+export type {
+  BrokerDelivery,
+  BrokerPublished,
+  BrokerTopic,
+  IBrokerAdapter,
+  ITlsOptions,
+} from './types';
 
 // interfaces
 
@@ -58,7 +69,9 @@ export interface IMqttBrokerAdapterOptions {
   id: string;
   /**
    * Its CONNECT's Keep Alive, in milliseconds, sent in whole seconds rounded up: from 1 to 65,535
-   * seconds (spec 15.30). Defaults to {@link KEEP_ALIVE}.
+   * seconds (spec 15.30). Defaults to {@link KEEP_ALIVE}. The Keep Alive its link runs unless its
+   * CONNACK names a shorter Server Keep Alive; a PINGREQ unanswered for half of it loses its link
+   * (spec 15.26).
    */
   keepAlive?: number | undefined;
   /**
@@ -69,7 +82,8 @@ export interface IMqttBrokerAdapterOptions {
   /**
    * Its Password, under its id as User Name, as given: UTF-8 text, never empty and holding no NUL
    * (spec 15.26). Refused with a {@link ProgrammerError} as it is built when it is not, beside a
-   * `passwordProvider`, and beside `tls`. With neither, its CONNECT carries its User Name alone.
+   * `passwordProvider`, and beside a `tls` that names a `certificate`; taken beside one that names
+   * `authorities` alone. With neither, its CONNECT carries its User Name alone.
    */
   password?: string | undefined;
   /**
@@ -83,17 +97,13 @@ export interface IMqttBrokerAdapterOptions {
    */
   passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
-   * Its TLS client certificate and key, which its broker ties to its id, over `mqtts` or `wss` in
-   * Node, never in a page; and the authority its broker's own certificate is trusted by, where not
-   * the platform's.
+   * Its TLS, over `mqtts` or `wss` in Node, never in a page (spec 15.39): its client certificate
+   * and key, which its broker ties to its id, its CONNECT then carrying no User Name; and the
+   * authorities its broker's own certificate is judged by, in place of the platform's roots. Refused
+   * with a {@link ProgrammerError} as it is built over any other URL, and as {@link ITlsOptions}
+   * says.
    */
-  tls?:
-    | {
-        ca?: string | Uint8Array | undefined;
-        cert: string | Uint8Array;
-        key: string | Uint8Array;
-      }
-    | undefined;
+  tls?: ITlsOptions | undefined;
   /** Its broker: `mqtt://`, `mqtts://`, or a WebSocket, `ws://` or `wss://`, of subprotocol `mqtt`. */
   url: string;
 }
@@ -134,6 +144,11 @@ interface IIncarnation {
   maximumPacketSize: number;
   /** Each PUBACK's Reason Code, by its packet identifier, until its publication settles. */
   readonly reasons: Map<number, number>;
+  /**
+   * The broker's own code of each acknowledgement its guard handed on as 0x80, by its type and its
+   * Packet Identifier, until that packet passes.
+   */
+  readonly refusals: Map<string, number[]>;
   /** Its CONNACK's Receive Maximum, its send quota. */
   receiveMaximum: number;
   /** Its publications waiting on the quota, in their order. */
@@ -145,7 +160,7 @@ interface IIncarnation {
 /** How long a start waits for its password, where it asks its provider, and its CONNACK, and a stop for what it was handed and its UNSUBACKs, then for its DISCONNECT, by default: 30 seconds (spec 15.30). */
 export const CONNECT_TIMEOUT = 30_000;
 
-/** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30). */
+/** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats where its CONNACK names no Server Keep Alive (spec 15.26, 15.30). */
 export const KEEP_ALIVE = 30_000;
 
 // the longest Keep Alive a CONNECT carries, a Two Byte Integer of seconds (MQTT 5.0 §3.1.2.10)
@@ -157,12 +172,23 @@ const RECEIVE_MAXIMUM = 65_535;
 // the longest life a Message Expiry Interval holds, a Four Byte Integer of seconds
 const LONGEST_LIFE_SECONDS = 4_294_967_295;
 
+// `ws`'s own `maxPayload`, 100 MiB: what a message read whole holds at most, unless a packet within
+// its Maximum Packet Size is larger (RFC 6455 §10.4)
+const WS_MESSAGE_BYTES = 104_857_600;
+
 const REASON = Object.freeze({
   NO_MATCHING_SUBSCRIBERS: 0x10,
   NO_SUBSCRIPTION_EXISTED: 0x11,
   SESSION_TAKEN_OVER: 0x8e,
   SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: 0x9e,
   SUCCESS: 0x00,
+});
+
+// each acknowledgement MQTT.js names, by its packet type
+const ACKNOWLEDGED = Object.freeze({
+  puback: ACKNOWLEDGEMENT_TYPES.PUBACK,
+  suback: ACKNOWLEDGEMENT_TYPES.SUBACK,
+  unsuback: ACKNOWLEDGEMENT_TYPES.UNSUBACK,
 });
 
 const ALL_CAPABILITIES = Object.freeze({ expiry: true, will: true });
@@ -186,16 +212,23 @@ const isUnreadable = (client: MqttClient, error: Error): boolean => {
   return !client.stream.destroyed && !UNANSWERED_ACK.test(error.message);
 };
 
-const isNode = (): boolean => {
-  return (
-    typeof (globalThis as { process?: { versions?: { node?: unknown } } }).process?.versions
-      ?.node === 'string'
-  );
+// ! a new object for each link, never frozen, which MQTT.js writes a `wss` link's TLS options into:
+// what `ws` takes in Node, a message bound no packet within its Maximum Packet Size passes and no
+// permessage-deflate offered (spec 15.25)
+const mqttWebSocketOptions = (
+  maximumPacketSize: number
+): NonNullable<IClientOptions['wsOptions']> => {
+  return { maxPayload: Math.max(WS_MESSAGE_BYTES, maximumPacketSize), perMessageDeflate: false };
 };
 
 // a Reason Code as a refusal names it
 const reasonOf = (code: number): string => {
   return `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+};
+
+// an acknowledgement's refusal, noted by its guard, as its packet passes it
+const refusalKeyOf = (type: AcknowledgementType, identifier: number): string => {
+  return `${String(type)}/${String(identifier)}`;
 };
 
 // a life in whole seconds, rounded up, 1 at least (spec 15.28)
@@ -211,7 +244,10 @@ const isPassword = (password: unknown): password is string => {
   return typeof password === 'string' && password.length > 0 && !password.includes('\0');
 };
 
-/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+/**
+ * What its link authenticates by, held as it is built: a password, its provider, or a client
+ * certificate alone, the authorities its broker is judged by beside any of them.
+ */
 const assertAuthentication = ({
   password,
   passwordProvider,
@@ -221,7 +257,10 @@ const assertAuthentication = ({
     throw new ProgrammerError('a link takes a password or a password provider, not both');
   }
 
-  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
+  if (
+    (password !== undefined || passwordProvider !== undefined) &&
+    tls?.certificate !== undefined
+  ) {
     throw new ProgrammerError(
       'a link authenticates by its client certificate or by a password, not both'
     );
@@ -243,8 +282,8 @@ const assertAuthentication = ({
  * Interval of 0. Its library reconnects nothing, subscribes nothing again and holds nothing while
  * down. Each subscription is of QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
  * group's its shared subscription, held once its SUBACK grants QoS 1, and let go once its UNSUBACK
- * came of 0x00 or 0x11, any other code refusing it, none within connectTimeout failing it, its link
- * and its filter kept. Each publication is of QoS 1,
+ * came of 0x00 or 0x11, a code of 0x80 or more refusing it, none within connectTimeout failing it,
+ * its link and its filter kept. Each publication is of QoS 1,
  * or 0 at most once, RETAIN 0, a life in whole seconds where asked and no other property, counted
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
@@ -255,7 +294,10 @@ const assertAuthentication = ({
  * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
  * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
  * it nothing. A packet past its own Maximum Packet Size, read at its Remaining Length, or one its
- * client cannot read, closes its network connection, no DISCONNECT, its link lost. Its link is up
+ * client cannot read, closes its network connection, no DISCONNECT, its link lost, and at its stop
+ * alike, its stop ended, no DISCONNECT; a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under
+ * 0x80 its table does not name, or a SUBACK or an UNSUBACK of a count of codes other than one, is
+ * one, awaited or not. Its link is up
  * as MQTT.js reads a CONNACK of 0x00 whose Maximum QoS is not 0, whatever comes after it; any other
  * CONNACK fails its start, naming its code, and sends nothing. Its leg is secure under TLS or to the
  * loopback.
@@ -273,9 +315,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     maximumPacketSize = MAXIMUM_PACKET_SIZE,
     password,
     passwordProvider,
-    tls,
     url,
   } = options;
+  // * a tls of no member is none
+  const tls = tlsOf(options.tls);
   const keepAlive = assertHeldWithin('keepAlive', options.keepAlive ?? KEEP_ALIVE, {
     ceiling: LONGEST_KEEP_ALIVE,
   });
@@ -320,6 +363,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
   if (tls !== undefined && protocol !== 'mqtts:' && protocol !== 'wss:') {
     throw new ProgrammerError(`a TLS client certificate is carried over mqtts or wss, not ${url}`);
+  }
+
+  if (tls !== undefined) {
+    assertTls(tls);
   }
 
   assertAuthentication({ password, passwordProvider, tls });
@@ -374,6 +421,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
     incarnation.failures.clear();
     incarnation.reasons.clear();
+    incarnation.refusals.clear();
     incarnation.filters.clear();
     incarnation.drained?.();
 
@@ -492,7 +540,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   };
 
   // * each filter its link asked or holds let go, one UNSUBSCRIBE each, all sent at once: settles
-  // once every UNSUBACK came, 0x00 or 0x11 letting it go and any other code too, its link ended, or
+  // once every UNSUBACK came, 0x00 or 0x11 letting it go and 0x80 or more too, its link ended, or
   // `within` passed (spec 15.26, 15.27)
   const letGo = (incarnation: IIncarnation, within: number): Promise<void> => {
     // ! one filter a packet: one UNSUBSCRIBE of them all may pass its CONNACK's Maximum Packet Size,
@@ -550,6 +598,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     // on and settled: MQTT.js reads no UNSUBACK behind a PUBLISH it holds unacknowledged
     if (!incarnation.isRetired && incarnation.client.connected) {
       await letGo(incarnation, Math.max(0, deadline - PLATFORM_CLOCK.performance.now()));
+    }
+
+    // ! its link lost meanwhile, a packet its client cannot read among it: its stop ends where it
+    // stopped, no DISCONNECT, its will going (spec 15.29); MQTT.js's `connected` outlives that loss
+    if (incarnation.isRetired) {
+      return;
     }
 
     incarnation.isRetired = true;
@@ -727,9 +781,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       clientId: id,
       connectTimeout: Math.max(1, Math.ceil(left)),
       // ! in a page alone, each message one frame (spec 15.25): in Node, `ws` fragments none, and
-      // its stream sends with a callback, which the sliced send would drop
+      // its stream sends with a callback, which the sliced send would drop; there `ws` reassembles a
+      // message whole, bounded by its Maximum Packet Size at least, no permessage-deflate offered
       ...(isNode()
-        ? {}
+        ? { wsOptions: mqttWebSocketOptions(maximumPacketSize) }
         : {
             createWebsocket: (webSocketUrl: string, protocols: string[]) => {
               return withSlicedSends(new WebSocket(webSocketUrl, protocols));
@@ -764,13 +819,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       reconnectOnConnackError: false,
       reconnectPeriod: 0,
       resubscribe: false,
-      ...(tls === undefined
-        ? { username: id }
-        : {
-            cert: tls.cert as never,
-            key: tls.key as never,
-            ...(tls.ca === undefined ? {} : { ca: tls.ca as never }),
-          }),
+      // * its User Name its id, unless its client certificate authenticates it (spec 15.26)
+      ...(tls?.certificate === undefined ? { username: id } : {}),
+      ...nodeTlsOf(tls),
       ...(secret === undefined ? {} : { password: secret }),
       ...(will === undefined
         ? {}
@@ -798,6 +849,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       isTakenOver: false,
       maximumPacketSize: LARGEST_PACKET_SIZE,
       reasons: new Map(),
+      refusals: new Map(),
       receiveMaximum: RECEIVE_MAXIMUM,
       waiting: [],
     };
@@ -805,10 +857,39 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     hooked.incarnation = held;
     current = held;
 
-    // * a PUBACK's Reason Code, which MQTT.js keeps from its publication's callback
+    // * an acknowledgement its guard handed on as 0x80 given back its broker's own code, awaited or
+    // not, before MQTT.js handles it, so that its refusal names that code; and a PUBACK's Reason
+    // Code, which MQTT.js keeps from its publication's callback
     client.on('packetreceive', (packet: Packet) => {
-      if (packet.cmd === 'puback' && !held.isRetired && packet.messageId !== undefined) {
-        held.reasons.set(packet.messageId, packet.reasonCode ?? 0);
+      if (
+        held.isRetired ||
+        (packet.cmd !== 'puback' && packet.cmd !== 'suback' && packet.cmd !== 'unsuback') ||
+        packet.messageId === undefined
+      ) {
+        return;
+      }
+
+      const key = refusalKeyOf(ACKNOWLEDGED[packet.cmd], packet.messageId);
+      const noted = held.refusals.get(key);
+      const code = noted?.shift();
+
+      if (noted?.length === 0) {
+        held.refusals.delete(key);
+      }
+
+      if (packet.cmd === 'puback') {
+        held.reasons.set(packet.messageId, code ?? packet.reasonCode ?? 0);
+      }
+
+      if (code === undefined) {
+        return;
+      }
+
+      // ! MQTT.js builds its refusal from this very packet, after this listener
+      if (packet.cmd === 'puback') {
+        packet.reasonCode = code;
+      } else {
+        packet.granted = [code];
       }
     });
     // a QoS 0 message, which no hook sees and no PUBACK answers
@@ -828,9 +909,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     let unreadable: Error | undefined;
 
     // * a packet its client cannot read closes its network connection, no DISCONNECT, its link
-    // lost once its CONNACK put it up, and never once its stop began (spec 15.26, 15.29)
+    // lost once its CONNACK put it up, and at its stop alike, its stop ended (spec 15.26, 15.29)
     client.on('error', (error) => {
-      if (held.isRetired || held.ending !== undefined || !isUnreadable(client, error)) {
+      if (held.isRetired || !isUnreadable(client, error)) {
         return;
       }
 
@@ -839,7 +920,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         { cause: error }
       );
 
-      if (held.isLinked) {
+      if (held.isLinked || held.ending !== undefined) {
         retire(held, lost);
       } else {
         unreadable ??= lost;
@@ -945,6 +1026,20 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           lastMaximumPacketSize = held.maximumPacketSize;
           // * up as its CONNACK is read, whatever comes after it (spec 15.26)
           held.isLinked = true;
+
+          // ! MQTT.js takes any Server Keep Alive above 0 (its client's keepalive getter) and arms
+          // its manager in _onConnect, after this event, before it emits connect: its own, the
+          // shorter, set back once connect comes (spec 15.26); a bump re-reads _onConnect and
+          // KeepaliveManager, and a longer one's test pins it
+          const ownKeepAlive = Math.ceil(keepAlive / 1_000);
+
+          if ((properties.serverKeepAlive ?? 0) > ownKeepAlive) {
+            client.once('connect', () => {
+              if (!held.isRetired) {
+                (client.keepaliveManager as KeepaliveManager | null)?.setKeepalive(ownKeepAlive);
+              }
+            });
+          }
           // * its link lost: once, as its network connection ends, unless it was stopped
           client.on('close', () => {
             retire(held, new GenericError(`the link of ${id} went down`));
@@ -970,12 +1065,18 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           }
         });
         client.connect();
-        guardPacketSize(client.stream, {
+        guardPackets(client.stream, {
           maximumPacketSize,
-          // * its start failed where no CONNACK put its link up, its link lost once one did
-          onPastMaximum: (size) => {
+          onRefusal: ({ code, identifier, type }) => {
+            const key = refusalKeyOf(type, identifier);
+
+            held.refusals.set(key, [...(held.refusals.get(key) ?? []), code]);
+          },
+          // * in every phase: its start failed where no CONNACK put its link up, its link lost once
+          // one did, its stop ended once it began, no down told
+          onTripped: (reason) => {
             const error = new GenericError(
-              `the link of ${id} went down: its broker sent a packet of ${String(size)} bytes, past its Maximum Packet Size, ${String(maximumPacketSize)} bytes`
+              `the link of ${id} went down: its broker sent ${reason}`
             );
 
             fail(error);
@@ -1087,6 +1188,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                   payload as never,
                   publishOptions,
                   (error, packet) => {
+                    // * a code its table names, or one of 0x80 or more its guard handed on as 0x80,
+                    // its broker's own given back: any other loses its link first
                     const messageId = (packet as { messageId?: number } | undefined)?.messageId;
                     const code =
                       (messageId === undefined ? undefined : incarnation.reasons.get(messageId)) ??
@@ -1229,7 +1332,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
             filter,
             { nl: false, qos: 1, rap: false, rh: 2 },
             (...[error, , suback]: [unknown, unknown, { granted?: unknown } | undefined]) => {
-              // * the SUBACK's own code: MQTT.js gives back what was asked beside a failure
+              // * the SUBACK's one code, its broker's own: MQTT.js gives back what was asked beside
+              // a failure, and its guard trips on a count other than one
               const code = (suback?.granted as number[] | undefined)?.[0];
 
               if (code === 1) {
@@ -1238,8 +1342,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                 return;
               }
 
-              // ! kept where its broker may hold it, QoS 0 granted among them, which its stop lets
-              // go; a code of 0x80 or more installed nothing
+              // ! kept where its broker may hold it, QoS 0 or 2 granted, which its stop lets go; a
+              // code of 0x80 or more installed nothing
               if (code !== undefined && code >= 0x80 && incarnation.filters.get(key) === record) {
                 incarnation.filters.delete(key);
               }
@@ -1288,13 +1392,17 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           );
           // ! its request never given up: MQTT.js reads a late UNSUBACK, which drops its record
           incarnation.client.unsubscribe(filter, (error, unsuback) => {
-            // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and
-            // any other refuses it (spec 15.27)
-            const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] ?? 0;
-
             if (isFailure(error)) {
               reject(toError(error));
-            } else if (code !== REASON.SUCCESS && code !== REASON.NO_SUBSCRIPTION_EXISTED) {
+
+              return;
+            }
+
+            // ! its one code, its broker's own, 0x00 or 0x11 letting it go and 0x80 or more refusing
+            // it (spec 15.27): its guard trips on any other, so none reaches here
+            const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] as number;
+
+            if (code !== REASON.SUCCESS && code !== REASON.NO_SUBSCRIPTION_EXISTED) {
               reject(
                 new GenericError(
                   `the broker of ${id} refused to let the subscription to ${filter} go: ${reasonOf(code)}`

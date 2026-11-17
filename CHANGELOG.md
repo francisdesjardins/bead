@@ -7,6 +7,375 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
+### Added
+
+- `tools/check-citations.mjs`, in CI's Commits job: every test the support matrix cites, by its
+  file, its class, its method, its function or its title, wherever it stands, is one a side's tests
+  declare, an entry a harness names at run time, a case's label or a row of the matrix (decision
+  0006).
+- beadc's Rust target: each package's service descriptors, catalogue, typed server and client,
+  hooks, windows and options, its requests' validators, and the procedures each transport of its
+  server takes, beside the messages Buffa writes, through the pinned `protoc-gen-buffa` or an
+  application's build through `bead_protobuf_build`; `examples/hello`'s Rust half; the Rust
+  interop's descriptors generated (decision 0051).
+- The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
+  generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
+  `spec/validations.json`'s verdicts (decisions 0035, 0051).
+- The Rust side's HTTP/JSON gateway, the features `transcoding` and `gateway` of its core, and
+  protobuf's JSON mapping, the feature `transcoding` of `bead-protobuf`: `HttpGateway` on its own
+  listener or mounted by `answer`, `HttpCaller`, `JsonForm` and `HttpBinding`; beadc's Rust target
+  writes an output's `bead_http.rs`, its routes, its document and each service's HTTP client, and
+  `examples/hello`'s Rust half serves a gateway; it plays `spec/transcoding.json` but the exchange
+  of a `#`, its places of `spec/durations.json`, protobuf's conformance suite's JSON through Bead's
+  mapping, and the interop runs both ways over its gateway (decision 0052).
+- A gateway's `limits`, its exchanges' clients' router limits, on the C# side as on the TypeScript
+  side (decision 0052).
+- A ninth fuzz twin on every side, `json-form`: protobuf's JSON read by Bead's mapping over the
+  `Transcoding` service's messages; what reads is written, what was written reads, and it writes
+  again to the same text, byte for byte (decision 0052).
+- Guides for teams that adopt Bead outside its repository, in `docs/guides/`: getting started, from
+  an empty folder to a C# server and a TypeScript client in Node and in a page; real-time recipes,
+  a `JWT` and admission hooks, reconnection, Prometheus in .NET and Chrome's DevTools; and how Bead
+  fits together, beside gRPC-Web, Connect and SignalR. The root README links them after its "At a
+  glance".
+- The fuzz target `mqtt-websocket-frames` and its seeded mutations, over the Rust side's reader of
+  an MQTT 5 WebSocket's frames (decision 0050).
+- A TLS client certificate and the authorities a client trusts, `tls`, on every side's WebSocket
+  and HTTP transport clients, outside a page; the C# WebSocket client's `Handler`; `spec/pki`, one
+  PKI every side's tests read, its keys held to `spec/` and the tests by `spec/check.py`; undici,
+  an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
+  a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
+  0053).
+- Spec 15.39 holds a client over TLS to its server's name: under the authorities given or its
+  platform's roots, it takes a certificate only where a `dNSName` or an `iPAddress` of its
+  subjectAltName names the host its URL names, never its common name (RFC 9525 §6), and under the
+  authorities given it checks no revocation; a certificate it refuses fails its connect. Twins on
+  every side's WebSocket and HTTP clients and MQTT 5 and AMQP 1.0 adapters play it under two leaves
+  `spec/pki` gains, one naming `localhost` alone, one 127.0.0.1 alone (decision 0053).
+- The demo's Packages tab plans Rust packages, beadc's third target, and adds a package in each
+  language from one row. Each language's server is offered the transports its side has, as the
+  support matrix gives them: the Web Worker is the TypeScript side's alone, and AMQP 1.0 is not
+  offered in Rust. A Rust gateway's procedure named as a method its HTTP client holds is refused
+  on the page in beadc's words.
+- The demo's sign-up takes up to 8 guests, each an email. A violation of a guest says its path,
+  `guests[1]`. "Break it past the server's bound" raises more violations than
+  the server's detail of 1,024 bytes holds, and the page says how many its closing line counts. The
+  box that bounds the client's detail to 256 bytes says it bounds the refusals the client writes and
+  the details it reads.
+- `tools/check-a11y.mjs` holds pages to WCAG 2.2 AA in Chromium: axe's rules of the `wcag2a`,
+  `wcag2aa`, `wcag21aa` and `wcag22aa` tags and statuses told by more than colour, in both themes,
+  each disclosure and menu open; and, in one theme, the checks axe cannot make, the reflow at
+  320 px, the text spacing, the keyboard's order and its focus shown and never under a sticky bar,
+  44 px targets on a coarse pointer, the states of tabs, radios and toggles, and motion under
+  reduced motion. It serves a folder
+  or reads any address; its exceptions, each with its reason, are `tools/a11y-exceptions.json`. CI's
+  `typescript` job runs it over the page, the not-found page and every scene of the demo, and the
+  demo's and the DevTools panel's tests over the served transports and each view and tab of a call.
+  `@axe-core/playwright` 4.14.0 is a dev dependency of the TypeScript side.
+- An ended subscription's line in the DevTools panel's Timeline and Waterfall stops on a cap where
+  it ended, and the legend's swatch shows it, so an ended line reads apart from an open one.
+- `yarn devtools:package`: the DevTools extension's zip for the Chrome Web Store, from an explicit
+  list of the build's files, the same bytes for the same commit, its SHA-256 printed; it refuses a
+  tree with changes. The extension's name and description are in English and in French.
+- The DevTools extension's privacy policy, at beadproto.dev's `/privacy/`, in English and in French,
+  linked from the page's footer: what the extension reads, keeps and sends. Its build refuses a key
+  of the extension's manifest that the policy does not state.
+
+### Changed
+
+- The spec moves to 0.15.0 (`spec-v0.15.0`), its companion, `spec/debugging.md`, to 0.10.0
+  (`debugging-v0.10.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.5.0
+  (`transcoding-v0.5.0`).
+- Bead's page and its demo are served at their own domain, https://beadproto.dev/, the demo at
+  `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
+  ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
+  Bead's mark, Baily's beads at the Moon's edge, is the page's and the demo's icon and the mark
+  beside the name in their top bars, and the DevTools extension's, its panel's tab `Bead ⦿`; the
+  page's footer names its author.
+- **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
+  repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
+  Buffa's crates exactly (decision 0051).
+- The support matrix and the records correct what they state: the Rust side's HTTP client comes
+  with its gateway (decision 0044); two more rows of the matrix's differences name where the sides
+  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, and a DISCONNECT from a broker that
+  keeps its connection open; and an MQTT 5 acknowledgement no request awaits is named in the cells
+  of its two rows (decisions 0041, 0050).
+- The page's table of the three implementations is drawn from data and held to the support matrix
+  by its build: each row of the matrix's Features and Transports in one part of the table or listed
+  as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
+  row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
+  names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
+  side's service manager over a router of the application's own ahead.
+- beadc works in a folder of its own for each run, `beadc/run-<id>` under the system's temporary
+  folder, where it worked under the project's `.beadc/`: buf builds a copy of the roots' `.proto`
+  files there, and runs at once against one `--against` folder no longer fail on each other's work
+  areas. An area holds its process's pid and start time, and goes as the run ends, by SIGINT,
+  SIGTERM or Ctrl+C too; each run first sweeps the areas of runs gone, and `beadc clean` sweeps
+  them on demand, `--all` those without a marker too. A project's `.beadc/` holds the editor's
+  copy alone, and `beadc --help` prints the usage.
+- beadc judges in its model, `builder/src/model/check-rust.ts`, a Rust gateway's procedure whose
+  method its HTTP client holds already. A page that plans an output can run it as the Rust target
+  does, and the target's refusal reads the same.
+- The support matrix names each test it cites as its side declares it: a title cut where its test
+  goes on, a renamed Rust function and a C# method's last word among them.
+- `spec/transcoding.md` refuses a body read before the gateway took its request, by the server
+  it is mounted on: 500, a failure of its own reported on its `error`, its call never made (7.5,
+  7.6, 10.1). Every gateway makes the change, so the companion's next version is a minor
+  (decision 0037).
+- Over MQTT 5, every side judges each PUBACK, SUBACK and UNSUBACK alike, whether or not a request
+  awaits it. A Reason Code of 0x80 or more refuses its request, its link kept, whether or not its
+  packet's table names it, as MQTT 5 gives every such code (§2.4, §4.13.2): a PUBACK of 0x95, which
+  Mosquitto 2.1.2 sends past its `message_size_limit`, refuses that publication on the TypeScript
+  side too, which lost its link on it. A Reason Code under 0x80 its table does not name, or a SUBACK
+  or an UNSUBACK whose count of codes is not one, is a packet the client cannot read: the link
+  closes, no DISCONNECT, in every phase, where the C# and Rust sides refused it, or took such a
+  PUBACK, and kept the link, and the TypeScript side let a subscription go on an UNSUBACK of no
+  code. A packet the client cannot read ends the adapter's stop with no DISCONNECT on every side,
+  where the TypeScript side read on to its DISCONNECT. Spec 15.26 to 15.29 say so, with when a
+  PUBLISH of QoS 0 is taken, once written, and that a subscription or a publication given up once
+  its packet may have gone loses its link; `spec/vectors.json` gains `mqttAcknowledgementCodes`.
+  Every side's MQTT 5 adapter changes, so the spec's next version is a minor (decision 0041).
+- Spec 15.25: over a WebSocket, an MQTT 5 participant reads each binary message as one stream of
+  packets as its frames come, with no bound on a message of its own, and its upgrade offers no
+  extension; 15.29 judges a packet past its bound as the bytes holding its length come, or once its
+  message is whole on a platform that hands one on only so. A text message closes the link
+  ([MQTT-6.0.0-1]), the TypeScript and C# sides an open row of `docs/support.md`.
+- The Rust side's MQTT 5 link reads its WebSocket's frames itself: its upgrade judged as RFC 6455
+  §4.1 has a client judge one, `Connection` read as a list of tokens, each binary frame's payload
+  handed to its packet reader as it comes, so a message of several packets is read whatever its
+  size, a packet past its Maximum Packet Size is judged at its Remaining Length, and nothing is
+  reserved at a frame's head; a ping is answered with its pong and a close with a close (spec
+  15.25, 15.29; decision 0050).
+- Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
+  and never reaches its router; a page's `WebSocket` fails it as its browser does.
+  `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
+- `spec/transcoding.json`'s exchange of a `#` is two, the `#` and `%23` apart, and an exchange
+  names the rows that excuse a side from it, as a case of `spec/transports.json` does; every player
+  skips the one that excuses its own (decision 0052).
+- `spec/transcoding.md` has a `HEAD` that would open a stream answered as its `GET` begins, then
+  ended at its head, its subscription with it, where both gateways held it while it lasted (8.1),
+  the fixture's `watch` gaining a `get` rule, `/v1/watch`, to pin it (decision 0052).
+- `spec/transcoding.md` takes a navigation from another site only as a `GET` that no `object` or
+  `embed` makes, web.dev's resource isolation policy whole, where the TypeScript side refused a
+  `HEAD` one but to the document and the C# side took it (10.1) (decision 0052).
+- Decision 0044 no longer names crates for the Rust side's gateway: it is a feature of the core,
+  its JSON mapping a feature of `bead-protobuf` (decision 0052).
+- Spec 15.26: an MQTT 5 link's Keep Alive in force is the shorter of its CONNECT's and its
+  CONNACK's Server Keep Alive, its CONNECT's under 0, and a PINGREQ whose PINGRESP has not come
+  within half of it loses its link, on every side. The Rust side keeps its own under a Server Keep
+  Alive of 0 and no longer takes a longer one, and waits half its Keep Alive for a PINGRESP; the
+  TypeScript side keeps its own under a longer one; the C# side loses its link once a PINGREQ
+  under a shorter one has no PINGRESP. The matrix's row of a Server Keep Alive of 0, or longer
+  than a side's own, closes (decision 0041).
+- A transfer received is admitted to `bufferedBytesBudget` by its whole total, in the order the
+  openings came on any connection. An opening the budget left cannot hold waits for it, holding
+  none of it, and is refused `CAPACITY_EXCEEDED` once half of `transferInactivityTimeout` passed:
+  a request's, or a result's, which ends its call. Transfers no longer hold the budget between
+  them until each ends `TRANSFER_STALLED`, and the credit that admits one sets its inactivity going
+  (spec 8.2, 12.2, 12.3, 12.4, 12.8, 12.10; decision 0001).
+- A transfer's opening carries exactly the bytes its sender places in it, `chunkBytes` less its
+  header, or is answered `CHUNK_INVALID` (spec 12.3; decision 0001).
+- The receiving transfers' gauges: `reservedBytes` holds what `bufferedBytes` held, under the
+  budget's ceiling; `bufferedBytes` counts the bytes received and held; `waitingTransfers` is new.
+- **Breaking:** the broker adapters' `tls` is the same type on every side, `ITlsOptions` and
+  `TlsOptions`, its members `authorities`, `certificate` and `key`, PEM text: the TypeScript
+  side's `ca` and `cert` are renamed, and its members take a `string` alone; a password is taken
+  beside a `tls` that names authorities alone, on every side, and a `tls` over a URL that is not
+  TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
+  client's `client_config`, the gateway caller's among them, and its MQTT 5 adapter takes none
+  (decision 0053).
+- `tools/check-names.mjs` holds a rendering to the records its rule names, each of which writes the
+  rule's tag. It reads a C# static class of constants as one name and as its members, placed by one
+  or the other. It keys a Rust module's item with its module, and a C# static member's bare member
+  only where it has two words or more (decision 0047).
+- **Breaking:** the Rust side's `check_records` is `check_proto_records`, the other sides'
+  `checkProtoRecords` and `ProtoRecords.Check` (decisions 0044, 0047).
+- A result, whole or an opening, past `chunkBytes` ends its call `ENVELOPE_TOO_LARGE`, and is
+  cancelled, as a request past it is answered: a whole one was taken, an opening refused
+  `CHUNK_INVALID`. 12.2 says a chunk is held to `chunkBytes` within its transfer, and one for no
+  transfer judged as 12.9's table says, as every side does; step 2's detail names a request or a
+  result whenever `chunkBytes` held it. A server that joins HTTP with another transport, its
+  `chunkBytes` its own, refuses an HTTP client's answer to its command past it, as it refuses that
+  client's request (decisions 0001, 0033).
+- Bead's page, its demo and its not-found page stand on one skin, `tokens.skin.css`, over
+  penumbra's two sheets and Bead's overrides of them, which add a control's least size on a phone
+  and the size of a block of code. The page and the not-found page inline the whole stack, the
+  latter built into `site/dist/404.html`. The demo's dark scheme takes every one of penumbra's dark
+  values, and a block of code reads at 13 px on the page and on the demo.
+- The demo sets its text in the page's faces, Geist, Geist Mono and Newsreader, which the skin
+  declares once for the three surfaces. It takes the theme the page keeps before its first paint,
+  and a toggle in its bar switches it and keeps the choice for both. One script,
+  `penumbra/theme.js`, holds the theme for the page and the demo.
+- Bead's page, its demo and its not-found page share one top bar, `penumbra/chrome.css`: Bead's mark
+  and name, a link to the other surface, the language where there are two and the theme, fixed and
+  56 px tall at every width, on one line, each tool 44 px. The demo's transport, connection,
+  identity and wire leave it for a strip of the demo's own under it, sticky on a desktop, one
+  compact row on a phone whose chip opens the other transports and whose light opens the
+  connection's sentence and the identity. The demo's scene tabs stay under the bar as the page
+  scrolls, on a screen 700 px tall or more, their end faded while the list runs on. CI's `site` job
+  holds the page and the not-found page to their layout from 320 to 1440 px, `site/layout.mjs`.
+- The page colours its code by the demo's scanner, `demo/highlight.ts`, and its blocks read as they
+  did. TypeScript, `.proto`, TOML and the shell share one set of keywords; C# and Rust have their
+  own. A Rust lifetime stays plain. The colours of code join Bead's skin, each at 4.5:1 or more on
+  a card and on an inset in both themes.
+- The demo's Code view reads `examples/hello` in TypeScript, C# and Rust, one file at a time: the
+  role a tab, the language a segmented control beside it, each choice keeping the other, and the
+  language kept for the next visit. Its code is coloured as the page colours it. On a phone the
+  file runs down the page, and the demo counts what crossed on the wire's sheet, whose bar stays in
+  view.
+- The DevTools panel's Timeline draws a call a row, as the Calls list draws its rows, in its
+  typography, each status an icon with its name. A click or Enter on a row opens the call's detail in Calls,
+  and ↑ and ↓ move through the rows. The span dragged across the axis also narrows it, and "Show
+  every call" gives the whole back. The Timeline and the Waterfall draw a call by one track, its
+  places percentages, so a resized panel redraws nothing. A call too short for a bar of 6 px is an
+  instant, a diamond on its start, and the ticks and rings within one percent of the track are
+  drawn once.
+- The DevTools panel's Broker view lists a participant's parcels newest first, as the Calls list
+  does, a new parcel appearing at the top.
+- The demo labels only what a reader acts on, a field or a control, in sentence case and the
+  body's face; a label that repeated its card's heading is gone, and nothing reads as an eyebrow.
+  A card is a scene's primary unit, what it holds flat: the Server view is one card, its four
+  figures one strip in Geist Mono, two by two on a phone. On a phone a package's Remove sits on its
+  language's row, and the blueprint's buttons form a grid. A focus the page scrolls to stops below
+  its sticky scene tabs, where it could sit under them. The DevTools panel's Broker table fits
+  its pane at 1280 px, its parts cut where they run long and whole in the row's detail, and the
+  Timeline lists its calls newest first, row for row as the Calls list does.
+- The documents are brought to 0.14.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's gateway and beadc target among what holds.
+
+### Removed
+
+- **Breaking:** C#'s `MqttBrokerTlsOptions` and `AmqpBrokerTlsOptions`, whose adapters take
+  `TlsOptions` (decision 0053).
+- **Breaking:** the public required walk, C#'s `ProtoRequired.Check` and Rust's `check_required`.
+  The walk is internal on every side, as the TypeScript side's is, and each codec still runs it on a
+  read and a write (decision 0047).
+
+### Fixed
+
+- beadc refuses an `openapi.problemTypes` that is not of printable ASCII, as RFC 3986 spells a URI:
+  a control character or a lone surrogate passed, and each language's target wrote it otherwise,
+  the C# side keeping a lone surrogate the others turned into U+FFFD.
+- The TypeScript side's WebSocket client opens on a 101 its server wrote with a close, as RFC 6455
+  §4.1 and the C# and Rust sides do: its connect resolves, what came before the close is heard
+  after it, and its close is told once, where the connect failed after the message was heard. A
+  dispose as it opened fails the connect in the dispose's words, and a reconnection that a close
+  listener began then keeps its socket. A reconnection's attempt whose socket closes before its
+  connect ends now counts as reconnected, its close told once, as on the other sides, where it
+  failed and the reconnection tried again.
+- The C# side's WebSocket server gives a connection's place back before it tells its close, as the
+  TypeScript side's does: a client that came again on that close could still meet 503 busy.
+- The TypeScript side's WebSocket server and client guard a socket's `terminate`, which a
+  `WebSocketServer` or a `WebSocket` the application gives may throw: at a close timeout, after a
+  close that throws, at a bound's drop and at a heartbeat's. What it throws is the connection's
+  error, unless it had one; the connection is ended and its close told, and a close resolves and a
+  stop ends, where it escaped and left the connection open. The server gives the connection's place
+  back before its close is told and ends its TCP connection, and what a close throws is the
+  connection's error too. A refused upgrade whose `terminate` throws fails its connect, what it
+  threw the cause.
+- The C# side's WebSocket connection guards its socket's `Abort`: what it throws is the
+  connection's error, unless it had one, its read is cancelled, and its close is told, where a close
+  a stop awaits threw at its close timeout.
+- The Rust side's session request's debug text leaves out its transport credential and whether
+  one was carried, keeping the connection and the request header.
+- The Rust side's JSON codec keeps its parser's refusal as the cause of a `not JSON` refusal,
+  alongside its reason, as the TypeScript and C# sides do.
+- Rust's `json` payload codecs normalize `-0` to `0` at every depth on read, including typed
+  payloads, as the TypeScript and C# sides do.
+- WCAG 2.2 AA on Bead's page, its demo and the DevTools panel: a link's code and a green outcome on
+  its wash reach 4.5:1, the page's tables and its header's words, which scroll sideways on a phone,
+  take the keyboard's focus, and the focus on a phone is scrolled to above the demo's folded wire.
+  The panel's controls are 24 px tall or more, and its Calls and Envelopes switch is a radio group,
+  chosen by the arrow keys.
+- The DevTools panel's selects centre their selected text on their row, where it sat at the top.
+  Its footer and its Calls list count one subscription or one record in the singular, and the
+  Broker view's labels and its recorded fields' heading read as the rest of the panel.
+- The DevTools extension reads `runtime.lastError` as each of its ports closes, where Chrome
+  reported it unchecked as a page went into the back/forward cache, and the bridge closes its port
+  while the page sits there and opens another once it is shown again, where it scheduled a
+  reconnection from the cached page.
+- On a phone, the page keeps a name of code in a table whole, as REQUEST, where it split inside the
+  word, and the demo's wire, opened as a sheet, lies over its scene tabs.
+- The TypeScript side tells the `tx` step of a call made within a notification's callback once
+  its router drew its id, and names it, as debugging 4.4 states and the C# and Rust sides do: it
+  told it with no id, and the DevTools panel showed that call twice, once never answered.
+- The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
+  `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
+- A gateway mounted behind what reads a request's body, a framework's body parser or a
+  middleware, answers 500 and reports it, never calling with what was left: the TypeScript side
+  answered nothing, or 408 `too-slow`, and the C# side called with the bytes left or answered 400.
+  The C# side reads a body its server buffered from its start, and the TypeScript side reads at
+  once a body that came empty and ended before it (decision 0037). A reader that read the body
+  and put it back is refused alike, where the gateway answered before: a stream's `unshift` on the
+  TypeScript side, a middleware's examining read on the C# side; mount the gateway before it.
+- The TypeScript side's MQTT 5 link over a WebSocket in Node bounds a message by 100 MiB, or by its
+  `maximumPacketSize` where larger, so no packet within its bound is refused, and offers no
+  permessage-deflate (spec 15.25).
+- The Rust side's WebSocket, server and client, fails a text message that is no UTF-8 with 1007,
+  as spec 15.3 says and the other sides do, where it sent 1002; a close whose reason is no UTF-8
+  alike, since tungstenite raises one error for both.
+- The Rust side's router ends a call whose timer its clock cannot arm before its request goes with
+  nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
+  cancelled a request its peer never saw.
+- The C# MQTT adapter's stop sends no DISCONNECT once MQTTnet failed an UNSUBSCRIBE of its let-go
+  with its link, a packet it cannot decode among what came, as spec 15.29 states and the other
+  sides do: MQTTnet fails what awaits before it says the link disconnected, and in that moment the
+  stop read it connected and sent one.
+- The C# MQTT adapter hands nothing on of a link once its down was told: a PUBLISH MQTTnet
+  dispatched as the link ended could reach the participant after its down, which the TypeScript
+  and Rust sides never hand on; it is dropped, as theirs is.
+- The C# MQTT adapter's stop sends no DISCONNECT once its client's reads ended, a packet MQTTnet
+  cannot decode among them, in its drain as in its let-go (spec 15.29): MQTTnet says its link
+  connected a moment past that end, and a stop that held no filter read it so and sent one.
+- The TypeScript side's gateway reports a host's response write that throws, once, and destroys
+  its response, as transcoding 7.6 states: on a stream, that write left a rejection unhandled,
+  every write after it rejected, and the response stayed open until its close. A write whose
+  callback fails, its client gone, destroys its response too, and is still not reported.
+- The C# side's gateway reports a stream's write that throws, once, and aborts its exchange, as it
+  does a document's: the stream stayed open, its writes after it attempted, and nothing reported.
+- The TypeScript side's gateway catches what its host throws as its listener answers, a refusal's
+  `writeHead` or `setHeader` among it, as the C# side does: reported once, answered 500 while its
+  head is unsent, its response destroyed otherwise or when that 500 throws too. The throw reached
+  Node's `request` emit uncaught, and a 500 that threw after a failed call left a rejection
+  unhandled.
+- The C# side's gateway answers what no gate foresaw with a 500 that carries none of the fields set
+  before it, a refusal's mark among them, and aborts its exchange when its head already went or
+  that 500 throws too: the 500 kept the mark, and a 500 that threw reached its host.
+- The TypeScript side closes no connection refused twice `maximumAnsweringCalls` requests in a row
+  once its router was disposed before that close came due, as the C# side does: it asked its
+  transport to close the connection, and reported what that close rejected with.
+- The Rust side closes no connection refused twice `maximumAnsweringCalls` requests in a row once
+  its router was disposed before that close came due, as the C# side does: it asked its transport
+  to close the connection.
+- The Rust side reads its monotonic clock at the end of each counted call a closing connection
+  answered, as the TypeScript and C# sides do: those calls shared one reading, short of the two
+  readings a counted call takes (debugging 3.3).
+- The C# side's MQTT 5 adapter judges its broker by the authorities it is given over `wss` as over
+  `mqtts`, by the same check as its AMQP 1.0 adapter's: MQTTnet's WebSocket channel read none of
+  them, and refused a broker they certify. Under them it checks no revocation, as every other side
+  and path does, where it checked it over `mqtts`. Both adapters chain their broker's certificate
+  through the intermediates it presents, where the AMQP 1.0 adapter refused a broker whose
+  intermediate no store of the platform held (decision 0053).
+- The TypeScript side's AMQP 1.0 adapter links over `amqps` to an IP address: rhea named the
+  address as the TLS server name, which Node refuses, so the link never opened.
+
+### Security
+
+- A call whose resolver, or credential's verifier, outlives it — still running once the call was
+  answered or cancelled — keeps a place on its connection until it settles: a request that comes
+  while the calls a connection answers and those outlived number twice `maximumAnsweringCalls`
+  is answered `CAPACITY_EXCEEDED`, and a connection refused so that many times in a row, nothing
+  settling, is closed and the close reported, so a peer that sends a request then its cancel,
+  again and again, no longer runs as many resolvers on a connection as it likes, HTTP/2's Rapid
+  Reset (CVE-2023-44487) at the layer of calls. A received transfer whose resolver outlives its
+  call keeps a place among twice `maximumTransfers`; a resolver whose call ended before its turn
+  is handed nothing; a connection that closes tells every resolver still running on it. Each side
+  gauges `outlivingResolvers`, `largestTrackedCalls` and `outlivingTransfers`; the interop's
+  `slow` takes `heeds` and `answersFirst`; a conversation's step `closed` expects the server's
+  close (spec 8.2, 9.2, 9.10, 10.2, 12.2, 12.3; decision 0033).
+
 ## [0.13.0] - 2026-11-12
 
 ### Added
@@ -2763,7 +3132,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.13.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.14.0...develop
+[0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0

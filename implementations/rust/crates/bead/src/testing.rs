@@ -42,8 +42,7 @@ pub mod scripted;
 pub(crate) mod service_port;
 #[cfg(test)]
 pub(crate) mod sessions;
-#[cfg(test)]
-pub(crate) mod surface;
+pub mod surface;
 #[cfg(test)]
 mod tests;
 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]

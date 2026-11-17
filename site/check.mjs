@@ -1,20 +1,30 @@
 #!/usr/bin/env node
 // Holds the page to its sources, with no browser and nothing installed: each diagram's SVG opens
 // with the sha256 of its source, `diagrams/<language>/<name>.mmd`, its line breaks LF, and every
-// source has its SVG and every SVG its source; then the build gives the committed
-// `dist/index.html` byte for byte.
+// source has its SVG and every SVG its source; each icon is the one `icons.mjs` wrote from the mark,
+// `src/favicon.svg`, by the hashes `src/icons.json` records; then the build gives the committed
+// `dist/index.html`, `dist/privacy/index.html` and `dist/404.html` byte for byte.
 //
 //   node check.mjs
 //
-// Exit 1 on a stale or orphaned SVG, saying `node render.mjs`, or on a page the build no longer
-// gives, saying `node build.mjs`.
+// Exit 1 on a stale or orphaned SVG, saying `node render.mjs`, on an icon not the mark's, saying
+// `node icons.mjs`, or on a page the build no longer gives, saying `node build.mjs`.
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LANGUAGES, OUT, build } from './build.mjs';
+import {
+  LANGUAGES,
+  NOT_FOUND,
+  OUT,
+  PRIVACY,
+  build,
+  buildNotFound,
+  buildPrivacy,
+} from './build.mjs';
+import { ICONS, RECORD, hashOf, markBytes } from './icons.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIAGRAMS = join(HERE, 'diagrams');
@@ -52,13 +62,35 @@ for (const language of LANGUAGES) {
   }
 }
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
+{
+  const record = existsSync(RECORD) ? JSON.parse(readFileSync(RECORD, 'utf8')) : null;
+  if (record === null || record.mark !== hashOf(markBytes())) {
+    problems.push('src/icons.json: not the mark’s record; node icons.mjs');
+  } else {
+    for (const file of Object.keys(ICONS)) {
+      const path = join(HERE, '..', file);
+      if (!existsSync(path) || record.files[file] !== hashOf(readFileSync(path))) {
+        problems.push(`${file}: not what icons.mjs wrote from the mark; node icons.mjs`);
+      }
+    }
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 if (problems.length === 0) {
   try {
-    const page = build();
-    if (!existsSync(OUT) || read(OUT) !== page) {
-      problems.push('dist/index.html: not what the build gives; node build.mjs');
+    for (const [path, page] of [
+      [OUT, build()],
+      [PRIVACY, buildPrivacy()],
+      [NOT_FOUND, buildNotFound()],
+    ]) {
+      if (!existsSync(path) || read(path) !== page) {
+        const name = relative(join(HERE, 'dist'), path).split(sep).join('/');
+        problems.push(`dist/${name}: not what the build gives; node build.mjs`);
+      }
     }
   } catch (error) {
     problems.push(error instanceof Error ? error.message : String(error));
@@ -71,5 +103,7 @@ if (problems.length > 0) {
   }
   process.exitCode = 1;
 } else {
-  console.log('site: every SVG is its source’s render, and the build gives dist/index.html');
+  console.log(
+    'site: every SVG is its source’s render, every icon the mark’s, and the build gives dist/index.html, dist/privacy/index.html and dist/404.html'
+  );
 }

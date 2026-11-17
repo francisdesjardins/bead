@@ -22,7 +22,7 @@ import {
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { tooBigOf } from '../shared/errors';
+import { toError, tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { createHold, type IHold } from '../shared/hold';
@@ -126,6 +126,13 @@ interface IListener {
   readonly http: Server;
   readonly instance: IWebSocketServerLike;
   readonly stopServing: () => void;
+}
+
+// what an upgrade that took a place keeps: its end, its raw socket destroyed, and its place given
+// back, once
+interface IUpgradeTaken {
+  readonly destroy: () => void;
+  readonly giveBack: () => void;
 }
 
 // lets go of what a start opened: an HTTP server still binding its address is closed once it
@@ -302,9 +309,13 @@ export const createWebSocketTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
+      // what each upgrade that took a place keeps, by its raw socket: the place's return, once, and
+      // that socket's end, for a drop that threw and never ended it
+      const upgrades = new WeakMap<object, IUpgradeTaken>();
+
       // ! a place is taken as its upgrade is judged, before its handshake completes, and given back
-      // once its socket closes, whatever became of it, so upgrades that cross take no more than are
-      // left (spec 15.2, step 8)
+      // once, as its connection ends or its socket closes, whichever comes first, whatever became of
+      // it, so upgrades that cross take no more than are left (spec 15.2, step 8)
       const place = (request: IncomingMessage, address: string): boolean => {
         if (placed >= maximumConnections || heldBy(address) >= maximumConnectionsPerAddress) {
           return false;
@@ -312,9 +323,7 @@ export const createWebSocketTransportServer = (
 
         let isHeld = true;
 
-        placed += 1;
-        perAddress.set(address, heldBy(address) + 1);
-        request.socket.once(CLOSE_EVENT, () => {
+        const giveBack = (): void => {
           if (!isHeld) {
             return;
           }
@@ -329,6 +338,16 @@ export const createWebSocketTransportServer = (
           } else {
             perAddress.set(address, others);
           }
+        };
+
+        placed += 1;
+        perAddress.set(address, heldBy(address) + 1);
+        request.socket.once(CLOSE_EVENT, giveBack);
+        upgrades.set(request.socket, {
+          destroy: () => {
+            request.socket.destroy();
+          },
+          giveBack,
         });
 
         return true;
@@ -344,6 +363,25 @@ export const createWebSocketTransportServer = (
         }
       };
 
+      // the end of each connection held, told by its socket's close or by a drop of it that throws
+      const endings = new WeakMap<IServerSocketLike, () => void>();
+
+      // ! a drop always completes: what a socket the application gave throws as it is terminated is
+      // its connection's error, and the connection is ended here, since that socket may never
+      // close; a socket no connection holds has none to end. False when it threw
+      const terminate = (socket: IServerSocketLike): boolean => {
+        try {
+          socket.terminate();
+
+          return true;
+        } catch (reason) {
+          fail(socket, toError(reason));
+          endings.get(socket)?.();
+
+          return false;
+        }
+      };
+
       // ! a connection behind its bounds is dropped, its close unclean, then reported as it closes,
       // naming the bound, so an operator tells it from a network that failed (RFC 6455 §7.1.7),
       // and a listener that throws keeps it open no longer
@@ -353,7 +391,7 @@ export const createWebSocketTransportServer = (
       ): void => {
         paces.get(socket)?.stop();
         fail(socket, droppedOf(connectionHandle, why));
-        socket.terminate();
+        terminate(socket);
       };
 
       // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
@@ -368,15 +406,18 @@ export const createWebSocketTransportServer = (
         socket.resume?.();
 
         return createPromise((resolve) => {
-          const terminate = (): void => {
-            socket.terminate();
+          // a drop that throws ended the connection here: its socket's close is waited on no more
+          const dropSocket = (): void => {
+            if (!terminate(socket)) {
+              resolve();
+            }
           };
           // `Infinity` waits on the peer without end, where Node's timer would take it for 1 ms
           const timeoutId =
             closeTimeout === Infinity
               ? undefined
               : // oxlint-disable-next-line no-restricted-properties -- a close handshake's bound is the platform's
-                globalThis.setTimeout(terminate, closeTimeout);
+                globalThis.setTimeout(dropSocket, closeTimeout);
 
           socket.once(CLOSE_EVENT, () => {
             // oxlint-disable-next-line no-restricted-properties -- as its bound above
@@ -386,8 +427,13 @@ export const createWebSocketTransportServer = (
 
           try {
             socket.close(code);
-          } catch {
-            socket.terminate();
+          } catch (reason) {
+            // ! what it threw is the connection's first error, a terminate's that throws after it
+            // reported no more (spec 15.1); its close never went out, so no answer is waited on
+            fail(socket, toError(reason));
+            // oxlint-disable-next-line no-restricted-properties -- as its bound above
+            globalThis.clearTimeout(timeoutId);
+            dropSocket();
           }
         });
       };
@@ -536,10 +582,12 @@ export const createWebSocketTransportServer = (
         const { remotePort } = request.socket;
         // read once, and handed beside every envelope of the connection (spec 15.2)
         const credential = upgradeCredentialOf(request);
+        // its place and its raw socket, where its upgrade took one
+        const taken = upgrades.get(request.socket);
 
         // a socket gone has no peer to name, and its close is on its way
         if (address === undefined || remotePort === undefined) {
-          return (socket.terminate(), undefined);
+          return (terminate(socket), undefined);
         }
 
         // drawn as it is taken, never from the peer's address alone, which another socket may share
@@ -595,7 +643,7 @@ export const createWebSocketTransportServer = (
         // a socket that is closing has its close handshake, bounded by `closeTimeout`, to end it
         const beating = createHeartbeat(heartbeat, {
           drop: () => {
-            socket.terminate();
+            terminate(socket);
           },
           ping: () => {
             if (socket.readyState === ReadyState.OPEN) {
@@ -608,12 +656,22 @@ export const createWebSocketTransportServer = (
           beating.answer();
         });
 
-        // * its end: its one error, then its close, unclean once it failed, what a listener of
+        // * its end, once: its one error, then its close, unclean once it failed, what a listener of
         // `error` throws dropped (spec 15.1); a stop's clear tells none
-        socket.on(CLOSE_EVENT, (code) => {
+        let isEnded = false;
+
+        const end = (code: number): void => {
+          // ! a socket whose drop threw may still close after this side ended its connection
+          if (isEnded) {
+            return;
+          }
+
+          isEnded = true;
           beating.stop();
           paces.get(socket)?.stop();
           holds.get(socket)?.drop();
+          // given back before its close is told, so a client that comes again on it is taken
+          taken?.giveBack();
 
           const failure = failures.get(socket);
 
@@ -625,6 +683,16 @@ export const createWebSocketTransportServer = (
             connections.delete(connectionHandle);
             tell(CLOSE_EVENT, [code === 1000 && failure === undefined, connectionHandle]);
           }
+        };
+
+        // ! a drop that threw left its TCP connection open: its raw socket is destroyed here, as
+        // `ws`'s own terminate does (RFC 6455 §7.1.1)
+        endings.set(socket, () => {
+          taken?.destroy();
+          end(1006); // closed abnormally (RFC 6455 §7.4.1)
+        });
+        socket.on(CLOSE_EVENT, (code) => {
+          end(code);
         });
 
         // ! `ws` fails the connection before it emits its error, and reads nothing more: a message

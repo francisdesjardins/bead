@@ -665,7 +665,7 @@ fn frames_of(send: &Map<String, Value>) -> Result<Vec<Frame>, String> {
 
 // a batch's envelopes, each after its length on 4 bytes, big-endian, as `expected` writes them; what
 // is left past the last whole one, in hexadecimal
-fn batch_of(body: &[u8], expected: Option<&Vec<Value>>) -> Value {
+pub(crate) fn batch_of(body: &[u8], expected: Option<&Vec<Value>>) -> Value {
     let mut envelopes = Vec::new();
     let mut rest = body;
 

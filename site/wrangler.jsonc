@@ -1,0 +1,24 @@
+// The Worker that serves beadproto.dev: files alone, the folder `deploy.mjs` assembles, and no
+// script, so nothing of Bead's runs at Cloudflare. No account and no secret here: `wrangler login`,
+// the operator's own, says whose account it is.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "beadproto",
+  "compatibility_date": "2026-11-04",
+  // one host: no workers.dev address, and no preview address for a version
+  "workers_dev": false,
+  "preview_urls": false,
+  // ! both custom domains: www.beadproto.dev carries the zone's redirect rule to the apex, and a
+  // deploy that left it out would detach it, its DNS record with it, and the rule would match nothing
+  "routes": [
+    { "pattern": "beadproto.dev", "custom_domain": true },
+    { "pattern": "www.beadproto.dev", "custom_domain": true },
+  ],
+  "assets": {
+    "directory": "out",
+    // `/playground` to `/playground/`, a rule of `_redirects` making that one hop a 301
+    "html_handling": "auto-trailing-slash",
+    // ! a path nothing answers is a 404, with `404.html`; never the page under a 200
+    "not_found_handling": "404-page",
+  },
+}

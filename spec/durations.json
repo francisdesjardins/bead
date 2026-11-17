@@ -12,7 +12,7 @@
     "reason is derived from the input, the place's kind and its never — under the floor, past the ceiling, 0 refused, never refused, or not a number — and held by the regeneration alone: the words of a refusal are each side's, which its harness builds, and a side that reports a refusal by a code checks the reason against that code.",
     "differs, on an input, a way or an outcome, names a row of docs/support.md, which names this file and what crosses it, and the language that row excuses from it: an input that language cannot be given, a way it lacks, or an outcome it reaches otherwise. A harness plays every input at every place and way but those a differs excuses its language from."
   ],
-  "specVersion": "0.14.0",
+  "specVersion": "0.15.0",
   "inputs": [
     {
       "name": "0",
@@ -3753,7 +3753,7 @@
     },
     {
       "id": "mqttBrokerAdapter.keepAlive",
-      "name": "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
+      "name": "an MQTT 5 adapter's Keep Alive, its CONNECT's, which its broker counts its link lost by where its CONNACK names no Server Keep Alive",
       "clauses": [
         "1.4",
         "15.30"

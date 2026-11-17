@@ -11,7 +11,7 @@
   and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `gateway` and
   `beadc breaking`'s `HTTP`; each runtime's transcoding layer, its gateway and the HTTP client each
   output with `gateway` writes, section 12; the interop over each gateway, each side's client
-  against the other side's gateway and the two served documents compared byte for byte; and
+  against each other side's gateway and the served documents compared byte for byte; and
   protobuf's conformance suite's JSON tests through each side's mapping. The in-memory transport and
   the joined transport a gateway calls through are
   [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s;
@@ -48,6 +48,13 @@ session, one subscription per procedure and session, its answering calls, its tr
 a refusal tells. One connection for every HTTP caller lends the first caller's session to the next,
 a deputy's confusion ([CWE-441](https://cwe.mitre.org/data/definitions/441.html)); a pool keyed by
 credential gives every caller presenting none one key.
+
+**What reads a body before a mounted gateway takes it from the gateway.** The server an
+application mounts a gateway on may read a request's body first, through a framework's body
+parser or a middleware, and a stream read once gives the next reader nothing. Node's request
+has ended and closed, and a late `close` reads as a client gone. ASP.NET Core's reads as zero
+bytes at its end, unless its server buffered it. A gateway that read on would call with an
+empty or partial body, or blame its client with a 400 or a 408.
 
 **The two stock libraries part on protobuf's JSON mapping**, probed on `@bufbuild/protobuf` 2.16.0,
 the TypeScript side's pin, and Google.Protobuf 3.36.2, the C# side's, each through binary as a call
@@ -100,8 +107,10 @@ with a JSON Pointer of RFC 6901's fragment form. The WHATWG's
 `EventSource` reestablish its connection whenever a 200 stream's body ends, send `Last-Event-ID`
 when an event wrote an `id`, stop on any other status, 204 named for that, and dispatch an event
 with no name as `message`; it writes no header of its page's. The Fetch Standard shows a page's
-`Origin` on every request but a `GET` or a `HEAD` that is no CORS request, and Fetch Metadata's
-resource isolation policy refuses a request from another site but a navigation, which OWASP's CSRF
+`Origin` on every request but a `GET` or a `HEAD` that is no CORS request, and web.dev's
+[Fetch Metadata resource isolation policy](https://web.dev/articles/fetch-metadata) refuses a
+request from another site but a `GET` navigation that no `object` or `embed` makes, which OWASP's
+CSRF
 cheat sheet names as defense in depth. OpenAPI 3.1.1's base dialect only annotates `format` and
 `contentEncoding`: probed with the builder's ajv, a schema of `Everything` takes `{"at":"nope"}`, a
 tenth fraction digit, year 0000 and a 20-digit `int64`, each of which both libraries refuse.
@@ -146,6 +155,23 @@ service offered once
 It answers on a listener of its own or as a handler an application mounts, never on the HTTP
 transport's, and both take one policy object of hosts, origins, proxies and bounds, so two lists
 are never kept alike in silence; one origin for `/bead` and `/api/…` comes from a proxy in front.
+Mounted, a gateway keeps every gate of 10.1 from its step 2, its problems, its pace and its bounds;
+its host owns what HTTP refuses of its own (step 1), its head's bounds and timeouts, its socket's
+write deadline, a path its own router answers first, and whatever reads the body before it
+(7.6.27).
+
+**A body read before it, a gateway refuses** (transcoding 7.6, 10.1). One that the server it
+is mounted on read, wholly or in part, is answered 500 as step 10 begins. It is a failure of
+its own, reported on its `error`, with no detail and never a call. The C# side reads a body
+its server buffered from its start, and the Rust side one put back whole with its length, a
+difference of the platforms; the Rust side judges a body by hyper's hints before its first byte
+and by its count at its end, still before any binding, and what hyper's request cannot show is
+two rows of the platform
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)). A chunked body that came
+empty and was read to its end is refused on every side, a leveling; one only peeked the
+TypeScript side reads as empty, since Node shows nothing of the peek, another difference of
+the platforms. A reader that put back what it read is refused alike, since neither platform
+tells it from one that kept it.
 
 - **One Bead connection per HTTP exchange** (transcoding 2.1), drawn as its request passes the
   gates, closed as its response ends: everything `spec.md` binds to a connection is one caller's. A
@@ -155,19 +181,20 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   request, as `POST /bead` carries one; by the gateway's option `bearer-jwt`, a `Bearer` token
   presented as a `JWT`. Never `OPAQUE`; no cookie, no query.
 - **Routes** (3): `POST <prefix>/<Service>/<procedure>` always, `/api` the prefix by default, and
-  `GET` there for a procedure marked `NO_SIDE_EFFECTS`, Connect's rule for its own form; each
-  `google.api.http` rule served as written, a `get` rule its author's word that its method reads,
-  `custom` refused. A path is read raw, a dot segment matching nothing; its verb splits at the last
-  unencoded `:` of its last segment; where two routes of one method match, a literal before `*`, `*`
-  before `**`, a template that ends where the path ends before a `**` of none, the order Vanguard's
-  trie walks, stated whole so no two sides part on it. The builder refuses only a tie, and a gateway
-  refuses a table that holds one as it is built, since two tables built apart may join.
+  `GET` and `HEAD` there for a procedure marked `NO_SIDE_EFFECTS`, Connect's rule for its own form;
+  each `google.api.http` rule served as written, a `get` rule its author's word that its method
+  reads, `custom` refused. A path is read raw, a dot segment matching nothing; its verb splits at
+  the last unencoded `:` of its last segment; where two routes of one method match, a literal before
+  `*`, `*` before `**`, a template that ends where the path ends before a `**` of none, the order
+  Vanguard's trie walks, stated whole so no two sides part on it. The builder refuses only a tie,
+  and a gateway refuses a table that holds one as it is built, since two tables built apart may
+  join.
 - **Binding** (4): `http.proto`'s rules alone, every value made the JSON the mapping reads, the
   query read as the WHATWG URL Standard's `application/x-www-form-urlencoded`, `+` a space; a
   `PATCH`'s absent `update_mask` filled from the keys its body holds, as grpc-gateway's
   `allow_patch_feature` fills one, so a caller clears a field by sending it.
 - **The JSON form is Bead's own mapping** (5), one reader and one writer a runtime, one object made
-  over the messages an `Any` may name, `JsonForm` on the TypeScript and C# sides, the Rust side's coming with its gateway, ahead: it reads a body by its message's
+  over the messages an `Any` may name, `JsonForm` on every side: it reads a body by its message's
   descriptor and writes a message, a field of one or an event's data, each call of two parameters
   at most, the schema a parameter where a message carries none. It reads and writes over its
   descriptors and its library's reflection, the binary payload still its stock library's alone, as
@@ -197,23 +224,25 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   in `errors`, each pointing at its field by JSON names.
 - **Notifications as Server-Sent Events** (8), chosen by `accept: text/event-stream` alone: the
   result, then each notification as a plain `message` event, then the failure that ends them, each
-  event an `id`; a request carrying `Last-Event-ID` answered 204 and no call, so an `EventSource`
-  stops and its page is told rather than called again behind the gap; paced by the response's drain,
-  a subscription `PACED` within a window of 16, so a reader that falls behind holds its server's
-  queue, where [0002](0002-a-subscription-goes-at-its-clients-pace.md)'s keys and bound tell it,
-  never the gateway's memory.
+  event an `id`; a `HEAD` that asks one answered as its `GET` begins, then ended at its head, its
+  subscription with it (8.1); a request carrying `Last-Event-ID` answered 204 and no call, so an
+  `EventSource` stops and its page is told rather than called again behind the gap; paced by the
+  response's drain, a subscription `PACED` within a window of 16, so a reader that falls behind
+  holds its server's queue, where [0002](0002-a-subscription-goes-at-its-clients-pace.md)'s keys and
+  bound tell it, never the gateway's memory.
 - **Every body a gateway writes is paced** (10.2): a whole answer, a problem, the document and each
   event, by 15.12's `minimumSendBytesPerSecond` after `sendGracePeriod` and by `maximumUnsentBytes`,
-  what waits for the socket and the write that would add to it; a whole answer goes in slices of at
-  most 64 KiB, each its own deadline, so a reader that stops reading is dropped within minutes,
-  never the hours one deadline for its whole would give. A drop is reported, naming its bound, as
-  15.12 has a server report each; it frees its exchange's place and its socket, and cancels a
-  stream's call.
+  what its platform holds unwritten above its socket, as it shows it, and the write that would add
+  to it; a whole answer goes in slices of at most 64 KiB, each its own deadline, so a reader that
+  stops reading is dropped within minutes, never the hours one deadline for its whole would give. A
+  drop is reported, naming its bound, as 15.12 has a server report each; it frees its exchange's
+  place and its socket, and cancels a stream's call.
 - **The gates** (10) are the HTTP transport's, in 15.6's order, with Fetch Metadata's step: a
-  request with no `origin` from another site refused but a navigation to `/openapi.json`, a default
-  route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by
-  `maximumExchanges` and `maximumExchangesPerAddress`, 10,000 and 256, since one lives a request,
-  streams by 15.12's connections' bounds, 64 an address, since one lives as long as its reader.
+  request with no `origin` from another site refused but a `GET` navigation that no `object` or
+  `embed` makes, to `/openapi.json`, a default route's `GET`, or a `get` rule on a marked method.
+  Calls and streams are bounded apart, calls by `maximumExchanges` and `maximumExchangesPerAddress`,
+  10,000 and 256, since one lives a request, streams by 15.12's connections' bounds, 64 an address,
+  since one lives as long as its reader.
 - **The document** (11): OpenAPI 3.1.1, one a blueprint, or one of the procedures an output's
   `gateway` selects, written once by the builder in the blueprint's own form and embedded byte for
   byte in an output with `gateway`, served at
@@ -226,13 +255,14 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   table, of the procedures it selects, under the route table's contract 5, which stays beside a service file's 7, since a route
   table calls no codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
-  `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both sides. It
+  `<Service>HttpClient` over `fetch`, `HttpClient` or the Rust side's hyper client, its surface name
+  for name on every side. It
   reads every answer its gateway gives as a Bead failure: a problem of a code and a scope as that
   failure, the gateway's own `about:blank` by its `bead-refusal` then its status, a status with no
   problem by section 9's line between a call never tried, `DESTINATION_UNREACHABLE`, and one that
   may have run, `DESTINATION_LOST`; a passed bound `PAYLOAD_TOO_LARGE`, a cut stream
   `DESTINATION_LOST`, a body it cannot read `PAYLOAD_UNDECODABLE`. It reconnects no stream and sends
-  no `Last-Event-ID`; each side's client calls the other side's gateway in the interop.
+  no `Last-Event-ID`; each side's client calls each other side's gateway in the interop.
 - **Where it is stated**: a companion, `spec/transcoding.md`, on the spec's axis under a version of
   its own, its file repeating `transcodingVersion`, tagged `transcoding-v`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): a gateway is beside the
@@ -249,7 +279,8 @@ in the trace and the connections' gauge for each exchange, which is what HTTP is
 down": a command over a gateway (`SERVICE_UNKNOWN`); a connection's session (it ends with its
 exchange); a stream's resume (a reconnection is answered 204); a stream's window (its reader's pace
 is its socket's); a `custom` rule; a `**` variable in the document (one parameter); what no schema
-carries; and, under 3.1.1, a stream's items, which 3.2.0 describes by `itemSchema`.
+carries; under 3.1.1, a stream's items, which 3.2.0 describes by `itemSchema`; and a chunked body
+that came empty, read before a mounted gateway.
 
 **The route is no guard**: a procedure is reached by its default route whatever rules map it, so a
 proxy's rule on a rule's path guards nothing; the guard is its admission, which every route meets
@@ -257,26 +288,26 @@ alike. A page of another origin preflights each route's URL once per `max-age`, 
 preflight cache by URL, where `POST /bead` has one URL
 ([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
 
-**The mapping is Bead's to keep**: its third implementation is the generator's, and protobuf's
+**The mapping is Bead's to keep**: its fourth implementation is the generator's, and protobuf's
 conformance suite's JSON tests then hold the code that answers, each side's `failing.txt` naming,
-with its reason, what Bead's rules part from it on, the same lines on both sides. Its cost against
+with its reason, what Bead's rules part from it on, the same lines on every side. Its cost against
 each stock library's JSON is a benchmark of each side, so a regression shows.
 
 **Ahead, each a round of its own**: a report's context, the exchange and the route it came of; an
 event for each refusal of the gateway's own; and an occurrence's id in a problem, RFC 9457 §3.1.5's
-`instance`. Each adds surface on both sides, and none is needed for a problem to say what failed and
+`instance`. Each adds surface on every side, and none is needed for a problem to say what failed and
 where.
 
-**Its gates** ([0006](0006-a-rule-has-its-gate.md)): `spec/transcoding.json`, which both sides play
-whole — its templates and bindings through their routes, its readings and writings through their
-mapping, its failures through their problems, its events through their streams, and its exchanges
-through their gateway over a real socket; protobuf's conformance suite's JSON tests through each
-side's mapping; `tools/check-transcoding.mjs`, which holds each side's generated route table and
-embedded document to what beadc writes; beadc's tests, which hold every document to OpenAPI 3.1's
-schema and every body Bead writes to the document; and the generator itself, which runs protobuf's
-Python library beside its own reading and writing and fails on any parting its entries do not name.
-`spec/check.py` holds the companion's units as it holds the spec's, its ledger
-`spec/transcoding-units.txt`.
+**Its gates** ([0006](0006-a-rule-has-its-gate.md)): `spec/transcoding.json`, which every side plays
+whole but an exchange its `differs` excuses it from — its templates and bindings through their
+routes, its readings and writings through their mapping, its failures through their problems, its
+events through their streams, and its exchanges through their gateway over a real socket; protobuf's
+conformance suite's JSON tests through each side's mapping; `tools/check-transcoding.mjs`, which
+holds each side's generated route table and embedded document to what beadc writes; beadc's tests,
+which hold every document to OpenAPI 3.1's schema and every body Bead writes to the document; and
+the generator itself, which runs protobuf's Python library beside its own reading and writing and
+fails on any parting its entries do not name. `spec/check.py` holds the companion's units as it
+holds the spec's, its ledger `spec/transcoding-units.txt`.
 
 ## The Tenth Man
 
@@ -291,8 +322,12 @@ problems carry and what it reports, met ten more: eight accepted, one settled on
 rule, one held ahead; the coverage work on both sides found eleven more, each settled; and a round
 on what the twin tests and `transcoding.json` pin met eleven more: ten accepted, one refused. A
 round on the generated client and a gateway's pace met seventeen more, two of them blocking:
-fifteen accepted, one decided by 15.12's words, one refused. Each other objection, with the answer
-that holds:
+fifteen accepted, one decided by 15.12's words, one refused. A round on a body read before a
+mounted gateway met ten more: eight accepted, two in part. The round on the Rust side's gateway
+brought two units to every side, a `HEAD` that asks a stream ended at its head (8.1) and a
+navigation from another site taken only as a `GET` that no `object` or `embed` makes (10.1.5), its
+nine objections in
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s table. Each other objection, with the answer that holds:
 
 ### On routes
 
@@ -411,3 +446,22 @@ was silent among them: twelve objections, two of them blocking, eleven accepted,
 | The C# side keeps a stream's leading byte order mark and compares media types by case.                                                                                                                                    | Accepted: the mark is taken away, as the HTML standard decodes a stream, and media types compare as RFC 9110 §8.3.1 has them.                                                                                                                               |
 | The TypeScript event bound encodes its whole pending text again at each chunk.                                                                                                                                            | Accepted: it counts a stream's bytes as they come.                                                                                                                                                                                                          |
 | `credentials: 'omit'` drops a page's client certificates and differs from the transport's `same-origin`.                                                                                                                  | Accepted: `same-origin`.                                                                                                                                                                                                                                    |
+
+### On a body read before a mounted gateway
+
+What a gateway does with a body the server it is mounted on read before it met the Tenth Man at
+xhigh effort: ten objections, eight accepted and two in part. Each was checked against the code and
+answered on probes of both platforms.
+
+| Objection                                                                                                                                                                                                                                          | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The TypeScript side does not hang for want of an event: Node's late `close` settles the reader as a client gone and clears its 408, so a reader in the parser's tick gets nothing and one in a later tick gets 408 `too-slow`, blaming the client. | Accepted. The judgement reads the stream's state, synchronously, before the reader attaches any listener, so the tick never changes it. The twins hand the request on in the parser's tick, in a later one, and behind a peek.                                                                                                                                                                                                                                                                                  |
+| `readableEnded` misses a partial read, mis-answers a `content-length: 0` body read before, and the rule that matches C# levels the TypeScript side down on an empty chunked body with no row to say so.                                            | Accepted. A body is taken when `readableDidRead`, or when it ended and carries content (step 8's reading). One ended with no content is the empty body, given at once. Two optional members join `IHTTPRequestLike`, and an object without them reads as not taken. A chunked body that came empty and was read to its end is refused on every side, a row of "Leveled down". One only peeked the TypeScript side reads as empty, since Node shows nothing of the peek: a row of Differences, of kind platform. |
+| C#'s silent failure is not what the proposal says: proto and json routes answer 400 "not JSON" with no call, raw and text routes call with nothing or with the body's tail, and a completed reader answers 500 already.                            | In part. The measures stand in this round. The record states the hazard in the present tense, as its documents do. Every variant has one answer.                                                                                                                                                                                                                                                                                                                                                                |
+| C#'s signals in the proposal fail: a length read as 0 misses chunked bodies, `CanHaveBody` never moves, and a buffered body at `Position > 0` is held whole.                                                                                       | Accepted. A seekable body is read from its start. Otherwise `IHttpMaxRequestBodySizeFeature.IsReadOnly` judges it, and an absent feature reads as not taken. A completed reader shows it too. A non-seekable stream put in the body's place is refused, a limit stated.                                                                                                                                                                                                                                         |
+| This is no refusal of 7.7 and the gateway tells none on an event: it is a failure of its own, as 7.5's configuration and 7.6's 5xx rows are, and fixed words for one variant would answer one misconfiguration two ways.                           | Accepted. It is a row of 7.6 and part of 7.5's item 3: 500, unmarked, with no detail (spec 9.0, ASVS 5.0 §16.5.1), and reported on `error` with words of its own. An event for the gateway's own refusals stays ahead.                                                                                                                                                                                                                                                                                          |
+| The proposal does not place the judgement in 10.1's order, and judging first would answer 500 where the head alone answers 403, 404, 405, 415 or 400 today.                                                                                        | Accepted. It is step 10's first judgement, before the body's first byte is awaited, and steps 1–9 answer as they do.                                                                                                                                                                                                                                                                                                                                                                                            |
+| As a unit of the spec it costs more than said: no handler mode in the companion, a version that moves, a ledger line no entry can cite, a Rust gateway bound unprobed, and no case the players can express.                                        | In part. There is no conformance case, since the exchanges player drives the gateway's own listener. The unit stays, held by twins, the ledger's reason for what no entry can cite. 1.1 names the server a gateway is mounted on. The version moves at the release, a minor. The Rust gateway is ahead, and its stage holds 7.6 or adds a row.                                                                                                                                                                  |
+| C# can read a body its server buffered, Node cannot, and refusing a seekable body would break the rewound case that answers 200.                                                                                                                   | Accepted. The C# side reads a seekable body from its start, a row of Differences of kind platform.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| "Mount before any middleware that reads the body" says nothing of C#'s fallback, which runs after every middleware, nor of Fastify, which parses before any handler.                                                                               | Accepted. Each README says where the gateway goes on its host: Express's parsers after it, Fastify's `onRequest` hook, and ASP.NET Core's `EnableBuffering` or `UseWhen`.                                                                                                                                                                                                                                                                                                                                       |
+| The TypeScript HTTP transport takes `close` and `end` alike, and an application could wrap its listener in a framework.                                                                                                                            | Accepted, as out of scope. The transport's `createServer` builds a server of `node:http`, `node:https` or `node:http2` on its listener, which offers no handler to mount. A framework around it is unprobed, and a round of the transport's own if it reproduces.                                                                                                                                                                                                                                               |

@@ -359,6 +359,8 @@ test.describe('createAnsweringCalls', () => {
       abandonedCalls: 1,
       answeringCalls: 1,
       largestAnsweringCalls: 1,
+      largestTrackedCalls: 1,
+      outlivingResolvers: 0,
     });
 
     calls.takeAll();
@@ -368,6 +370,8 @@ test.describe('createAnsweringCalls', () => {
       abandonedCalls: 0,
       answeringCalls: 0,
       largestAnsweringCalls: 0,
+      largestTrackedCalls: 0,
+      outlivingResolvers: 0,
     });
   });
 
@@ -395,7 +399,7 @@ test.describe('createAnsweringCalls', () => {
 
     // the busiest connection's, never the sum of them, under the bound of one connection
     expect(calls.gauges()).toMatchObject({
-      ceilings: { largestAnsweringCalls: 5 },
+      ceilings: { largestAnsweringCalls: 5, largestTrackedCalls: 10 },
       counts: { answeringCalls: 4, largestAnsweringCalls: 3 },
     });
     expect(calls.countOn('a')).toBe(3);
@@ -408,5 +412,93 @@ test.describe('createAnsweringCalls', () => {
     calls.takeAll('a');
 
     expect(calls.gauges().counts).toMatchObject({ largestAnsweringCalls: 1 });
+  });
+
+  test('gauges largestTrackedCalls under its ceiling, twice maximumAnsweringCalls, which health warns at, and outlivingResolvers', () => {
+    const limits = {
+      maximumAnsweringCalls: 5,
+      maximumTransfers: 4,
+      transferInactivityTimeout: 30_000,
+    };
+    const calls = createAnsweringCalls<Handle, IReceivingOf>({ clock: createTestClock(), limits });
+    const checkOf = (name: string) => {
+      return healthOf({
+        router: layerGaugesOf(calls.gauges(), new Set(['a', 'b'])),
+        server: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+        sessions: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+        transport: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+      }).checks[`router:${name}`]?.[0];
+    };
+    const runningOn = (connectionHandle: Handle, callId: number): AbortController => {
+      const controller = calls.open({ connectionHandle, header: headerOf(callId) });
+
+      expect(calls.run(controller)).toBe(true);
+
+      return controller;
+    };
+    // a's: three calls answered, then three whose resolvers outlive their cancel
+    const onA = [1, 3, 5, 7, 9, 11].map((callId) => {
+      return runningOn('a', callId);
+    });
+
+    for (const callId of [7, 9, 11]) {
+      calls.take({ callId, connectionHandle: 'a' });
+    }
+
+    // b's: one whose resolver outlives its answer
+    const onB = runningOn('b', 1);
+
+    calls.close({ callId: 1, connectionHandle: 'b' }, onB);
+
+    // the busiest connection's two counts together, never the sum of them, and the resolvers that
+    // outlive their call over the whole side, under no ceiling
+    expect(calls.gauges()).toMatchObject({
+      ceilings: { largestAnsweringCalls: 5, largestTrackedCalls: 10 },
+      connectionHandles: new Set(['a', 'b']),
+      counts: {
+        answeringCalls: 3,
+        largestAnsweringCalls: 3,
+        largestTrackedCalls: 6,
+        outlivingResolvers: 4,
+      },
+    });
+    expect(calls.gauges().ceilings).not.toHaveProperty('outlivingResolvers');
+    expect([calls.countOn('a'), calls.trackedOn('a'), calls.trackedOn('b')]).toEqual([3, 6, 1]);
+    expect(checkOf('largestTrackedCalls')).toMatchObject({ output: '6 of 10', status: 'pass' });
+    expect(checkOf('outlivingResolvers')).toBeUndefined();
+
+    // two more whose resolvers outlive their answer: 8 of 10 warns
+    for (const callId of [13, 15]) {
+      calls.close({ callId, connectionHandle: 'a' }, runningOn('a', callId));
+    }
+
+    expect(checkOf('largestTrackedCalls')).toMatchObject({ output: '8 of 10', status: 'warn' });
+
+    // one that settles gives its place back; one whose call is open runs no more, and its call's
+    // end leaves nothing behind
+    calls.settle(onA[3]!);
+    calls.settle(onA[0]!);
+    calls.take({ callId: 1, connectionHandle: 'a' });
+
+    expect(calls.gauges().counts).toMatchObject({
+      answeringCalls: 2,
+      largestTrackedCalls: 6,
+      outlivingResolvers: 5,
+    });
+    expect(checkOf('largestTrackedCalls')).toMatchObject({ output: '6 of 10', status: 'pass' });
+
+    // a's connection closes: what still runs there counts by no connection until it settles
+    calls.takeAll('a');
+
+    expect(calls.gauges()).toMatchObject({
+      connectionHandles: new Set(['b']),
+      counts: { largestTrackedCalls: 1, outlivingResolvers: 7 },
+    });
+
+    for (const controller of [...onA, onB]) {
+      calls.settle(controller);
+    }
+
+    expect(calls.gauges().counts).toMatchObject({ largestTrackedCalls: 0, outlivingResolvers: 2 });
   });
 });

@@ -155,3 +155,234 @@ fn writes_an_integer_past_2_to_the_53_from_its_digits_as_the_double_nearest_them
         b"9007199254740992"
     );
 }
+
+#[test]
+fn reads_0_as_0_at_every_depth_and_a_member_named_proto_as_a_member() {
+    let read = JsonCodec
+        .decode(&Bytes::from_static(br#"[-0,{"a":-0}]"#))
+        .expect("zero at both depths");
+    let values = read.as_array().expect("an array");
+    assert_eq!(values.len(), 2);
+    let object = values[1].as_object().expect("its nested object");
+    assert_eq!(object.len(), 1);
+    let bits = [&values[0], &object["a"]].map(|value| value.as_f64().expect("a number").to_bits());
+    assert_eq!(bits, [0_f64.to_bits(), 0_f64.to_bits()]);
+    let read = JsonCodec
+        .decode(&Bytes::from_static(br#"{"__proto__":{"a":1},"b":2}"#))
+        .expect("an ordinary data member");
+    assert!(
+        read.as_object()
+            .expect("an object")
+            .contains_key("__proto__")
+    );
+    assert_eq!(
+        JsonCodec.encode(&read).expect("written").as_ref(),
+        br#"{"__proto__":{"a":1},"b":2}"#
+    );
+}
+
+#[test]
+fn normalizes_negative_zero_before_a_json_payload_is_given_to_its_type() {
+    for text in [b"-0".as_slice(), b"-0.0", b"-0e0"] {
+        let bytes = Bytes::copy_from_slice(text);
+        let decoded = JsonOf::<f64>::new().decode(&bytes).expect("a typed double");
+        assert_eq!(decoded.to_bits(), 0_f64.to_bits());
+        assert_eq!(
+            JsonOf::<i64>::new()
+                .decode(&bytes)
+                .expect("a typed integer"),
+            0
+        );
+    }
+    let decoded = JsonOf::<Vec<f64>>::new()
+        .decode(&Bytes::from_static(b"[-0,-0.0,-0e0]"))
+        .expect("a typed array");
+    assert_eq!(
+        decoded.into_iter().map(f64::to_bits).collect::<Vec<_>>(),
+        [0, 0, 0]
+    );
+}
+
+#[test]
+fn builds_a_payload_whose_name_holds_an_escape_as_json_parse_builds_one_a_member_named_proto_its_own()
+ {
+    let read = JsonCodec
+        .decode(&Bytes::from_static(
+            br#"{"__prot\u006f__":{"a":[1,-0,1E2,"\n",true,null]},"2":false,"1":0}"#,
+        ))
+        .expect("escaped name and values read");
+    let object = read.as_object().expect("an object");
+    assert!(object.contains_key("__proto__"));
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["1", "2", "__proto__"]
+    );
+    assert_eq!(
+        JsonCodec.encode(&read).expect("canonical form").as_ref(),
+        br#"{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\n",true,null]}}"#
+    );
+}
+
+#[test]
+fn writes_an_object_of_no_prototype_and_a_member_named_proto_as_a_member() {
+    let value = serde_json::Value::Object(serde_json::Map::from_iter([
+        ("b".to_owned(), serde_json::Value::Bool(true)),
+        ("__proto__".to_owned(), serde_json::Value::from("x")),
+    ]));
+    assert_eq!(
+        JsonCodec
+            .encode(&value)
+            .expect("data members written")
+            .as_ref(),
+        br#"{"__proto__":"x","b":true}"#
+    );
+}
+
+#[test]
+fn refuses_what_it_does_not_read_each_in_its_own_words_with_a_syntax_error() {
+    for (bytes, words) in [
+        (Bytes::from_static(b"\"\xff\""), "not UTF-8"),
+        (Bytes::from_static(b"\xef\xbb\xbf1"), "a byte order mark"),
+        (
+            Bytes::from([vec![b'['; 65], vec![b']'; 65]].concat()),
+            "nested past 64",
+        ),
+        (Bytes::from_static(br#"{"a":1,"a":2}"#), "a name twice"),
+        (Bytes::from_static(br#""\ud800""#), "a surrogate alone"),
+        (Bytes::from_static(br#"{"\udc00":1}"#), "a surrogate alone"),
+        (Bytes::from_static(b"1E400"), "a number past a double"),
+    ] {
+        let refusal: crate::payloads::CodecRefusal = JsonCodec.decode(&bytes).expect_err(words);
+        assert_eq!(refusal.to_string(), words);
+    }
+    for text in ["", "[1,]"] {
+        let refusal = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect_err("not JSON");
+        assert_eq!(refusal.to_string(), "not JSON");
+        assert_eq!(
+            std::error::Error::source(&refusal)
+                .expect("the parser's cause")
+                .downcast_ref::<crate::json::JsonRefusal>(),
+            Some(&crate::json::JsonRefusal::NotJson)
+        );
+    }
+}
+
+#[test]
+fn hands_on_the_document_it_read_when_canonical_and_the_canonical_form_s_otherwise() {
+    for (text, canonical) in [
+        (r#"{"a":1,"b":[-1.5,"x"]}"#, r#"{"a":1,"b":[-1.5,"x"]}"#),
+        ("1.0", "1"),
+        ("-0", "0"),
+        (r#"[-0,{"a":-0}]"#, r#"[0,{"a":0}]"#),
+        ("12345678901234567890", "12345678901234567000"),
+    ] {
+        let read = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect("a JSON value");
+        assert_eq!(
+            JsonCodec.encode(&read).expect("canonical bytes").as_ref(),
+            canonical.as_bytes()
+        );
+    }
+    assert_eq!(
+        JsonOf::<i32>::new()
+            .decode(&Bytes::from_static(b"1.0"))
+            .expect("an integer"),
+        1
+    );
+    builds_a_payload_whose_name_holds_an_escape_as_json_parse_builds_one_a_member_named_proto_its_own();
+}
+
+#[test]
+fn refuses_a_json_value_that_does_not_write_and_a_text_either_way_in_its_own_words() {
+    let mut deep = serde_json::Value::Array(Vec::new());
+    for _ in 1..65 {
+        deep = serde_json::Value::Array(vec![deep]);
+    }
+    assert_eq!(
+        JsonCodec
+            .encode(&deep)
+            .expect_err("65 nested arrays")
+            .reason(),
+        "nested past 64"
+    );
+    assert_eq!(
+        TextCodec
+            .decode(&Bytes::from_static(&[0xc3]))
+            .expect_err("truncated UTF-8")
+            .reason(),
+        "not UTF-8"
+    );
+}
+
+#[test]
+fn refuses_a_number_past_the_largest_double_that_an_element_parsed_leniently_holds_as_it_is_written()
+ {
+    // A Value holds no non-finite number; the typed writer can receive all three.
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            JsonOf::<f64>::new()
+                .encode(&value)
+                .expect_err("a non-finite number")
+                .reason(),
+            "not a finite number"
+        );
+    }
+    assert_eq!(
+        JsonCodec
+            .decode(&Bytes::from_static(b"[1E400]"))
+            .expect_err("no lenient Value input")
+            .reason(),
+        "a number past a double"
+    );
+}
+
+#[test]
+fn writes_a_string_as_written_when_it_holds_no_escape_and_is_utf_8_and_from_its_characters_otherwise()
+ {
+    for (text, expected) in [
+        ("\"é<\u{7f}\"", "\"é<\u{7f}\""),
+        (r#""\u0041\u003e""#, "\"A>\""),
+    ] {
+        let read = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect("a string");
+        assert_eq!(
+            JsonCodec.encode(&read).expect("written").as_ref(),
+            expected.as_bytes()
+        );
+    }
+    assert_eq!(
+        JsonCodec
+            .decode(&Bytes::from_static(b"\"\xff\""))
+            .expect_err("no invalid UTF-8 Value input")
+            .reason(),
+        "not UTF-8"
+    );
+}
+
+#[test]
+fn is_given_by_json_serializer_no_nan_and_no_infinity_and_a_surrogate_alone_as_u_fffd_before_it_writes()
+ {
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            JsonOf::<f64>::new()
+                .encode(&value)
+                .expect_err("a non-finite number")
+                .reason(),
+            "not a finite number"
+        );
+    }
+    let repaired = "a\u{fffd}b".to_owned();
+    assert_eq!(
+        JsonOf::<String>::new()
+            .encode(&repaired)
+            .expect("a replacement character")
+            .as_ref(),
+        "\"a\u{fffd}b\"".as_bytes()
+    );
+    String::from_utf16(&[0x61, 0xd800, 0x62]).expect_err("a surrogate alone is no Rust String");
+    assert_eq!(String::from_utf16_lossy(&[0x61, 0xd800, 0x62]), repaired);
+}

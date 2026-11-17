@@ -207,7 +207,7 @@ pub struct HttpTransportServerOptions {
 
 // a member given in the policy and beside it, refused, so that a listener never takes one value of
 // two in silence
-fn given_once<T: Clone>(
+pub(crate) fn given_once<T: Clone>(
     name: &str,
     (beside, in_policy): (Option<&T>, Option<T>),
 ) -> Result<Option<T>, ProgrammerError> {

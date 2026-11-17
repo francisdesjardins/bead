@@ -284,3 +284,100 @@ fn tell_error_tells_error_to_each_listener_within_a_guard_dropping_what_one_thro
     );
     drop(told);
 }
+
+#[test]
+#[expect(
+    clippy::as_conversions,
+    reason = "the source twin checks the six fieldless enum discriminants against WebSocket numbering"
+)]
+fn keeps_the_websocket_numbering_for_connecting_to_closed() {
+    assert_eq!(
+        [
+            ReadyState::Connecting,
+            ReadyState::Open,
+            ReadyState::Closing,
+            ReadyState::Closed,
+            ReadyState::Uninitialized,
+            ReadyState::Reconnecting,
+        ]
+        .map(|state| state as u8),
+        [0, 1, 2, 3, 4, 5]
+    );
+}
+
+#[test]
+fn ready_state_names_reverses_it() {
+    for (state, name) in [
+        (ReadyState::Connecting, "CONNECTING"),
+        (ReadyState::Open, "OPEN"),
+        (ReadyState::Closing, "CLOSING"),
+        (ReadyState::Closed, "CLOSED"),
+        (ReadyState::Uninitialized, "UNINITIALIZED"),
+        (ReadyState::Reconnecting, "RECONNECTING"),
+    ] {
+        assert_eq!(state.name(), name);
+    }
+}
+
+// * every bound `spec/transports.json` gives a default, as the transports take it when told none
+#[cfg(all(feature = "websocket", feature = "http"))]
+#[test]
+fn bounds_default_to_what_the_file_states() {
+    use core::time::Duration;
+
+    use serde_json::{Map, Value};
+
+    let file: Map<String, Value> =
+        crate::testing::files::read("transports.json").expect("spec/transports.json");
+    let stated = file
+        .get("defaults")
+        .and_then(Value::as_object)
+        .expect("its defaults");
+    let milliseconds = |duration: Duration| u64::try_from(duration.as_millis()).unwrap();
+    let taken: Map<String, Value> = [
+        ("bodyBytesBudget", crate::BODY_BYTES_BUDGET),
+        ("bodyGracePeriod", milliseconds(crate::BODY_GRACE_PERIOD)),
+        (
+            "connectionInactivityTimeout",
+            milliseconds(crate::CONNECTION_INACTIVITY_TIMEOUT),
+        ),
+        ("exchangeTimeout", milliseconds(crate::EXCHANGE_TIMEOUT)),
+        ("headersTimeout", milliseconds(crate::HEADERS_TIMEOUT)),
+        ("heartbeat", milliseconds(crate::HEARTBEAT)),
+        ("inactivityTimeout", milliseconds(crate::INACTIVITY_TIMEOUT)),
+        ("maximumBodyBytes", crate::MAXIMUM_BODY_BYTES),
+        ("maximumConnections", crate::MAXIMUM_CONNECTIONS),
+        (
+            "maximumConnectionsPerAddress",
+            crate::MAXIMUM_CONNECTIONS_PER_ADDRESS,
+        ),
+        ("maximumMessageBytes", crate::MAXIMUM_MESSAGE_BYTES),
+        ("maximumOutboxBytes", crate::MAXIMUM_OUTBOX_BYTES),
+        ("maximumUnsentBytes", crate::MAXIMUM_UNSENT_BYTES),
+        ("maximumWait", milliseconds(crate::MAXIMUM_WAIT)),
+        ("maximumWaitingExchanges", crate::MAXIMUM_WAITING_EXCHANGES),
+        (
+            "minimumBodyBytesPerSecond",
+            crate::MINIMUM_BODY_BYTES_PER_SECOND,
+        ),
+        (
+            "minimumSendBytesPerSecond",
+            crate::MINIMUM_SEND_BYTES_PER_SECOND,
+        ),
+        ("sendGracePeriod", milliseconds(crate::SEND_GRACE_PERIOD)),
+        ("acceptTimeout", milliseconds(crate::ACCEPT_TIMEOUT)),
+        (
+            "maximumEnvelopePartsBytes",
+            crate::MAXIMUM_ENVELOPE_PARTS_BYTES,
+        ),
+        (
+            "heldBytesBudget",
+            crate::broker::participant::HELD_BYTES_BUDGET,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, bound)| (name.to_owned(), Value::from(bound)))
+    .collect();
+
+    assert_eq!(&taken, stated, "each bound as the file states it");
+}

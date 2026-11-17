@@ -95,8 +95,7 @@ fn answered_in(exposition: &str) -> Vec<String> {
 
 // every procedure answered by the side its kind names: a command by the client, any other by the
 // server, as the registries each side declares to tell
-#[tokio::test]
-async fn every_procedure_of_the_interop_services_api_is_offered_on_the_side_its_kind_names() {
+async fn offered_interop() {
     use bead::testing::pair::{Pair, PairOptions};
     use bead::{
         ClientOptions, MetricsRegistry, MetricsRegistryOptions, ProcedureKind, ServerOptions,
@@ -140,4 +139,14 @@ async fn every_procedure_of_the_interop_services_api_is_offered_on_the_side_its_
     assert_eq!(answered_in(&server_text), names_of(false), "{server_text}");
     assert_eq!(answered_in(&client_text), names_of(true), "{client_text}");
     pair.client.dispose().await;
+}
+
+#[tokio::test]
+async fn every_procedure_of_the_interop_services_api_is_offered_on_the_side_its_kind_names() {
+    offered_interop().await;
+}
+
+#[tokio::test]
+async fn offers_every_procedure_of_the_interop_services_api_on_the_side_its_kind_names() {
+    offered_interop().await;
 }

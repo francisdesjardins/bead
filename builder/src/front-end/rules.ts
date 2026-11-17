@@ -25,6 +25,7 @@ import {
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
 
+import { messageOfField } from '../descriptors.ts';
 import { diagnosticOf, type IDiagnostic } from '../diagnostics.ts';
 import {
   field as fieldExtension,
@@ -395,12 +396,7 @@ const fieldTypeOf = (
 
 // the message a field holds, a singular one's, an item's or a map value's; none for a wrapper
 const heldOf = (field: DescField): DescMessage | undefined => {
-  const message =
-    field.fieldKind === 'message' ||
-    (field.fieldKind === 'list' && field.listKind === 'message') ||
-    (field.fieldKind === 'map' && field.mapKind === 'message')
-      ? field.message
-      : undefined;
+  const message = messageOfField(field);
 
   return message === undefined || WRAPPERS[message.typeName] !== undefined ? undefined : message;
 };

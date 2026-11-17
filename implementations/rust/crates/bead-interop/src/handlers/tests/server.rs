@@ -13,7 +13,7 @@ use bead::{
 };
 use serde_json::{Value, json};
 
-use crate::{InteropProcedures, OfferedInterop, interop_procedures, offer_interop};
+use crate::{InteropProcedures, OfferedInterop, offer_interop};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -76,7 +76,7 @@ struct Fixture {
     clock: Arc<SteppingClock>,
     wire: Arc<Wire>,
     server: Server,
-    procedures: InteropProcedures,
+    procedures: &'static InteropProcedures,
     handle: ConnectionHandle,
     _offered: OfferedInterop,
 }
@@ -101,7 +101,7 @@ impl Fixture {
             clock,
             wire,
             server,
-            procedures: interop_procedures(None).expect("the interop descriptors"),
+            procedures: InteropProcedures::get().expect("the interop descriptors"),
             handle,
             _offered: offered,
         }

@@ -403,8 +403,7 @@ fn trims_only_spaces_and_tabs_around_a_carried_credential_and_keeps_its_scheme_a
     }
 }
 
-#[test]
-fn takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port()
+fn takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port_scenario()
  {
     for is_required in [false, true] {
         let well_formed: Vec<&str> = WELL_FORMED_HOSTS
@@ -435,8 +434,7 @@ fn takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_
     );
 }
 
-#[test]
-fn takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star()
+fn takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star_scenario()
  {
     for hosts in [
         &[][..],
@@ -474,8 +472,7 @@ fn takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_
     );
 }
 
-#[test]
-fn takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under_a_star()
+fn takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under_a_star_scenario()
  {
     let hosts = owned(HOSTS);
 
@@ -499,8 +496,8 @@ fn takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_
     assert_eq!(taken(&others, &owned(&["*"])), others, "every host under *");
 }
 
-#[test]
-fn refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another() {
+fn refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another_scenario()
+ {
     for hosts in BUILT_HOSTS {
         assert_hosts(&owned(hosts)).expect("built");
     }
@@ -535,8 +532,8 @@ fn refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star
 }
 
 // spec 15.12
-#[test]
-fn refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_rfc_6454_serializes_it() {
+fn refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_rfc_6454_serializes_it_scenario()
+ {
     assert_origins(&[]).expect("none");
     assert_origins(&owned(BUILT_ORIGINS)).expect("built");
 
@@ -673,8 +670,7 @@ fn takes_a_request_with_no_origin_one_among_those_given_and_the_server_s_own_htt
 }
 
 // spec 15.12
-#[test]
-fn own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes()
+fn own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes_scenario()
  {
     let authorities = [
         Some("localhost:8080"),
@@ -783,8 +779,7 @@ fn is_listed_origin_takes_an_origin_that_origins_names_exactly_the_server_s_own_
     }
 }
 
-#[test]
-fn is_ip_address_takes_a_bare_ip_address_by_rfc_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address()
+fn is_ip_address_takes_a_bare_ip_address_by_rfc_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address_scenario()
  {
     assert_eq!(
         LISTENING_ADDRESSES
@@ -901,12 +896,11 @@ fn is_visible_field_takes_htab_sp_and_visible_ascii_and_refuses_each_other_contr
     );
 }
 
-#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "a twin plays its sentence whole, as the other sides' twins do"
 )]
-fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path()
+fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path_scenario()
  {
     let visible: String = ('!'..='~').collect();
     let others: Vec<char> = ('\u{0}'..='\u{20}').chain('\u{7F}'..='\u{FF}').collect();
@@ -1121,8 +1115,7 @@ fn folds_ascii_alone_a_host_that_differs_past_ascii_is_another() {
     );
 }
 
-#[test]
-fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority()
+fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority_scenario()
  {
     // a # in an authority is no host's
     for target in [
@@ -1190,4 +1183,108 @@ fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_a
         ],
         "read as it came"
     );
+}
+
+#[test]
+fn takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port()
+ {
+    takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port_scenario();
+}
+
+#[test]
+fn takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port()
+ {
+    takes_a_host_http_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_ipv_future_literal_or_a_colon_with_no_port_scenario();
+}
+
+#[test]
+fn takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star()
+ {
+    takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star_scenario();
+}
+
+#[test]
+fn takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under()
+ {
+    takes_whatever_its_hosts_localhost_the_names_under_localhost_and_ip_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star_scenario();
+}
+
+#[test]
+fn takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under_a_star()
+ {
+    takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under_a_star_scenario();
+}
+
+#[test]
+fn takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under()
+ {
+    takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ascii_case_and_every_host_and_none_under_a_star_scenario();
+}
+
+#[test]
+fn refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another() {
+    refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another_scenario();
+}
+
+#[test]
+fn refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_beside_another() {
+    refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another_scenario();
+}
+
+#[test]
+fn refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_rfc_6454_serializes_it() {
+    refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_rfc_6454_serializes_it_scenario();
+}
+
+#[test]
+fn refuses_an_origins_entry_that_is_or_null_or_not_an_origin_as_rfc_6454_serializes_it() {
+    refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_rfc_6454_serializes_it_scenario();
+}
+
+#[test]
+fn own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes()
+ {
+    own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes_scenario();
+}
+
+#[test]
+fn own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_servers_or_one_listed_and_none_of_one_only_takes()
+ {
+    own_authority_of_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes_scenario();
+}
+
+#[test]
+fn is_ip_address_takes_a_bare_ip_address_by_rfc_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address()
+ {
+    is_ip_address_takes_a_bare_ip_address_by_rfc_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address_scenario();
+}
+
+#[test]
+fn isipaddress_takes_a_bare_ip_address_by_rfc_3986s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address()
+ {
+    is_ip_address_takes_a_bare_ip_address_by_rfc_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_ipv4_mapped_address_scenario();
+}
+
+#[test]
+fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path()
+ {
+    is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path_scenario();
+}
+
+#[test]
+fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path()
+ {
+    is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path_scenario();
+}
+
+#[test]
+fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority()
+ {
+    reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority_scenario();
+}
+
+#[test]
+fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_and_refuses_one_without_an_authority()
+ {
+    reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority_scenario();
 }

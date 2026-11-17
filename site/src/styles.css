@@ -1,101 +1,11 @@
-/* The site's tokens, as its home has them, and the page's own on top: the code, the byte roles and
-   the diagrams', each of the site's. The light scheme is the root's; the dark one answers to
-   `data-color-scheme`, or to the system where no script set it. */
-
-@font-face {
-  font-family: 'Geist';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/geist.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: url('/fonts/geist-mono.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/newsreader.woff2') format('woff2');
-}
+/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
+   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+   diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
+   the system where no script set it. */
 
 :root {
-  color-scheme: light;
-  --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-  --app-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-  --app-font-mono:
-    'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
-
-  --app-primary: #c13584;
-  --app-primary-ink: #ffffff;
-  --app-primary-hover: #9d2a6b;
-  --app-accent: #c13584;
-  --app-flame-wash: rgb(193 53 132 / 0.1);
-  --app-ring: #ff69b4;
-
-  --app-bg: #f5f2f8;
-  --app-paper: #fdfcfe;
-  --app-text: #17111d;
-  --app-text-secondary: #4a4055;
-  --app-text-tertiary: #6d6278;
-  --app-divider: rgb(23 17 29 / 0.12);
-  --app-control-border: #6b788c;
-  --app-hover: rgb(15 23 42 / 0.05);
-
-  --app-ok: #047857;
-  --app-ok-wash: rgb(4 120 87 / 0.1);
-  --app-info: #0369a1;
-  --app-info-wash: rgb(3 105 161 / 0.1);
-  --app-warn: #92400e;
-  --app-warn-wash: rgb(146 64 14 / 0.1);
-
-  --app-space-1: 4px;
-  --app-space-2: 8px;
-  --app-space-3: 12px;
-  --app-space-4: 16px;
-  --app-space-5: 20px;
-  --app-space-6: 24px;
-  --app-space-8: 32px;
-  --app-space-10: 40px;
-  --app-space-12: 48px;
-  --app-space-14: 56px;
-  --app-text-xs: 0.6875rem;
-  --app-text-sm: 0.8125rem;
-  --app-text-md: 0.9375rem;
-  --app-text-base: 1.125rem;
-  --app-text-lg: 1.375rem;
-  --app-text-xl: 1.75rem;
-  --app-text-2xl: 2.25rem;
-  --app-text-3xl: 2.875rem;
-  --app-lh-tight: 1.15;
-  --app-lh-snug: 1.35;
-  --app-lh-body: 1.6;
-  --app-tracking-tight: -0.022em;
-  --app-tracking-label: 0.14em;
-  --app-radius-sm: 3px;
-  --app-radius: 6px;
-  --app-radius-md: 8px;
-  --app-radius-lg: 12px;
-  --app-radius-pill: 999px;
-  --app-quick: 110ms;
-  --app-ease: cubic-bezier(0.2, 0, 0, 1);
-  --app-topbar-height: 56px;
-  --app-measure: 68ch;
-
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
-  --code-bg: #f1ecf5;
-  --tok-comment: #625770;
-  --tok-keyword: #a62b70;
-  --tok-string: #04694c;
-  --tok-number: #035f91;
   /* the accent on its own wash is 4.33:1 in light: the deeper hover carries it */
   --seg-prefix: var(--app-primary-hover);
   --seg-prefix-wash: var(--app-flame-wash);
@@ -119,66 +29,14 @@
 
 /* the dark scheme, chosen; and the system's, where no script chose */
 :root[data-color-scheme='dark'] {
-  color-scheme: dark;
-  --app-primary: #ff8bc4;
-  --app-primary-ink: #3d0b28;
-  --app-primary-hover: #ffaed5;
-  --app-accent: #ff8bc4;
-  --app-flame-wash: rgb(255 139 196 / 0.14);
-  --app-ring: #ffaed5;
-  --app-bg: #0c0910;
-  --app-paper: #15111c;
-  --app-text: #f2ecf5;
-  --app-text-secondary: #b2a7bf;
-  --app-text-tertiary: #8d8199;
-  --app-divider: rgb(242 236 245 / 0.14);
-  --app-control-border: #7d8ba1;
-  --app-hover: rgb(238 242 248 / 0.07);
-  --app-ok: #34d399;
-  --app-ok-wash: rgb(52 211 153 / 0.14);
-  --app-info: #38bdf8;
-  --app-info-wash: rgb(56 189 248 / 0.14);
-  --app-warn: #fbbf24;
-  --app-warn-wash: rgb(251 191 36 / 0.14);
   --focus: var(--app-ring);
   --seg-prefix: var(--app-accent);
-  --code-bg: #1c1625;
-  --tok-comment: #9d91a9;
-  --tok-keyword: #ff8bc4;
-  --tok-string: #34d399;
-  --tok-number: #38bdf8;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme]) {
-    color-scheme: dark;
-    --app-primary: #ff8bc4;
-    --app-primary-ink: #3d0b28;
-    --app-primary-hover: #ffaed5;
-    --app-accent: #ff8bc4;
-    --app-flame-wash: rgb(255 139 196 / 0.14);
-    --app-ring: #ffaed5;
-    --app-bg: #0c0910;
-    --app-paper: #15111c;
-    --app-text: #f2ecf5;
-    --app-text-secondary: #b2a7bf;
-    --app-text-tertiary: #8d8199;
-    --app-divider: rgb(242 236 245 / 0.14);
-    --app-control-border: #7d8ba1;
-    --app-hover: rgb(238 242 248 / 0.07);
-    --app-ok: #34d399;
-    --app-ok-wash: rgb(52 211 153 / 0.14);
-    --app-info: #38bdf8;
-    --app-info-wash: rgb(56 189 248 / 0.14);
-    --app-warn: #fbbf24;
-    --app-warn-wash: rgb(251 191 36 / 0.14);
     --focus: var(--app-ring);
     --seg-prefix: var(--app-accent);
-    --code-bg: #1c1625;
-    --tok-comment: #9d91a9;
-    --tok-keyword: #ff8bc4;
-    --tok-string: #34d399;
-    --tok-number: #38bdf8;
   }
 }
 
@@ -192,7 +50,6 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  scroll-padding-top: calc(var(--app-topbar-height) + var(--app-space-4));
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -208,7 +65,6 @@ html {
 
 body {
   margin: 0;
-  padding-top: var(--app-topbar-height);
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--app-font-body);
@@ -233,12 +89,20 @@ a:hover {
   text-decoration-thickness: 2px;
 }
 
+/* a link's code stands on an inset, where the accent falls under 4.5:1: it takes the darker ink */
+a code {
+  color: var(--app-primary-hover);
+}
+
 .skip {
   position: absolute;
   top: var(--app-space-2);
   left: var(--app-space-2);
   z-index: 50;
-  padding: var(--app-space-2) var(--app-space-3);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
   background: var(--app-paper);
   border-radius: var(--app-radius);
   transform: translateY(-200%);
@@ -250,89 +114,7 @@ a:hover {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-.topbar {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: var(--app-space-3);
-  height: var(--app-topbar-height);
-  padding: 0 var(--app-space-4);
-  background: var(--app-paper);
-  border-bottom: 1px solid var(--app-divider);
-}
-
-.back {
-  flex: none;
-  color: var(--app-text-secondary);
-  font-size: var(--app-text-sm);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.back:hover {
-  color: var(--app-text);
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--app-space-2);
-  margin-inline: auto;
-  font-family: var(--app-font-mono);
-  font-weight: 500;
-  font-size: var(--app-text-md);
-  letter-spacing: 0.01em;
-}
-
-/* the disc's edge, and three beads of light breaking through just inside it, as the home draws them */
-.mark {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 83% 53%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 74% 74%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 53% 83%, var(--app-primary) 0 1.8px, transparent 2.3px);
-  box-shadow: inset 0 0 0 1.5px var(--app-primary);
-}
-
-.tools {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--app-space-1);
-}
-
-.tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  height: 40px;
-  padding: 0 var(--app-space-2);
-  border: none;
-  border-radius: var(--app-radius-pill);
-  background: transparent;
-  color: var(--app-text);
-  font: 500 var(--app-text-md) / 1 var(--app-font-body);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color var(--app-quick) var(--app-ease);
-}
-
-.tool:hover {
-  background: var(--app-hover);
-}
-
-.tool[data-action='theme'],
-.tool[data-action='menu'] {
-  width: 40px;
-  padding: 0;
-  font-size: 1.25rem;
-}
-
+/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
 .language .short {
   display: none;
 }
@@ -349,20 +131,6 @@ a:hover {
   .language .short {
     display: inline;
   }
-  .brand {
-    margin-inline: auto 0;
-  }
-}
-
-/* under 360 px, the bar keeps the mark and leaves the name to the page's heading */
-@media (max-width: 359px) {
-  .brand {
-    font-size: 0;
-  }
-  .topbar {
-    gap: var(--app-space-2);
-    padding-inline: var(--app-space-3);
-  }
 }
 
 /* ── Layout and contents ──────────────────────────────────────────────────── */
@@ -371,9 +139,9 @@ a:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--app-space-10);
-  max-width: 1120px;
+  max-width: var(--app-content-max-width);
   margin-inline: auto;
-  padding: var(--app-space-8) var(--app-space-4) var(--app-space-14);
+  padding: var(--app-space-8) var(--frame-gutter) var(--app-space-14);
 }
 
 main {
@@ -448,7 +216,7 @@ main:focus {
   :root[data-menu-open] .toc {
     position: fixed;
     inset: var(--app-topbar-height) 0 auto;
-    z-index: 30;
+    z-index: var(--app-z-sidebar);
     display: block;
     max-height: calc(100dvh - var(--app-topbar-height));
     overflow-y: auto;
@@ -458,7 +226,21 @@ main:focus {
     box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
   }
   :root[data-menu-open] .toc a {
-    padding-block: var(--app-space-2);
+    display: flex;
+    align-items: center;
+    min-height: var(--app-touch);
+  }
+}
+
+/* the menu's sheet comes in at once, or a short fade where motion is welcome */
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  :root[data-menu-open] .toc {
+    transition: opacity var(--app-quick) var(--app-ease);
+  }
+  @starting-style {
+    :root[data-menu-open] .toc {
+      opacity: 0;
+    }
   }
 }
 
@@ -526,9 +308,9 @@ td code,
 summary code,
 h3 code,
 .gist code {
-  padding: 1px 4px;
+  padding: 1px var(--app-space-1);
   border-radius: var(--app-radius-sm);
-  background: var(--code-bg);
+  background: var(--raised);
   overflow-wrap: anywhere;
 }
 
@@ -568,9 +350,9 @@ h3 code,
   margin: 0;
   max-width: 34ch;
   font-family: var(--app-font-display);
-  font-size: clamp(1.375rem, 3.2vw, 1.75rem);
+  font-size: clamp(var(--app-text-lg), 3.2vw, var(--app-text-xl));
   line-height: 1.3;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--app-tracking-snug);
 }
 
 .invite {
@@ -607,6 +389,13 @@ h3 code,
 
 .invite a {
   color: inherit;
+}
+
+/* the invite's second way out, a link a finger reaches beside its button */
+.invite .actions a:not(.button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--app-touch);
 }
 
 .invite :focus-visible {
@@ -648,7 +437,7 @@ h3 code,
 }
 
 .seg .hex {
-  padding: 8px 10px;
+  padding: var(--app-space-2) 10px;
   border: 1px solid var(--seg-line);
   border-radius: var(--app-radius);
   background: var(--seg-bg);
@@ -666,7 +455,7 @@ h3 code,
 }
 
 .bytes-hero {
-  gap: 12px 8px;
+  gap: var(--app-space-3) var(--app-space-2);
   padding: var(--app-space-5);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-lg);
@@ -674,7 +463,7 @@ h3 code,
 }
 
 .bytes-hero .hex {
-  padding: 10px 12px;
+  padding: 10px var(--app-space-3);
   font-size: clamp(16px, 2.4vw, 20px);
 }
 
@@ -697,7 +486,7 @@ h3 code,
 }
 
 .seg-block {
-  --seg-bg: var(--code-bg);
+  --seg-bg: var(--raised);
   --seg-ink: var(--app-text);
   --seg-line: var(--app-divider);
 }
@@ -793,7 +582,7 @@ h3 code,
   justify-content: space-between;
   gap: 6px;
   min-width: 0;
-  padding: 8px;
+  padding: var(--app-space-2);
   border-right: 1px solid var(--app-divider);
   font-size: var(--app-text-sm);
 }
@@ -839,7 +628,7 @@ table {
 
 th,
 td {
-  padding: 10px 12px;
+  padding: 10px var(--app-space-3);
   border-bottom: 1px solid var(--app-divider);
   text-align: left;
   vertical-align: top;
@@ -867,6 +656,11 @@ th[scope='row'] {
 .code-num {
   overflow-wrap: normal;
   white-space: nowrap;
+}
+
+/* a table scrolls sideways on a narrow screen, so a name of code in it stays whole */
+.table-wrap td code {
+  overflow-wrap: normal;
 }
 
 .code-num {
@@ -904,8 +698,13 @@ th[scope='row'] {
 }
 
 .fate-rejected {
-  background: var(--code-bg);
+  background: var(--raised);
   color: var(--app-text);
+}
+
+.fate-ended {
+  background: var(--app-info-wash);
+  color: var(--app-info);
 }
 
 .fates {
@@ -920,7 +719,7 @@ th[scope='row'] {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
+  gap: var(--app-space-1) 10px;
   margin: 0;
 }
 
@@ -971,7 +770,7 @@ th[scope='row'] {
 
 .chips li {
   margin: 0;
-  padding: 4px 10px;
+  padding: var(--app-space-1) 10px;
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-pill);
   background: var(--app-paper);
@@ -981,7 +780,6 @@ th[scope='row'] {
 /* ── Folded detail ────────────────────────────────────────────────────────── */
 
 details.more {
-  max-width: var(--app-measure);
   margin-top: var(--app-space-4);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-md);
@@ -1052,8 +850,8 @@ pre.snippet {
   padding: var(--app-space-4);
   overflow-x: auto;
   border-radius: var(--app-radius-md);
-  background: var(--code-bg);
-  font: 400 13.5px/1.55 var(--app-font-mono);
+  background: var(--raised);
+  font: 400 var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
   tab-size: 2;
 }
 
@@ -1086,6 +884,29 @@ pre code {
   margin-top: var(--app-space-2);
   font-size: var(--app-text-sm);
   overflow-wrap: anywhere;
+}
+
+/* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
+   a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
+   to the frame's edge, while its prose keeps the measure; a short block stays as it is. The room:
+   the frame, less its gutters, the contents (220px) and their gap */
+@media (min-width: 1136px) {
+  :root {
+    --code-room: calc(
+      min(100vw, var(--app-content-max-width)) - 2 * var(--frame-gutter) - 220px -
+        var(--app-space-12)
+    );
+  }
+  main pre.snippet,
+  main details.more,
+  main .excerpt {
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--code-room);
+  }
+  details.more pre.snippet {
+    max-width: 100%;
+  }
 }
 
 .files {

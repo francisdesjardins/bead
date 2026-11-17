@@ -1,9 +1,11 @@
 // ── Demo playground ───────────────────────────────────────────────────────────
 
 // The demo as a static host takes it: the page, its worker and its HTML in one folder, every path
-// relative, so it is served under any path. It starts nothing — the page's server is its worker —
-// and, like `serve.ts`, Node runs it as it is, its types stripped, importing packages and `node:`
-// modules alone.
+// relative, so it is served under any path. Its faces alone it asks at `/fonts/`, where
+// beadproto.dev serves the page's: a copy of them in `fonts/` serves a host of this folder at its
+// root, and the deploy leaves it out. It starts nothing — the page's server is its worker — and,
+// like `serve.ts`, Node runs it as it is, its types stripped, importing packages and `node:` modules
+// alone.
 //
 // The scripts are named by their content, as a bundler names its assets: a host keeps a script
 // hours without asking again, and a script of the same name from an earlier build would run
@@ -12,7 +14,7 @@
 // dependencies
 
 import { build } from 'esbuild';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // constants
@@ -34,10 +36,20 @@ const STATIC = 'data-bead-transport="worker"';
 /** How the page loads its script, which this build names. */
 const SCRIPT = 'src="./page.js"';
 
-/** Penumbra's two sheets, the DevTools panel's copy, which the page links under its skin. */
+/** How the page loads its theme before the first paint: a classic script, which this build names. */
+const THEME = '<script src="penumbra/theme.js"></script>';
+
+/** The page's faces, which the folder holds where a host of it at its root serves them. */
+const FONTS = new URL('../../../site/src/fonts/', DEMO);
+
+/** Penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them, Bead's skin and
+ * Bead's top bar, which the page links under its own styles. */
 const SHEETS: readonly string[] = Object.freeze([
   'penumbra/tokens.system.css',
   'penumbra/tokens.skin.base.css',
+  'penumbra/tokens.system.overrides.css',
+  'penumbra/tokens.skin.css',
+  'penumbra/chrome.css',
 ]);
 
 // helpers
@@ -78,6 +90,27 @@ const [pageFile, workerFile] = await Promise.all(
     return written.split('/').at(-1) ?? written;
   })
 );
+
+// * the theme's script as it is, no module, so it runs where the head names it, before the first
+// paint; named by its content, as the page's are
+const { metafile: themed } = await build({
+  entryNames: '[name]-[hash]',
+  entryPoints: [pathOf('../devtools/penumbra/theme.js')],
+  format: 'iife',
+  metafile: true,
+  minify: true,
+  outdir: fileURLToPath(OUT),
+  platform: 'browser',
+  target: 'es2022',
+});
+const themeFile = Object.keys(themed.outputs)[0]?.split('/').at(-1);
+
+if (themeFile === undefined) {
+  throw new Error('esbuild wrote nothing for theme.js');
+}
+
+await cp(FONTS, new URL('fonts/', OUT), { recursive: true });
+
 const page = await readFile(pathOf('index.html'), 'utf8');
 
 // a sheet as the page links it
@@ -87,7 +120,7 @@ const linkOf = (sheet: string): string => {
 
 // a page that no longer says where its server is, or loads its script or its sheets otherwise,
 // would ask what is not there
-for (const expected of [SERVED, SCRIPT, ...SHEETS.map(linkOf)]) {
+for (const expected of [SERVED, SCRIPT, THEME, ...SHEETS.map(linkOf)]) {
   if (!page.includes(expected)) {
     throw new Error(`demo/index.html no longer carries ${expected}`);
   }
@@ -110,4 +143,5 @@ await writeFile(
   sheeted
     .replace(SERVED, `${STATIC} data-bead-worker="${String(workerFile)}"`)
     .replace(SCRIPT, `src="./${String(pageFile)}"`)
+    .replace(THEME, `<script src="./${themeFile}"></script>`)
 );

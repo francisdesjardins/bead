@@ -51,7 +51,7 @@ use crate::router::types::{
 };
 use crate::session_token::SessionToken;
 use crate::transport::{
-    Listened, ListenerId, Panicked, Sent, ServerListener, ServerTransport, caught,
+    Listened, ListenerId, Panicked, Sent, ServerListener, ServerTransport, caught, caught_future,
 };
 
 #[cfg(test)]
@@ -401,6 +401,30 @@ impl Side for ServerState {
 
     fn report(&mut self, error: RouterError, connection_handle: &ConnectionHandle) {
         self.listeners.report(&error, Some(connection_handle));
+    }
+
+    // ! the application's transport, asked within the turn, its close waited on off the owner: what
+    // it panics is reported with its connection (spec 15.1)
+    fn close(&mut self, connection_handle: &ConnectionHandle) {
+        let Some(transport) = self.transport() else {
+            return;
+        };
+
+        match caught(("a transport", || transport.close(connection_handle))) {
+            Ok(closing) => {
+                let owner = self.core.owner.clone();
+                let handle = Arc::clone(connection_handle);
+
+                self.core.owner.cover(async move {
+                    if let Err(panicked) = caught_future(("a transport", closing)).await {
+                        owner.offer(Box::new(move |state: &mut Self| {
+                            state.report(panicked.into(), &handle);
+                        }));
+                    }
+                });
+            }
+            Err(panicked) => self.report(panicked.into(), connection_handle),
+        }
     }
 
     // ! the application's transport, called within the turn: what it panics is its throw, the

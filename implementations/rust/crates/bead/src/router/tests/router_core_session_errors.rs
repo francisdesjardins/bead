@@ -50,13 +50,11 @@ async fn reports(peer: &crate::testing::core_port::Peer) -> Vec<(String, bool)> 
 }
 
 // spec 13.1
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared error-order, OPAQUE and NONE scenarios include each late settlement"
 )]
-async fn a_credential_whose_resolution_throws_or_rejects_or_promises_for_none_or_opaque_is_answered_procedure_failed_and_reported_a_jwts_in_a_later_turn()
- {
+async fn failed_resolutions() {
     let (peer, handed, admitted) = serving(Some(Box::new(|request, _| {
         match request.carried.header.call_id {
             1 | 3 | 7 => Resolution::Now(Err(broken("no verifier answers"))),
@@ -170,4 +168,16 @@ async fn a_credential_whose_resolution_throws_or_rejects_or_promises_for_none_or
     assert_eq!(reports(&none).await.len(), 1);
     assert!(locked(&handed).is_empty());
     assert!(locked(&admitted).is_empty());
+}
+
+#[tokio::test]
+async fn a_credential_whose_resolution_throws_or_rejects_or_promises_for_none_or_opaque_is_answered_procedure_failed_and_reported_a_jwts_in_a_later_turn()
+ {
+    failed_resolutions().await;
+}
+
+#[tokio::test]
+async fn whose_resolution_throws_or_rejects_or_promises_for_none_or_opaque_is_answered_procedure_failed_and_reported_a_jwts_in_a_later_turn()
+ {
+    failed_resolutions().await;
 }

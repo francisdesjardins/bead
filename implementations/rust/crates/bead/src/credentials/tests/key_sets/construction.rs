@@ -229,3 +229,51 @@ async fn asks_the_elsewhere_verifier_once_with_exactly_what_its_transport_carrie
     signal.cancel();
     assert!(locked(&asked)[0].1.is_cancelled());
 }
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_key_not_shaped_for_its_algorithm_and_an_audience_not_of_well_formed_unicode()
+ {
+    let fixture = Fixture::new(vec![]);
+    let mut key = application(ISSUER, (1, None));
+    key.jwk
+        .insert("k".to_owned(), json!(crate::base64url::encode(&[1; 31])));
+    let bad = Credentials {
+        audience: Some(AUDIENCE.to_owned()),
+        keys: vec![key],
+        ..Credentials::default()
+    };
+    configured(&fixture, &bad).expect_err("a 31-byte HS256 key is refused at construction");
+    let good = Credentials {
+        audience: Some(AUDIENCE.to_owned()),
+        keys: vec![application(ISSUER, (1, None))],
+        ..Credentials::default()
+    };
+    configured(&fixture, &good).expect("its 32-byte key holds");
+    assert!(
+        String::from_utf16(&[0xd800]).is_err(),
+        "a Rust audience holds no surrogate alone"
+    );
+}
+
+#[tokio::test]
+async fn refuses_limits_whose_chunk_or_envelope_is_under_1024_bytes_and_takes_them_from_1024() {
+    refuses_limits_whose_chunk_or_envelope_is_under_1_024_bytes_and_takes_them_from_1_024();
+    // The same small envelope is taken by a side that presents and takes no JWT.
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let transport = crate::testing::scripted::ScriptedClient::new(clock);
+    let router = crate::RouterClient::new(
+        Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport),
+        &crate::RouterClientOptions {
+            limits: Some(crate::RouterLimitsOptions {
+                chunk_bytes: Some(64),
+                maximum_envelope_bytes: Some(64),
+                window_bytes: Some(128),
+                ..crate::RouterLimitsOptions::default()
+            }),
+            ..crate::RouterClientOptions::default()
+        },
+    )
+    .expect("a side without JWT needs no 1024-byte envelope");
+    router.dispose().await;
+    assert_eq!(transport.listener_count(), 0);
+}

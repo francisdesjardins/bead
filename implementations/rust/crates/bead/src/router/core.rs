@@ -32,8 +32,9 @@ use crate::failure::{Failure, ProcedureAddress};
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
 use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
-    Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
-    RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
+    Admitted, Announcements, Answering, AnsweringCalls, OpeningOf, PendingCalls, Placed, Placement,
+    ReceivingTransfers, RequestReceiving, ResolverRun, SendingFor, SendingTransfers,
+    budget_wait_of, cancel_timer,
 };
 use crate::router::transfer::{Chunk, ChunkOutcome};
 use crate::router::types::{
@@ -204,6 +205,11 @@ pub(crate) struct Dispatch {
     pub(crate) session: Mutex<Option<Arc<CallSession>>>,
     pub(crate) answered: Mutex<Option<FailureRecord>>,
     pub(crate) origin: (Option<String>, Option<u16>),
+    /// Where its resolver stands, which its call shares.
+    pub(crate) run: ResolverRun,
+    /// Whether this side answered its call `PROCEDURE_FAILED`, its own failure: what its resolver
+    /// fails with is then reported, whatever tells it after (spec 9.0).
+    pub(crate) is_failed_answered: AtomicBool,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -300,10 +306,20 @@ pub(crate) enum Resolution {
 }
 
 /// A request as a side resolves its credential: where it came from, and what it came with.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct SessionRequest {
     pub(crate) connection_handle: ConnectionHandle,
     pub(crate) carried: Carried,
+}
+
+impl fmt::Debug for SessionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionRequest")
+            .field("connection_handle", &self.connection_handle)
+            .field("header", &self.carried.header)
+            .finish_non_exhaustive()
+    }
 }
 
 /// An answer about to be written, as its side is shown it before.
@@ -432,6 +448,10 @@ pub(crate) trait Side: Sized + Send + 'static {
 
     /// What went wrong that no call waits on.
     fn report(&mut self, error: RouterError, connection_handle: &ConnectionHandle);
+
+    /// Closes `connection_handle` of its own accord, its peer refused past the resolvers that
+    /// outlive its calls (spec 9.2, step 3): a server closes that connection, a client its own.
+    fn close(&mut self, connection_handle: &ConnectionHandle);
 
     /// Its owner ends on a job that panicked (decision 0044): each call it waits on fails now, with
     /// that panic for its reason, and it is marked disposed; a side lets go of the rest of what it
@@ -1414,14 +1434,31 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
 }
 
 // takes a call out — only while `only` dispatched it, when given — what it received leaving with it,
-// its call abandoned
+// its call abandoned; a resolver whose turn has not come never runs, and one that runs on outlives
+// its call, keeping its place, and its transfer's, until it settles (spec 9.2, steps 3 and 9)
 fn forget_answering<S: Side>(
     state: &mut S,
     (call, only): (&CallAddress, Option<u64>),
 ) -> Option<Answering> {
     let answering = state.core().answering.forget(call, only)?;
+    let outlives = answering.run.end();
+
+    if outlives {
+        state
+            .core()
+            .answering
+            .outlive((&call.connection_handle, &answering));
+    }
 
     if let Some(receiving) = &answering.receiving {
+        // a transfer it still receives keeps its place, one that ended keeps none
+        if outlives && state.core().receivings.get(receiving.transfer).is_some() {
+            state
+                .core()
+                .receivings
+                .outlive((&call.connection_handle, answering.dispatched));
+        }
+
         let core = state.core();
         let credit_end = core
             .receivings
@@ -1434,12 +1471,56 @@ fn forget_answering<S: Side>(
 
         core.receiving_requests.remove(&receiving.transfer);
 
-        let credits = core.receivings.close(receiving.transfer);
+        let admitted = core.receivings.close(receiving.transfer);
 
-        send_credits(state, credits);
+        admit(state, admitted);
     }
 
     Some(answering)
+}
+
+/// Sets each transfer the budget admitted going, then sends its first credit: a request's, its
+/// transfer's inactivity; a result's, its call's, set going again (spec 12.4, 12.8). One ended as
+/// another was set going is skipped, and a disposed router sends nothing.
+pub(crate) fn admit<S: Side>(state: &mut S, admitted: Vec<Admitted>) {
+    for Admitted {
+        id,
+        call,
+        credit_end,
+    } in admitted
+    {
+        let core = state.core();
+        let timeout = core.limits.transfer_inactivity_timeout;
+
+        if core.is_disposed() || core.receivings.get(id).is_none() {
+            continue;
+        }
+
+        if core.receiving_requests.contains_key(&id) {
+            touch_request_transfer(state, (id, timeout));
+        } else if let Some(request) = core.pending.get(&call).filter(|request| {
+            request
+                .receiving
+                .as_ref()
+                .is_some_and(|receiving| receiving.transfer == id)
+        }) {
+            let request = request.id;
+
+            crate::router::requester::request_progress(state, (&call, request));
+        }
+
+        let core = state.core();
+
+        // ! setting its timer going may have ended it, or disposed the router: its credit goes
+        // only while it is held
+        if core.is_disposed() || core.receivings.get(id).is_none() {
+            continue;
+        }
+
+        if let Some(credit_end) = credit_end {
+            send_credits(state, vec![(call, credit_end)]);
+        }
+    }
 }
 
 /// Sends each credit the budget let a transfer grant.
@@ -1632,6 +1713,17 @@ fn answer_call<S: Side>(state: &mut S, (made, is_in_place): (CallAnswer<S>, bool
     // its answer going out: a second goes nowhere, and this one closes the call once done
     let is_its = state.core().answering.answer((&call, dispatch.id));
 
+    // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+    // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+    if let RouterAnswer::Failure(failure) = &answer
+        && is_its
+        && !state.core().is_disposed()
+        && failure.scope == FailureScope::Protocol
+        && failure.code == ProtocolCode::PROCEDURE_FAILED.get()
+    {
+        dispatch.is_failed_answered.store(true, Ordering::Release);
+    }
+
     // ! held only for the router's own answer in its resolver's place, which its manager tells as
     // that resolver's answer settles: a failure the resolver answered is never held
     if let RouterAnswer::Failure(failure) = &answer
@@ -1723,6 +1815,61 @@ pub(crate) fn refuse<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc
             )),
         },
     );
+}
+
+// a request past the calls its connection has this side answer and those whose resolvers outlive
+// them, refused; once its connection was refused so `tracked_most` requests in a row, nothing
+// settling between, the close is reported and, once the last refusal is handed to its transport,
+// the connection closed in a later turn, as an HTTP/2 endpoint MAY treat suspicious activity as a
+// connection error of type ENHANCE_YOUR_CALM (RFC 9113 §10.5)
+fn refuse_past_tracked<S: Side>(state: &mut S, (dispatch, tracked_most): (&Arc<Dispatch>, u64)) {
+    let handle = Arc::clone(&dispatch.connection_handle);
+    let core = state.core();
+    let failure = core
+        .failure(ProtocolCode::CAPACITY_EXCEEDED)
+        .saying(format!(
+            "the calls a connection answers and those its resolvers outlive are {tracked_most} at most"
+        ));
+    let run = core.answering.refused_past(&handle);
+
+    if run != tracked_most {
+        return refuse(state, (failure, dispatch));
+    }
+
+    let closing = Arc::clone(dispatch);
+
+    answer_in_place(
+        state,
+        CallAnswer {
+            answer: RouterAnswer::Failure(failure.record()),
+            dispatch: Arc::clone(dispatch),
+            done: Some(Box::new(
+                move |state: &mut S, outcome: Result<(), CallError>| {
+                    if let Err(error) = outcome {
+                        // a refusal that never reached the transport leaves no call open behind it
+                        close_answering(state, &closing);
+                        state.report(reported_call(error), &closing.connection_handle);
+                    }
+
+                    // none once its router was disposed
+                    state.core().later(move |state: &mut S| {
+                        if !state.core().is_disposed() {
+                            state.close(&closing.connection_handle);
+                        }
+                    });
+                },
+            )),
+        },
+    );
+
+    let failure = state
+        .core()
+        .failure(ProtocolCode::CAPACITY_EXCEEDED)
+        .saying(format!(
+            "the calls a connection answers and those its resolvers outlive stayed at {tracked_most} for {tracked_most} requests: the connection is closed"
+        ));
+
+    state.report(reported(failure), &handle);
 }
 
 // a result's transfer progressing sets its timer going again
@@ -1848,11 +1995,18 @@ fn dispatch_to<S: Side>(
         }),
         carried: None,
     };
+    let run = dispatch.run.clone();
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
-    let resolving = match caught(("a resolver", || (handler.resolve)(props))) {
-        Ok(resolving) => resolving,
-        Err(panicked) => {
-            return resolver_failed(state, (&dispatch, &signal, ResolverError::other(panicked)));
+    let resolving = async move {
+        // ! its turn and its call's end race: a call that ended before its turn hands it nothing,
+        // as Go's server starts no handler for a stream reset before its turn (spec 9.2, step 9)
+        if !run.start() {
+            return Ok(());
+        }
+
+        match caught(("a resolver", || (handler.resolve)(props))) {
+            Ok(resolving) => resolving.await,
+            Err(panicked) => Err(ResolverError::other(panicked)),
         }
     };
     let Some(running) = owner.spawn(resolving) else {
@@ -1868,6 +2022,15 @@ fn dispatch_to<S: Side>(
             )),
         };
 
+        // * one that outlived its call gives its place back as it settles, however it settles
+        if dispatch.run.settle() {
+            let settled = Arc::clone(&dispatch);
+
+            owner.offer(Box::new(move |state: &mut S| {
+                settle_resolver(state, &settled);
+            }));
+        }
+
         if let Err(error) = outcome {
             owner.offer(Box::new(move |state: &mut S| {
                 resolver_failed(state, (&dispatch, &signal, error));
@@ -1876,8 +2039,19 @@ fn dispatch_to<S: Side>(
     });
 }
 
-// a resolver that failed: reported unless its call was cancelled or went with its connection, then
-// answered PROCEDURE_FAILED while it still answers, as the other sides' order has it
+// gives back the place a resolver that outlived its call kept, and its transfer's, as it settles
+fn settle_resolver<S: Side>(state: &mut S, dispatch: &Dispatch) {
+    let core = state.core();
+    let handle = &dispatch.connection_handle;
+
+    core.answering.settle((handle, dispatch.id));
+    core.receivings.settle((handle, dispatch.id));
+}
+
+// a resolver that failed: reported unless its call was cancelled or went with its connection, or
+// it was told by its signal before its failure came, one whose call this side answered
+// PROCEDURE_FAILED reported all the same; then answered PROCEDURE_FAILED while it still answers, as
+// the other sides' order has it
 fn resolver_failed<S: Side>(
     state: &mut S,
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
@@ -1886,7 +2060,7 @@ fn resolver_failed<S: Side>(
     let ResolverError::Other(error) = error;
     let error = reported_error_of(error);
 
-    if !signal.is_aborted() {
+    if !signal.is_aborted() || dispatch.is_failed_answered.load(Ordering::Acquire) {
         state.report(error, &handle);
     }
 
@@ -1927,10 +2101,11 @@ fn is_admission_code(failure: &Failure) -> bool {
 }
 
 // a request admitted on the call's session, then where it goes: refused, dispatched, or its
-// transfer opened, whose first credit goes only now
+// transfer opened, whose first credit goes only now; an opening is held to `opening_bytes`, what its
+// sender placed in it by the header it sent
 fn admit_routed<S: Side>(
     state: &mut S,
-    (dispatch, payload, handler): (Arc<Dispatch>, Bytes, Arc<Handler>),
+    (dispatch, (payload, opening_bytes), handler): (Arc<Dispatch>, (Bytes, u64), Arc<Handler>),
 ) {
     let handle = Arc::clone(&dispatch.connection_handle);
     let session = locked(&dispatch.session).clone();
@@ -2007,8 +2182,16 @@ fn admit_routed<S: Side>(
         connection_handle: Arc::clone(&handle),
         call_id: header.call_id,
     };
-    let transfer = match core.receivings.open(&payload, (&call, total)) {
-        Ok(transfer) => transfer,
+    let opened = core.receivings.open(
+        &payload,
+        OpeningOf {
+            call: &call,
+            total,
+            opening_bytes,
+        },
+    );
+    let (transfer, admitted) = match opened {
+        Ok(opened) => (opened.id, opened.admitted),
         Err(failure) => return refuse(state, (failure, &dispatch)),
     };
     let timeout = core.limits.transfer_inactivity_timeout;
@@ -2016,8 +2199,13 @@ fn admit_routed<S: Side>(
     core.receiving_requests
         .insert(transfer, (Arc::clone(&dispatch), Arc::clone(&handler)));
 
-    // kept before its first credit goes, so a chunk that credit brings at once finds it
+    // kept before its first credit goes, so a chunk that credit brings at once finds it; kept as
+    // well while it waits, so a cancel or a close ends it as it ends one admitted
     core.answering.attach(&call, RequestReceiving { transfer });
+
+    if !admitted {
+        return wait_for_budget(state, (transfer, total));
+    }
 
     touch_request_transfer(state, (transfer, timeout));
 
@@ -2029,6 +2217,63 @@ fn admit_routed<S: Side>(
         .collect();
 
     send_credits(state, credits);
+}
+
+// arms the wait of a request's opening the budget does not admit yet, in its transfer's timer:
+// still waiting once it passes, it is refused, and the budget walks the openings behind it
+fn wait_for_budget<S: Side>(state: &mut S, (transfer, total): (u64, u64)) {
+    let core = state.core();
+    let wait = budget_wait_of(&core.limits);
+    let timer = core.after(wait, move |state: &mut S| {
+        let core = state.core();
+        let Some((dispatch, _)) = core.receiving_requests.get(&transfer).cloned() else {
+            return;
+        };
+
+        if !core.receivings.is_waiting(transfer) {
+            return;
+        }
+
+        let failure = core
+            .failure(ProtocolCode::CAPACITY_EXCEEDED)
+            .saying(format!(
+                "a total of {total} bytes waited {} milliseconds for the budget",
+                wait.as_millis()
+            ));
+
+        refuse(state, (failure, &dispatch));
+
+        // * its end walks the openings that wait in this turn, whatever its refusal did with it:
+        // one its transport refused closes its call only in a later turn
+        let admitted = state.core().receivings.refuse_waiting(transfer);
+
+        admit(state, admitted);
+    });
+
+    hold_request_timer(state, (transfer, timer));
+}
+
+// keeps the timer armed for a request's transfer in its slot, in place of the one before; none
+// for a transfer ended meanwhile
+fn hold_request_timer<S: Side>(
+    state: &mut S,
+    (transfer, timer): (u64, Result<Arc<dyn Timer>, ProgrammerError>),
+) {
+    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
+        if let Ok(timer) = timer {
+            timer.cancel();
+        }
+        return;
+    };
+    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
+        return;
+    };
+    if let Some(receiving) = state.core().receivings.get_mut(transfer) {
+        cancel_timer(&mut receiving.timer);
+        receiving.timer = Some(timer);
+    } else {
+        timer.cancel();
+    }
 }
 
 // sets a request's transfer's timer going again: silent too long, it is refused
@@ -2047,21 +2292,7 @@ fn touch_request_transfer<S: Side>(state: &mut S, (transfer, timeout): (u64, Dur
         refuse(state, (failure, &dispatch));
     });
 
-    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
-        if let Ok(timer) = timer {
-            timer.cancel();
-        }
-        return;
-    };
-    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
-        return;
-    };
-    if let Some(receiving) = state.core().receivings.get_mut(transfer) {
-        cancel_timer(&mut receiving.timer);
-        receiving.timer = Some(timer);
-    } else {
-        timer.cancel();
-    }
+    hold_request_timer(state, (transfer, timer));
 }
 
 // the call's session, from what its request came with, then its admission on it; while it
@@ -2081,6 +2312,13 @@ fn resolve_session<S: Side>(
     let Some(signal) = signal_of(state, &dispatch) else {
         return;
     };
+    // ! counted by the header as it came: the one handed on holds no JWT's bytes (spec 12.3)
+    let opening_bytes = carried.header.total.map_or(0, |_| {
+        state
+            .core()
+            .placement
+            .opening_bytes_of(&EnvelopeHeader::Request(carried.header.clone()))
+    });
     let credential_scheme = carried.header.credential.as_ref().map(Credential::scheme);
     let has_credential = carried.header.credential.is_some();
     let is_later = matches!(
@@ -2120,7 +2358,7 @@ fn resolve_session<S: Side>(
     if is_later && is_forwarded {
         return state.core().later(move |state: &mut S| {
             if !signal.is_aborted() {
-                admit_routed(state, (dispatch, payload, handler));
+                admit_routed(state, (dispatch, (payload, opening_bytes), handler));
             }
         });
     }
@@ -2143,6 +2381,7 @@ fn resolve_session<S: Side>(
         }
         resolution @ (Resolution::Now(_) | Resolution::Later(_)) => resolution,
     };
+    let verifying = Arc::clone(&dispatch);
     let settle = move |state: &mut S, resolved: Result<Resolved, Unresolved>| {
         match resolved {
             Ok(resolved) => {
@@ -2175,7 +2414,7 @@ fn resolve_session<S: Side>(
                 }
 
                 *locked(&dispatch.session) = session;
-                admit_routed(state, (dispatch, payload, handler));
+                admit_routed(state, (dispatch, (payload, opening_bytes), handler));
             }
             // a bound of the side's own refuses the call: nothing failed, so nothing is reported
             Err(Unresolved::Capacity(error)) => {
@@ -2212,18 +2451,37 @@ fn resolve_session<S: Side>(
             let owner = state.core().owner.clone();
             let token = signal.token().clone();
 
+            // * its verifier runs as a resolver does: a call that ends meanwhile leaves it
+            // outliving that call, its place kept until it settles (spec 10.2)
+            verifying.run.verify();
             state.core().owner.cover(async move {
                 // ! what a resolution panics is its throw, as a resolver's is: the call answered
                 // PROCEDURE_FAILED and the panic reported (decision 0044)
                 let mut resolving =
                     Box::pin(caught_future(("a credential's resolution", resolving)));
+                let settled = |owner: &WeakOwner<S>, verifying: Arc<Dispatch>| {
+                    owner.offer(Box::new(move |state: &mut S| {
+                        settle_resolver(state, &verifying);
+                    }));
+                };
                 let Some(resolved) = token.run_until_cancelled(resolving.as_mut()).await else {
                     // ! the verifier may ignore its signal: its task keeps no cancelled call's
                     // payload, which belongs to the settlement alone
                     drop(settle);
                     drop(resolving.await);
+
+                    if verifying.run.settle() {
+                        settled(&owner, verifying);
+                    }
+
                     return;
                 };
+
+                // its call ended as it settled: what it settled to is dropped, its place given back
+                if verifying.run.verified() {
+                    settled(&owner, verifying);
+                }
+
                 let resolved =
                     resolved.unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
@@ -2235,6 +2493,10 @@ fn resolve_session<S: Side>(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/credential_schemes.rs"]
+mod credential_schemes_tests;
 
 // the schemes the side takes, OPAQUE always, and the detail that names them
 fn schemes_detail_of(schemes: &BTreeSet<u16>) -> String {
@@ -2307,8 +2569,11 @@ fn receive_request<S: Side>(
     }
 
     let core = state.core();
-    // past the calls its connection has this side answer at once, it is refused before anything
-    // else of it is read, and counted all the same
+    // past the calls its connection has this side answer at once, or past twice as many with the
+    // calls whose resolvers outlive them, it is refused before anything else of it is read, and
+    // counted all the same
+    let tracked_most = core.limits.maximum_answering_calls.saturating_mul(2);
+    let is_past_tracked = core.answering.tracked_on(handle) >= tracked_most;
     let is_past_bound = core.answering.count_on(handle) >= core.limits.maximum_answering_calls;
     let registered = header
         .destination_id
@@ -2344,6 +2609,8 @@ fn receive_request<S: Side>(
         session: Mutex::new(None),
         answered: Mutex::new(None),
         origin,
+        run: ResolverRun::default(),
+        is_failed_answered: AtomicBool::new(false),
     });
 
     // * its call starts as its request opens it, timed from its arrival
@@ -2362,6 +2629,7 @@ fn receive_request<S: Side>(
         Answering {
             dispatched: id,
             signal: Signal::new(),
+            run: dispatch.run.clone(),
             is_answered: false,
             is_ended: false,
             receiving: None,
@@ -2379,7 +2647,16 @@ fn receive_request<S: Side>(
         header: header.clone(),
     };
 
-    // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer open
+    // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer open;
+    // the second ceiling first
+    if is_past_tracked {
+        return refuse_past_tracked(state, (&dispatch, tracked_most));
+    }
+
+    state.core().answering.admitted(handle);
+
+    let core = state.core();
+
     if is_past_bound {
         let failure = core
             .failure(ProtocolCode::CAPACITY_EXCEEDED)
@@ -2624,9 +2901,9 @@ fn receive_request_chunk<S: Side>(
             send_credits(state, credits);
         }
         Ok(ChunkOutcome::Complete) => {
-            let (payload, credits) = state.core().receivings.complete(transfer);
+            let (payload, admitted) = state.core().receivings.complete(transfer);
 
-            send_credits(state, credits);
+            admit(state, admitted);
             dispatch_to(state, (handler, dispatch, payload));
         }
         // a chunk that brings nothing new is dropped in silence
@@ -2691,11 +2968,11 @@ pub(crate) fn reject_pending<S: Side>(
     state: &mut S,
     (reason, handle): (&str, Option<&ConnectionHandle>),
 ) {
-    // its transfers first, so the budget they give back grants no credit to one about to go; the
-    // credits it grants the transfers of other connections go out (spec 12.10)
-    let credits = state.core().receivings.close_all(handle);
+    // its transfers first, waiting or admitted, so the budget they give back admits no opening
+    // about to go; the openings of other connections it admits are credited (spec 12.10)
+    let admitted = state.core().receivings.close_all(handle);
 
-    send_credits(state, credits);
+    admit(state, admitted);
 
     let core = state.core();
 
@@ -2712,13 +2989,20 @@ pub(crate) fn reject_pending<S: Side>(
     // ! the calls it answers taken last, each counted closed once all are out
     let mut taken = core.answering.take_all(handle);
 
-    // * read once, and only when a call it takes is counted (spec/debugging.md 3.1)
-    let mut now = None;
+    // * a resolver queued never runs; each still running, its call answered or not, is told by its
+    // call's signal, and counts side-wide until it settles (spec 9.10)
+    for (_, answering) in &taken {
+        if answering.run.end() {
+            core.answering.outlive_closed(answering.dispatched);
+        }
+    }
 
+    let outliving = core.answering.close_outliving(handle);
+
+    // * each call counted reads its clock at its own end gate, and one not counted reads none
+    // (spec/debugging.md 3.1, 3.3)
     for (_, answering) in &mut taken {
-        answering.end(CallEnding::Closed, || {
-            *now.get_or_insert_with(|| core.now())
-        });
+        answering.end(CallEnding::Closed, || core.now());
     }
 
     // then each call waiting settled, and each signal aborted, application code last
@@ -2730,6 +3014,10 @@ pub(crate) fn reject_pending<S: Side>(
         answering
             .signal
             .abort(SignalReason::Disconnected(reason.to_owned()));
+    }
+
+    for signal in outliving {
+        signal.abort(SignalReason::Disconnected(reason.to_owned()));
     }
 }
 

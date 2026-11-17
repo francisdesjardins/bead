@@ -6,8 +6,8 @@
 // (VALIDATE_COPY). googleapis' `google/api/http.proto` and `annotations.proto`, which beadc vendors
 // too (decision 0037), are taken from the roots where both are there and each is the pin's bytes, a
 // line's CRLF read as LF, since many a project vendors googleapis whole; any other copy is HTTP_COPY.
-// Where a file of the set is on disk, for a finding's path. The roots' source files are read alone;
-// beadc's work area belongs to its own module.
+// Where a file of the set is on disk, for a finding's path. The roots' source files are read alone,
+// never the editor's copy of beadc's options a root's `.beadc/` holds.
 
 // dependencies
 
@@ -16,6 +16,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { BEADC_FOLDER } from './config.ts';
 import { diagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 
 // constants
@@ -68,10 +69,15 @@ export const displayOf = (path: string): string => {
   return relative(process.cwd(), path).split(sep).join('/');
 };
 
-// whether `folder` holds a `.proto` file, at any depth
+// whether `folder` holds a `.proto` file, at any depth; never in beadc's own folder, the editor's
+// copy of its options
 const holdsProto = (folder: string): boolean => {
-  return readdirSync(folder, { recursive: true, encoding: 'utf8' }).some((name) => {
-    return name.endsWith('.proto');
+  return readdirSync(folder, { withFileTypes: true }).some((entry) => {
+    if (entry.isDirectory()) {
+      return entry.name !== BEADC_FOLDER && holdsProto(join(folder, entry.name));
+    }
+
+    return entry.name.endsWith('.proto');
   });
 };
 

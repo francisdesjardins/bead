@@ -32,11 +32,12 @@ const ONLY_CONNECTION: &str = "connection";
 
 // ! every key of a step this player reads: one it does not know fails the step, rather than pass it
 // unplayed
-const STEP_KEYS: [&str; 16] = [
+const STEP_KEYS: [&str; 17] = [
     "advance",
     "carried",
     "carries",
     "close",
+    "closed",
     "counted",
     "expect",
     "on",
@@ -96,6 +97,8 @@ struct Script {
     // the procedures each connection's open gave its transport, every one for a connection absent
     taking: HashMap<ConnectionHandle, BTreeSet<ProcedureAddress>>,
     sent: HashMap<ConnectionHandle, VecDeque<SentEnvelope>>,
+    // the connections the server closed of its own accord
+    closed_by_server: HashSet<ConnectionHandle>,
 }
 
 impl Script {
@@ -166,8 +169,34 @@ impl ServerTransport for Scripted {
         Ok(Sent::Done)
     }
 
-    fn close(&self, _connection_handle: &ConnectionHandle) -> BoxFuture<bool> {
-        Box::pin(async { false })
+    // * a connection the server closes of its own accord is told closed in a later turn, as every
+    // transport tells it
+    fn close(&self, connection_handle: &ConnectionHandle) -> BoxFuture<bool> {
+        let handle = Arc::clone(connection_handle);
+        let is_open = {
+            let mut script = locked(&self.script);
+            let is_open = script.opened.contains(&handle);
+
+            if is_open {
+                script.opened.retain(|held| *held != handle);
+                script.closed_by_server.insert(Arc::clone(&handle));
+            }
+
+            is_open
+        };
+        let listeners = locked(&self.listeners).clone();
+
+        Box::pin(async move {
+            if !is_open {
+                return false;
+            }
+
+            for listener in listeners {
+                listener.on_close(false, &handle);
+            }
+
+            true
+        })
     }
 
     fn listen(&self, listener: Arc<dyn ServerListener>) {
@@ -221,10 +250,19 @@ impl ServerTransport for Scripted {
 
 // ── The in-memory connections ────────────────────────────────────────────────────────────────
 
+// the names whose connection the test closes, and those whose connection closed while the test
+// did not close it: the server did
+#[derive(Default)]
+struct Closes {
+    closing: HashSet<String>,
+    by_server: HashSet<String>,
+}
+
 // what a client's transport hears, kept for the steps that expect it
 struct Hearing {
     name: String,
     heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
+    closes: Arc<Mutex<Closes>>,
 }
 
 impl ClientListener for Hearing {
@@ -233,6 +271,14 @@ impl ClientListener for Hearing {
             .entry(self.name.clone())
             .or_default()
             .push_back((message.data, message.credential));
+    }
+
+    fn on_close(&self, _was_clean: bool, _is_quick: bool) {
+        let mut closes = locked(&self.closes);
+
+        if !closes.closing.remove(&self.name) {
+            closes.by_server.insert(self.name.clone());
+        }
     }
 }
 
@@ -256,6 +302,7 @@ struct InMemory {
     ports: HashMap<String, u16>,
     handles: HashMap<String, ConnectionHandle>,
     heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
+    closes: Arc<Mutex<Closes>>,
     drawn: Arc<Mutex<Option<ConnectionHandle>>>,
 }
 
@@ -272,6 +319,7 @@ struct OverBroker {
     clients: HashMap<String, BrokerTransportClient>,
     handles: HashMap<String, ConnectionHandle>,
     heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
+    closes: Arc<Mutex<Closes>>,
     drawn: Arc<Mutex<Option<ConnectionHandle>>>,
 }
 
@@ -321,6 +369,7 @@ impl OverBroker {
             clients: HashMap::new(),
             handles: HashMap::new(),
             heard: Arc::new(Mutex::new(HashMap::new())),
+            closes: Arc::default(),
             drawn,
         })
     }
@@ -343,10 +392,13 @@ impl OverBroker {
             client.listen(Arc::new(Hearing {
                 name: name.to_owned(),
                 heard: Arc::clone(&self.heard),
+                closes: Arc::clone(&self.closes),
             }));
             self.participants.insert(name.to_owned(), participant);
             self.clients.insert(name.to_owned(), client);
         }
+
+        locked(&self.closes).by_server.remove(name);
 
         let client = self
             .clients
@@ -448,6 +500,7 @@ impl Connections {
                     }
 
                     script.opened.push(Arc::clone(&handle));
+                    script.closed_by_server.remove(&handle);
 
                     // each connection takes what its open gave its transport
                     if let Some(procedures) = procedures {
@@ -479,9 +532,12 @@ impl Connections {
                     client.listen(Arc::new(Hearing {
                         name: name.to_owned(),
                         heard: Arc::clone(&memory.heard),
+                        closes: Arc::clone(&memory.closes),
                     }));
                     memory.clients.insert(name.to_owned(), client);
                 }
+
+                locked(&memory.closes).by_server.remove(name);
 
                 let client = memory
                     .clients
@@ -582,6 +638,8 @@ impl Connections {
                     .ok_or_else(|| format!("no step opened {name}"))?;
                 let mut options = TransportClientDisconnectOptions::default();
 
+                locked(&memory.closes).closing.insert(name.to_owned());
+
                 options.is_clean = Some(false);
 
                 client
@@ -595,6 +653,8 @@ impl Connections {
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
                 let mut options = TransportClientDisconnectOptions::default();
+
+                locked(&broker.closes).closing.insert(name.to_owned());
 
                 options.is_clean = Some(false);
 
@@ -615,12 +675,20 @@ impl Connections {
                 }
             }
             Self::InMemory(memory) => {
+                locked(&memory.closes)
+                    .closing
+                    .extend(memory.clients.keys().cloned());
+
                 for client in memory.clients.values() {
                     client.close();
                 }
             }
             // * each stop takes effect as it is made: its future only waits
             Self::OverBroker(broker) => {
+                locked(&broker.closes)
+                    .closing
+                    .extend(broker.clients.keys().cloned());
+
                 for client in broker.clients.values() {
                     client.close();
                 }
@@ -631,6 +699,20 @@ impl Connections {
 
                 drop(broker.server.stop());
             }
+        }
+    }
+
+    // whether the server closed the connection `name` of its own accord
+    fn is_closed_by_server(&self, name: &str) -> bool {
+        match self {
+            Self::Scripted(scripted) => {
+                let mut script = locked(&scripted.script);
+                let handle = script.handle_of(name);
+
+                script.closed_by_server.contains(&handle)
+            }
+            Self::InMemory(memory) => locked(&memory.closes).by_server.contains(name),
+            Self::OverBroker(broker) => locked(&broker.closes).by_server.contains(name),
         }
     }
 
@@ -1176,6 +1258,7 @@ pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<
             ports: HashMap::new(),
             handles: HashMap::new(),
             heard: Arc::new(Mutex::new(HashMap::new())),
+            closes: Arc::default(),
             drawn,
         }))
     } else {
@@ -1392,6 +1475,33 @@ async fn play_steps(
                     format!("{at}: reported with {reported:?}, not {handle:?}")
                 })?;
             }
+        }
+
+        // * the server closed it of its own accord, within the player's patience, and nothing more
+        // came on it
+        if step.get("closed") == Some(&Value::Bool(true)) {
+            let mut is_closed = false;
+
+            for _ in 0..PATIENCE {
+                clock.settle().await;
+
+                if connections.is_closed_by_server(on) {
+                    is_closed = true;
+
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+
+            hold(is_closed, || format!("{at}: the server closed {on}"))?;
+            clock.settle().await;
+
+            let untaken = connections.untaken().remove(on);
+
+            hold(untaken.is_none(), || {
+                format!("{at}: what came on {on} before its close: {untaken:?}")
+            })?;
         }
 
         if let Some(timer) = step

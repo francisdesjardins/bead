@@ -15,14 +15,17 @@ test.describe('samplesModule', () => {
     expect(written).toBe(await samplesModule());
   });
 
-  test('offers each role on both sides, a file of its language each', () => {
+  test('offers each role in TypeScript, C# and Rust, a file of its language each', () => {
     expect(Object.keys(SAMPLES)).toEqual(['resolvers', 'serving', 'calling']);
 
-    for (const { csharp, typescript } of Object.values(SAMPLES)) {
+    for (const { csharp, rust, typescript } of Object.values(SAMPLES)) {
       expect(csharp.file).toMatch(/^examples\/hello\/dotnet\/[A-Z][a-z]+\.cs$/u);
+      expect(rust.file).toMatch(/^examples\/hello\/rust\/src\/[a-z]+\.rs$/u);
       expect(typescript.file).toMatch(/^examples\/hello\/typescript\/src\/[a-z]+\.ts$/u);
-      expect(csharp.text.length).toBeGreaterThan(0);
-      expect(typescript.text.length).toBeGreaterThan(0);
+
+      for (const { text } of [csharp, rust, typescript]) {
+        expect(text.length).toBeGreaterThan(0);
+      }
     }
   });
 });

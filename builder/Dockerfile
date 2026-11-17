@@ -8,9 +8,10 @@
 #   docker build -f builder/Dockerfile -t beadc .        # the image
 #
 # Stages: deps, every package of the lock; protoc, the pin's archive for this platform, its sha256
-# checked by fetch-protoc.mjs; production, the runtime's packages and the licences of what the image
-# adds; image, what ships; test, beadc's tests laid over the image; and the image again, last, so a
-# plain build gives it and runs no test.
+# checked by fetch-protoc.mjs; protoc-gen-buffa, the pin's binary for this platform, its sha256
+# checked by fetch-protoc-gen-buffa.mjs; production, the runtime's packages and the licences of what
+# the image adds; image, what ships; test, beadc's tests laid over the image; and the image again,
+# last, so a plain build gives it and runs no test.
 
 # ! the frontend and the base by their digests: one Dockerfile dialect on every engine, and the
 # base named once, for its FROM and its labels. A release bumps both by hand, and shellcheck's in
@@ -39,6 +40,16 @@ COPY builder/protoc.json ./
 COPY builder/tools/fetch-protoc.mjs tools/
 RUN node tools/fetch-protoc.mjs && mv ".protoc/$(node -p "require('./protoc.json').version")" /opt/protoc
 
+# protoc-gen-buffa, by its one pin, which writes a Rust output's messages (decision 0051):
+# fetch-protoc-gen-buffa.mjs reads protoc-gen-buffa.json, takes this platform's binary and checks its
+# sha256 before it writes it as an executable or runs it
+FROM node AS protoc-gen-buffa
+WORKDIR /bead/builder
+COPY builder/protoc-gen-buffa.json ./
+COPY builder/tools/fetch-protoc-gen-buffa.mjs tools/
+RUN node tools/fetch-protoc-gen-buffa.mjs \
+    && mv ".protoc-gen-buffa/$(node -p "require('./protoc-gen-buffa.json').version")" /opt/protoc-gen-buffa
+
 # the runtime's packages alone, and the licence texts of everything the image adds to its base
 FROM deps AS production
 ARG LICENSES
@@ -49,8 +60,9 @@ RUN --mount=type=cache,target=/root/.yarn/berry/cache \
     node .yarn/releases/yarn-4.18.1.cjs workspaces focus --production \
     && node tools/licenses.mjs /opt/bead/licenses "$LICENSES"
 
-# the image: Node, beadc, buf, protoc-gen-es, protoc and its well-known types, bead/options.proto,
-# the wrappers, the files of spec/ beadc reads at their places beside it, and the licences
+# the image: Node, beadc, buf, protoc-gen-es, protoc and its well-known types, protoc-gen-buffa,
+# bead/options.proto, the wrappers, the files of spec/ beadc reads at their places beside it, and the
+# licences
 FROM node AS image
 ARG NODE_IMAGE
 ARG NODE_DIGEST
@@ -63,15 +75,18 @@ LABEL org.opencontainers.image.source=https://github.com/francisdesjardins/bead 
       org.opencontainers.image.base.digest=${NODE_DIGEST}
 COPY --from=production /bead/builder/node_modules/ /opt/bead/builder/node_modules/
 COPY --from=production /opt/bead/licenses/ /opt/bead/licenses/
-COPY builder/package.json builder/protoc.json /opt/bead/builder/
+COPY builder/package.json builder/protoc.json builder/protoc-gen-buffa.json /opt/bead/builder/
 COPY builder/proto/ /opt/bead/builder/proto/
 COPY builder/wrappers/ /opt/bead/builder/wrappers/
 COPY --exclude=**/__tests__ builder/src/ /opt/bead/builder/src/
 COPY spec/spec.md /opt/bead/spec/
 COPY spec/schemas/common.schema.json spec/schemas/bead-blueprint.schema.json /opt/bead/spec/schemas/
 COPY --from=protoc /opt/protoc /opt/protoc
+COPY --from=protoc-gen-buffa /opt/protoc-gen-buffa /opt/protoc-gen-buffa
 # ! a read-only root: every cache under the tmpfs the wrappers mount at /tmp
-ENV BEADC_PROTOC=/opt/protoc/bin/protoc HOME=/tmp XDG_CACHE_HOME=/tmp/.cache
+ENV BEADC_PROTOC=/opt/protoc/bin/protoc \
+    BEADC_PROTOC_GEN_BUFFA=/opt/protoc-gen-buffa/protoc-gen-buffa \
+    HOME=/tmp XDG_CACHE_HOME=/tmp/.cache
 # a user no host account is likely to hold: the wrappers pass the caller's on Linux, so a missing
 # --user shows in a test rather than hiding behind a host's first account, 1000
 USER 65532:65532
@@ -93,9 +108,11 @@ COPY implementations/typescript/interop/generated/ implementations/typescript/in
 COPY --exclude=**/__tests__ implementations/typescript/src/ implementations/typescript/src/
 COPY implementations/dotnet/.editorconfig implementations/dotnet/
 COPY implementations/dotnet/interop/Bead.Interop/Generated/ implementations/dotnet/interop/Bead.Interop/Generated/
+# the Rust workspace's manifest, whose requirement of Buffa's crates the plugin's pin is held to
+COPY implementations/rust/Cargo.toml implementations/rust/
 COPY --from=deps /bead/builder/node_modules/ builder/node_modules/
 COPY builder/ builder/
-ENV BEADC_PROTOC_REQUIRED=1 CI=1
+ENV BEADC_PROTOC_REQUIRED=1 BEADC_PROTOC_GEN_BUFFA_REQUIRED=1 CI=1
 WORKDIR /opt/bead/builder
 # ! emulated, as QEMU runs arm64 on amd64, V8's WebAssembly trap handler faults inside the type
 # stripping Node runs beadc through: explicit bounds checks there, the image unchanged

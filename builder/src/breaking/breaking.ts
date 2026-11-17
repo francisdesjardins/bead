@@ -502,10 +502,7 @@ export const breaking = (source: Source, options: IBreakingOptions): IBreaking =
   };
   const fromProto = 'proto' in source;
   const checked: IChecked = fromProto
-    ? checkRoots(source.proto, {
-        image: true,
-        ...(options.config === undefined ? {} : { folder: options.config.folder }),
-      })
+    ? checkRoots(source.proto, { image: true })
     : checkBlueprintFile(source.blueprint, { file: displayOf(source.blueprint) });
 
   // * the current input checked first: an error is check's, and nothing is compared

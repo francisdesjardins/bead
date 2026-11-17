@@ -6,7 +6,7 @@
     "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
     "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
     "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
-    "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
+    "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
     "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
@@ -15,10 +15,11 @@
     "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
     "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
     "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+    "An MQTT 5 acknowledgement's codes are a PUBACK's, a SUBACK's or an UNSUBACK's, by packet and by type, its fixed header's packet type, 4, 9 or 11, and named, the Reason Codes its table names (sections 15.27 to 15.29): a side plays every code from 0x00 to 0xFF of each, read as its table names it where named holds it, a refusal of its request where it is 0x80 or more, and otherwise a packet its client cannot read.",
     "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
     "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
-  "specVersion": "0.14.0",
+  "specVersion": "0.15.0",
   "headers": [
     {
       "name": "a request",
@@ -1679,6 +1680,63 @@
           "kind": 21
         }
       }
+    },
+    {
+      "name": "a chunk past chunkBytes reads, held to it within its transfer",
+      "clauses": [
+        "12.2",
+        "12.2.2",
+        "12.6.1"
+      ],
+      "bytes": "A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 2C | 68 69",
+      "chunkBytes": 17,
+      "envelope": {
+        "kind": 20,
+        "header": {
+          "callId": 7,
+          "isLast": false,
+          "kind": 20,
+          "offset": 44
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a notification past chunkBytes reads",
+      "clauses": [
+        "12.2"
+      ],
+      "bytes": "A1 13 00 02  00 00 00 04 | 68 69",
+      "chunkBytes": 9,
+      "envelope": {
+        "kind": 19,
+        "header": {
+          "callId": 4,
+          "kind": 19
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a failure past chunkBytes reads",
+      "clauses": [
+        "12.2"
+      ],
+      "bytes": "A1 12 00 02  00 00 00 05 | 00 13 00 00",
+      "chunkBytes": 11,
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 5,
+          "kind": 18
+        },
+        "failure": {
+          "code": 19,
+          "detail": "",
+          "relays": 0,
+          "scope": 0
+        }
+      }
     }
   ],
   "envelopeRefusals": [
@@ -1749,6 +1807,78 @@
       "bytes": "B0 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
       "maximumEnvelopeBytes": 13,
       "code": 1
+    },
+    {
+      "name": "a request past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a request's opening past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 00 00 01 00 | 68",
+      "chunkBytes": 20,
+      "code": 4,
+      "detail": "a request is 20 bytes at most, not 21"
+    },
+    {
+      "name": "a result past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 11 00 02  00 00 00 04 | 68 69 6A 6B 6C 6D",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a result is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a result's opening past chunkBytes",
+      "clauses": [
+        "5.1.2",
+        "12.2",
+        "12.2.2"
+      ],
+      "bytes": "A1 11 04 04  00 00 00 04  00 00 00 00 00 00 01 00 | 68",
+      "chunkBytes": 16,
+      "code": 4,
+      "detail": "a result is 16 bytes at most, not 17"
+    },
+    {
+      "name": "a request of a layout to come past chunkBytes, its kind's bound checked before its layout",
+      "clauses": [
+        "5.1",
+        "5.1.2",
+        "12.2"
+      ],
+      "bytes": "A2 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a request past a chunkBytes as large as the envelope's bound names a request",
+      "clauses": [
+        "5.1.2",
+        "12.2"
+      ],
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "maximumEnvelopeBytes": 13,
+      "chunkBytes": 13,
+      "code": 4,
+      "detail": "a request is 13 bytes at most, not 14"
     }
   ],
   "failures": [
@@ -6059,6 +6189,69 @@
       "expiry": true,
       "largestPayload": null,
       "packetBytes": null
+    }
+  ],
+  "mqttAcknowledgementCodes": [
+    {
+      "name": "a PUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.28",
+        "15.29"
+      ],
+      "packet": "PUBACK",
+      "type": 4,
+      "named": [
+        0,
+        16,
+        128,
+        131,
+        135,
+        144,
+        145,
+        151,
+        153
+      ]
+    },
+    {
+      "name": "a SUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.27",
+        "15.29"
+      ],
+      "packet": "SUBACK",
+      "type": 9,
+      "named": [
+        0,
+        1,
+        2,
+        128,
+        131,
+        135,
+        143,
+        145,
+        151,
+        158,
+        161,
+        162
+      ]
+    },
+    {
+      "name": "an UNSUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.27",
+        "15.29"
+      ],
+      "packet": "UNSUBACK",
+      "type": 11,
+      "named": [
+        0,
+        17,
+        128,
+        131,
+        135,
+        143,
+        145
+      ]
     }
   ],
   "amqpMessages": [

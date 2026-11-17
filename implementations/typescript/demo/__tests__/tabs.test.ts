@@ -81,4 +81,27 @@ test.describe('mountTabs', () => {
       })
     ).toBe(0);
   });
+
+  test('marks a list while it runs on past its end, the scenes’ and the code’s roles alike', async ({
+    page,
+  }) => {
+    const scenes = page.locator('#scene-tabs');
+    const roles = page.locator('#sides-tabs');
+
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.goto(`${served?.url ?? ''}#code`);
+    await expect(scenes).toHaveAttribute('data-runs-on', '');
+    await expect(roles).toHaveAttribute('data-runs-on', '');
+
+    for (const list of [scenes, roles]) {
+      await list.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+      });
+      await expect(list).not.toHaveAttribute('data-runs-on');
+    }
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(scenes).not.toHaveAttribute('data-runs-on');
+    await expect(roles).not.toHaveAttribute('data-runs-on');
+  });
 });

@@ -18,8 +18,10 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, subject, branch?, record?, draft?, draftEffort?, small?,
+// args: { slug, subject, branch?, record?, draft?, draftEffort?, small?, repo?, scratch?, venv?, toolchain?,
 //   dissentModel? }
+// - repo, scratch, venv, toolchain: the clone, a folder outside it, the Python of `spec/check.py`
+//   and what goes first on PATH, this machine's by default;
 // - dissentModel: the model the Tenth Man runs on, when it is not the session's ('fable', say);
 // - subject: the change in full: what differs or what changes, the files and sections it touches,
 //   the standards in play;
@@ -37,9 +39,12 @@ const required = (name) => {
   return args[name];
 };
 
-const REPO = required('repo');
-const SCRATCH = required('scratch');
-const VENV = required('venv');
+const REPO = args.repo || 'D:/workspace/francisdesjardins/2025/bead';
+const SCRATCH = args.scratch || 'D:/workspace/francisdesjardins/2025/_scratch';
+const VENV = args.venv || `${SCRATCH}/venv/Scripts/python.exe`;
+const TOOLCHAIN =
+  args.toolchain ||
+  `\`${SCRATCH}/venv/Scripts\` and \`${SCRATCH}/dotnet-10.0.404\` first on PATH, \`DOTNET_ROOT\` the latter, \`NO_COLOR\` unset for Node`;
 const SLUG = required('slug');
 const SUBJECT = required('subject');
 const OUT = `${SCRATCH}/${SLUG}`;
@@ -55,7 +60,7 @@ const RECORD = args.record
 const COMMON = `
 You work on Bead, at ${REPO}${WHERE}. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Do not stage, commit, branch or push.** Change nothing in the repository: write only under ${OUT}/.
-- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
+- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp\`. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Before 1.0.0, a decision record or a released behaviour yields to a standard, an industry practice, a cleaner split, stability or clarity: name it and recommend the revision outright.

@@ -36,6 +36,7 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
+import { PKI } from './tls-front';
 
 // constants
 
@@ -45,6 +46,9 @@ const INBOX_QUEUE = '/queues/bead.i.ada';
 const NAME = Object.freeze(['bead', 's', 'interop']);
 const NAME_QUEUE = '/queues/bead.s.interop';
 const PASSWORD = 'secret';
+
+// the fixture's certificate as a client's, under its key
+const CERTIFIED = Object.freeze({ certificate: TLS_FIXTURE.cert, key: TLS_FIXTURE.key });
 
 // the body sections rhea writes, which its typings leave untyped
 const SECTIONS = rhea.message as unknown as Record<
@@ -326,7 +330,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     try {
       const certified = createAmqpBrokerAdapter({
         id: ID,
-        tls: { ca: TLS_FIXTURE.cert, cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key },
+        tls: { ...CERTIFIED, authorities: TLS_FIXTURE.cert },
         url: secured.url,
       });
       const bare = await linkUp({ adapter: certified, script: secured });
@@ -341,14 +345,14 @@ test.describe('createAmqpBrokerAdapter', () => {
 
     // a certificate in the clear is refused as it is built
     expect(() => {
-      return createAmqpBrokerAdapter({ id: ID, tls: TLS_FIXTURE, url: script.url });
+      return createAmqpBrokerAdapter({ id: ID, tls: CERTIFIED, url: script.url });
     }).toThrow('a TLS client certificate is carried over amqps');
   });
 
   test('fails its start over TLS where its broker’s certificate chains to no authority it trusts', async () => {
     await using secured = await createAmqpScript({ tls: TLS_FIXTURE });
 
-    for (const authentication of [{ password: PASSWORD }, { tls: TLS_FIXTURE }]) {
+    for (const authentication of [{ password: PASSWORD }, { tls: CERTIFIED }]) {
       const adapter = createAmqpBrokerAdapter({
         connectTimeout: 1_000,
         id: ID,
@@ -363,6 +367,37 @@ test.describe('createAmqpBrokerAdapter', () => {
       expect(String(failure)).not.toContain(PASSWORD);
       expect([adapter.isLinked, downs]).toEqual([false, []]);
       await adapter.stop();
+    }
+  });
+
+  // spec 15.39
+  test('links over TLS by a host its broker’s certificate names, and fails its start by one it does not', async () => {
+    // * each leaf names one host alone, which takes it, and the other host of the same script
+    // refuses it
+    for (const [cert, key, named, other] of [
+      [PKI.namedServer, PKI.namedServerKey, 'localhost', '127.0.0.1'],
+      [PKI.addressedServer, PKI.addressedServerKey, '127.0.0.1', 'localhost'],
+    ] as const) {
+      // * the script asks a certificate under the fixture's: its broker judged by the PKI's root, the
+      // adapter presents the fixture's
+      await using secured = await createAmqpScript({ tls: { ca: TLS_FIXTURE.cert, cert, key } });
+      const { port } = new URL(secured.url);
+      const tls = { ...CERTIFIED, authorities: PKI.root };
+      const taken = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${named}:${port}` });
+
+      await linkUp({ adapter: taken, script: secured });
+      expect(taken.isSecure).toBe(true);
+      await taken.stop();
+
+      const refused = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${other}:${port}` });
+      const failure = await settledOf(refused.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      expect(String(failure)).toContain('does not match certificate');
+      expect(refused.isLinked).toBe(false);
+      // * no OPEN came: its broker's certificate was refused before it
+      await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
+      await refused.stop();
     }
   });
 
@@ -2625,13 +2660,15 @@ test.describe('createAmqpBrokerAdapter', () => {
       return PASSWORD;
     };
     const refusals = [
-      { password: PASSWORD, tls: TLS_FIXTURE },
-      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, tls: CERTIFIED },
+      { passwordProvider: provider, tls: CERTIFIED },
       { password: PASSWORD, passwordProvider: provider },
       // * both, and a certificate: the first refusal, in one order on every side
-      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider, tls: CERTIFIED },
       // * neither: PLAIN's password is one octet at least, and its link never ANONYMOUS
       {},
+      // * nor the authorities alone, which authenticate nothing
+      { tls: { authorities: TLS_FIXTURE.cert } },
     ].map((given) => {
       const refusal = refusalOf(() => {
         return createAmqpBrokerAdapter({ id: ID, url: secured, ...given });
@@ -2647,6 +2684,7 @@ test.describe('createAmqpBrokerAdapter', () => {
       'a link authenticates by its client certificate or by a password, not both',
       'a link takes a password or a password provider, not both',
       'a link takes a password or a password provider, not both',
+      'an AMQP link authenticates by a password or by its client certificate',
       'an AMQP link authenticates by a password or by its client certificate',
     ]);
   });
@@ -2697,6 +2735,24 @@ test.describe('createAmqpBrokerAdapter', () => {
     }
   });
 
+  // spec 15.39
+  test('takes a password beside tls that names authorities alone', () => {
+    const provider = (): string => {
+      return PASSWORD;
+    };
+
+    for (const given of [{ password: PASSWORD }, { passwordProvider: provider }]) {
+      expect(() => {
+        return createAmqpBrokerAdapter({
+          id: ID,
+          tls: { authorities: TLS_FIXTURE.cert },
+          url: 'amqps://127.0.0.1:5671',
+          ...given,
+        });
+      }).not.toThrow();
+    }
+  });
+
   test('refuses a WebSocket URL and a page, naming why', () => {
     for (const url of ['ws://broker.example/amqp', 'wss://broker.example/amqp']) {
       expect(() => {
@@ -2732,14 +2788,14 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
     );
     expect(AMQP_TLS_URL).toBeDefined();
 
-    const ca = readFileSync(process.env['BEAD_AMQP_CA'] ?? '', 'utf8');
+    const authorities = readFileSync(process.env['BEAD_AMQP_CA'] ?? '', 'utf8');
     const certificates = process.env['BEAD_AMQP_CERTIFICATES'] ?? '';
     const adapterFor = (id: string): IAmqpBrokerAdapter => {
       return createAmqpBrokerAdapter({
         id,
         tls: {
-          ca,
-          cert: readFileSync(join(certificates, `${id}.pem`), 'utf8'),
+          authorities,
+          certificate: readFileSync(join(certificates, `${id}.pem`), 'utf8'),
           key: readFileSync(join(certificates, `${id}.key`), 'utf8'),
         },
         url: AMQP_TLS_URL ?? '',

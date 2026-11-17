@@ -321,6 +321,13 @@ impl<Req: PayloadCodec, Res: PayloadCodec> Descriptor<Req, Res> {
     pub fn validates(&self) -> bool {
         self.init.validate.is_some()
     }
+
+    /// The rules its request is judged by, where it has some: what a player of the verdicts and
+    /// the differential's testee judge a request by, as the C# side's `Bindings.Validate`.
+    #[must_use]
+    pub fn validate(&self) -> Option<&Validate<Req::Value>> {
+        self.init.validate.as_ref()
+    }
 }
 
 impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> NotifyingDescriptor<Req, Res, Not> {
@@ -425,6 +432,8 @@ pub struct ServiceProcedure {
     procedure: Procedure,
     descriptor: Made,
     admission: AdmissionRule,
+    // whether its descriptor is a notifying one, whose subscription its client makes
+    notifies: bool,
     command: Option<CommandMaker>,
     client: Option<ClientMaker>,
 }
@@ -435,6 +444,7 @@ impl fmt::Debug for ServiceProcedure {
             .debug_struct("ServiceProcedure")
             .field("procedure", &self.procedure)
             .field("admission", &self.admission)
+            .field("notifies", &self.notifies)
             .finish_non_exhaustive()
     }
 }
@@ -488,6 +498,7 @@ where
             procedure: descriptor.procedure().clone(),
             descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init),
             admission: descriptor.admission(),
+            notifies: false,
             command,
             client,
         }
@@ -536,6 +547,7 @@ where
             procedure: descriptor.descriptor.procedure().clone(),
             descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.descriptor.init),
             admission: descriptor.descriptor.admission(),
+            notifies: true,
             command: None,
             client: Some(client),
         }
@@ -547,6 +559,12 @@ impl ServiceProcedure {
     #[must_use]
     pub const fn procedure(&self) -> &Procedure {
         &self.procedure
+    }
+
+    /// Whether it notifies: its descriptor a notifying one.
+    #[cfg(feature = "transcoding")]
+    pub(crate) const fn notifies(&self) -> bool {
+        self.notifies
     }
 }
 

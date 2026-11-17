@@ -1,12 +1,15 @@
-//! A server's requests: its transport, admissions before decoding, routing refusals, and the
-//! connection and parity of each incoming call.
+//! A server's requests: its transport, admissions before decoding, routing refusals, the
+//! connection and parity of each incoming call, and the close of a connection refused past the
+//! resolvers that outlive its calls, its transport's close panicking.
 
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, news, request_of, second, subscribing_of};
-use super::{locked, result_of};
+use super::{cancel_of, locked, result_of};
 use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, NotificationHeader, RequestHeader};
@@ -15,8 +18,11 @@ use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::core::Handler;
 use crate::router::server::RouterServerOptions;
-use crate::router::types::{CallSession, ConnectionHandle, TransportMessage};
+use crate::router::types::{
+    CallSession, ConnectionHandle, RouterError, RouterLimitsOptions, TransportMessage,
+};
 use crate::testing::pair::echo;
+use crate::testing::scripted::{ClosingOptions, Sending};
 
 // A refused request is deliberately unreadable: the decode history proves its admission comes
 // first, rather than merely obtaining the same refusal from another stage.
@@ -130,9 +136,11 @@ async fn a_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_ca
 }
 
 // spec 9.2, 13.1
-#[tokio::test]
-async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
- {
+#[expect(
+    clippy::too_many_lines,
+    reason = "the sequential and batched source arrivals each retain their full session, admission, callback and wire orders"
+)]
+async fn server_session_order(sequential: bool) {
     let order = Arc::new(Mutex::new(Vec::new()));
     let resolving = Arc::clone(&order);
     let session = CallSession {
@@ -178,15 +186,17 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
             response.result("ok".to_owned())
         }))
         .expect("echo registered");
+    let [without, with, rejected] = if sequential { [1, 3, 5] } else { [31, 33, 35] };
+    let other = if sequential {
+        crate::SessionToken::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    } else {
+        crate::SessionToken::new([2; 16])
+    }
+    .expect("another token");
     for (id, credential) in [
-        (31, None),
-        (33, Some(Credential::Opaque(token))),
-        (
-            35,
-            Some(Credential::Opaque(
-                crate::SessionToken::new([2; 16]).expect("another token"),
-            )),
-        ),
+        (without, None),
+        (with, Some(Credential::Opaque(token))),
+        (rejected, Some(Credential::Opaque(other))),
     ] {
         served.transport.deliver(
             &Envelope::Request {
@@ -198,24 +208,40 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
             },
             &first(),
         );
+        if sequential {
+            served.settle().await;
+        }
     }
     served.settle().await;
     assert_eq!(
         *locked(&order),
-        [
-            SessionStep::Session(first(), 31, false),
-            SessionStep::Admit(31, None),
-            SessionStep::Session(first(), 33, false),
-            SessionStep::Admit(33, Some(Arc::new(session.clone()))),
-            SessionStep::Session(first(), 35, false),
-            SessionStep::Callback(31, None),
-            SessionStep::Callback(33, Some(Arc::new(session))),
-        ]
+        if sequential {
+            vec![
+                SessionStep::Session(first(), 1, false),
+                SessionStep::Admit(1, None),
+                SessionStep::Callback(1, None),
+                SessionStep::Session(first(), 3, false),
+                SessionStep::Admit(3, Some(Arc::new(session.clone()))),
+                SessionStep::Callback(3, Some(Arc::new(session))),
+                SessionStep::Session(first(), 5, false),
+            ]
+        } else {
+            vec![
+                SessionStep::Session(first(), 31, false),
+                SessionStep::Admit(31, None),
+                SessionStep::Session(first(), 33, false),
+                SessionStep::Admit(33, Some(Arc::new(session.clone()))),
+                SessionStep::Session(first(), 35, false),
+                SessionStep::Callback(31, None),
+                SessionStep::Callback(33, Some(Arc::new(session))),
+            ]
+        }
     );
     {
         let steps = locked(&order);
+        let (admit, callback) = if sequential { (4, 5) } else { (3, 6) };
         let (SessionStep::Admit(_, Some(admitted)), SessionStep::Callback(_, Some(received))) =
-            (&steps[3], &steps[6])
+            (&steps[admit], &steps[callback])
         else {
             panic!("the admitted call reaches its callback with its session");
         };
@@ -224,11 +250,19 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
     }
     assert_eq!(
         served.sent_since(),
-        [
-            "first failure 35 SESSION_REQUIRED",
-            "first result 31 ok",
-            "first result 33 ok",
-        ]
+        if sequential {
+            [
+                "first result 1 ok",
+                "first result 3 ok",
+                "first failure 5 SESSION_REQUIRED",
+            ]
+        } else {
+            [
+                "first failure 35 SESSION_REQUIRED",
+                "first result 31 ok",
+                "first result 33 ok",
+            ]
+        }
     );
     assert_eq!(served.reported(), Vec::<String>::new());
 }
@@ -311,8 +345,49 @@ async fn requests_are_asked_their_admission_once_on_their_header_before_their_pa
 
 // spec 9.2, 13.5
 #[tokio::test]
-async fn requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
- {
+async fn are_asked_their_admission_once_on_their_header_before_their_payload_is_read() {
+    let served = Served::new(&RouterServerOptions::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let asking = Arc::clone(&asked);
+    let decoded = Arc::default();
+    let mut dependencies =
+        RequestResolverDependencies::new(NonEmptyText(Arc::clone(&decoded)), TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        move |request| {
+            locked(&asking).push(request.header.call_id);
+            request.header.call_id == 31
+        },
+        None,
+    ));
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<TextCodec>| {
+            response.result(format!("{}!", request.payload))
+        }))
+        .expect("echo registered");
+
+    // * both arrivals share a turn: the refused payload is unreadable, its refusal immediate
+    served
+        .transport
+        .deliver(&request_of((31, &echo(), "hi")), &first());
+    served
+        .transport
+        .deliver(&request_of((33, &echo(), "")), &first());
+    served.settle().await;
+
+    assert_eq!(*locked(&asked), [31, 33]);
+    assert_eq!(*locked(&decoded), [Bytes::from_static(b"hi")]);
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 33 ACCESS_DENIED", "first result 31 hi!"]
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+// spec 9.2, 13.5
+async fn admission_refusals() {
     let served = Served::new(&RouterServerOptions::default());
     let reached = Arc::new(Mutex::new(Vec::new()));
     let reaching = Arc::clone(&reached);
@@ -354,9 +429,7 @@ async fn requests_refused_their_admission_never_reach_a_callback_which_would_sub
 }
 
 // spec 9.2
-#[tokio::test]
-async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
- {
+async fn routing_refusals() {
     let served = Served::new(&RouterServerOptions::default());
     let other = crate::identity::Procedure {
         procedure_id: 9,
@@ -410,8 +483,7 @@ async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destinatio
 }
 
 // spec 9.2
-#[tokio::test]
-async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
+async fn unanswered_envelopes() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.deliver(
         &Envelope::Notification {
@@ -441,9 +513,7 @@ async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
 }
 
 // spec 9.2, 11.2
-#[tokio::test]
-async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
- {
+async fn incoming_call_parity() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
@@ -480,8 +550,7 @@ async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_re
         .expect("a call id belongs to its connection");
 }
 
-#[tokio::test]
-async fn requests_refuse_a_second_resolver_for_one_procedure() {
+async fn duplicate_resolver() {
     let served = Served::new(&RouterServerOptions::default());
     served
         .router
@@ -490,4 +559,247 @@ async fn requests_refuse_a_second_resolver_for_one_procedure() {
     assert!(served.router.register_resolver((&echo(), idle())).is_err());
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+    served.router.dispose().await;
+}
+
+#[tokio::test]
+async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+ {
+    server_session_order(false).await;
+}
+
+#[tokio::test]
+async fn a_connections_requests_are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+ {
+    server_session_order(true).await;
+}
+
+#[tokio::test]
+async fn requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
+ {
+    admission_refusals().await;
+}
+
+#[tokio::test]
+async fn refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request() {
+    admission_refusals().await;
+}
+
+#[tokio::test]
+async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+ {
+    routing_refusals().await;
+}
+
+#[tokio::test]
+async fn are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+ {
+    routing_refusals().await;
+}
+
+#[tokio::test]
+async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
+    unanswered_envelopes().await;
+}
+
+#[tokio::test]
+async fn are_the_only_envelopes_answered_any_other_is_reported() {
+    unanswered_envelopes().await;
+}
+
+#[tokio::test]
+async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
+ {
+    incoming_call_parity().await;
+}
+
+#[tokio::test]
+async fn of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
+ {
+    incoming_call_parity().await;
+}
+
+#[tokio::test]
+async fn requests_refuse_a_second_resolver_for_one_procedure() {
+    duplicate_resolver().await;
+}
+
+#[tokio::test]
+async fn refuse_a_second_resolver_for_one_procedure() {
+    duplicate_resolver().await;
+}
+
+// each failure sent on the first connection: its call id, its code and its detail
+fn refusals_of(served: &Served) -> Vec<(u32, u16, String)> {
+    served
+        .transport
+        .envelopes(&first())
+        .iter()
+        .filter_map(|envelope| match envelope {
+            Envelope::Failure { failure, .. } => Some((
+                envelope.call_id(),
+                failure.code.get(),
+                failure.detail.clone(),
+            )),
+            Envelope::Request { .. }
+            | Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => None,
+        })
+        .collect()
+}
+
+// spec 9.2; RFC 9113 §10.5
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a twin plays its sentence whole, as the other sides' twins do"
+)]
+async fn closes_a_connection_that_it_refused_twice_maximum_answering_calls_requests_in_a_row_past_the_resolvers_that_outlive_its_calls_nothing_settling_between_and_reports_it()
+ {
+    let close_detail = "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed";
+
+    // its transport's close panics as it is called, or as it settles
+    for at_call in [false, true] {
+        let served = Served::new(&RouterServerOptions {
+            limits: Some(RouterLimitsOptions {
+                maximum_answering_calls: Some(1),
+                ..RouterLimitsOptions::default()
+            }),
+            ..RouterServerOptions::default()
+        });
+        let held: Arc<Mutex<Vec<Option<oneshot::Sender<()>>>>> = Arc::default();
+        let holding = Arc::clone(&held);
+        let deliver = |call_ids: &[(u32, bool)]| {
+            for &(call_id, is_cancel) in call_ids {
+                let envelope = if is_cancel {
+                    cancel_of(call_id)
+                } else {
+                    request_of((call_id, &echo(), ""))
+                };
+
+                served.transport.deliver(&envelope, &first());
+            }
+        };
+        let call_ids = || {
+            refusals_of(&served)
+                .into_iter()
+                .map(|(call_id, _, _)| call_id)
+                .collect::<Vec<_>>()
+        };
+
+        // what its close panics with is reported
+        served.transport.close_as(&ClosingOptions {
+            panicked: Some("the transport would not close".to_owned()),
+            at_call: Some(at_call),
+            ..ClosingOptions::default()
+        });
+        served.transport.open(&first(), true);
+        // deaf to its signal, each resolver settles when the test says
+        served
+            .router
+            .register_resolver((
+                &echo(),
+                Handler {
+                    resolve: Arc::new(move |_props| {
+                        let (settles, settled) = oneshot::channel::<()>();
+
+                        locked(&holding).push(Some(settles));
+
+                        Box::pin(async move {
+                            settled.await.ok();
+
+                            Ok(())
+                        })
+                    }),
+                    ..idle()
+                },
+            ))
+            .expect("echo registered");
+
+        deliver(&[(1, false)]);
+        served.settle().await;
+        deliver(&[(1, true), (3, false)]);
+        served.settle().await;
+        // the first of a run past both counts
+        deliver(&[(5, false)]);
+        served.settle().await;
+        // a settle, then a request refused at the calls answered alone: the run starts over
+        locked(&held)
+            .first_mut()
+            .and_then(Option::take)
+            .expect("the first resolver held")
+            .send(())
+            .ok();
+        served.settle().await;
+        deliver(&[(7, false), (3, true), (9, false)]);
+        served.settle().await;
+        // past both again: once
+        deliver(&[(11, false)]);
+        served.settle().await;
+
+        assert_eq!(call_ids(), [5, 7, 11]);
+        assert_eq!(served.transport.closed(), Vec::<ConnectionHandle>::new());
+        assert_eq!(served.reported(), Vec::<String>::new());
+
+        // twice, in a row: reported at once, and closed once its transport settled that refusal
+        let released = CancellationToken::new();
+
+        served.transport.send_as((
+            &first(),
+            Sending::Waiting {
+                released: released.clone(),
+                outcome: Ok(()),
+            },
+        ));
+        deliver(&[(13, false)]);
+        served.settle().await;
+
+        assert_eq!(served.reported(), ["CAPACITY_EXCEEDED first"]);
+
+        let detail = locked(&served.reports)
+            .first()
+            .and_then(|(error, _)| match error {
+                RouterError::Failure(failure) => Some(failure.detail().to_owned()),
+                RouterError::ReadyState(_)
+                | RouterError::Disconnected(_)
+                | RouterError::Other(_) => None,
+            });
+
+        assert_eq!(detail.as_deref(), Some(close_detail));
+
+        // one more refused before the close lands closes nothing more
+        deliver(&[(15, false)]);
+        served.settle().await;
+
+        assert_eq!(served.transport.closed(), Vec::<ConnectionHandle>::new());
+
+        released.cancel();
+        served.settle().await;
+
+        assert_eq!(call_ids(), [5, 7, 11, 13, 15]);
+
+        let refusals = refusals_of(&served);
+
+        assert_eq!(
+            refusals.get(refusals.len().saturating_sub(2)),
+            Some(&(
+                13,
+                ProtocolCode::CAPACITY_EXCEEDED.get().get(),
+                "the calls a connection answers and those its resolvers outlive are 2 at most"
+                    .to_owned()
+            ))
+        );
+        assert_eq!(served.transport.closed(), [first()]);
+        assert_eq!(
+            served.reported(),
+            [
+                "CAPACITY_EXCEEDED first",
+                "a transport panicked: the transport would not close first"
+            ],
+            "its close panicking as it is called: {at_call}"
+        );
+    }
 }

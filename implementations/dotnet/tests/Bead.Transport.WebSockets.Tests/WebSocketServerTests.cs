@@ -674,12 +674,19 @@ public sealed class WebSocketServerTests
                 }
             }
         };
-        // taken whole, then held: its place on the connection stays until its call ends
-        ends.Server.Services.GetRequestResolver(held, BytesAnswered)((_, _) =>
+        // taken whole, then held: its place on the connection stays until its call ends, with its
+        // connection, which its resolver hears and settles at, so nothing outlives the test
+        ends.Server.Services.GetRequestResolver(held, BytesAnswered)((request, _) =>
         {
-            holding.TrySetResult();
+            var stopped = new TaskCompletionSource();
 
-            return new TaskCompletionSource().Task;
+            holding.TrySetResult();
+            request.Signal.Register(() =>
+            {
+                stopped.TrySetResult();
+            });
+
+            return stopped.Task;
         });
         ends.Server.Services.GetRequestResolver(refusing, BytesAnswered with
         {
@@ -1246,8 +1253,8 @@ public sealed class WebSocketServerTests
         var localPort = new StrongBox<int>(0);
         using var aliceHandshakes = new SamePort(localPort);
         using var otherHandshakes = new SamePort(localPort);
-        var alice = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = aliceHandshakes.Invoker } });
-        var other = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = otherHandshakes.Invoker } });
+        var alice = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Handler = aliceHandshakes.Handler } });
+        var other = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Handler = otherHandshakes.Handler } });
 
         // who opened a session on each connection, as its handle names it
         var names = new ConcurrentDictionary<string, string>();

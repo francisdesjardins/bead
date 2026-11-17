@@ -98,9 +98,7 @@ fn call_of(
 }
 
 // debugging 1.1, 5.1
-#[tokio::test]
-async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
- {
+async fn client_trace() {
     let scripted = Scripted::new();
     let seen: Arc<Mutex<Vec<(DebugDirection, TracedEnvelope)>>> = Arc::default();
     let hearing = Arc::clone(&seen);
@@ -108,6 +106,21 @@ async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_an
     scripted.router.on_debug(Arc::new(
         move |direction: DebugDirection, traced: &TracedEnvelope| {
             locked(&hearing).push((direction, traced.clone()));
+            let mut copy = traced.clone();
+            match &mut copy.header {
+                EnvelopeHeader::Request(header) => header.call_id = 99,
+                EnvelopeHeader::Result(header) => header.call_id = 99,
+                EnvelopeHeader::Failure(_)
+                | EnvelopeHeader::Notification(_)
+                | EnvelopeHeader::Chunk(_)
+                | EnvelopeHeader::Credit(_)
+                | EnvelopeHeader::Cancel(_) => panic!("a request or result traced"),
+            }
+            assert_eq!(
+                copy.header.call_id(),
+                99,
+                "the listener can change its copy"
+            );
         },
     ));
 
@@ -156,6 +169,7 @@ async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_an
         ],
         "each envelope, with its connection and its header"
     );
+    assert!(!format!("{:?}", *locked(&seen)).contains(&token().to_string()));
 }
 
 // debugging 2.2, 2.3
@@ -664,4 +678,16 @@ async fn observes_a_call_on_a_clock_whose_monotonic_reading_moves_by_100_us_as_a
         ],
         "its buckets"
     );
+}
+
+#[tokio::test]
+async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
+ {
+    client_trace().await;
+}
+
+#[tokio::test]
+async fn tells_each_envelope_out_and_in_with_its_connection_server_a_copy_of_its_header_and_never_its_session_token()
+ {
+    client_trace().await;
 }

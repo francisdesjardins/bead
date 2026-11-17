@@ -33,15 +33,17 @@ only into a resumed session ([MQTT-4.4.0-1]) and then in the original order ([MQ
 NATS keeps a publisher's order alike; an AMQP inbox ends with its link. A message past the next one
 awaited means one dropped for good.
 
-**A broker bounds a message, often below Bead's envelope.** With a parcel's 28 bytes of prefix,
-one message to a server's inbox, `bead/i/server` or `bead.i.server`, carries an envelope of about
-268 MB on Mosquitto 2.1.2, the protocol's, its `max_packet_size` without a limit by default;
-1,048,521 on EMQX 6.3.2 (1 MiB), as 15.30 counts it; 16,777,128 on RabbitMQ 4.4.0 (16 MiB), as
-15.37 counts it; and 1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of 1,048,576
-bytes needs two parts on EMQX and NATS, and an envelope of `maximumEnvelopeBytes`, 16,778,240,
-seventeen there and two on RabbitMQ. A packet past its receiver's Maximum Packet Size is discarded
-by its broker, a loss ([MQTT-3.1.2-25]), and one a broker sends all the same ends its receiver's
-link (MQTT 5.0 §3.1.2.11.4, §4.13.1), as [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md) counts it.
+**A broker bounds a message, often below Bead's envelope.** With a parcel's 28 bytes of prefix, one
+message to a server's inbox, `bead/i/server` or `bead.i.server`, carries an envelope of 1,999,945
+bytes on Mosquitto 2.1.2, whose `max_packet_size` is 2,000,000 by default; 1,048,521 on EMQX 6.3.2
+(1 MiB), as 15.30 counts it; 16,777,128 on RabbitMQ 4.4.0 (16 MiB), as 15.37 counts it; and
+1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of 1,048,576 bytes needs two parts on
+EMQX and NATS, and an envelope of `maximumEnvelopeBytes`, 16,778,240, seventeen there and two on
+RabbitMQ. A packet past its receiver's Maximum Packet Size is discarded by its broker, a loss
+([MQTT-3.1.2-25]), and one a broker sends all the same ends its receiver's link (MQTT 5.0
+§3.1.2.11.4, §4.13.1), as
+[0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
+counts it.
 
 The options weighed:
 

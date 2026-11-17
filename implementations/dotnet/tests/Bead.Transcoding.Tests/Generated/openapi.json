@@ -3489,6 +3489,69 @@
           "serviceId": 1
         }
       }
+    },
+    "/v1/watch": {
+      "get": {
+        "description": "Answers nothing, then notifies nothing, and ends its subscription never.",
+        "operationId": "Transcoding.watch.http",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "x-bead-events": {
+                  "failure": {
+                    "$ref": "#/components/schemas/Problem"
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Tick"
+                  },
+                  "result": {
+                    "additionalProperties": false,
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "description": "The result; with Accept: text/event-stream, the result, then each notification, then the failure that ends them (transcoding 8)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers nothing, then notifies nothing, and ends its subscription never.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "watch",
+          "procedureId": 11,
+          "procedureKind": "notifies",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
     }
   },
   "tags": [

@@ -41,6 +41,9 @@ internal sealed class MqttScript : IAsyncDisposable
     /// <summary>Whether the script answers no UNSUBSCRIBE, the test answering each itself: false unless told.</summary>
     public bool IsHoldingUnsubscribes { get; set; }
 
+    /// <summary>Whether its TLS takes a link that presents no client certificate: false unless told.</summary>
+    public bool IsTakingNoCertificate { get; set; }
+
     /// <summary>A script on a port of its own, over TCP, or over TLS under <paramref name="certificate"/>.</summary>
     public static MqttScript Start(X509Certificate2? certificate = null)
     {
@@ -126,7 +129,7 @@ internal sealed class MqttScript : IAsyncDisposable
                 var secured = new SslStream(stream, false, (_, certificate, _, _) =>
                 {
                     // a client certificate is taken whatever its chain: the test reads what came
-                    return certificate is not null;
+                    return certificate is not null || IsTakingNoCertificate;
                 });
 
                 await secured.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = _certificate, ClientCertificateRequired = true }, _closing.Token);

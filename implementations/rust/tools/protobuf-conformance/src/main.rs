@@ -3,19 +3,19 @@
 //! little-endian integer; on the standard output, each `ConformanceResponse` alike, until the input
 //! ends. Each message is read and written back through `bead_protobuf`'s codec of the code Buffa
 //! generates for it, found by the message's full name: its records checked, its view decoded within
-//! the bound, its required fields walked, then the owned message, written back. Its JSON, which the
-//! other sides read and write by Bead's own mapping (decision 0037), goes through Buffa's dynamic
-//! message by the pool the generated code embeds until Rust's gateway brings that mapping: a JSON
-//! payload is read into the dynamic message, then its bytes read as the codec reads a payload.
+//! the bound, its required fields walked, then the owned message, written back. Its JSON goes
+//! through Bead's own mapping, `bead_protobuf`'s `JsonForm` over the pool the generated code embeds,
+//! as on both other sides (decisions 0037 and 0052): a JSON payload read into its bytes, then read as
+//! the codec reads a payload; a JSON output written of the bytes the codec read.
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, LazyLock};
 
-use bead::PayloadCodec;
-use bead_protobuf::{ProtoCodec, ProtoSchema};
+use bead::{MessageForm, MessageFormError, PayloadCodec, ProgrammerError};
+use bead_protobuf::{JsonForm, ProtoCodec, ProtoSchema};
 use buffa::{EnumValue, Message};
-use buffa_descriptor::reflect::{DynamicMessage, ReflectMessage};
+use buffa_descriptor::reflect::ReflectMessage;
 use bytes::Bytes;
 
 /// The suite's messages, its exchange and `Probe`, as the build script generates them.
@@ -33,8 +33,8 @@ trait Codec: Send + Sync {
     /// Its message's schema, by the pool its generated code embeds.
     fn schema(&self) -> &ProtoSchema;
 
-    /// `bytes` read, then written back as bytes or, where `json` says, as JSON.
-    fn round_trip(&self, bytes: &Bytes, json: bool) -> Answer;
+    /// `bytes` read, then written back as bytes or, where `json` gives it, as JSON by that form.
+    fn round_trip(&self, bytes: &Bytes, json: Option<&dyn MessageForm>) -> Answer;
 }
 
 impl<M> Codec for ProtoCodec<M>
@@ -46,15 +46,18 @@ where
         ProtoCodec::schema(self)
     }
 
-    fn round_trip(&self, bytes: &Bytes, json: bool) -> Answer {
+    fn round_trip(&self, bytes: &Bytes, json: Option<&dyn MessageForm>) -> Answer {
         let message = match self.decode(bytes) {
             Ok(message) => message,
             Err(refusal) => return Answer::ParseError(refusal.to_string()),
         };
 
-        if json {
-            return match message.to_dynamic().to_json() {
+        if let Some(form) = json {
+            return match form.write(bytes, None) {
                 Ok(json) => Answer::JsonPayload(json),
+                Err(MessageFormError::Undecodable(refusal)) => {
+                    Answer::ParseError(refusal.to_string())
+                }
                 Err(error) => Answer::SerializeError(format!("json: {error}")),
             };
         }
@@ -67,33 +70,38 @@ where
 }
 
 // each message the suite sends, by its full name, and its codec
-static CODECS: LazyLock<Vec<(&str, Box<dyn Codec>)>> = LazyLock::new(|| {
-    vec![
+type Codecs = Vec<(&'static str, Box<dyn Codec>)>;
+
+// the codecs, or the refusal of one, which fails every test
+static CODECS: LazyLock<Result<Codecs, ProgrammerError>> = LazyLock::new(|| {
+    let codecs: Codecs = vec![
         (
             "protobuf_test_messages.proto3.TestAllTypesProto3",
-            Box::new(ProtoCodec::<proto3::TestAllTypesProto3>::new()),
+            Box::new(ProtoCodec::<proto3::TestAllTypesProto3>::new()?),
         ),
         (
             "protobuf_test_messages.proto2.TestAllTypesProto2",
-            Box::new(ProtoCodec::<proto2::TestAllTypesProto2>::new()),
+            Box::new(ProtoCodec::<proto2::TestAllTypesProto2>::new()?),
         ),
         (
             "protobuf_test_messages.editions.TestAllTypesEdition2023",
-            Box::new(ProtoCodec::<editions::TestAllTypesEdition2023>::new()),
+            Box::new(ProtoCodec::<editions::TestAllTypesEdition2023>::new()?),
         ),
         (
             "protobuf_test_messages.editions.proto2.TestAllTypesProto2",
-            Box::new(ProtoCodec::<editions::proto2::TestAllTypesProto2>::new()),
+            Box::new(ProtoCodec::<editions::proto2::TestAllTypesProto2>::new()?),
         ),
         (
             "protobuf_test_messages.editions.proto3.TestAllTypesProto3",
-            Box::new(ProtoCodec::<editions::proto3::TestAllTypesProto3>::new()),
+            Box::new(ProtoCodec::<editions::proto3::TestAllTypesProto3>::new()?),
         ),
         (
             "bead.codecs.v1.Probe",
-            Box::new(ProtoCodec::<generated::bead::codecs::v1::Probe>::new()),
+            Box::new(ProtoCodec::<generated::bead::codecs::v1::Probe>::new()?),
         ),
-    ]
+    ];
+
+    Ok(codecs)
 });
 
 fn answer(request: &ConformanceRequest) -> Answer {
@@ -134,29 +142,33 @@ fn answer(request: &ConformanceRequest) -> Answer {
         );
     }
 
+    let codecs = match CODECS.as_ref() {
+        Ok(codecs) => codecs,
+        Err(refusal) => return Answer::RuntimeError(refusal.to_string()),
+    };
+
     // ! a message gone fails its tests, rather than skipping them
-    let Some((_, codec)) = CODECS
+    let Some((_, codec)) = codecs
         .iter()
         .find(|(name, _)| *name == request.message_type)
     else {
         return Answer::RuntimeError(format!("no procedure binds {}", request.message_type));
     };
 
-    // * a JSON payload read by the dynamic message, then its bytes read as the codec reads a payload
+    // * a JSON payload read by Bead's mapping, then its bytes read as the codec reads a payload
+    let schema = codec.schema();
+    let form = JsonForm::new(Arc::clone(schema.pool())).form_of(schema.clone());
     let bytes = match &request.payload {
         Some(Payload::ProtobufPayload(bytes)) => Bytes::copy_from_slice(bytes),
-        Some(Payload::JsonPayload(json)) => {
-            let schema = codec.schema();
-
-            match DynamicMessage::from_json(Arc::clone(schema.pool()), schema.message(), json) {
-                Ok(message) => Bytes::from(message.encode_to_vec()),
-                Err(error) => return Answer::ParseError(format!("json: {error}")),
-            }
-        }
+        Some(Payload::JsonPayload(json)) => match form.read(json.as_bytes()) {
+            Ok(bytes) => bytes,
+            Err(error) => return Answer::ParseError(format!("json: {error}")),
+        },
         _ => return Answer::RuntimeError("no payload".to_owned()),
     };
+    let json = (output == EnumValue::from(WireFormat::JSON)).then_some(form.as_ref());
 
-    codec.round_trip(&bytes, output == EnumValue::from(WireFormat::JSON))
+    codec.round_trip(&bytes, json)
 }
 
 // one exchange: a request read after its length, its response written after its own; none once

@@ -19,8 +19,7 @@ use crate::router::types::RouterError;
 use crate::testing::pair::echo;
 use crate::testing::scripted::{Sending, handle_of};
 
-#[tokio::test]
-async fn a_request_is_answered_once_a_second_answer_is_a_programmer_error_and_sends_nothing() {
+async fn single_resolver_answer() {
     let fixture = Fixture::new();
     let recording = Arc::new(Recording::default());
     let second = Arc::new(Mutex::new(Vec::new()));
@@ -71,8 +70,7 @@ async fn a_request_is_answered_once_a_second_answer_is_a_programmer_error_and_se
     assert_eq!(*locked(&second), [true, true]);
 }
 
-#[tokio::test]
-async fn may_be_a_refusal_of_admission_of_the_routers_side_with_a_detail() {
+async fn admission_failure_answer() {
     let fixture = Fixture::new();
     for (refusal, expected) in [
         (
@@ -119,9 +117,7 @@ fn command() -> Procedure {
     }
 }
 
-#[tokio::test]
-async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_and_tells_debug_it_is_a_command()
- {
+async fn command_resolver_trace(source_case: bool) {
     let fixture = ClientFixture::new();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&seen);
@@ -135,8 +131,12 @@ async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_
             RequestResolverDependencies::new(TextCodec, TextCodec),
         )
         .expect("defined")
-        .on(Arc::new(|request, response| {
-            response.result(format!("{}!", request.payload))
+        .on(Arc::new(move |request, response| {
+            response.result(if source_case {
+                format!("{} done", request.payload)
+            } else {
+                format!("{}!", request.payload)
+            })
         }))
         .expect("registered");
     fixture.transport.deliver(&Envelope::Request {
@@ -144,11 +144,16 @@ async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_
             call_id: 2,
             ..header()
         },
-        payload: Bytes::from_static(b"hi"),
+        payload: Bytes::from_static(if source_case { b"run" } else { b"hi" }),
     });
     fixture.clock.settle().await;
+    let expected = if source_case {
+        b"run done".as_slice()
+    } else {
+        b"hi!".as_slice()
+    };
     assert!(
-        matches!(&fixture.transport.envelopes()[0], Envelope::Result { payload, .. } if payload.as_ref() == b"hi!")
+        matches!(&fixture.transport.envelopes()[0], Envelope::Result { payload, .. } if payload.as_ref() == expected)
     );
     assert_eq!(
         *locked(&seen),
@@ -160,8 +165,7 @@ async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn on_a_clients_router_a_refusal_is_the_clients() {
+async fn client_admission_refusal() {
     let fixture = ClientFixture::new();
     let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| false, None));
@@ -194,8 +198,7 @@ async fn on_a_clients_router_a_refusal_is_the_clients() {
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn are_the_procedures_own_from_1_to_65535_and_nothing_outside() {
+async fn application_code_bounds() {
     let fixture = Fixture::new();
     let recording = Arc::new(Recording::default());
     for code in [1, 0x1000, 0xffff] {
@@ -494,4 +497,56 @@ async fn are_typed_a_refusal_of_admission_or_the_procedures_own_and_no_other() {
         )
         .expect_err("a refusal is an admission failure");
     fixture.router.dispose().await;
+}
+
+#[tokio::test]
+async fn on_a_clients_router_a_refusal_is_the_clients() {
+    client_admission_refusal().await;
+}
+
+#[tokio::test]
+async fn on_a_client_router_a_refusal_is_the_client_one() {
+    client_admission_refusal().await;
+}
+
+#[tokio::test]
+async fn a_request_is_answered_once_a_second_answer_is_a_programmer_error_and_sends_nothing() {
+    single_resolver_answer().await;
+}
+
+#[tokio::test]
+async fn a_request_is_answered_once_a_second_answer_is_an_invalid_operation_and_sends_nothing() {
+    single_resolver_answer().await;
+}
+
+#[tokio::test]
+async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_and_tells_debug_it_is_a_command()
+ {
+    command_resolver_trace(false).await;
+}
+
+#[tokio::test]
+async fn get_command_resolver_runs_the_server_request_registered_in_the_router_and_tells_debug_it_is_a_command()
+ {
+    command_resolver_trace(true).await;
+}
+
+#[tokio::test]
+async fn are_the_procedures_own_from_1_to_65535_and_nothing_outside() {
+    application_code_bounds().await;
+}
+
+#[tokio::test]
+async fn are_the_procedure_own_from_1_to_65535_and_nothing_outside() {
+    application_code_bounds().await;
+}
+
+#[tokio::test]
+async fn may_be_a_refusal_of_admission_of_the_routers_side_with_a_detail() {
+    admission_failure_answer().await;
+}
+
+#[tokio::test]
+async fn may_be_a_refusal_of_admission_with_a_detail() {
+    admission_failure_answer().await;
 }

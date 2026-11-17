@@ -70,6 +70,54 @@ async fn refuses_an_extension_method_on_the_wire_405_method_refused() {
     started.stop().await;
 }
 
+// a method is a case-sensitive token (RFC 9110 §9.1): `get` is none of the methods it takes
+#[tokio::test]
+async fn refuses_lowercase_methods_on_the_wire_405_method_refused() {
+    let started = started(&HttpTransportServerOptions {
+        origins: Some(vec![PAGE.to_owned()]),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let fields = [
+        format!("Origin: {PAGE}"),
+        "Access-Control-Request-Method: POST".to_owned(),
+        "Content-Length: 0".to_owned(),
+    ];
+    let fields: Vec<&str> = fields.iter().map(String::as_str).collect();
+
+    for method in ["get", "post", "delete", "head", "options"] {
+        let request = head_of((method, "/bead"), (started.port, &fields));
+        let answer = raw_answer_of(started.port, request.as_bytes()).await;
+
+        assert_eq!(
+            (answer.status, answer.refusal),
+            (405, Some(HTTP_REFUSALS.method.to_owned())),
+            "{method}"
+        );
+        assert_eq!(
+            answer.fields.get("allow").map(String::as_str),
+            Some("GET, POST, DELETE"),
+            "{method}: what it takes"
+        );
+    }
+
+    let refusals = started.recorder.refusals(5).await;
+
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    assert_eq!(
+        refusals
+            .iter()
+            .map(|refusal| (refusal.status, refusal.reason.as_str()))
+            .collect::<Vec<_>>(),
+        [(405, HTTP_REFUSALS.method); 5],
+        "each refusal told"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn closes_without_a_response_an_http_2_preface_where_http_1_1_alone_is_served() {
     let started = started(&HttpTransportServerOptions::default()).await;
@@ -1535,8 +1583,7 @@ fn refuses_options_it_cannot_hold() {
 }
 
 // spec 15.12
-#[test]
-fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null() {
+fn compares_host_configuration() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -2864,4 +2911,14 @@ async fn ends_a_request_cancelled_before_its_head_went_204_empty_and_one_cancell
 
     assert_eq!(late.after_head(), "0\r\n\r\n", "ended with no body");
     started.stop().await;
+}
+
+#[test]
+fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null() {
+    compares_host_configuration();
+}
+
+#[test]
+fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_or_null() {
+    compares_host_configuration();
 }

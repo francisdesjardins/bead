@@ -260,9 +260,12 @@ reconnect, a new pair, possibly to another member. A will makes a crashed partic
 at once where its broker leaves one; elsewhere the heartbeat finds it.
 
 **A participant's stop ends its link in place**: its peers told 1001 before the link ends and no
-will gone; a stop loses no OPEN its broker sent it before it let the name go, its CLOSEs still at its
-call, and settles a round trip later where it refuses OPENs during the let-go; and its next link, at its application's word, keeps its transports, its routers and
-their sessions; its clients reconnect after it, a new pair. Its dispose is final.
+will gone, but where its link is lost first, as on a packet its client cannot read
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md));
+a stop loses no OPEN its broker sent it before it let the name go, its CLOSEs still at its call, and
+settles a round trip later where it refuses OPENs during the let-go; and its next link, at its
+application's word, keeps its transports, its routers and their sessions; its clients reconnect
+after it, a new pair. Its dispose is final.
 
 **Who may accept is the broker's access control** on subscribing a server's name, as a DNS name and
 its certificate place a socket's server. An acceptor that proves itself to its opener is ahead.

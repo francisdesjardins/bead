@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using MQTTnet;
 using MQTTnet.Diagnostics.PacketInspection;
@@ -19,10 +20,12 @@ namespace Bead.Transport.Mqtt;
 /// read as no subscriber; each message handed on before its PUBACK, which goes once its participant
 /// settled it; a will of its GONE; at a stop, an UNSUBSCRIBE of each filter it asked or holds, then
 /// a DISCONNECT of 0x00, and one of 0x8E read as its link taken over. A packet past its own Maximum
-/// Packet Size, read at its Remaining Length, closes its network connection, no DISCONNECT, its link
-/// lost. MQTTnet's automation is off: no reconnection, resubscription, offline queue or alias; each
-/// incarnation is a client of its own, every late callback of a former one doing nothing. The
-/// TypeScript side's adapter over MQTT.js does the same.
+/// Packet Size, read at its Remaining Length, or a PUBACK, a SUBACK or an UNSUBACK of a Reason Code
+/// under 0x80 its table does not name or of a count of codes other than one, read at MQTTnet's
+/// packet inspector before it decodes it, closes its network connection, no DISCONNECT, its link
+/// lost, at its stop as at any other time. MQTTnet's automation is off: no reconnection,
+/// resubscription, offline queue or alias; each incarnation is a client of its own, every late
+/// callback of a former one doing nothing. The TypeScript side's adapter over MQTT.js does the same.
 /// </summary>
 public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 {
@@ -38,6 +41,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     private readonly MqttBrokerAdapterOptions _options;
     private readonly bool _isSecure;
+    // what its TLS holds, its key among it, read once and let go of at its dispose
+    private readonly TlsCredentials? _tls;
     private readonly Lock _gate = new();
     private Link? _link;
 
@@ -73,10 +78,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException($"an MQTT broker's IPv6 address is followed by its port or by nothing, not {options.Uri.OriginalString}", nameof(options));
         }
 
-        if (options.Tls?.ClientCertificates is not null && options.Uri.Scheme is not ("mqtts" or "wss"))
+        // * its URL and its TLS are one record: a TLS given over a URL that is not TLS is refused
+        // (spec 15.39)
+        if (Tls.IsGiven(options.Tls) && options.Uri.Scheme is not ("mqtts" or "wss"))
         {
-            throw new ArgumentException("a TLS client certificate is carried over mqtts or wss, never in the clear", nameof(options));
+            throw new ArgumentException($"a TLS client certificate is carried over mqtts or wss, not {options.Uri.OriginalString}", nameof(options));
         }
+
+        var tls = Tls.Assert(options.Tls, nameof(options));
 
         if (options.Id.Length == 0)
         {
@@ -86,19 +95,21 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         AssertPacketSize((nameof(MqttBrokerAdapterOptions.MaximumPacketSize), options.MaximumPacketSize));
 
         // * what its link authenticates by, held in one order on every side; with neither a password
-        // nor a provider, its User Name alone, or its certificate
-        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), options.Tls?.ClientCertificates is not null) is { } refusal)
+        // nor a provider, its User Name alone, or its certificate; its authorities beside any
+        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), tls?.Certificate is not null) is { } refusal)
         {
             throw new ArgumentException(refusal, nameof(options));
         }
 
         _options = options with
         {
+            Tls = tls,
             // ! never without end: a broker never counts a link of Keep Alive 0 lost, and its will never goes
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
+        _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
 
     /// <inheritdoc/>
@@ -230,7 +241,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Start(BrokerStart? start = null)
     {
         Link? guarded = null;
-        var client = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
+        var made = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
         {
             MaximumPacketSize = _options.MaximumPacketSize,
             PastMaximum = (size) =>
@@ -241,7 +252,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     PastMaximum((guarded, size));
                 }
             },
+            ReadsEnded = () =>
+            {
+                if (guarded is not null)
+                {
+                    ReadsEnded(guarded);
+                }
+            },
         }));
+        var client = _options.ClientOf?.Invoke(made) ?? made;
         var link = guarded = new Link(client);
 
         lock (_gate)
@@ -304,10 +323,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 connected = await client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
             }
-            // * a packet past its own Maximum Packet Size, its CONNACK's among them, read before it
-            catch (Exception) when (link.PastMaximum is not null)
+            // * a packet its client cannot read, read before its CONNACK or as it: past its own Maximum
+            // Packet Size, its CONNACK among them, or an acknowledgement its table does not name
+            catch (Exception) when (link.Unreadable is not null)
             {
-                throw link.PastMaximum;
+                throw link.Unreadable;
             }
             // * the timeout's, whatever its cancel ended after it: MQTTnet tells the link down as it gives up
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested)
@@ -319,14 +339,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 throw new IOException($"the link of {Id} ended before its CONNACK: {reason.Message}", reason);
             }
 
-            // * MQTT 5 names no CONNACK Reason Code between 0x01 and 0x7F: its code alone
+            // * a code outside MQTT 5's CONNACK table has no name: its code alone
             if (connected.ResultCode != MqttClientConnectResultCode.Success)
             {
                 var code = (int)connected.ResultCode;
+                var name = ConnAckNameOf(code);
+                var suffix = name is null ? "" : $", {name}";
 
-                throw new IOException(code >= 0x80
-                    ? string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}, {connected.ResultCode}")
-                    : string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}"));
+                throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}{suffix}"));
             }
 
             // * subscriptions of QoS 1 and a will of QoS 1: a broker of Maximum QoS 0 carries neither,
@@ -387,11 +407,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Holds a subscription to <paramref name="topic"/> of QoS 1, No Local 0, Retain As Published 0
     /// and Retain Handling 2, a group's as its shared subscription; settles once its SUBACK granted
-    /// QoS 1, and fails on any other code, QoS 0 among them (spec 15.27). Its filter is its link's
-    /// as its SUBSCRIBE goes, so that its stop lets it go whether or not its SUBACK came, until a
-    /// SUBACK of 0x80 or more says its broker installed none; one whose SUBACK comes as its link
-    /// stops fails with its stop. A group its broker offers none of is refused, naming why; a link
-    /// down, an <see cref="InvalidOperationException"/>.
+    /// QoS 1, and fails on QoS 0 or 2 granted and on a code of 0x80 or more, whether or not SUBACK's
+    /// table names it (spec 15.27); a SUBACK of a code under 0x80 its table does not name, or of a
+    /// count of codes other than one, loses its link, which it fails with (spec 15.29). Its filter
+    /// is its link's as its SUBSCRIBE goes, so that its stop lets it go whether or not its SUBACK
+    /// came, until a SUBACK of 0x80 or more says its broker installed none; one whose SUBACK comes as
+    /// its link stops fails with its stop. A group its broker offers none of is refused, naming why;
+    /// a link down, an <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
     {
@@ -486,8 +508,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or
     /// the topic itself where it held none, its UNSUBSCRIBE sent as it is called; settles once its
     /// UNSUBACK came of 0x00, or 0x11 where its broker held none, each PUBLISH its broker sent of it
-    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on
-    /// 0x80 or more, an <see cref="IOException"/> naming it, and with none within
+    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on a
+    /// code of 0x80 or more, whether or not UNSUBACK's table names it, an <see cref="IOException"/>
+    /// naming it, with its link's loss on one under 0x80 it does not name or of a count of codes
+    /// other than one (spec 15.29), and with none within
     /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, a
     /// <see cref="TimeoutException"/> naming it, its link kept so that no will goes (spec 15.27).
     /// Its filter stays its link's until such an UNSUBACK came, a late one among them, so that a
@@ -506,9 +530,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         var filter = held?.Filter ?? key;
 
-        // ! its request never given up by a token, its link's own but: MQTTnet ends a link on an
-        // UNSUBACK no request awaits, with no DISCONNECT, so its will would go; its wait alone is
-        // bounded, and a late UNSUBACK read
+        // ! its request never given up by a token, its link's own but, so that a late UNSUBACK is
+        // still read; its wait alone is bounded
         var leaving = LeftOf((link, (key, held)), Asked((link, CancellationToken.None), link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), link.Life.Token)));
 
         try
@@ -552,13 +575,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Publishes a parcel in one PUBLISH (spec 15.28): of QoS 1 at least once, held to its CONNACK's
     /// Receive Maximum, later ones waiting in their order, <see cref="BrokerPublished.Taken"/> once
-    /// its PUBACK came under 0x80 but 0x10, <see cref="BrokerPublished.NoSubscriber"/> on 0x10, an
-    /// <see cref="IOException"/> on 0x80 or more; of QoS 0 at most once, taken as it goes; RETAIN 0,
-    /// its life in whole seconds rounded up where one is asked, no other property. One whose packet
-    /// would pass its CONNACK's Maximum Packet Size is an <see cref="ArgumentException"/>, nothing
-    /// sent; a link down, an <see cref="InvalidOperationException"/>. Given up while it waits for the
-    /// quota, it leaves unsent, its link kept; given up once it may have gone, at either QoS, its link
-    /// is retired.
+    /// its PUBACK came of 0x00 or of none, <see cref="BrokerPublished.NoSubscriber"/> on 0x10, an
+    /// <see cref="IOException"/> naming it on a code of 0x80 or more, whether or not PUBACK's table
+    /// names it, and its link's loss on one under 0x80 it does not name (spec 15.29); of QoS 0 at
+    /// most once, taken as it goes; RETAIN 0, its life in whole seconds rounded up where one is
+    /// asked, no other property. One whose packet would pass its CONNACK's Maximum Packet Size is an
+    /// <see cref="ArgumentException"/>, nothing sent; a link down, an
+    /// <see cref="InvalidOperationException"/>. Given up while it waits for the quota, it leaves
+    /// unsent, its link kept; given up once it may have gone, at either QoS, its link is retired.
     /// </summary>
     public async Task<BrokerPublished> Publish(BrokerPublication publication)
     {
@@ -666,14 +690,17 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// filter its link asked or holds, one filter each, all at once, their UNSUBACKs of 0x00 or
     /// 0x11 awaited together; what it was handed and those UNSUBACKs within one
     /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, what has not gone by then
-    /// failed; its DISCONNECT within a bound of its own, an UNSUBACK that refuses, or none by then,
-    /// ending it all the same. It settles once its broker let go of each subscription of its link,
-    /// as its unsubscription lets one go, so that its broker hands it nothing more. Nothing where
-    /// it has none, and nothing sent where its link is down; a later start a new link.
+    /// failed; its DISCONNECT within a bound of its own, an UNSUBACK of a code of 0x80 or more that
+    /// refuses, or none by then, ending it all the same. A packet its client cannot read ends it at
+    /// once, no DISCONNECT, no down told, its broker publishing its will, and what it awaited fails
+    /// with that loss (spec 15.29). It settles once its broker let go of each subscription of its
+    /// link, as its unsubscription lets one go, so that its broker hands it nothing more. Nothing
+    /// where it has none, and nothing sent where its link is down; a later start a new link.
     /// </summary>
     public async Task Stop()
     {
         Link? link;
+        var life = CancellationToken.None;
         var stopped = new InvalidOperationException($"the link of {Id} stopped");
 
         lock (_gate)
@@ -685,6 +712,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 // ! named before its DISCONNECT goes, which fails what it awaits before its end
                 link.IsStopping = true;
                 link.Ended = stopped;
+
+                // ! read under its gate while it has not ended: its end disposes its source
+                life = link.Life.Token;
             }
         }
 
@@ -693,10 +723,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return;
         }
 
+        // whether an UNSUBSCRIBE of its let-go failed other than by its bound: its link lost
+        var isLost = false;
+
         try
         {
-            // * one connectTimeout from its call: what it was handed, then its broker's let-go
-            using var letting = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            // * one connectTimeout from its call: what it was handed, then its broker's let-go; and
+            // its link's end, a packet its client cannot read among it, ending both waits at once
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            using var letting = CancellationTokenSource.CreateLinkedTokenSource(bounded.Token, life);
 
             // * what it was handed goes first, no new publication taken meanwhile: its quota drained,
             // each PUBACK come
@@ -709,7 +744,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // peer reading no subscriber before its 1001; one filter each, since one packet of
             // every filter may pass its broker's Maximum Packet Size, a Protocol Error that
             // publishes its will
-            if (link.IsUp && link.Client.IsConnected)
+            if (link.IsUp && IsReading(link))
             {
                 List<string> filters;
 
@@ -721,20 +756,33 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     }).Distinct(StringComparer.Ordinal)];
                 }
 
-                await Quietly(Task.WhenAll(filters.Select((filter) =>
+                try
                 {
-                    // ! its link's client itself: LinkUp refuses a link stopping
-                    return Sent(() =>
+                    await Task.WhenAll(filters.Select((filter) =>
                     {
-                        return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
-                    });
-                })).WaitAsync(letting.Token));
+                        // ! its link's client itself: LinkUp refuses a link stopping
+                        return Sent(() =>
+                        {
+                            return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
+                        });
+                    })).WaitAsync(letting.Token);
+                }
+                // ! MQTTnet fails what awaits a link whose reads it cannot go on with before it says
+                // that link disconnected, a packet it cannot decode among them (spec 15.29): an
+                // UNSUBSCRIBE failed so, or refused as its link is down, is its link lost; one failed
+                // as its bound is spent, or its link ended, MQTTnet's timeout, is what follows reads
+                catch (Exception reason) when (reason is not OutOfMemoryException)
+                {
+                    isLost = !letting.IsCancellationRequested;
+                }
             }
 
             // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
             // broker would read no DISCONNECT and publish its will; sent once MQTTnet says it
-            // connected, its CONNACK read, even before its start's continuation counted it up
-            if (link.Client.IsConnected)
+            // connected, its CONNACK read, even before its start's continuation counted it up, and
+            // never once its link ended or was lost, a packet its client cannot read ending it,
+            // which MQTTnet may say connected a moment more
+            if (!isLost && IsReading(link))
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
 
@@ -772,6 +820,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             catch (Exception reason)
             {
                 disposing.SetException(reason);
+            }
+            finally
+            {
+                _tls?.Dispose();
             }
         }
 
@@ -907,6 +959,37 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // the connect's options: one network connection that keeps no session, its id and its means
+    // MQTT 5.0 §3.2.2.2, Table 3-1: a CONNACK's Reason Code names.
+    private static string? ConnAckNameOf(int code)
+    {
+        return code switch
+        {
+            0x00 => "Success",
+            0x80 => "Unspecified error",
+            0x81 => "Malformed Packet",
+            0x82 => "Protocol Error",
+            0x83 => "Implementation specific error",
+            0x84 => "Unsupported Protocol Version",
+            0x85 => "Client Identifier not valid",
+            0x86 => "Bad User Name or Password",
+            0x87 => "Not authorized",
+            0x88 => "Server unavailable",
+            0x89 => "Server busy",
+            0x8A => "Banned",
+            0x8C => "Bad authentication method",
+            0x90 => "Topic Name invalid",
+            0x95 => "Packet too large",
+            0x97 => "Quota exceeded",
+            0x99 => "Payload format invalid",
+            0x9A => "Retain not supported",
+            0x9B => "QoS not supported",
+            0x9C => "Use another server",
+            0x9D => "Server moved",
+            0x9F => "Connection rate exceeded",
+            _ => null,
+        };
+    }
+
     private MqttClientOptions OptionsOf((BrokerPublication? Will, string? Password) connect)
     {
         var (will, password) = connect;
@@ -942,21 +1025,29 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 tls.UseTls(true).WithTargetHost(host);
 
-                if (_options.Tls?.ClientCertificates is { } certificates)
+                // ! a collection, which the platform presents as its leaf alone, or none, where it
+                // builds no chain to the authorities its broker names: its intermediates are its
+                // store's (docs/support.md)
+                if (_tls?.Certificates is { } certificates)
                 {
                     tls.WithClientCertificates(certificates);
                 }
 
-                if (_options.Tls?.TrustChain is { } trusted)
+                // ! a handler, never a trust chain, which MQTTnet's WebSocket channel does not read:
+                // its broker's name, then a chain to its authorities alone, as the AMQP adapter judges
+                if (_tls is { Authorities: not null } trusting)
                 {
-                    tls.WithTrustChain(trusted);
+                    tls.WithCertificateValidationHandler((presented) =>
+                    {
+                        return trusting.IsTrusted((presented.Certificate, presented.Chain), presented.SslPolicyErrors);
+                    }).WithRevocationMode(X509RevocationMode.NoCheck);
                 }
             });
         }
 
         // * its User Name its id, with its Password where it has one; neither under its certificate,
         // which a password never stands beside
-        if (_options.Tls?.ClientCertificates is null)
+        if (_options.Tls?.Certificate is null)
         {
             builder = builder.WithCredentials(Id, password);
         }
@@ -1004,49 +1095,107 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 Interlocked.Exchange(ref link.LastSent, TimeProvider.System.GetTimestamp());
             }
+            // ! judged whole, before MQTTnet decodes it: its end cancels what awaits it before
+            // MQTTnet hands that a code, whatever context its caller resumes on
+            else if (MqttPackets.UnreadableOf(inspected.Buffer) is { } words)
+            {
+                Lost((link, new IOException($"the link of {Id} went down: its broker sent {words}")));
+            }
 
             return Task.CompletedTask;
         };
     }
 
     // a packet past its own Maximum Packet Size, a Protocol Error (MQTT 5.0 §3.1.2.11.4, §4.13.1),
-    // judged at its Remaining Length by its channel's guard, on MQTTnet's receive loop: its link
-    // lost, or its start failed where its CONNACK had not come
+    // judged at its Remaining Length by its channel's guard, on MQTTnet's receive loop
     private void PastMaximum((Link Link, long Size) past)
     {
         var (link, size) = past;
-        var reason = new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"));
+
+        Lost((link, new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"))));
+    }
+
+    // a packet its client cannot read (spec 15.29), on MQTTnet's receive loop, in every phase: its
+    // link lost where it was up, its start failed where its CONNACK had not come, its stop ended
+    // where it stopped, no down told; never a DISCONNECT
+    private void Lost((Link Link, IOException Reason) lost)
+    {
+        var (link, reason) = lost;
 
         lock (_gate)
         {
             // ! a link ended already keeps the reason it ended for
             if (!link.IsEnded)
             {
-                link.PastMaximum = reason;
+                link.Unreadable = reason;
             }
         }
 
         End((link, new BrokerDown()), reason);
     }
 
+    // whether its link ended, read under its gate
+    private bool IsEnded(Link link)
+    {
+        lock (_gate)
+        {
+            return link.IsEnded;
+        }
+    }
+
+    // its client's reads ended, told before MQTTnet fails what awaits on that end: a stop then sends
+    // no DISCONNECT, MQTTnet saying it connected a moment more
+    private void ReadsEnded(Link link)
+    {
+        lock (_gate)
+        {
+            link.IsReadEnded = true;
+        }
+    }
+
+    // whether its link still reads: MQTTnet says it connected, its reads did not end, and it did not
+    // end
+    private bool IsReading(Link link)
+    {
+        lock (_gate)
+        {
+            return link.Client.IsConnected && !link.IsReadEnded && !link.IsEnded;
+        }
+    }
+
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
-    // on the link it came by alone
+    // on the link it came by alone; one MQTTnet dispatches once its link ended is dropped
     private void Take((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken)
     {
         var (link, received) = taken;
-
-        if (link.IsEnded)
-        {
-            return;
-        }
-
         var message = received.ApplicationMessage;
         var isAcknowledged = message.QualityOfServiceLevel != MqttQualityOfServiceLevel.AtMostOnce;
 
-        if (isAcknowledged)
+        // ! handed on under its link's hand-on, which its end awaits before it tells its down
+        lock (link.Handing)
         {
-            Interlocked.Increment(ref _unsettled);
+            lock (_gate)
+            {
+                if (link.IsEnded)
+                {
+                    return;
+                }
+
+                if (isAcknowledged)
+                {
+                    Interlocked.Increment(ref _unsettled);
+                }
+            }
+
+            HandOn((link, received), isAcknowledged);
         }
+    }
+
+    // a message taken, to its participant
+    private void HandOn((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken, bool isAcknowledged)
+    {
+        var (link, received) = taken;
+        var message = received.ApplicationMessage;
 
         Message?.Invoke(new BrokerMessage(
             new BrokerPublication { Topic = message.Topic.Split('/'), Payload = message.Payload.ToArray() },
@@ -1076,9 +1225,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }));
     }
 
-    // a Server Keep Alive shorter than its own, which MQTTnet reads and pings past all the same: a
-    // PINGREQ once nothing went for that long, on the system's clock, as the library's own timer
-    // runs ([MQTT-3.2.2-21])
+    // a Server Keep Alive shorter than its own, its Keep Alive in force: a PINGREQ once nothing went
+    // for that long, on the system's clock, as the library's own timer runs ([MQTT-3.2.2-21]), and
+    // its link lost, no DISCONNECT, once that PINGREQ has had no PINGRESP for half of it (spec 15.26)
+    // ! MQTTnet works out the Server Keep Alive and pings on its own period all the same
+    // (MqttClient.cs 146-155, 1032): its own Keep Alive under 0 and under a longer one is MQTTnet's
+    // loop, which waits half its period for a PINGRESP; a bump re-reads it, and the twin of a Server
+    // Keep Alive of 0 or longer pins it
     private void KeepServerKeepAlive((Link Link, ushort Seconds) kept)
     {
         var (link, seconds) = kept;
@@ -1108,7 +1261,23 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     try
                     {
-                        await Quietly(link.Client.PingAsync(link.Life.Token));
+                        using var deadline = new CancellationTokenSource(serverKeepAlive / 2, TimeProvider.System);
+                        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(link.Life.Token, deadline.Token);
+
+                        try
+                        {
+                            await link.Client.PingAsync(waiting.Token);
+                        }
+                        // ! judged by its tokens, not by what it throws: MQTTnet's wait may end in
+                        // its own time-out as in a cancellation
+                        catch (Exception) when (deadline.IsCancellationRequested && !link.Life.IsCancellationRequested)
+                        {
+                            End((link, new BrokerDown()), new IOException($"the link of {Id} had no PINGRESP within half its Keep Alive"));
+                        }
+                    }
+                    catch (Exception reason) when (reason is not OutOfMemoryException)
+                    {
+                        // its link's end tells what failed
                     }
                     finally
                     {
@@ -1189,6 +1358,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             Interlocked.Exchange(ref _unsettled, 0);
         }
 
+        // ! a hand-on under way finishes first, and none starts after: nothing of its link reaches
+        // its participant once it heard it down, as on the other sides
+        lock (link.Handing)
+        {
+        }
+
         // * told first, so that its participant hears its link down before what failed of it
         if (wasUp && down is not null && !link.IsStopping)
         {
@@ -1232,6 +1407,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public IMqttClient Client { get; } = client;
 
+        // what a message's hand-on holds, its end awaiting it
+        public Lock Handing { get; } = new();
+
+        // whether its client's reads ended, which MQTTnet tells after it failed what awaits on it
+        public bool IsReadEnded { get; set; }
+
         public CancellationTokenSource Life { get; } = new();
 
         public Dictionary<string, Held> Filters { get; } = new(StringComparer.Ordinal);
@@ -1253,8 +1434,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public Exception? Ended { get; set; }
 
-        // set by its guard before it ends it, so that its start fails with it, never as a stop's end
-        public IOException? PastMaximum { get; set; }
+        // a packet its client cannot read, set before it ends it, so that its start fails with it,
+        // never as a stop's end
+        public IOException? Unreadable { get; set; }
 
         public ITimer? Pinger { get; set; }
     }

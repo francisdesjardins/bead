@@ -492,36 +492,39 @@ fn get_all_connection_handles_and_has_list_what_is_stored() {
     assert!(sessions.manager.get(&handle(UNKNOWN)).is_none(), "unknown");
 }
 
-#[test]
-fn every_update_of_a_connection_with_no_session_is_null() {
+fn empty_session_updates() {
     let mut sessions = SessionManager::new();
     let first = handle(FIRST);
+    for absent in [false, true] {
+        let timeout = if absent { None } else { Some(milliseconds(1)) };
+        let data = if absent { None } else { Some(Value::Null) };
 
-    assert_eq!(
-        sessions.manager.update_connection_inactivity_timeout(
-            (&first, Some(milliseconds(1))),
-            (&sessions.arming, &mut sessions.told)
-        ),
-        Ok(None),
-        "its connection's timeout"
-    );
-    assert_eq!(
-        sessions
-            .manager
-            .update_data((&first, Some(Value::Null)), &mut sessions.told),
-        None,
-        "its data"
-    );
-    assert_eq!(sessions.touch((FIRST, at(0))), None, "its activity");
-    assert_eq!(
-        sessions.manager.update_session_inactivity_timeout(
-            (&first, Some(milliseconds(1))),
-            (&sessions.arming, &mut sessions.told)
-        ),
-        Ok(None),
-        "its own timeout"
-    );
-    assert!(sessions.taken().is_empty(), "nothing told");
+        assert_eq!(
+            sessions.manager.update_connection_inactivity_timeout(
+                (&first, timeout),
+                (&sessions.arming, &mut sessions.told)
+            ),
+            Ok(None),
+            "its connection's timeout"
+        );
+        assert_eq!(
+            sessions
+                .manager
+                .update_data((&first, data), &mut sessions.told),
+            None,
+            "its data"
+        );
+        assert_eq!(sessions.touch((FIRST, at(0))), None, "its activity");
+        assert_eq!(
+            sessions.manager.update_session_inactivity_timeout(
+                (&first, timeout),
+                (&sessions.arming, &mut sessions.told)
+            ),
+            Ok(None),
+            "its own timeout"
+        );
+        assert!(sessions.taken().is_empty(), "nothing told");
+    }
 }
 
 #[test]
@@ -1347,4 +1350,14 @@ fn a_timer_refusal_keeps_a_stored_timeout_and_its_live_timer_and_tells_nothing()
         assert_eq!(sessions.arming.live(), live, "the live timers held");
         assert!(sessions.told.is_empty(), "nothing told");
     }
+}
+
+#[test]
+fn every_update_of_a_connection_with_no_session_is_null() {
+    empty_session_updates();
+}
+
+#[test]
+fn every_update_of_a_connection_with_no_session_is_undefined() {
+    empty_session_updates();
 }

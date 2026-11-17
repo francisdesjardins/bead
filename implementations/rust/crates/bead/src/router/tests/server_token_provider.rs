@@ -33,9 +33,7 @@ fn resolve(served: &Served) {
         .expect("echo registered");
 }
 
-#[tokio::test]
-async fn requests_go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
- {
+async fn resolved_requests() {
     let served = Served::new(&RouterServerOptions {
         session_token_of: Some(Arc::new(|handle| Ok((*handle == first()).then(token)))),
         ..RouterServerOptions::default()
@@ -92,8 +90,7 @@ async fn requests_go_to_the_resolver_registered_which_answers_on_their_call_id_a
     assert_eq!(served.reported(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn requests_whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported() {
+async fn failed_session_announcement() {
     let error = error_of("no session");
     let failed = error.clone();
     let served = Served::new(&RouterServerOptions {
@@ -114,9 +111,7 @@ async fn requests_whose_answers_session_cannot_be_told_are_answered_by_nothing_a
     drop(reports);
 }
 
-#[tokio::test]
-async fn its_own_requests_present_opaque_when_they_ask_their_connections_session_as_session_token_of_gives_it_and_fail_before_they_go_session_required_when_it_has_none()
- {
+async fn command_session() {
     let held = Arc::new(Mutex::new(None));
     let holding = Arc::clone(&held);
     let served = Served::new(&RouterServerOptions {
@@ -221,4 +216,38 @@ async fn a_token_provider_that_panics_fails_only_its_answer_and_the_next_answer_
             }
         )]
     );
+}
+
+#[tokio::test]
+async fn requests_go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
+ {
+    resolved_requests().await;
+}
+
+#[tokio::test]
+async fn go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
+{
+    resolved_requests().await;
+}
+
+#[tokio::test]
+async fn requests_whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported() {
+    failed_session_announcement().await;
+}
+
+#[tokio::test]
+async fn whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported() {
+    failed_session_announcement().await;
+}
+
+#[tokio::test]
+async fn its_own_requests_present_opaque_when_they_ask_their_connections_session_as_session_token_of_gives_it_and_fail_before_they_go_session_required_when_it_has_none()
+ {
+    command_session().await;
+}
+
+#[tokio::test]
+async fn present_opaque_when_they_ask_their_connections_session_as_session_token_of_gives_it_and_fail_before_they_go_session_required_when_it_has_none()
+ {
+    command_session().await;
 }

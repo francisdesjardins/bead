@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use super::token;
+use super::{Handed, keeping, locked, token};
 use crate::constants::{CredentialScheme, EnvelopeKind, ProtocolCode, RouterSide};
 use crate::debug::DebugDirection;
 use crate::envelope::{
@@ -12,7 +12,7 @@ use crate::envelope::{
 };
 use crate::router::core::{self as router_core, Handler};
 use crate::router::types::{RouterAnswer, RouterError, RouterLimitsOptions};
-use crate::testing::core_port::{Peer, completed, scripted_header};
+use crate::testing::core_port::{Peer, scripted_header};
 
 // spec 11.1
 #[tokio::test]
@@ -115,19 +115,20 @@ async fn hands_a_credit_of_notifications_to_the_side_that_paces_them_a_transfers
 }
 
 // debugging 5.1
-#[tokio::test]
-async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone() {
+async fn traced_credentials() {
     for answer_first in [false, true] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+        let handed = Handed::default();
+        let resolve = keeping((&handed, None));
         peer.owner
-            .run(|state| {
+            .run(move |state| {
                 state.tokens.insert(Arc::from("a"), token());
                 router_core::register_resolver(
                     &state.core.resolvers,
                     (
                         &crate::testing::pair::echo(),
                         Handler {
-                            resolve: Arc::new(|_| Box::pin(async { Ok(()) })),
+                            resolve,
                             admit: None,
                             maximum_payload_bytes: None,
                             forwards_credentials: false,
@@ -141,15 +142,19 @@ async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme
             .await
             .expect("the port ready");
         if answer_first {
-            completed(peer.respond((
-                RouterAnswer::Result(Bytes::new()),
-                crate::router::types::CallAddress {
-                    call_id: 1,
-                    connection_handle: Arc::from("a"),
+            peer.receive((
+                Envelope::Request {
+                    header: scripted_header(1),
+                    payload: Bytes::new(),
                 },
-            )))
-            .await
-            .expect("answered");
+                Arc::from("a"),
+            ));
+            peer.settle().await;
+            let answerer = Arc::clone(&locked(&handed)[0].answerer);
+            answerer
+                .respond(RouterAnswer::Result(Bytes::new()))
+                .await
+                .expect("answered");
         }
         let call_id = if answer_first { 3 } else { 1 };
         peer.receive((
@@ -163,15 +168,21 @@ async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme
             Arc::from("a"),
         ));
         peer.settle().await;
+        assert_eq!(
+            locked(&handed).len(),
+            usize::from(answer_first),
+            "the unsupported JWT reaches no resolver"
+        );
         peer.owner.run(move |state| {
             let mut expected = Vec::new();
             if answer_first {
+                expected.push((DebugDirection::Rx, "a", EnvelopeKind::Request, 1, None));
                 expected.push((DebugDirection::Tx, "a", EnvelopeKind::Result, 1, Some(CredentialScheme::OPAQUE)));
             }
             expected.push((DebugDirection::Rx, "a", EnvelopeKind::Request, call_id, Some(CredentialScheme::JWT)));
             expected.push((DebugDirection::Tx, "a", EnvelopeKind::Failure, call_id, if answer_first { None } else { Some(CredentialScheme::OPAQUE) }));
             assert_eq!(state.traces.iter().map(|(direction, traced)| (*direction, traced.connection_handle.as_ref(), traced.header.kind(), traced.header.call_id(), traced.credential_scheme)).collect::<Vec<_>>(), expected);
-            let request = &state.traces[usize::from(answer_first)].1.header;
+            let request = &state.traces[if answer_first { 2 } else { 0 }].1.header;
             assert_eq!(request, &EnvelopeHeader::Request(scripted_header(call_id)));
             assert!(state.traces.iter().all(|(_, traced)| traced.header.credential().is_none()), "a trace carries the credential's scheme alone, with no token");
             assert!(!format!("{:?}", state.traces).contains("a.b.c"));
@@ -180,4 +191,14 @@ async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme
             assert!(matches!(state.sent[0].1.header(), EnvelopeHeader::Result(ResultHeader { credential: Some(Credential::Opaque(announced)), .. }) | EnvelopeHeader::Failure(crate::envelope::FailureHeader { credential: Some(Credential::Opaque(announced)), .. }) if announced == token()));
         }).await.expect("the traces checked");
     }
+}
+
+#[tokio::test]
+async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone() {
+    traced_credentials().await;
+}
+
+#[tokio::test]
+async fn traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone() {
+    traced_credentials().await;
 }

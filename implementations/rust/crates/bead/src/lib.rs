@@ -18,6 +18,9 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+#[cfg(feature = "gateway")]
+mod gateway;
+mod generated_code;
 #[cfg(feature = "http")]
 mod http;
 mod http_policy;
@@ -42,11 +45,15 @@ mod router;
 mod server;
 mod service;
 mod session_token;
+#[cfg(feature = "transcoding")]
+mod transcoding;
 mod transport;
 mod violations;
 #[cfg(feature = "websocket")]
 mod websocket;
 
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+pub use net::tls::TlsOptions;
 /// The TLS a socket transport speaks, re-exported so that the config an application gives one is
 /// of the version Bead builds on.
 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
@@ -106,6 +113,22 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+#[cfg(feature = "gateway")]
+pub use gateway::body::HttpGatewayBody;
+#[cfg(feature = "gateway")]
+pub use gateway::caller::{
+    HttpCallOptions, HttpCaller, HttpCallerOptions, HttpEvent, HttpRequester, HttpSubscriber,
+    HttpSubscription,
+};
+#[cfg(feature = "gateway")]
+pub use gateway::host::{
+    DOCUMENT_PATH, GATEWAY_TIMEOUT, GATEWAY_WINDOW, GatewayAuthorization, GatewayErrorListener,
+    HttpGateway, HttpGatewayOptions, HttpGatewayStartOptions, MAXIMUM_EXCHANGES,
+    MAXIMUM_EXCHANGES_PER_ADDRESS,
+};
+#[cfg(feature = "gateway")]
+pub use generated_code::GENERATED_CODE_SUPPORTS_VERSION_5;
+pub use generated_code::{GENERATED_CODE_SUPPORTS_VERSION_7, GENERATED_CODE_SUPPORTS_VERSION_8};
 #[cfg(feature = "http")]
 pub use http::client::{
     HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions,
@@ -199,6 +222,18 @@ pub use service::{
     ServiceServerOptions, command_of, failures_of, notifying_of, request_of,
 };
 pub use session_token::{SessionToken, SessionTokenDrawError};
+#[cfg(feature = "transcoding")]
+pub use transcoding::events::ServerSentEvent;
+#[cfg(feature = "transcoding")]
+pub use transcoding::form::{
+    BindingOptions, JsonFormError, MessageForm, MessageFormError, RequestPlace,
+};
+#[cfg(feature = "transcoding")]
+pub use transcoding::problems::{OwnFailure, OwnProblemOptions};
+#[cfg(feature = "transcoding")]
+pub use transcoding::routes::{
+    HttpMethod, HttpPayload, HttpRoute, HttpRouteInit, HttpRouteTemplate, route_of,
+};
 pub use transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_DEFAULTS, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
@@ -247,7 +282,27 @@ pub mod internal {
         MqttDisconnect, MqttPacket, MqttPublish, MqttPublishShapeOptions, MqttReading, MqttRefusal,
         largest_payload, publish_bytes, read_packet, width_of, write_publish,
     };
+    #[cfg(feature = "mqtt")]
+    pub use crate::mqtt::websocket::{MqttFrameEvent, MqttFrameReader, MqttFrameRefusal};
     pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
+    #[cfg(feature = "transcoding")]
+    pub use crate::transcoding::events::{
+        EVENT_STREAM_MEDIA_TYPE, EventHeartbeat, EventSink, EventStream, HEARTBEAT_COMMENT, Taken,
+        base64_of, bytes_of_base64, raw_data_of, text_data_of,
+    };
+    #[cfg(feature = "transcoding")]
+    pub use crate::transcoding::problems::{
+        Arose, CallFailure, DEFAULT_CHALLENGE, Encoding, PROBLEM_MEDIA_TYPE, PROTOCOL_TYPES,
+        Problem, ProblemField, ProblemOptions, ProblemRoute, RoutedFieldPath, fragment_of,
+        own_status_of, phrase_of, place_by, place_into, pointer_token_of, problem_of_failure,
+        problem_of_own, problem_of_refusal, text_of,
+    };
+    #[cfg(feature = "transcoding")]
+    pub use crate::transcoding::templates::{
+        RawPath, Segment, Template, Variable, VariableRefusal, VariableValue, decode_of, is_tie,
+        matches_template, parse_template, query_decode_of, raw_path_of, route_index_of,
+        template_of, variables_of,
+    };
 }
 
 #[cfg(any(test, feature = "testing"))]

@@ -32,6 +32,8 @@ Bead.Transcoding.Http.HttpGatewayOptions.Heartbeat.init -> void
 Bead.Transcoding.Http.HttpGatewayOptions.Hosts.get -> System.Collections.Generic.IReadOnlyList<string!>?
 Bead.Transcoding.Http.HttpGatewayOptions.Hosts.init -> void
 Bead.Transcoding.Http.HttpGatewayOptions.HttpGatewayOptions() -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Limits.get -> Bead.RouterLimits?
+Bead.Transcoding.Http.HttpGatewayOptions.Limits.init -> void
 Bead.Transcoding.Http.HttpGatewayOptions.MaximumBodyBytes.get -> int
 Bead.Transcoding.Http.HttpGatewayOptions.MaximumBodyBytes.init -> void
 Bead.Transcoding.Http.HttpGatewayOptions.MaximumConnections.get -> int

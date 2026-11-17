@@ -1,6 +1,7 @@
 """The form of PAYLOAD_INVALID's detail (spec 18.3, 18.6): a violation's members, RFC 8785's canonical
 form of a value (17.7), and the writer of a detail's lines under its bound, which make_validations.py
-and make_conversations.py share, so that a verdict's detail and a conversation's are written alike."""
+and make_conversations.py share, so that a verdict's detail and a conversation's are written alike.
+make_codecs.py writes its values in the same canonical form, and make_transcoding.py its numbers."""
 import json
 from decimal import Decimal
 
@@ -8,17 +9,22 @@ from decimal import Decimal
 # ── RFC 8785, 17.7 ──────────────────────────────────────────────────────────────────────────────
 
 
-def es(value):
-    """ECMAScript's Number::toString of a finite double: what RFC 8785 3.2.2.3 writes a number as, and
-    what 18.8.6 writes a float or a double as."""
-    if value == 0:
-        return '0'
+class Members(list):
+    """An object's members as the bytes name them, in their order, a name given twice kept twice."""
 
-    if value < 0:
-        return '-' + es(-value)
 
-    _, digits, exponent = Decimal(repr(value)).as_tuple()
-    digits = ''.join(map(str, digits)).lstrip('0')
+def utf16(name):
+    """A name's UTF-16 code units, which RFC 8785 3.2.3 sorts names by."""
+    return name.encode('utf-16-be', 'surrogatepass')
+
+
+def members_of(value):
+    return list(value) if isinstance(value, Members) else list(value.items())
+
+
+def number_text(digits, exponent):
+    """Number::toString of a positive number of these digits, its value int(digits) * 10 ** exponent."""
+    digits = digits.lstrip('0')
     stripped = digits.rstrip('0')
     exponent += len(digits) - len(stripped)
     digits = stripped
@@ -36,9 +42,24 @@ def es(value):
     return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
 
 
+def es(value):
+    """ECMAScript's Number::toString of a finite double (ECMA-262, Number::toString), from repr's
+    shortest digits: what RFC 8785 3.2.2.3 writes a number as, and what 18.8.6 writes a float or a
+    double as."""
+    if value == 0:
+        return '0'
+
+    if value < 0:
+        return '-' + es(-value)
+
+    _, digits, exponent = Decimal(repr(value)).as_tuple()
+    return number_text(''.join(map(str, digits)), exponent)
+
+
 def canonical(value):
-    """A value's canonical form (17.7): its members sorted by their UTF-16 code units, a number as
-    ECMAScript writes its double, a string as JSON.stringify writes a well-formed one."""
+    """A value's canonical form (17.7, RFC 8785 3.2): its members sorted by their UTF-16 code units, a
+    number as ECMAScript writes its double, a string as JSON.stringify writes a well-formed one. Of an
+    object read as Members, each member is written as it was read, a name given twice twice."""
     if value is None:
         return 'null'
 
@@ -52,12 +73,14 @@ def canonical(value):
         return es(float(value))
 
     if isinstance(value, str):
+        # Python's dumps writes each character as JSON.stringify writes a well-formed string: " and the
+        # backslash, five control characters short, the others in lower-case hexadecimal
         return json.dumps(value, ensure_ascii=False)
 
-    if isinstance(value, list):
+    if isinstance(value, list) and not isinstance(value, Members):
         return '[' + ','.join(canonical(item) for item in value) + ']'
 
-    members = sorted(value.items(), key=lambda member: member[0].encode('utf-16-be'))
+    members = sorted(members_of(value), key=lambda member: utf16(member[0]))
     return '{' + ','.join(json.dumps(name, ensure_ascii=False) + ':' + canonical(item) for name, item in members) + '}'
 
 

@@ -28,12 +28,14 @@ mod conversation;
 #[path = "players/socket.rs"]
 mod socket;
 
+use core::num::NonZeroU16;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime};
 
+use bead::internal::{Envelope, MAXIMUM_DETAIL_BYTES, write_envelope};
 use bead::testing::link_relay::{LinkRelay, LinkRelayOptions};
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::testing::{Difference, SteppingClock, files, hexadecimal, instants, is_excused};
@@ -42,11 +44,11 @@ use bead::{
     BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerPublished,
     BrokerRefusedError, BrokerStart, BrokerSubscription, BrokerTransportClient,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
-    BrokerTransportServerOptions, ClientListener, ConnectionHandle, MemoryBroker,
-    MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions, MqttBrokerAdapter,
-    MqttBrokerAdapterOptions, RouterClientTransport, RouterError, Server, ServerListener,
-    ServerOptions, ServerTransport, SharedClock, TransportError, TransportMessage,
-    TransportServerRefusal,
+    BrokerTransportServerOptions, ClientListener, ConnectionHandle, FailureHeader, FailureRecord,
+    FailureScope, MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions,
+    MemoryBrokerOptions, MqttBrokerAdapter, MqttBrokerAdapterOptions, RouterClientTransport,
+    RouterError, Server, ServerListener, ServerOptions, ServerTransport, SharedClock,
+    TransportError, TransportMessage, TransportServerRefusal,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -1977,6 +1979,15 @@ fn trials() -> Result<Vec<Trial>, String> {
         .with_kind(MQTT),
     );
 
+    trials.insert(
+        0,
+        Trial::test(
+            "reads each batch failure detail only where the case gives one",
+            || reads_each_batch_failure_detail().map_err(Failed::from),
+        )
+        .with_kind("responses"),
+    );
+
     // each case named once, at least one played, and each played if and only if no row excuses
     // this side from it
     trials.insert(
@@ -2010,6 +2021,59 @@ fn trials() -> Result<Vec<Trial>, String> {
     );
 
     Ok(trials)
+}
+
+// a batch of two failures, each after its length on 4 bytes, its detail read where the case gives
+// one alone, from its own bytes
+fn reads_each_batch_failure_detail() -> Result<(), String> {
+    let expected = vec![
+        json!({ "kind": 18, "callId": 3, "failure": { "code": 1, "scope": 0, "relays": 0 } }),
+        json!({ "kind": 18, "callId": 5, "failure": { "code": 1, "scope": 0, "relays": 0, "detail": "second" } }),
+    ];
+    let mut batch = Vec::new();
+
+    for (call_id, detail) in [(3, "first"), (5, "second")] {
+        let bytes = write_envelope(
+            &Envelope::Failure {
+                header: FailureHeader {
+                    call_id,
+                    credential: None,
+                },
+                failure: FailureRecord {
+                    code: NonZeroU16::MIN,
+                    scope: FailureScope::Protocol,
+                    detail: detail.to_owned(),
+                    relays: 0,
+                },
+            },
+            MAXIMUM_DETAIL_BYTES,
+        )
+        .map_err(|error| error.to_string())?;
+        let length = u32::try_from(bytes.len()).map_err(|error| error.to_string())?;
+
+        batch.extend_from_slice(&length.to_be_bytes());
+        batch.extend_from_slice(&bytes);
+    }
+
+    hold(
+        socket::batch_of(&batch, Some(&expected)) == Value::from(expected.clone()),
+        || format!("{:?}", socket::batch_of(&batch, Some(&expected))),
+    )?;
+
+    // ! the second item's detail comes from its own bytes, not its expectation or its neighbour
+    if let Some(last) = batch.last_mut() {
+        *last = b'!';
+    }
+
+    let altered = vec![
+        expected.first().cloned().unwrap_or_default(),
+        json!({ "kind": 18, "callId": 5, "failure": { "code": 1, "scope": 0, "relays": 0, "detail": "secon!" } }),
+    ];
+
+    hold(
+        socket::batch_of(&batch, Some(&expected)) == Value::from(altered),
+        || format!("{:?}", socket::batch_of(&batch, Some(&expected))),
+    )
 }
 
 fn main() -> ExitCode {

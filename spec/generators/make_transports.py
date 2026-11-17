@@ -1,25 +1,16 @@
 """Writes spec/transports.json: what a transport's server does at its edge, over HTTP, with what a
 peer of the test's own sends it in exact octets."""
-import base64
-import hashlib
-import hmac
 import ipaddress
-import json
-import os
 import re
 from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
+from conformance import advance, armed, hexadecimal, text, word, write_json
+from interop import PROCEDURES, SERVICE_ID
+from jws import signed, unbase64url
 from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
-# the interop service's API, its one service in its blueprint (decision 0022)
-API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
-SERVICE_ID = API['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 
 REQUEST, RESULT, FAILURE, NOTIFICATION = 16, 17, 18, 19
 PROTOCOL = 0
@@ -38,18 +29,6 @@ PAGE = 'https://page.test'
 # where every case's wall clock starts, and that instant in milliseconds since the epoch
 WALL_CLOCK = '2026-01-01T00:00:00Z'
 EPOCH = int(datetime.fromisoformat(WALL_CLOCK.replace('Z', '+00:00')).timestamp()) * 1000
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def word(value, length):
-    return hexadecimal(value.to_bytes(length, 'big'))
-
-
-def text(value):
-    return hexadecimal(value.encode('utf-8'))
 
 
 def length_of(data):
@@ -178,15 +157,6 @@ def drawn(on='connect', *, listening=False, fields=None):
 
 def until(gauge, value):
     return {'until': {'gauge': gauge, 'is': value}}
-
-
-def armed(milliseconds):
-    """A timer armed on the server's clock, due that many milliseconds from now."""
-    return {'until': {'timer': milliseconds}}
-
-
-def advance(milliseconds):
-    return {'advance': milliseconds}
 
 
 def answered(on, envelope):
@@ -874,17 +844,9 @@ def interop_jwt():
     # the wall clock's start, 2026-01-01T00:00:00Z, in seconds since the epoch
     wall = 1_767_225_600
 
-    def base64url(data):
-        return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-    def part(value):
-        return base64url(json.dumps(value, separators=(',', ':')).encode('ascii'))
-
     claims = {'iss': issuer, 'sub': 'carol', 'aud': audience, 'exp': wall + 3600, 'iat': wall, 'jti': 'at-relay',
               'client_id': 'bead-client'}
-    signing_input = part({'alg': 'HS256', 'typ': 'at+jwt'}) + '.' + part(claims)
-    key = base64.urlsafe_b64decode(secret + '=' * (-len(secret) % 4))
-    token = signing_input + '.' + base64url(hmac.new(key, signing_input.encode('ascii'), hashlib.sha256).digest())
+    token = signed({'alg': 'HS256', 'typ': 'at+jwt'}, claims, unbase64url(secret))
 
     # its block: the scheme 2, its length, its characters a byte each, then zero bytes to a word
     data = token.encode('ascii')
@@ -973,8 +935,8 @@ cases += relayed_over_http()
 # RFC 6455 §1.3's own key, and the accept it gives
 KEY, ACCEPT = 'dGhlIHNhbXBsZSBub25jZQ==', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
 SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
-CONTINUATION, BINARY = 0x0, 0x2
-NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
+CONTINUATION, TEXT, BINARY = 0x0, 0x1, 0x2
+NORMAL, GOING_AWAY, INVALID_PAYLOAD, TOO_BIG = 1000, 1001, 1007, 1009
 
 
 def asked(on='socket', fields=None, *, method='GET', target='/', http='HTTP/1.1', host='{host}',
@@ -1042,6 +1004,11 @@ websocket = [
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
     ('a message past the side\'s own limit fails its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
+    # 15.3: FF and FE are never UTF-8 (RFC 3629 §1), written as a frame since a text is a JSON string,
+    # which holds no octet past UTF-8
+    ('a text message that is not UTF-8 fails its connection with 1007', ['15.3'], {}, [
+        *upgrade(), message('socket', frames=[{'opcode': TEXT, 'fin': True, 'payload': 'FF FE'}]),
+        heard('socket', close=INVALID_PAYLOAD)]),
     # 15.1 and 15.2: the Authorization of an upgrade from no page, carried beside every envelope of its
     # connection; the verifier holds a value of its grammar alone, so whoami answers only if its
     # auth-scheme came with it and the spaces and tabs around it went
@@ -2306,7 +2273,6 @@ def a_retained_message(transport):
 
 @case(IN_MEMORY, MQTT, AMQP, over_mqtt=['15.25', '15.31'], over_amqp=['15.32', '15.38'])
 def a_name_served_with_a_twin(transport):
-    captures = Captures(transport)
     connections = [Connection(f'opener{n}', opener=half(n)) for n in range(1, 5)]
 
     # the twin serves the name in its group beside the server under test, and answers nothing: each
@@ -2724,9 +2690,7 @@ document = {
     'brokers': {MQTT: mqtt_broker(), AMQP: amqp_broker()},
 }
 
-with open(ROOT + 'transports.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('transports.json', document)
 
 print(len(cases), 'cases over HTTP,', len(websocket), 'over WebSocket,', len(played[IN_MEMORY]), 'over a broker,',
       len(played[MQTT]), 'over MQTT 5,', len(played[AMQP]), 'over AMQP 1.0,', len(responses), 'responses')

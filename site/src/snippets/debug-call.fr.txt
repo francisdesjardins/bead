@@ -1,5 +1,7 @@
 // l'écouteur d'un appel : (error, info), pour la requête echo('hi') qui réussit
 null, {
+  callId: 3,
+  connectionHandle: 'server',
   direction: 'rx',
   duration: 1,
   options: { timeout: 2000 },

@@ -1,9 +1,9 @@
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 // `beadc init <name>`: a project beadc generates, written in the folder it runs in (decision 0022).
-// Its `beadc.yaml`, each language's output under the folder of its half, `typescript/gen` and
-// `dotnet/gen`, a `.proto` of one service that `beadc check` passes and buf's STANDARD lint takes,
-// buf's own `buf.yaml` for an editor, the editor's copy of Bead's options, and the wrappers
+// Its `beadc.yaml`, each language's output under the folder of its half, `typescript/gen`,
+// `dotnet/gen` and `rust/src/generated`, a `.proto` of one service that `beadc check` passes and
+// buf's STANDARD lint takes, buf's own `buf.yaml` for an editor, the editor's copy of Bead's options, and the wrappers
 // `beadc.sh` and `beadc.ps1` filled with beadc's version; then the lines a project's `.gitignore`
 // and `.gitattributes` owe, each appended when absent. It writes over no file: every path is looked
 // at before the first write, and one there is refused, but a wrapper that is byte for byte the one
@@ -29,6 +29,7 @@ import { CONFIG_FILE } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import { EDITOR_COPY, writeEditorCopy } from './generate.ts';
 import { BEADC_FILES, HTTP_FOLDER, VALIDATE_FILE } from './roots.ts';
+import { pascalOfSnake } from './targets/names.ts';
 import { WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
@@ -37,6 +38,7 @@ import { WRAPPERS, wrapperText } from './wrappers.ts';
 export const Language = Object.freeze({
   TYPESCRIPT: 'typescript',
   CSHARP: 'csharp',
+  RUST: 'rust',
 } as const);
 
 export type Language = (typeof Language)[keyof typeof Language];
@@ -66,10 +68,12 @@ const LANGUAGES: readonly string[] = Object.values(Language);
 
 // * each language's generated code under the folder of its half, named as the repository names its
 // implementations: a generated `_bead.ts` resolves its packages from where it sits, so `<half>/gen`
-// serves a package at the project's root and one in the half's folder alike
+// serves a package at the project's root and one in the half's folder alike; Rust's a module of its
+// crate's `src/`, `generated`, since edition 2024 reserves `gen` (RFC 3513)
 const OUT: Readonly<Record<Language, string>> = Object.freeze({
   [Language.TYPESCRIPT]: 'typescript/gen',
   [Language.CSHARP]: 'dotnet/gen',
+  [Language.RUST]: 'rust/src/generated',
 });
 
 // helpers
@@ -90,16 +94,6 @@ const causeOf = (bytes: Uint8Array): string => {
   return cause === undefined
     ? ''
     : `, by ${cause}: Windows PowerShell's > wrote it; run the line in PowerShell 7.6 (pwsh)`;
-};
-
-// `hello_world` as a type's name: HelloWorld
-const pascalOf = (name: string): string => {
-  return name
-    .split('_')
-    .map((part) => {
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join('');
 };
 
 // the lines a project's git files owe, each appended when absent: the wrappers', the blueprint's,
@@ -133,7 +127,7 @@ const configOf = (name: string, languages: readonly Language[]): string => {
     ...languages.flatMap((language) => {
       return language === Language.TYPESCRIPT
         ? ['  - language: typescript', `    out: ${OUT[language]}`, '    importExtension: ts']
-        : ['  - language: csharp', `    out: ${OUT[language]}`];
+        : [`  - language: ${language}`, `    out: ${OUT[language]}`];
     }),
     "# the output folders are beadc's own: generate takes out what it no longer writes there",
     'clean: true',
@@ -142,7 +136,7 @@ const configOf = (name: string, languages: readonly Language[]): string => {
 };
 
 const protoOf = (name: string): string => {
-  const pascal = pascalOf(name);
+  const pascal = pascalOfSnake(name);
 
   return [
     'syntax = "proto3";',
@@ -192,12 +186,12 @@ const BUF = [
   '',
 ].join('\n');
 
-// the languages asked, each once, in the order given; both when none is
+// the languages asked, each once, in the order given; every one when none is
 const languagesOf = (given: readonly string[]): readonly Language[] => {
   for (const language of given) {
     if (!LANGUAGES.includes(language)) {
       throw new InputError(
-        `--language ${language}: typescript or csharp, the targets of this beadc`
+        `--language ${language}: typescript, csharp or rust, the targets of this beadc`
       );
     }
   }
@@ -242,7 +236,7 @@ const absentOf = (path: string, lines: readonly string[]): readonly string[] => 
 // definition
 
 /**
- * Writes the project `name` into `options.folder`, its outputs those of `options.languages`, both
+ * Writes the project `name` into `options.folder`, its outputs those of `options.languages`, each
  * when none is named, its wrappers filled with `options.version`. Throws an {@link InputError} for a
  * name that is no proto package's part, a language beadc has no target for, and a file there that it
  * would write, before anything is written.

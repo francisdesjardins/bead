@@ -415,6 +415,22 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // the status of the close the server sends, the first frame it sends
+    private static async Task<int> FirstCloseCodeOf(NetworkStream stream)
+    {
+        var head = new byte[2];
+
+        await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(0x88, head[0]);
+
+        var payload = new byte[head[1] & 0x7F];
+
+        await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        return (payload[0] << 8) | payload[1];
+    }
+
     // a masked client frame of the first byte and the payload given, its payload under 126 bytes
     private static byte[] FrameOf((byte First, byte[] Payload) given)
     {
@@ -434,9 +450,18 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         return frame;
     }
 
-    /// <summary>A socket whose close throws, as one already broken can; the rest is the socket it wraps.</summary>
+    /// <summary>
+    /// A socket whose close throws, as one already broken can, or whose close goes out and whose
+    /// abort throws, aborting nothing; the rest is the socket it wraps.
+    /// </summary>
     private sealed class StubbornWebSocket(WebSocket socket) : WebSocket
     {
+        /// <summary>Whether its close goes out; it throws unless told.</summary>
+        public bool Closes { get; init; }
+
+        /// <summary>Whether its abort throws, leaving the socket it wraps as it was.</summary>
+        public bool RefusesAbort { get; init; }
+
         public override WebSocketCloseStatus? CloseStatus
         {
             get
@@ -471,17 +496,22 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         public override void Abort()
         {
+            if (RefusesAbort)
+            {
+                throw new InvalidOperationException("abort refused");
+            }
+
             socket.Abort();
         }
 
         public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
         {
-            return Task.FromException(new WebSocketException("the close cannot go out"));
+            return Closes ? socket.CloseAsync(closeStatus, statusDescription, cancellationToken) : Task.FromException(new WebSocketException("the close cannot go out"));
         }
 
         public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
         {
-            return Task.FromException(new WebSocketException("the close cannot go out"));
+            return Closes ? socket.CloseOutputAsync(closeStatus, statusDescription, cancellationToken) : Task.FromException(new WebSocketException("the close cannot go out"));
         }
 
         public override void Dispose()
@@ -2786,23 +2816,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
-    // RFC 6455 §8.1 and §7.4.1: .NET closes a text message that is no UTF-8 with 1007, and a close
-    // whose reason is no UTF-8 with 1002, where `ws` sends 1007 for both and tungstenite 1002 for
-    // both; a row of docs/support.md
+    // RFC 6455 §8.1: .NET fails a text message that is no UTF-8 with 1007 at the first fragment that
+    // breaks it, where `ws` waits for its last, and a close whose reason is no UTF-8 with 1002, where
+    // `ws` and the Rust side send 1007; rows of docs/support.md
     [Fact]
-    public async Task Closes_with_1007_a_text_message_that_is_no_UTF_8_and_with_1002_a_close_whose_reason_is_no_UTF_8()
+    public async Task Closes_with_1007_a_text_message_in_fragments_that_is_no_UTF_8_at_the_first_fragment_that_breaks_it_and_with_1002_a_close_whose_reason_is_no_UTF_8()
     {
         var codes = new List<int>();
 
-        foreach (var frame in new[] { FrameOf((0x81, [0xFF, 0xFE])), FrameOf((0x88, [0x03, 0xE8, 0xFF, 0xFE])) })
+        // a text message's first fragment, no FIN, then a ping, which no pong answers before the close
+        var sent = new[]
+        {
+            FrameOf((0x01, [0xFF])).Concat(FrameOf((0x89, []))).ToArray(),
+            FrameOf((0x88, [0x03, 0xE8, 0xFF, 0xFE])),
+        };
+
+        foreach (var frames in sent)
         {
             using var tcp = await OpenTcp();
             var stream = tcp.GetStream();
 
             await stream.WriteAsync(HandshakeOf("GET / HTTP/1.1", $"Host: 127.0.0.1:{_port}"), Cancelled);
             await ReadHead(stream);
-            await stream.WriteAsync(frame, Cancelled);
-            codes.Add(await CloseCodeOf(stream));
+            await stream.WriteAsync(frames, Cancelled);
+            codes.Add(await FirstCloseCodeOf(stream));
         }
 
         Assert.Equal([1007, 1002], codes);
@@ -3182,6 +3219,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             },
         });
 
+        var told = Told();
         var (client, connectionHandle) = await Connect();
 
         using (client)
@@ -3192,6 +3230,55 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Empty(_server.ConnectionHandles);
             Assert.Empty(_server.Clients);
             Assert.Equal((false, connectionHandle), await Next(_closes));
+            // a close that cannot go out is its peer's I/O, which no error tells (spec 15.1); an error
+            // would be told before the close just heard
+            Assert.DoesNotContain(told, (each) =>
+            {
+                return each.Name == "error";
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Ends_a_connection_whose_drop_throws_at_its_close_timeout_telling_what_it_threw_once_and_its_close_at_a_close_and_at_a_stop()
+    {
+        var stubborn = new ConcurrentQueue<StubbornWebSocket>();
+
+        await Start(new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) })
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                var refusing = new StubbornWebSocket(socket) { Closes = true, RefusesAbort = true };
+
+                stubborn.Enqueue(refusing);
+
+                return (refusing, connectionHandle);
+            },
+        });
+
+        var told = Told();
+        // neither peer reads, so neither answers its close
+        var (closed, closedHandle) = await Connect();
+        var (stopped, stoppedHandle) = await Connect();
+
+        using (closed)
+        using (stopped)
+        {
+            Assert.True(await _server.CloseConnection(closedHandle).WaitAsync(Patience, Cancelled));
+            await _server.Stop().WaitAsync(Patience, Cancelled);
+
+            Assert.Empty(_server.ConnectionHandles);
+            Assert.Empty(_server.Clients);
+            Assert.Equal(
+                [("error", "abort refused", closedHandle), ("close", null, closedHandle), ("error", "abort refused", stoppedHandle), ("close", null, stoppedHandle)],
+                told.Select((each) =>
+                {
+                    return (each.Name, each.Reason?.Message, each.ConnectionHandle);
+                }));
+            Assert.All(stubborn, (socket) =>
+            {
+                Assert.Equal(WebSocketState.Aborted, socket.State);
+            });
         }
     }
 
@@ -3915,5 +4002,31 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal([400, 400, 400, 400, 400, 400, 400], answers);
         Assert.Equal(505, await StatusOf(Latin1HandshakeOf("GET / HTTP/2.0")));
         Assert.Empty(_server.Clients);
+    }
+
+    [Fact]
+    public async Task Dispose_stops_it_closing_with_1001_and_refusing_what_comes_after()
+    {
+        var (client, _) = await Connect();
+
+        using (client)
+        {
+            var closing = AnswerClose(client);
+
+            await _server.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await closing.WaitAsync(Patience, Cancelled));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            {
+                return _server.Start(Loopback with { CancellationToken = Cancelled });
+            });
+            Assert.Equal(ReadyState.Closed, _server.ReadyState);
+        }
+    }
+
+    [Fact]
+    public void Beats_every_HEARTBEAT_when_told_nothing()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), new WebSocketTransportServerOptions().Heartbeat);
     }
 }

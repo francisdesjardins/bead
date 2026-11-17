@@ -96,8 +96,8 @@ interop/
     InteropCredentials.cs       its credentials: the key set and the verifier
   BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager and
                                 its two interfaces, called through the generated server and client
-  Bead.Interop.Server/          its server, which the TypeScript side's interop and its page of
-                                another origin call
+  Bead.Interop.Server/          its server, which the TypeScript and Rust sides' interop and the
+                                TypeScript side's page of another origin call
 tests/
   Bead.*.Tests/                 a project's tests, beside it by name
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
@@ -216,20 +216,24 @@ A binding to a real broker is a project of its own, beside its adapter. `Bead.Tr
 decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
 one network connection that keeps no session, its Client Identifier the participant's id,
 authenticated by a `Password` under its id, as given or what its `PasswordProvider` hands at each
-link's start, by a TLS client certificate (`Tls`), or with neither by its User Name alone; a
+link's start, by a TLS client certificate (`Tls`, a `TlsOptions`), or with neither by its User Name alone; a
 subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as its shared
 subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1, or of QoS 0 where its
 `Delivery` is `AtMostOnce`, counted to its byte by `MqttPackets` before it goes, one of QoS 1 held
-to its CONNACK's Receive Maximum, PUBACK 0x10 read as no subscriber; each message handed on before
-its PUBACK, which goes once the core settled it; a will of the participant's GONE; at a stop, once
-what it was handed went, an UNSUBSCRIBE of each filter it asked or holds, one a packet, their
-UNSUBACKs awaited within its `ConnectTimeout`, then a DISCONNECT of 0x00 within one of its own, one
-of 0x8E read as the link taken over. A guard of its own on MQTTnet's channel, `MqttPacketGuard`,
-reads each packet it receives at its Remaining Length: one past its own `MaximumPacketSize` closes
-the network connection before its body comes, no DISCONNECT (spec 15.29, a row of
-[`docs/support.md`](../../docs/support.md)'s "Leveled down"), its link lost where it was up and its
-start failed where no CONNACK put it up. MQTTnet's automation is off: no reconnection, resubscription, offline queue
-or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
+to its CONNACK's Receive Maximum, PUBACK 0x10 read as no subscriber; each acknowledgement read at
+MQTTnet's packet inspector before it decodes it, a code of 0x80 or more refusing its request
+whether or not its table names it, and a code under 0x80 its table does not name, or a count other
+than one, closing the link, no DISCONNECT, in every phase (spec 15.27 to 15.29); each message
+handed on before its PUBACK, which goes once the core settled it; a will of the participant's
+GONE; at a stop, once what it was handed went, an UNSUBSCRIBE of each filter it asked or holds,
+one a packet, their UNSUBACKs awaited within its `ConnectTimeout`, then a DISCONNECT of 0x00
+within one of its own, one of 0x8E read as the link taken over. A guard of its own on MQTTnet's
+channel, `MqttPacketGuard`, reads each packet it receives at its Remaining Length: one past its own
+`MaximumPacketSize` closes the network connection before its body comes, no DISCONNECT (spec 15.29,
+a row of [`docs/support.md`](../../docs/support.md)'s "Leveled down"), its link lost where it was
+up and its start failed where no CONNACK put it up. MQTTnet's automation is off: no reconnection,
+resubscription, offline queue or alias, each incarnation a client of its own. Its handles' type is
+`MQTT`.
 
 ```csharp
 await using var participant = new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions
@@ -258,7 +262,9 @@ Its link is up as a CONNACK of 0x00 whose Maximum QoS is not 0 is read: a loss r
 told once as its `Down`, a DISCONNECT of 0x8E as its link taken over, and its start succeeds all
 the same. A CONNACK of any other code fails its start, an `IOException` naming it, `CONNACK 0x86`
 say, as does one of Maximum QoS 0, and a start that fails sends no DISCONNECT; a stop once MQTTnet
-says it connected sends its DISCONNECT of 0x00, though its start has not settled (spec 15.26). A
+says it connected sends its DISCONNECT of 0x00, though its start has not settled (spec 15.26), and
+none once a packet its client cannot read ended its link, which ends that stop at once, no down
+told (spec 15.29). A
 subscription or a publication its token gives up once what it asked may have gone, at either QoS,
 a publication at most once given up before its packet is written among them, retires its link, so
 that nothing of it enters another: what else its link was asked fails with an `IOException` saying
@@ -275,7 +281,7 @@ a relay of its own that a case's `lose` cuts.
 AMQPNetLite (spec 15.32 to 15.38, decision 0043): `amqp://` or `amqps://`; one network connection
 opened anew at each start, its container-id the participant's id, authenticated by SASL PLAIN under
 its id, its `Password` as given or what its `PasswordProvider` hands at each link's start, or by
-EXTERNAL under a TLS client certificate (`Tls`), never ANONYMOUS: the adapter is refused as it is
+EXTERNAL under a TLS client certificate (`Tls`, a `TlsOptions`), never ANONYMOUS: the adapter is refused as it is
 built given neither, and its password is given, asked and refused as an MQTT 5 link's is; its start
 waits `ConnectTimeout` for its password, where it asks its provider, its broker's OPEN and its
 sessions; its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
@@ -323,19 +329,29 @@ await gateway.Start(new HttpGatewayStartOptions { Port = 8080 });
 ```
 
 It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body on
-the TypeScript and C# sides, and its README says it whole: every procedure a client calls at
-`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too where
-the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
-protobuf's JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`;
-notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**: a
-procedure answers its default route whatever rules map it, and what guards it is its admission.
-Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
-HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
-too; a member given in the policy and beside it, at its default as at any value, is refused.
-It listens on its own port, or answers in the application's own Kestrel pipeline,
-`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; one origin for `/bead` and `/api/…`
-comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
-`etag`; Swagger UI is the application's to serve.
+every side, and its README says it whole: every procedure a client calls at `POST
+/api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too where the
+query carries its request, each `google.api.http` rule as written; Bead's own mapping of protobuf's
+JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`; notifications
+as Server-Sent Events, paced by what the response takes, a `HEAD` that asks one answered as its
+`GET` begins and ended at its head, its subscription with it. **The route is no guard**: a procedure
+answers its default route whatever rules map it, and what guards it is its admission. Each exchange
+draws one Bead connection, closed as its response ends, its client given the router limits
+`HttpGatewayOptions.Limits` gives. It judges a request by the HTTP transport's own gates, a
+navigation from another site taken only as a `GET` that no `object` or `embed` makes, from one
+`HttpPolicy`, which `HttpTransportServerOptions.Policy` takes too; a member given in the policy and
+beside it, at its default as at any value, is refused. It listens on its own port, or answers in the
+application's own Kestrel pipeline, `endpoints.MapBeadGateway(gateway)`, its fallback endpoint; as
+the fallback it runs after every middleware, so one that reads a body there leaves it buffered
+(`EnableBuffering`), which the gateway reads from its start, or runs on the application's own paths
+alone (`UseWhen`). A body read before it otherwise is answered 500 and reported on `Error`, never
+called with what was left. Mounted, it keeps every gate of `transcoding.md` 10.1 from its step 2,
+its problems, its pace and its bounds; its host owns what HTTP refuses of its own, its head's bounds
+and timeouts, its socket's write deadline, a path its own router answers first, and whatever reads
+the body before it. Mounting it in a host's framework, its lines held by tests, is a round of its
+own, ahead (decision 0052). One origin for `/bead` and `/api/…` comes from a proxy in front. It
+serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
+application's to serve.
 
 Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
 `MinimumSendBytesPerSecond` after `SendGracePeriod`: whole answers, problems, the document and
@@ -512,7 +528,8 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
-  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: one
+  client or a WebSocket client given a `Handler` keeps the handler's behaviour, the WebSocket
+  client's held in an invoker of its own and never disposed by it. Neither follows a redirect: one
   answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
   listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
   `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
@@ -522,6 +539,28 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   another kind that follows all the same is caught by its answer's `RequestMessage`, gone to
   another URL than the one asked, which fails the connect, and loses the connection of a send or a
   listen.
+- **A client's TLS** (spec 15.39, [decision
+  0053](../../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)):
+  each client, `WebSocketTransportClientOptions` and `HttpTransportClientOptions`, and each broker's
+  adapter, `MqttBrokerAdapterOptions` and `AmqpBrokerAdapterOptions`, takes a `Tls`, a
+  `TlsOptions` of `Bead.Core`, of three members, each PEM text: `Authorities`, the trust anchors
+  its server's certificate chains to, in place of the platform's roots (RFC 5280 §6.1.1);
+  `Certificate`, the client's certificate first, then the intermediates that certify it (RFC 8446
+  §4.4.2); and `Key`, its private key, PKCS #8, SEC1 or PKCS #1, unencrypted, never printed. A
+  certificate without its key, a key without its certificate or of another, an encrypted key, and
+  a member that reads as nothing are each an `ArgumentException` as the client is built, and so is
+  a `Tls` beside a `Handler`, which keeps a TLS of its own: the way to the platform's TLS. A
+  transport's client holds it in the clear and uses it on a secured connect alone, through a
+  `SocketsHttpHandler` of its own whose `SslOptions` present the certificate by a
+  `SslStreamCertificateContext`, its intermediates with it, and judge the server by a chain to the
+  authorities alone; a broker's adapter refuses it over a URL that is not TLS, and takes a password
+  beside authorities alone. Its leaf is imported again from PKCS #12, since Schannel refuses an
+  ephemeral key, and on Windows the platform writes the intermediates into the user's CA store,
+  from which Schannel sends them. The brokers' libraries take a collection, presented as the leaf
+  alone, or nothing on Windows, where no store holds its intermediates (`docs/support.md`). On
+  Windows a client that presents a certificate resumes no TLS session. .NET caches the anonymous
+  credential its handshake starts with, and Schannel ties it to the certificate: a client given
+  none would read it and present that certificate.
 - **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
@@ -540,7 +579,7 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   its attempt is over, its
   callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
   that cancels itself while that attempt's token is still live fails it as any failure of its does.
-  What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
+  What else a connect awaits, a WebSocket client's `Handler` and an HTTP client's, is bounded
   alike, one that ignores its token among them. A connect refuses, an `ArgumentException`, nothing
   moved: both given; one that is no field value — anything but visible ASCII, spaces and tabs, or a
   space or a tab first or last (RFC 9110 §5.5), which the HTTP client refuses alike before a send
@@ -595,7 +634,7 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   declare among them ([decision
   0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
   a singular closed enum's record of a number its enum does not declare is dropped before the
-  library reads (17.9.8). `ProtoRequired.Check` then refuses a message that leaves a field of
+  library reads (17.9.8). The required walk then refuses a message that leaves a field of
   `LEGACY_REQUIRED` presence unset, at any depth but inside an extension or an `Any`, reading and
   writing, with a `FormatException` of the same reason (17.9.7, [decision
   0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
@@ -715,7 +754,7 @@ origin and exposes every field, so a page of a listed origin connects, calls, li
 cursor and wait in `bead-after` and `bead-wait`, which a browser's preflight cache keys, so a page
 preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`:
 no cookie goes across origins, and a `fetch` given to the TypeScript side's client must not use
-`credentials: 'include'`. A gateway in front that answers CORS for the path stops, or replaces the
+`credentials: 'include'`. A proxy in front that answers CORS for the path stops, or replaces the
 fields rather than appends them, once the server lists the origin: two `Access-Control-Allow-Origin`
 fail the browser's check. A page of the public network reaching a server on the loopback or a
 private address needs besides its user's permission, which the browser asks (Local Network Access),

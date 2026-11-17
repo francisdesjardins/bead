@@ -4,88 +4,39 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>bead — a binary call protocol, its server in a Web Worker</title>
-    <link rel="canonical" href="https://francisdesjardins.ca/playground/bead/" />
+    <link rel="canonical" href="https://beadproto.dev/playground/" />
     <meta
       name="description"
       content="Bead, a binary call protocol, one surface in TypeScript, C# and Rust, tried in the page: calls, subscriptions at the client's pace, transfers, cancellation, payload rules, and the same sign-up over HTTP and JSON with its OpenAPI document."
     />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- before the first paint: the theme, as the page keeps it -->
+    <script src="penumbra/theme.js"></script>
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
+    <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
+    <link rel="stylesheet" href="penumbra/tokens.skin.css" />
+    <link rel="stylesheet" href="penumbra/chrome.css" />
     <style>
-      /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
-         declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
-         the demo draws with of its own; the faces are the site's, on the system's fallbacks, since
-         the page fetches no font file */
+      /* the demo's own, over Bead's skin, its bar and penumbra's sheets: a write's mark, the shadow
+         the wire's sheet casts over the page, and the height of the strip under the bar */
       :root {
-        color-scheme: light dark;
-        --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-        --app-font-body:
-          'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-        --app-font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
         /* a board of rows reads denser than a page of prose */
         --app-lh-body: 1.45;
-
-        --app-primary: #c13584;
-        --app-primary-ink: #ffffff;
-        --app-primary-hover: #9d2a6b;
-        --app-accent: #c13584;
-        --app-flame: #c13584;
-        --app-flame-wash: rgb(193 53 132 / 0.1);
-        --app-ring: #ff69b4;
-        --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
-
-        --app-bg: #f5f2f8;
-        --app-paper: #fdfcfe;
-        --app-text: #17111d;
-        --app-text-secondary: #4a4055;
-        --app-text-tertiary: #6d6278;
-        --app-divider: rgb(23 17 29 / 0.12);
-        --app-error: #b91c1c;
-        --app-ok: #047857;
-        --app-ok-wash: rgb(4 120 87 / 0.1);
-        --app-info: #0369a1;
-        --app-warn: #92400e;
-        --app-warn-wash: rgb(146 64 14 / 0.1);
-
-        /* the demo's own: the ground of what is code, a refusal's wash, a write's mark, and the
-           shadow the wire's sheet casts over the page */
-        --raised: #f1ecf5;
-        --bad-soft: rgb(185 28 28 / 0.1);
+        --strip-height: 52px;
         --write: #b4460f;
         --sheet-shadow: 0 -8px 24px rgb(23 17 29 / 0.12);
-        /* code reads a step under the body, between penumbra's two smallest */
-        --text-code: 0.75rem;
-        /* what a finger is sure to hit, on a phone */
-        --touch: 44px;
+      }
+
+      :root[data-color-scheme='dark'] {
+        --write: #f0a45b;
+        --sheet-shadow: 0 -8px 24px rgb(0 0 0 / 0.5);
       }
 
       @media (prefers-color-scheme: dark) {
-        :root {
-          /* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
-          --app-primary: #ff8bc4;
-          --app-primary-ink: #3d0b28;
-          --app-primary-hover: #ffaed5;
-          --app-accent: #ff8bc4;
-          --app-flame: #ff8bc4;
-          --app-flame-wash: rgb(255 139 196 / 0.14);
-          --app-ring: #ffaed5;
-          --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
-
-          --app-bg: #0c0910;
-          --app-paper: #15111c;
-          --app-text: #f2ecf5;
-          --app-text-secondary: #b2a7bf;
-          --app-text-tertiary: #8d8199;
-          --app-divider: rgb(242 236 245 / 0.14);
-          --app-error: #f87171;
-          --app-ok: #34d399;
-          --app-ok-wash: rgb(52 211 153 / 0.14);
-          --app-info: #38bdf8;
-          --app-warn: #fbbf24;
-          --app-warn-wash: rgb(251 191 36 / 0.14);
-
-          --raised: #1c1625;
-          --bad-soft: rgb(248 113 113 / 0.12);
+        :root:not([data-color-scheme]) {
           --write: #f0a45b;
           --sheet-shadow: 0 -8px 24px rgb(0 0 0 / 0.5);
         }
@@ -128,7 +79,7 @@
       }
 
       code {
-        font: var(--text-code) var(--app-font-mono);
+        font: 0.875em var(--app-font-mono);
         overflow-wrap: anywhere;
       }
 
@@ -147,67 +98,46 @@
         white-space: nowrap;
       }
 
-      /* ── the bar: where it comes from, how it is connected, who, and the wire ─ */
+      /* ── the strip: the transport, how it is connected, who, and the wire ── */
 
-      .topbar {
+      /* * the demo's own row under Bead's bar, which holds Bead's name alone: one row at every
+         width, sticky under the bar on a desktop, scrolled away with the page on a phone */
+      .strip {
+        position: relative;
+        z-index: var(--app-z-sidebar);
         border-bottom: 1px solid var(--app-divider);
-        background: var(--app-paper);
+        background: var(--app-bg);
       }
 
-      .topbar-inner {
+      .strip-row {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         align-items: center;
-        gap: var(--app-space-3) var(--app-space-6);
-        max-width: 1360px;
+        gap: var(--app-space-3);
+        height: var(--strip-height);
+        max-width: var(--app-content-max-width);
         margin: 0 auto;
-        padding: var(--app-space-3) max(var(--app-space-4), 3vw);
-      }
-
-      .brand {
-        display: flex;
-        flex: 1 1 auto;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: var(--app-space-1) var(--app-space-3);
-      }
-
-      .back {
-        font-size: var(--app-text-sm);
-        text-decoration: none;
-      }
-
-      .wordmark {
-        font: 600 var(--app-text-lg) / var(--app-lh-tight) var(--app-font-display);
-        letter-spacing: -0.02em;
-      }
-
-      .tag {
-        color: var(--app-text-tertiary);
+        padding: 0 var(--frame-gutter);
         font-size: var(--app-text-sm);
       }
 
       /* the transports, a segmented control: one a link, the one in use marked */
       .transports {
         display: flex;
+        flex: none;
         gap: 2px;
         padding: 3px;
         border-radius: var(--app-radius-pill);
         background: var(--raised);
       }
 
-      .transports span {
-        display: contents;
-      }
-
       .transports a {
         display: inline-grid;
         place-items: center;
-        min-height: 36px;
+        min-height: 38px;
         padding: 0 var(--app-space-3);
         border-radius: var(--app-radius-pill);
         color: var(--app-text-secondary);
-        font-size: var(--app-text-sm);
         text-decoration: none;
         white-space: nowrap;
       }
@@ -223,19 +153,59 @@
         box-shadow: 0 1px 2px rgb(23 17 29 / 0.08);
       }
 
-      .status {
-        display: flex;
-        flex-wrap: wrap;
+      /* what a transport does, the words a phone's menu writes under its name */
+      .transports .why {
+        display: none;
+      }
+
+      /* the transport in use, named: a chip, which opens the others on a phone where there is a
+         choice */
+      .transport-chip {
+        display: inline-flex;
+        flex: none;
         align-items: center;
-        gap: var(--app-space-2) var(--app-space-3);
+        gap: var(--app-space-2);
+        padding: 3px var(--app-space-3);
+        border-radius: var(--app-radius-pill);
+        background: var(--raised);
+        color: var(--app-text);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      button.transport-chip,
+      button.status-toggle,
+      button.wire-toggle {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        gap: var(--app-space-2);
+        padding: 0 var(--app-space-3);
+        border-radius: var(--app-radius-pill);
         font-size: var(--app-text-sm);
+        white-space: nowrap;
+      }
+
+      button.transport-chip::after,
+      button.status-toggle::after {
+        content: '▾';
+        color: var(--app-text-tertiary);
+      }
+
+      #transport-toggle {
+        display: none;
       }
 
       /* a connection says how it stands by a light, as a status bar does; its whole sentence is
-         its title */
+         what the light opens */
+      button.status-toggle {
+        min-width: var(--app-touch);
+        border-color: transparent;
+        background: transparent;
+      }
+
       #connection {
         color: var(--app-text-secondary);
-        white-space: nowrap;
       }
 
       #connection::before {
@@ -257,14 +227,13 @@
         background: var(--app-error);
       }
 
-      /* who the calls are made as, by a role; the session's detail is its title */
+      /* who the calls are made as, by a role */
       #identity {
         padding: 3px var(--app-space-3);
         border-radius: var(--app-radius-pill);
         background: var(--app-flame-wash);
         color: var(--app-accent);
         font-weight: 600;
-        white-space: nowrap;
       }
 
       #identity[data-role='none'] {
@@ -273,29 +242,84 @@
       }
 
       /* how many envelopes crossed, on what opens the wire */
+      button.wire-toggle {
+        margin-inline-start: auto;
+      }
+
       .count {
         min-width: 1.75em;
         padding: 1px 7px;
         border-radius: var(--app-radius-pill);
         background: var(--app-primary);
         color: var(--app-primary-ink);
-        font: 500 var(--text-code) var(--app-font-mono);
+        font: 500 var(--app-text-sm) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         text-align: center;
       }
 
-      button.wire-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--app-space-2);
-        min-height: 36px;
+      /* * a phone counts what crossed on the wire's sheet, whose bar stays in view: the strip
+         scrolls away with the page, and its button names the wire alone */
+      @media (max-width: 899px) {
+        .wire-toggle .count {
+          display: none;
+        }
+      }
+
+      /* what the strip opens, a panel under it: the connection's sentence and who, or on a phone
+         the other transports */
+      .status-detail {
+        display: none;
+      }
+
+      .status-detail[data-open] {
+        position: absolute;
+        top: calc(100% + var(--app-space-1));
+        left: max(
+          var(--frame-gutter),
+          calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+        );
+        display: grid;
+        gap: var(--app-space-1);
+        width: min(100% - 2 * var(--frame-gutter), 420px);
+        padding: var(--app-space-4);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-lg);
+        background: var(--app-paper);
+        box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
         font-size: var(--app-text-sm);
+      }
+
+      .status-detail dt {
+        color: var(--app-text-secondary);
+      }
+
+      .status-detail dd + dt {
+        margin-top: var(--app-space-2);
+      }
+
+      .status-detail dd {
+        overflow-wrap: anywhere;
+      }
+
+      /* ! the panel comes in at once, or by a short fade where motion is welcome: never more */
+      @media (prefers-reduced-motion: no-preference) {
+        .status-detail[data-open],
+        .transports[data-open] {
+          transition: opacity var(--app-quick) var(--app-ease);
+        }
+
+        @starting-style {
+          .status-detail[data-open],
+          .transports[data-open] {
+            opacity: 0;
+          }
+        }
       }
 
       /* ── the controls: a button, a field, a tab ─────────────────────────── */
 
       button {
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-4);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
@@ -373,7 +397,8 @@
         font-weight: 600;
       }
 
-      .field input {
+      .field input,
+      .field textarea {
         width: 100%;
         min-height: 36px;
         padding: var(--app-space-1) var(--app-space-2);
@@ -384,14 +409,19 @@
         font: var(--app-text-sm) var(--app-font-mono);
       }
 
-      .field input[aria-invalid='true'] {
+      .field textarea {
+        resize: vertical;
+      }
+
+      .field input[aria-invalid='true'],
+      .field textarea[aria-invalid='true'] {
         border-color: var(--app-error);
         background: var(--bad-soft);
       }
 
       .hint {
         color: var(--app-text-secondary);
-        font-size: var(--text-code);
+        font-size: var(--app-text-sm);
       }
 
       /* a violation, under the input its path names, or above the form when it names none */
@@ -400,7 +430,7 @@
         gap: 2px;
         padding: 0;
         color: var(--app-error);
-        font-size: var(--text-code);
+        font-size: var(--app-text-sm);
         font-weight: 550;
         list-style: none;
         overflow-wrap: anywhere;
@@ -428,7 +458,7 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         font-weight: 600;
         cursor: pointer;
       }
@@ -447,8 +477,9 @@
 
       /* a phone zooms into a field whose text is smaller than 16px */
       @media (max-width: 600px) {
-        .field input {
-          min-height: var(--touch);
+        .field input,
+        .field textarea {
+          min-height: var(--app-touch);
           font-size: 16px;
         }
       }
@@ -460,9 +491,11 @@
         grid-template-columns: minmax(0, 1fr);
         gap: var(--app-space-8);
         align-items: start;
-        max-width: 1360px;
+        /* the frame Bead's page shares: penumbra's content width, the same
+           gutter at its sides */
+        max-width: var(--app-content-max-width);
         margin: 0 auto;
-        padding: var(--app-space-10) max(var(--app-space-4), 3vw) var(--app-space-14);
+        padding: var(--app-space-10) var(--frame-gutter) var(--app-space-14);
       }
 
       .scenes {
@@ -470,9 +503,7 @@
         align-content: start;
         gap: var(--app-space-6);
         width: 100%;
-        max-width: 860px;
         min-width: 0;
-        margin: 0 auto;
       }
 
       .intro {
@@ -505,19 +536,19 @@
         display: none;
       }
 
-      /* the scenes' tabs, on one line: past a phone's width, they scroll within it */
+      /* the scenes' tabs, on one line: past a phone's width, they scroll within it, sideways
+         alone; the hairline is drawn inside the list, where the selected tab's bar covers it, so
+         that no tab reaches past the list and asks a scroll of its own */
       .scene-tabs {
         display: flex;
         gap: var(--app-space-1);
-        overflow-x: auto;
-        border-bottom: 1px solid var(--app-divider);
+        overflow: auto hidden;
+        box-shadow: inset 0 -1px 0 var(--app-divider);
         scrollbar-width: thin;
       }
 
       .scene-tabs [role='tab'] {
         flex: none;
-        /* the selected tab's bar lies on the list's hairline */
-        margin-bottom: -1px;
         padding: 0 var(--app-space-3);
         border: 0;
         border-bottom: 2px solid transparent;
@@ -537,6 +568,29 @@
         border-bottom-color: var(--app-accent);
         color: var(--app-text);
         font-weight: 600;
+      }
+
+      /* the list's end fades while it runs on past it, so a cut tab reads as more to come */
+      .scene-tabs[data-runs-on],
+      .sides-tabs[data-runs-on] {
+        mask-image: linear-gradient(to right, #000 calc(100% - var(--app-space-10)), transparent);
+      }
+
+      /* where a screen is tall enough, the tabs stay under the bar as the page scrolls, and under
+         the strip too on a desktop, where it stays */
+      @media (min-height: 700px) {
+        .scene-tabs {
+          position: sticky;
+          top: var(--app-topbar-height);
+          z-index: var(--app-z-backdrop);
+          background: var(--app-bg);
+        }
+      }
+
+      @media (min-width: 900px) and (min-height: 700px) {
+        .scene-tabs {
+          top: calc(var(--app-topbar-height) + var(--strip-height) + 1px);
+        }
       }
 
       /* what to try first, in its order: each done ticked, the one to do next marked */
@@ -567,7 +621,7 @@
         border-radius: var(--app-radius-pill);
         background: var(--raised);
         color: var(--app-text-secondary);
-        font: 500 var(--text-code) var(--app-font-mono);
+        font: 500 var(--app-text-sm) var(--app-font-mono);
       }
 
       .steps li[aria-current] {
@@ -630,12 +684,16 @@
         line-height: var(--app-lh-snug);
       }
 
+      /* * the name of what a reader acts on, a field or a control, in the body's face: never a
+         block's eyebrow, which its heading already names */
       .label {
-        color: var(--app-text-tertiary);
-        font-size: var(--app-text-xs);
-        font-weight: 500;
-        letter-spacing: var(--app-tracking-label);
-        text-transform: uppercase;
+        color: var(--app-text-secondary);
+        font: 500 var(--app-text-sm) / var(--app-lh-snug) var(--app-font-body);
+      }
+
+      /* a key of beadc.yaml, at the label's own size */
+      .label code {
+        font-size: 1em;
       }
 
       /* what a scene's last call said */
@@ -646,7 +704,7 @@
 
       .detail {
         color: var(--app-text-tertiary);
-        font: var(--text-code) / 1.5 var(--app-font-mono);
+        font: var(--app-text-sm) / 1.5 var(--app-font-mono);
         overflow-wrap: anywhere;
       }
 
@@ -674,7 +732,7 @@
         width: 112px;
         height: 112px;
         flex: none;
-        border-radius: var(--app-radius-md);
+        border-radius: var(--app-radius);
         box-shadow: 0 0 0 1px var(--app-divider);
       }
 
@@ -682,18 +740,13 @@
         display: none;
       }
 
-      /* ── the server: its verdict, four figures, then what folds ──────────── */
+      /* ── the server: one card, its verdict and four figures, then what folds ── */
 
       .server-head {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--app-space-2) var(--app-space-4);
-      }
-
-      .server-head h2 {
-        font: 500 2.125rem / var(--app-lh-tight) var(--app-font-display);
-        letter-spacing: -0.02em;
+        gap: var(--app-space-2) var(--app-space-3);
       }
 
       /* the verdict, coloured as health checks are read */
@@ -717,13 +770,16 @@
         color: var(--app-error);
       }
 
+      /* * one strip of four figures in the server's card, two by two on a phone: the gaps, a
+         pixel wide over the divider's colour, draw the hairlines between them, never around */
       .figures {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--app-space-3);
+        gap: 1px;
+        background: var(--app-divider);
       }
 
-      @media (max-width: 760px) {
+      @media (max-width: 600px) {
         .figures {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
@@ -734,21 +790,31 @@
         align-content: start;
         gap: var(--app-space-1);
         min-width: 0;
-        padding: var(--app-space-4);
-        border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-lg);
+        padding: var(--app-space-2) var(--app-space-4);
         background: var(--app-paper);
       }
 
+      .figure:first-child {
+        padding-left: 0;
+      }
+
+      @media (max-width: 600px) {
+        .figure {
+          padding-block: var(--app-space-3);
+        }
+
+        .figure:nth-child(odd) {
+          padding-left: 0;
+        }
+      }
+
       .figure dt {
-        color: var(--app-text-tertiary);
-        font-size: var(--app-text-xs);
-        letter-spacing: var(--app-tracking-label);
-        text-transform: uppercase;
+        color: var(--app-text-secondary);
+        font: 500 var(--app-text-sm) / var(--app-lh-snug) var(--app-font-body);
       }
 
       .figure .value {
-        font: 500 2.125rem / 1 var(--app-font-display);
+        font: 500 var(--app-text-base) / var(--app-lh-snug) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
       }
@@ -769,7 +835,7 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: var(--app-space-2) var(--app-space-5);
         font-weight: 500;
         cursor: pointer;
@@ -855,7 +921,25 @@
         border-radius: var(--app-radius-md);
         background: var(--raised);
         box-shadow: 0 0 0 1px var(--app-divider);
-        font: var(--app-text-xs) / 1.5 var(--app-font-mono);
+        font: var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
+      }
+
+      /* code coloured as the page colours it, its colours Bead's skin's */
+      .tok-comment {
+        color: var(--tok-comment);
+        font-style: italic;
+      }
+
+      .tok-keyword {
+        color: var(--tok-keyword);
+      }
+
+      .tok-string {
+        color: var(--tok-string);
+      }
+
+      .tok-number {
+        color: var(--tok-number);
       }
 
       .exposition pre {
@@ -863,21 +947,69 @@
         margin: 0 var(--app-space-5) var(--app-space-4);
       }
 
-      /* ── the two sides: one role a tab, its two files side by side ──────── */
+      /* ── the same service: one role a tab, one language a choice, one file ─ */
 
+      /* the role and the language on one row, the file's path under them; where the card is
+         narrow, the language moves to the path's line, the path ellipsed before it; where it is
+         narrower still, to a row of its own, which leaves the path its room */
+      #sides {
+        container: sides / inline-size;
+      }
+
+      .sides {
+        display: grid;
+        grid-template-areas:
+          'roles languages'
+          'file file'
+          'code code';
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--app-space-2) var(--app-space-3);
+      }
+
+      @container sides (width < 36rem) {
+        .sides {
+          grid-template-areas:
+            'roles roles'
+            'file languages'
+            'code code';
+        }
+      }
+
+      @container sides (width < 18rem) {
+        .sides {
+          grid-template-areas:
+            'roles roles'
+            'languages languages'
+            'file file'
+            'code code';
+        }
+
+        .sides-languages {
+          justify-self: start;
+        }
+      }
+
+      /* the roles, on one line: where they run past the card, they scroll within it, sideways
+         alone */
       .sides-tabs {
         display: flex;
-        flex-wrap: wrap;
+        grid-area: roles;
         gap: var(--app-space-2);
+        min-width: 0;
+        overflow: auto hidden;
+        scrollbar-width: thin;
       }
 
       .sides-tabs [role='tab'] {
+        flex: none;
         min-height: 36px;
         padding: 0 var(--app-space-3);
         border-radius: var(--app-radius-pill);
         background: var(--raised);
         color: var(--app-text-secondary);
         font-weight: 500;
+        white-space: nowrap;
       }
 
       .sides-tabs [role='tab'][aria-selected='true'] {
@@ -885,47 +1017,74 @@
         color: var(--app-text);
       }
 
-      @media (max-width: 600px) {
-        .sides-tabs [role='tab'] {
-          min-height: var(--touch);
+      /* ! the focus ring is drawn outside a tab, which the list's scroll would cut */
+      .sides-tabs [role='tab']:focus-visible {
+        outline-offset: -2px;
+      }
+
+      /* the language, a segmented control as the transports and the wire's are */
+      .sides-languages {
+        display: flex;
+        grid-area: languages;
+        gap: 2px;
+        padding: 3px;
+        border-radius: var(--app-radius-pill);
+        background: var(--raised);
+      }
+
+      .sides-languages [role='radio'] {
+        min-height: 30px;
+        padding: 0 var(--app-space-3);
+        border: 0;
+        border-radius: var(--app-radius-pill);
+        background: transparent;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      .sides-languages [role='radio'][aria-checked='true'] {
+        background: var(--app-paper);
+        color: var(--app-text);
+        font-weight: 600;
+        box-shadow: 0 1px 2px rgb(23 17 29 / 0.08);
+      }
+
+      @media (pointer: coarse), (max-width: 600px) {
+        .sides-tabs [role='tab'],
+        .sides-languages [role='radio'] {
+          min-width: var(--app-touch);
+          min-height: var(--app-touch);
         }
       }
 
-      .sides {
-        display: grid;
-        gap: var(--app-space-3);
-      }
-
-      .sides figure {
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
-        gap: var(--app-space-1);
+      /* * the path whole where it fits; cut at its head where it does not, its file kept */
+      .sides-file {
+        grid-area: file;
         min-width: 0;
-        margin: 0;
-      }
-
-      .sides figcaption {
+        overflow: hidden;
         color: var(--app-text-secondary);
         font: var(--app-text-xs) / var(--app-lh-snug) var(--app-font-mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        direction: rtl;
+        text-align: left;
       }
 
-      /* a file is the one scroll of its own a scene keeps */
       .sides pre {
+        grid-area: code;
         max-height: 70vh;
       }
 
-      @media (min-width: 900px) {
-        .sides {
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      /* a phone: the page scrolls down, the file across alone, no scroll inside another */
+      @media (max-width: 899px) {
+        .sides pre {
+          max-height: none;
         }
       }
 
       /* ── the packages: a blueprint cut into beadc.yaml's outputs ─────────── */
-
-      /* the packages beside what they hold: the scenes' column widens for them */
-      .scenes:has(> #packages-scene:not([hidden])) {
-        max-width: 1280px;
-      }
 
       .planner {
         display: grid;
@@ -956,12 +1115,44 @@
         gap: var(--app-space-2) var(--app-space-4);
       }
 
+      /* a button a language, each as wide as the others */
+      .planner-add {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      .planner-add-buttons {
+        display: grid;
+        grid-auto-columns: minmax(0, 1fr);
+        grid-auto-flow: column;
+        gap: var(--app-space-2);
+      }
+
+      .planner-add-buttons button {
+        text-align: center;
+      }
+
       .planner-drop {
         display: grid;
         gap: var(--app-space-3);
         padding: var(--app-space-4);
         border: 1px dashed var(--app-divider);
         border-radius: var(--app-radius-md);
+      }
+
+      @media (max-width: 600px) {
+        .planner-drop .planner-file {
+          grid-column: 1 / -1;
+        }
+
+        .planner-drop {
+          padding: var(--app-space-3);
+        }
+
+        .planner-drop .buttons button {
+          padding: var(--app-space-2) var(--app-space-3);
+          text-wrap: balance;
+        }
       }
 
       .planner-drop[data-over] {
@@ -975,7 +1166,7 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-4);
         border-radius: var(--app-radius-md);
         background: var(--app-primary);
@@ -1016,11 +1207,43 @@
         display: none;
       }
 
+      .planner-package {
+        container: package / inline-size;
+      }
+
+      /* * the language, its folder and its removal on one row; where the card is narrow, the
+         folder on a line of its own, the removal kept on the language's row */
       .planner-package-head {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-areas: 'language folder remove';
+        grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: end;
         gap: var(--app-space-2) var(--app-space-4);
+      }
+
+      @container package (width < 40rem) {
+        .planner-package-head {
+          grid-template-areas:
+            'language remove'
+            'folder folder';
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+      }
+
+      .planner-language {
+        grid-area: language;
+        justify-self: start;
+      }
+
+      .planner-folder {
+        grid-area: folder;
+        min-width: 0;
+        min-height: var(--app-touch);
+        align-content: center;
+      }
+
+      .planner-remove {
+        grid-area: remove;
       }
 
       .planner-field {
@@ -1029,13 +1252,8 @@
         min-width: 0;
       }
 
-      /* the folder takes its own line where the head has no room for it */
-      .planner-folder {
-        flex: 1 1 14rem;
-      }
-
       .planner select {
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-3);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
@@ -1076,7 +1294,9 @@
         background: var(--raised);
       }
 
+      /* one radius a level: a transport inside its server's box, a pick inside either, a step down */
       .planner-transport {
+        border-radius: var(--app-radius);
         background: var(--app-paper);
       }
 
@@ -1100,8 +1320,14 @@
         display: inline-flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: 32px;
+        min-height: var(--app-space-8);
         cursor: pointer;
+      }
+
+      @media (pointer: coarse) {
+        .planner-choice {
+          min-height: var(--app-touch);
+        }
       }
 
       .planner-choice input {
@@ -1138,15 +1364,19 @@
       .planner-pick {
         min-width: 0;
         border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-md);
+        border-radius: var(--app-radius);
         background: var(--app-paper);
+      }
+
+      .planner-transport .planner-pick {
+        border-radius: var(--app-radius-sm);
       }
 
       .planner-pick summary {
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
-        min-height: var(--touch);
+        min-height: var(--app-touch);
         padding: 0 var(--app-space-3);
         cursor: pointer;
       }
@@ -1366,7 +1596,7 @@
       }
 
       .switch [role='tab'] {
-        min-height: 32px;
+        min-height: var(--app-space-8);
         padding: 0 var(--app-space-3);
         border: 0;
         border-radius: var(--app-radius-pill);
@@ -1406,7 +1636,7 @@
       .log ol {
         padding: var(--app-space-2) 0;
         list-style: none;
-        font: var(--text-code) / 1.55 var(--app-font-mono);
+        font: var(--app-text-code) / var(--app-lh-body) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
@@ -1436,13 +1666,13 @@
         font-size: var(--app-text-sm);
       }
 
-      /* the bar a phone folds the wire into */
+      /* the bar a phone folds the wire into, and what crossed, counted */
       button.wire-sheet {
         display: none;
         align-items: center;
         gap: var(--app-space-3);
         width: 100%;
-        min-height: 56px;
+        min-height: var(--app-space-14);
         border: 0;
         border-radius: var(--app-radius-xl) var(--app-radius-xl) 0 0;
         background: transparent;
@@ -1469,11 +1699,25 @@
           grid-template-columns: minmax(0, 1fr) 400px;
         }
 
+        /* the strip stays under the bar; the wire, under both */
+        html {
+          scroll-padding-top: calc(
+            var(--app-topbar-height) + var(--strip-height) + 1px + var(--app-space-4)
+          );
+        }
+
+        .strip {
+          position: sticky;
+          top: var(--app-topbar-height);
+        }
+
         .wire {
           position: sticky;
-          top: var(--app-space-6);
+          top: calc(var(--app-topbar-height) + var(--strip-height) + 1px + var(--app-space-6));
           display: grid;
-          max-height: calc(100dvh - 2 * var(--app-space-6));
+          max-height: calc(
+            100dvh - var(--app-topbar-height) - var(--strip-height) - 1px - 2 * var(--app-space-6)
+          );
           overflow: hidden;
         }
 
@@ -1486,31 +1730,87 @@
          for it */
       @media (max-width: 899px) {
         .layout {
-          padding-bottom: calc(56px + var(--app-space-10));
+          padding-bottom: calc(var(--app-space-14) + var(--app-space-10));
+        }
+
+        /* the focus is scrolled to above the folded wire, never under it */
+        html {
+          scroll-padding-bottom: calc(var(--app-space-14) + var(--app-space-4));
         }
 
         h1 {
-          font-size: 1.75rem;
+          font-size: var(--app-text-xl);
         }
 
-        .topbar-inner {
-          gap: var(--app-space-3);
+        /* * the strip, compact: the light first, the chip that names the transport, the wire */
+        .strip-row {
+          gap: var(--app-space-2);
+        }
+
+        button.status-toggle {
+          order: -1;
+          padding: 0 var(--app-space-2);
+        }
+
+        /* the light alone: its words, and the role, are what it opens */
+        #connection {
+          font-size: 0;
+        }
+
+        #connection::before {
+          margin-right: 0;
+        }
+
+        #identity {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+        }
+
+        body:not([data-bead-transport='worker']) #transport-toggle {
+          display: inline-flex;
         }
 
         .transports {
-          display: grid;
-          grid-auto-columns: minmax(0, 1fr);
-          grid-auto-flow: column;
-          width: 100%;
-        }
-
-        .transports a {
-          min-height: var(--touch);
-          padding: 0 var(--app-space-1);
-        }
-
-        button.wire-toggle {
           display: none;
+        }
+
+        .transports[data-open] {
+          position: absolute;
+          top: calc(100% + var(--app-space-1));
+          right: var(--frame-gutter);
+          left: var(--frame-gutter);
+          display: grid;
+          gap: 2px;
+          padding: var(--app-space-2);
+          border: 1px solid var(--app-divider);
+          border-radius: var(--app-radius-lg);
+          background: var(--app-paper);
+          box-shadow: 0 18px 44px -24px rgb(0 0 0 / 0.5);
+        }
+
+        .transports[data-open] a {
+          display: grid;
+          place-items: start;
+          gap: 2px;
+          min-height: var(--app-touch);
+          padding: var(--app-space-2) var(--app-space-3);
+          border-radius: var(--app-radius-md);
+          white-space: normal;
+        }
+
+        .transports[data-open] a[aria-current] {
+          background: var(--raised);
+          box-shadow: none;
+        }
+
+        .transports[data-open] .why {
+          display: block;
+          color: var(--app-text-secondary);
+          font-weight: 400;
         }
 
         .wire {
@@ -1518,7 +1818,8 @@
           right: 0;
           bottom: 0;
           left: 0;
-          z-index: 10;
+          /* the sheet, open, lies over the sticky scene tabs, under the strip's menus and the bar */
+          z-index: calc(var(--app-z-backdrop) + 1);
           display: grid;
           grid-template-rows: auto minmax(0, 1fr);
           max-height: 75dvh;
@@ -1549,7 +1850,11 @@
 
         .switch [role='tab'],
         button.wire-fold {
-          min-height: var(--touch);
+          min-height: var(--app-touch);
+        }
+
+        button.wire-fold {
+          width: var(--app-touch);
         }
 
         .switch {
@@ -1569,53 +1874,119 @@
           padding: var(--app-space-3) var(--app-space-4);
         }
       }
+
+      /* ! where the scene tabs stay at the top, a focus scrolled to stops under them too, never
+         beneath them: last in the sheet, over the desktop's padding for the bar and the strip */
+      @media (min-height: 700px) {
+        html {
+          scroll-padding-top: calc(
+            var(--app-topbar-height) + var(--app-touch) + var(--app-space-4)
+          );
+        }
+      }
+
+      @media (min-width: 900px) and (min-height: 700px) {
+        html {
+          scroll-padding-top: calc(
+            var(--app-topbar-height) + var(--strip-height) + 1px + var(--app-touch) +
+              var(--app-space-4)
+          );
+        }
+      }
     </style>
   </head>
   <body data-bead-pathname="%BEAD_PATHNAME%">
     <header class="topbar">
-      <div class="topbar-inner">
-        <p class="brand">
-          <a class="back" href="/" data-static>← francisdesjardins.ca</a>
-          <span class="wordmark">Bead</span>
-          <span class="tag">demo</span>
-        </p>
-        <nav class="transports" aria-label="Transport">
-          <span data-served
-            ><a href="?transport=ws" title="One socket, both ways">WebSocket</a
-            ><a
-              href="?transport=http"
-              title="What the server sends of its own comes back by a long poll, a GET it holds up to 30 s"
-              >HTTP</a
-            ><a
-              href="?transport=mqtt"
-              title="Through a broker of MQTT 5, where the demo runs beside one: node tools/mqtt-broker.mjs run -- yarn demo"
-              >MQTT 5</a
-            ></span
-          >
-          <a
-            href="?transport=worker"
-            title="The Bead server and the identity provider run in the page itself: nothing else answers but the files"
-            >Web Worker</a
+      <a class="brand" href="https://beadproto.dev/" title="Bead's page"
+        ><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true">
+          <circle class="moon" cx="14" cy="18" r="10.5" />
+          <path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" />
+          <circle class="bead" cx="15.94" cy="6.97" r="1.8" />
+          <circle class="bead" cx="21.64" cy="9.81" r="2.5" />
+          <circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg
+        >Bead</a
+      >
+      <span class="context">demo</span>
+      <span class="tools">
+        <a class="tool" href="https://beadproto.dev/">Page</a>
+        <button
+          type="button"
+          class="tool"
+          data-action="theme"
+          aria-label="Switch to dark mode"
+          data-to-dark="Switch to dark mode"
+          data-to-light="Switch to light mode"
+        >
+          ◐
+        </button>
+      </span>
+    </header>
+
+    <div class="strip" role="region" aria-label="The demo’s connection">
+      <div class="strip-row">
+        <button
+          type="button"
+          id="transport-toggle"
+          class="transport-chip"
+          aria-expanded="false"
+          aria-controls="transports"
+          data-served
+        >
+          <span class="unseen">Transport:</span> <span id="transport-name">WebSocket</span>
+        </button>
+        <span class="transport-chip" data-static>Web Worker</span>
+        <nav id="transports" class="transports" aria-label="Transport" data-served>
+          <a href="?transport=ws"
+            ><span class="name">WebSocket</span> <span class="why">One socket, both ways</span></a
+          ><a href="?transport=http"
+            ><span class="name">HTTP</span>
+            <span class="why"
+              >What the server sends of its own comes back by a long poll, a GET it holds up to 30
+              s</span
+            ></a
+          ><a href="?transport=mqtt"
+            ><span class="name">MQTT 5</span>
+            <span class="why"
+              >Through a broker of MQTT 5, where the demo runs beside one: node
+              tools/mqtt-broker.mjs run -- yarn demo</span
+            ></a
+          ><a href="?transport=worker"
+            ><span class="name">Web Worker</span>
+            <span class="why"
+              >The Bead server and the identity provider run in the page itself: nothing else
+              answers but the files</span
+            ></a
           >
         </nav>
-        <p class="status">
+        <button
+          type="button"
+          id="status-toggle"
+          class="status-toggle"
+          aria-expanded="false"
+          aria-controls="status-detail"
+        >
           <span class="unseen">Connection:</span>
-          <span id="connection" title="connecting…">connecting…</span>
+          <span id="connection">connecting…</span>
           <span class="unseen">Identity:</span>
-          <span id="identity" data-role="none" title="logged out">logged out</span>
-          <button
-            type="button"
-            id="wire-toggle"
-            class="wire-toggle"
-            aria-expanded="false"
-            aria-controls="wire"
-            title="What crossed the transport: the envelopes, the server's reads aside"
-          >
-            The wire <span class="count" data-wire-count>0</span>
-          </button>
-        </p>
+          <span id="identity" data-role="none">logged out</span>
+        </button>
+        <dl id="status-detail" class="status-detail">
+          <dt>Connection</dt>
+          <dd id="connection-said">connecting…</dd>
+          <dt>Identity</dt>
+          <dd id="identity-said">logged out</dd>
+        </dl>
+        <button
+          type="button"
+          id="wire-toggle"
+          class="wire-toggle"
+          aria-expanded="false"
+          aria-controls="wire"
+        >
+          <span class="wire-word">The wire</span> <span class="count" data-wire-count>0</span>
+        </button>
       </div>
-    </header>
+    </div>
 
     <div class="layout">
       <main class="scenes">
@@ -1710,7 +2081,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Identity</p>
               <p id="identity-who">logged out</p>
               <p id="identity-session" class="detail"></p>
               <p id="identity-outcome" class="outcome note" data-outcome role="status">—</p>
@@ -1734,10 +2104,9 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Counter</p>
               <span id="counter">—</span>
               <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
-              <p class="detail"><span class="label">Last burst</span> <span id="burst">—</span></p>
+              <p class="detail">Last burst: <span id="burst">—</span></p>
               <p id="counter-outcome" class="outcome note" data-outcome role="status">—</p>
             </div>
           </section>
@@ -1754,7 +2123,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Glyph</p>
               <div class="glyph">
                 <canvas
                   id="glyph"
@@ -1783,7 +2151,6 @@
               </div>
             </div>
             <div class="card-result">
-              <p class="label">Result</p>
               <p id="calls-outcome" class="outcome" data-outcome role="status">—</p>
             </div>
           </section>
@@ -1858,6 +2225,19 @@
                 <ul id="sign-up-phone-messages" class="violations" hidden></ul>
                 <p id="sign-up-phone-hint" class="hint">E.164: a +, then 7 to 15 digits</p>
               </div>
+              <div class="field">
+                <label for="sign-up-guests">Guests</label>
+                <textarea
+                  id="sign-up-guests"
+                  name="guests"
+                  rows="3"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  aria-describedby="sign-up-guests-hint"
+                ></textarea>
+                <ul id="sign-up-guests-messages" class="violations" hidden></ul>
+                <p id="sign-up-guests-hint" class="hint">Up to 8 emails, one a line</p>
+              </div>
               <label class="check">
                 <input
                   id="sign-up-validates"
@@ -1874,16 +2254,26 @@
                 <input id="sign-up-fail-fast" type="checkbox" disabled />
                 Stop at the first violation
               </label>
-              <p class="note">
-                A list longer than its detail holds ends <code>and N more</code>: validate before
-                sending under <a href="?detail=short#rules">a 256-byte detail</a> to see it (<a
-                  href="?#rules"
-                  >the default one</a
-                >).
+              <label class="check">
+                <input
+                  id="sign-up-short-detail"
+                  type="checkbox"
+                  aria-describedby="sign-up-short-detail-note"
+                />
+                Bound the client's detail to 256 bytes
+              </label>
+              <p id="sign-up-short-detail-note" class="note">
+                The client writes its own refusals, and reads the server's, in a detail of 1,024
+                bytes, or 256 with this checked. A list the client writes longer than that ends
+                <code>and N more</code>; a detail it reads cut short leaves the rest uncounted. The
+                page reloads with its client so bounded.
               </p>
               <div class="buttons">
                 <button type="submit">Sign up</button>
                 <button type="button" id="sign-up-broken">Break several fields</button>
+                <button type="button" id="sign-up-past-bound">
+                  Break it past the server's bound
+                </button>
                 <button type="button" id="sign-up-valid">Fill a valid one</button>
               </div>
               <p id="sign-up-status" role="status">—</p>
@@ -1899,9 +2289,9 @@
                 cannot</span
               >.
             </p>
-            <p class="label">Its request, as it is filled</p>
+            <p class="note">Its request, as it is filled:</p>
             <pre id="sign-up-http-request" class="code" tabindex="0"></pre>
-            <p class="label">What the gateway answers</p>
+            <p class="note">What the gateway answers:</p>
             <pre id="sign-up-http-answer" class="code" tabindex="0">
 What it answers shows once the sign-up is sent.</pre>
           </section>
@@ -1927,41 +2317,43 @@ What it answers shows once the sign-up is sent.</pre>
         </div>
 
         <div id="server-scene" class="scene" role="tabpanel" aria-labelledby="scene-server" hidden>
-          <div class="server-head">
-            <h2 id="server-h">The server, every second</h2>
-            <span id="health">—</span>
-          </div>
-          <p class="note">
-            Read every second, its health and what each layer holds by a <code>stats</code> call,
-            the calls it answered by the <code>metrics</code> call beside, over Bead itself, both
-            left out of the wire and of these counts.
-          </p>
-          <p class="note" id="tabs" hidden>
-            Open this page in a second tab: each tab is a client of this one server, which counts
-            them, and they share its counter.
-          </p>
-          <dl class="figures">
-            <div class="figure">
-              <dt>Calls answered</dt>
-              <dd id="answered" class="value">—</dd>
-              <dd class="note">by the server, the reads aside</dd>
+          <section class="card" aria-labelledby="server-h">
+            <div class="server-head">
+              <h2 id="server-h">The server, every second</h2>
+              <span id="health">—</span>
             </div>
-            <div class="figure">
-              <dt>Median</dt>
-              <dd id="median" class="value">—</dd>
-              <dd id="mean" class="note">estimated within its bucket</dd>
-            </div>
-            <div class="figure">
-              <dt>Connections</dt>
-              <dd id="connections" class="value">—</dd>
-              <dd class="note">a client a tab</dd>
-            </div>
-            <div class="figure">
-              <dt>Subscriptions</dt>
-              <dd id="subscriptions" class="value">—</dd>
-              <dd class="note">the server notifies</dd>
-            </div>
-          </dl>
+            <p class="note">
+              Read every second, its health and what each layer holds by a <code>stats</code> call,
+              the calls it answered by the <code>metrics</code> call beside, over Bead itself, both
+              left out of the wire and of these counts.
+            </p>
+            <p class="note" id="tabs" hidden>
+              Open this page in a second tab: each tab is a client of this one server, which counts
+              them, and they share its counter.
+            </p>
+            <dl class="figures">
+              <div class="figure">
+                <dt>Calls answered</dt>
+                <dd id="answered" class="value">—</dd>
+                <dd class="note">by the server, the reads aside</dd>
+              </div>
+              <div class="figure">
+                <dt>Median</dt>
+                <dd id="median" class="value">—</dd>
+                <dd id="mean" class="note">estimated within its bucket</dd>
+              </div>
+              <div class="figure">
+                <dt>Connections</dt>
+                <dd id="connections" class="value">—</dd>
+                <dd class="note">a client a tab</dd>
+              </div>
+              <div class="figure">
+                <dt>Subscriptions</dt>
+                <dd id="subscriptions" class="value">—</dd>
+                <dd class="note">the server notifies</dd>
+              </div>
+            </dl>
+          </section>
 
           <details class="fold" open>
             <summary>Per procedure, what the server answered</summary>
@@ -2012,49 +2404,64 @@ What it answers shows once the sign-up is sent.</pre>
 
         <div id="code-scene" class="scene" role="tabpanel" aria-labelledby="scene-code" hidden>
           <section id="sides" class="card" aria-labelledby="sides-h">
-            <h2 id="sides-h">The same service, in TypeScript and in C#</h2>
+            <h2 id="sides-h">The same service, in TypeScript, C# and Rust</h2>
             <p class="note">
-              <code>examples/hello</code>'s HelloService, both sides as the repository builds and
-              runs them: one surface, name for name, each in its language's own idiom.
+              <code>examples/hello</code>'s HelloService in each language, as the repository builds
+              and runs it: one surface, name for name, each in its language's own idiom.
             </p>
-            <div id="sides-tabs" class="sides-tabs" role="tablist" aria-label="What to read of it">
-              <button
-                id="sides-resolvers"
-                type="button"
-                role="tab"
-                aria-controls="sides-panel"
-                data-role="resolvers"
+            <div class="sides">
+              <div
+                id="sides-tabs"
+                class="sides-tabs"
+                role="tablist"
+                aria-label="What to read of it"
               >
-                Its resolvers
-              </button>
-              <button
-                id="sides-serving"
-                type="button"
-                role="tab"
-                aria-controls="sides-panel"
-                data-role="serving"
+                <button
+                  id="sides-resolvers"
+                  type="button"
+                  role="tab"
+                  aria-controls="sides-panel"
+                  data-role="resolvers"
+                >
+                  Its resolvers
+                </button>
+                <button
+                  id="sides-serving"
+                  type="button"
+                  role="tab"
+                  aria-controls="sides-panel"
+                  data-role="serving"
+                >
+                  Its server
+                </button>
+                <button
+                  id="sides-calling"
+                  type="button"
+                  role="tab"
+                  aria-controls="sides-panel"
+                  data-role="calling"
+                >
+                  Its client
+                </button>
+              </div>
+              <div
+                id="sides-languages"
+                class="sides-languages"
+                role="radiogroup"
+                aria-label="In which language"
               >
-                Its server
-              </button>
-              <button
-                id="sides-calling"
-                type="button"
-                role="tab"
-                aria-controls="sides-panel"
-                data-role="calling"
-              >
-                Its client
-              </button>
-            </div>
-            <div id="sides-panel" class="sides" role="tabpanel">
-              <figure>
-                <figcaption id="side-typescript-file"></figcaption>
-                <pre id="side-typescript" tabindex="0" aria-labelledby="side-typescript-file"></pre>
-              </figure>
-              <figure>
-                <figcaption id="side-csharp-file"></figcaption>
-                <pre id="side-csharp" tabindex="0" aria-labelledby="side-csharp-file"></pre>
-              </figure>
+                <button type="button" role="radio" aria-checked="false" data-language="typescript">
+                  TypeScript
+                </button>
+                <button type="button" role="radio" aria-checked="false" data-language="csharp">
+                  C#
+                </button>
+                <button type="button" role="radio" aria-checked="false" data-language="rust">
+                  Rust
+                </button>
+              </div>
+              <p class="sides-file"><span id="side-file" dir="ltr"></span></p>
+              <pre id="sides-panel" role="tabpanel" tabindex="0"></pre>
             </div>
           </section>
 
@@ -2109,14 +2516,10 @@ What it answers shows once the sign-up is sent.</pre>
 
           <div class="planner">
             <section class="planner-packages" aria-labelledby="planner-packages-h">
-              <div class="planner-row">
-                <h2 id="planner-packages-h">Packages</h2>
-                <div class="buttons">
-                  <button type="button" data-add-package="typescript">
-                    Add a TypeScript package
-                  </button>
-                  <button type="button" data-add-package="csharp">Add a C# package</button>
-                </div>
+              <h2 id="planner-packages-h">Packages</h2>
+              <div class="planner-add" role="group" aria-labelledby="planner-add-label">
+                <span id="planner-add-label" class="label">Add a package in</span>
+                <div id="planner-add" class="planner-add-buttons"></div>
               </div>
               <div id="planner-editor" class="planner-editor"></div>
             </section>
@@ -2160,12 +2563,13 @@ What it answers shows once the sign-up is sent.</pre>
             <p class="note">
               Each folder and each transport's key is derived from what its package holds, never
               from its place in the list: removing a package renames no other. To name them
-              otherwise, rename them in <code>beadc.yaml</code>; a key of
-              <code>server.transports</code> is the member of
-              <code>SERVED_PROCEDURES</code> (TypeScript) or <code>ServedProcedures</code> (C#) the
-              application hands its transport. The file around these outputs keeps its
-              <code>version</code> and its <code>source</code>: what depends on the disk, the
-              <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
+              otherwise, rename them in <code>beadc.yaml</code>. A key of
+              <code>server.transports</code> names what the application hands its transport: a
+              member of <code>SERVED_PROCEDURES</code> in TypeScript, of
+              <code>ServedProcedures</code> in C#, and in Rust a field of
+              <code>SERVED_PROCEDURES</code>, the key in snake case. The file around these outputs
+              keeps its <code>version</code> and its <code>source</code>: what depends on the disk,
+              the <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
             </p>
           </section>
         </div>

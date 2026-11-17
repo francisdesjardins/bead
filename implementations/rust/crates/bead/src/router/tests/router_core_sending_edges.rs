@@ -1,7 +1,6 @@
 //! Results sent in credited chunks: call lifetime, cancellation and transport refusal.
 
 use super::router_core_requester::{credit, quiet};
-use super::router_core_sessions::request;
 use super::router_core_transfer_edges::{limits, serving};
 use super::{Handed, locked};
 use crate::constants::ProtocolCode;
@@ -97,12 +96,15 @@ pub(super) fn payload(envelopes: &[Envelope]) -> Bytes {
         .collect()
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "the two result sizes each check opening, pending credit, call reuse, complete payload and envelope sizes"
+)]
+async fn sent_result_lifetime() {
     for dotnet in [false, true] {
         for total in [100, 150] {
             let (peer, handed) = serving(false, &limits()).await;
@@ -133,7 +135,17 @@ async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_
                     payload: bytes.slice(..28),
                 }
             );
-            peer.receive((request(1, None), Arc::from("a")));
+            peer.receive((
+                Envelope::Request {
+                    header: crate::testing::core_port::scripted_header(1),
+                    payload: if dotnet {
+                        Bytes::from_static(&[2])
+                    } else {
+                        Bytes::new()
+                    },
+                },
+                Arc::from("a"),
+            ));
             peer.receive((
                 credit(1, if total == 100 { 76 } else { 80 }),
                 Arc::from("a"),
@@ -154,7 +166,17 @@ async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_
                 Arc::from("a"),
             ));
             responding.await.expect("the last chunk handed off");
-            peer.receive((request(1, None), Arc::from("a")));
+            peer.receive((
+                Envelope::Request {
+                    header: crate::testing::core_port::scripted_header(1),
+                    payload: if dotnet {
+                        Bytes::from_static(&[3])
+                    } else {
+                        Bytes::new()
+                    },
+                },
+                Arc::from("a"),
+            ));
             peer.settle().await;
             assert_eq!(locked(&handed).len(), 2);
             let envelopes = sent(&peer).await;
@@ -191,12 +213,11 @@ async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_credit_comes() {
+async fn cancelled_sent_result() {
     for (total, initial) in [(100, None), (150, Some(80))] {
         let (peer, handed) = serving(false, &limits()).await;
         let answerer = asked(
@@ -292,10 +313,9 @@ fn same_error(outcome: &Result<(), CallError>, expected: &RouterError) {
     assert!(Arc::ptr_eq(actual, expected));
 }
 
-#[tokio::test]
-async fn end_a_result_whose_chunk_cannot_go_out_forgetting_its_call() {
+async fn failed_result_chunk() {
     for dotnet in [false, true] {
-        let later = false;
+        let later = dotnet;
         for (total, end, message) in [
             (150, 80, "gone"),
             (100, 100, "the transport refused the chunk"),
@@ -337,12 +357,11 @@ async fn end_a_result_whose_chunk_cannot_go_out_forgetting_its_call() {
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_a_result_whose_opening_cannot_go_out_forgetting_its_call() {
+async fn failed_result_opening() {
     for (later, dotnet) in [(false, false), (true, true)] {
         let (peer, handed) = serving(false, &limits()).await;
         let answerer = asked(&peer, (&handed, Bytes::from_static(&[1]))).await;
@@ -432,4 +451,44 @@ async fn an_opening_that_goes_after_the_last_chunk_holds_the_answer_until_it_wen
         .await
         .expect("the answer settles")
         .expect("every envelope of the transfer went");
+}
+
+#[tokio::test]
+async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off() {
+    sent_result_lifetime().await;
+}
+
+#[tokio::test]
+async fn sends_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off() {
+    sent_result_lifetime().await;
+}
+
+#[tokio::test]
+async fn stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_credit_comes() {
+    cancelled_sent_result().await;
+}
+
+#[tokio::test]
+async fn stops_a_result_the_peer_cancels_and_sends_nothing_more_of_it_whatever_credit_comes() {
+    cancelled_sent_result().await;
+}
+
+#[tokio::test]
+async fn end_a_result_whose_chunk_cannot_go_out_forgetting_its_call() {
+    failed_result_chunk().await;
+}
+
+#[tokio::test]
+async fn ends_a_result_whose_chunk_cannot_go_out_forgetting_its_call() {
+    failed_result_chunk().await;
+}
+
+#[tokio::test]
+async fn end_a_result_whose_opening_cannot_go_out_forgetting_its_call() {
+    failed_result_opening().await;
+}
+
+#[tokio::test]
+async fn ends_a_result_whose_opening_cannot_go_out_forgetting_its_call() {
+    failed_result_opening().await;
 }

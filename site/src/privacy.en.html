@@ -1,0 +1,129 @@
+<header class="hero">
+  <p class="eyebrow">Bead DevTools · privacy policy</p>
+  <h1>Bead DevTools and your data</h1>
+  <p class="lede">The extension shows what a page’s Bead clients do. It sends nothing anywhere.</p>
+</header>
+
+<section id="short" data-toc="In short">
+  <h2>In short</h2>
+  <p>
+    Bead DevTools is a Chrome extension that adds a Bead panel to DevTools. The panel shows the
+    calls, envelopes, metrics and broker parcels of the Bead clients built by the page you inspect.
+  </p>
+  <ul>
+    <li>It reads only what a page’s Bead clients tell its hook, and Bead’s own HTTP exchanges.</li>
+    <li>It keeps what it reads in the panel’s memory, until the panel closes or you clear it.</li>
+    <li>
+      It sends nothing out of your browser. It has no server, no analytics, no ads, and it runs no
+      code that is not in its package.
+    </li>
+    <li>It asks Chrome for no permission. It does not sell or share any data.</li>
+  </ul>
+</section>
+
+<section id="reads" data-toc="What it reads">
+  <h2>What it reads</h2>
+  <p>
+    On every page, before the page’s own scripts run, the extension defines a hook. A Bead client
+    built in that page announces itself to the hook. Until a Bead panel is open on the tab, the
+    hook passes on nothing but that a client announced itself, and its kind.
+  </p>
+  <p>While a Bead panel is open on the tab, the hook and the panel read:</p>
+  <ul>
+    <li>
+      each call the page’s Bead clients make or answer: its procedure, its timings, its status, and
+      its payloads as text and as a tree;
+    </li>
+    <li>each envelope those clients send and receive, and each client’s metrics;</li>
+    <li>the parcels, link changes and reports of each Bead broker participant the page builds;</li>
+    <li>
+      the stack of the code that made each call, its scripts’ addresses and lines, so the panel can
+      open it in Sources;
+    </li>
+    <li>
+      in the Network panel, only the exchanges whose content type is Bead’s,
+      <code>application/prs.bead</code>, and their bodies. It skips every other exchange.
+    </li>
+  </ul>
+  <p>
+    A credential a call carries is recorded by its scheme alone, never its token. A page or an
+    application can keep its clients from the panel by giving them <code>devtools: false</code>.
+  </p>
+</section>
+
+<section id="keeps" data-toc="What it keeps">
+  <h2>What it keeps</h2>
+  <p>
+    What the panel reads stays in its memory. It is gone when the panel closes, when DevTools
+    closes, or when you clear it. With Preserve log on, it stays across a reload of the page, while
+    DevTools stays open. The extension writes none of it to your disk.
+  </p>
+  <p>
+    The panel keeps two choices of yours in the extension’s own storage, on your device: where it
+    places a call’s detail, and the share of the split between the list and the detail. It keeps
+    nothing else there.
+  </p>
+  <p>Three actions write or read a file, and each only when you ask:</p>
+  <ul>
+    <li>Export saves the records the panel holds as a JSON file, where your browser saves files.</li>
+    <li>Import reads a JSON file you choose, in the panel alone.</li>
+    <li>A call’s menu copies its request, its answer or a snippet to your clipboard.</li>
+  </ul>
+</section>
+
+<section id="sends" data-toc="What it sends">
+  <h2>What it sends</h2>
+  <p>
+    Nothing leaves your browser. The extension makes no network request of its own. It has no
+    analytics, no telemetry, no crash report and no account. Its code is all in the package the
+    Chrome Web Store distributes, and it loads no remote code.
+  </p>
+  <p>
+    The records travel inside the browser alone: from the hook, in the page, to the extension’s
+    bridge, then to its service worker, then to the panel on the same tab, by Chrome’s own
+    messaging.
+  </p>
+  <p>
+    The extension changes nothing on the page but the hook it defines. It reloads the page only
+    when you ask it to.
+  </p>
+</section>
+
+<section id="permissions" data-toc="Its permissions">
+  <h2>Its permissions</h2>
+  <p>
+    The extension’s manifest names no permission and no host permission. It declares four parts:
+  </p>
+  <ul>
+    <li>
+      two content scripts on every address, <code>&lt;all_urls&gt;</code>, at
+      <code>document_start</code>: the hook, in the page’s own world, which must be in place before
+      the page’s Bead client loads; and the bridge, in the extension’s
+      isolated world, which carries the hook’s records to the panel;
+    </li>
+    <li>a DevTools page, which adds the Bead panel to DevTools;</li>
+    <li>a service worker, which pairs each tab with the panel open on it.</li>
+  </ul>
+  <p>
+    Chrome warns that such content scripts can read and change your data on every site. The hook
+    reads only what a page’s Bead clients give it, and keeps it within your browser.
+  </p>
+</section>
+
+<section id="contact" data-toc="Contact">
+  <h2>Contact</h2>
+  <p>
+    This page states what the extension does in its current version. A version that changes what
+    it reads, keeps or sends changes this page with it. The code is open, under the Apache-2.0
+    licence, in <a href="https://github.com/francisdesjardins/bead">Bead’s repository</a>. Ask a
+    question or report a problem in its
+    <a href="https://github.com/francisdesjardins/bead/issues">issues</a>.
+  </p>
+</section>
+
+<footer>
+  <p>
+    Bead DevTools is made by <a href="https://francisdesjardins.ca/?lng=en">Francis Desjardins</a>.
+    <a href="/?lng=en">Bead’s page</a> presents the protocol.
+  </p>
+</footer>

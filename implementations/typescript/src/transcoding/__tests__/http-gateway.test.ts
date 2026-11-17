@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
   createServer as createNodeServer,
+  type IncomingMessage,
   request as httpRequest,
   type IncomingHttpHeaders,
+  type OutgoingHttpHeaders,
 } from 'node:http';
 import {
   connect as connectHTTP2,
@@ -136,10 +138,23 @@ const opened = (port: number, octets: string): Socket => {
   return socket;
 };
 
-/** Writes `octets` on a socket of its own, and reads the response whole, to the socket's close. */
-const exchanged = (port: number, octets: string): Promise<IAnswered> => {
+/**
+ * Writes `octets` on a socket of its own, and reads the response whole, to the socket's close; past
+ * `within` milliseconds, where given, it drops the socket and gives what came, nothing among it.
+ */
+const exchanged = (
+  port: number,
+  octets: string,
+  { within }: { within?: number } = {}
+): Promise<IAnswered> => {
   const socket = opened(port, octets);
   const chunks: Buffer[] = [];
+  const patience =
+    within === undefined
+      ? undefined
+      : setTimeout(() => {
+          socket.destroy();
+        }, within);
 
   socket.on('data', (chunk: Buffer) => {
     chunks.push(chunk);
@@ -147,6 +162,8 @@ const exchanged = (port: number, octets: string): Promise<IAnswered> => {
 
   return new Promise((resolve) => {
     socket.on('close', () => {
+      clearTimeout(patience);
+
       const text = Buffer.concat(chunks).toString('utf8');
       const end = text.indexOf('\r\n\r\n');
       const [statusLine = '', ...fields] = text.slice(0, end).split('\r\n');
@@ -261,6 +278,73 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
         }
       : init;
   });
+};
+
+/**
+ * Reads a request's body before the gateway takes it, as the server it is mounted on may, by its
+ * `x-reader`, then hands it on: `end` in its `end`, `later` past it, `peek` behind two bytes read,
+ * `unshift` behind a chunk read and put back; any other, untouched.
+ */
+const readBefore = (request: IncomingMessage, hand: () => void): void => {
+  const reader = request.headers['x-reader'];
+
+  if (reader === 'end' || reader === 'later') {
+    request.resume();
+    request.on('end', () => {
+      if (reader === 'end') {
+        hand();
+      } else {
+        setTimeout(hand, 20);
+      }
+    });
+
+    return;
+  }
+
+  if (reader === 'peek' || reader === 'unshift') {
+    request.once('readable', () => {
+      const chunk: unknown = reader === 'peek' ? request.read(2) : request.read();
+
+      if (reader === 'unshift' && chunk instanceof Buffer) {
+        request.unshift(chunk);
+      }
+      hand();
+    });
+
+    return;
+  }
+
+  hand();
+};
+
+/** A gateway mounted on a server of Node's that reads each request's body first, by `readBefore`. */
+const mountedBehindReader = (): ReturnType<typeof startTranscoding> => {
+  return startTranscoding({
+    bodyGracePeriod: 100,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        readBefore(request, () => {
+          listener(request, response);
+        });
+      });
+    },
+    maximumExchangesPerAddress: 1,
+  });
+};
+
+/** A request to echo's route, its framing's fields and its body as they go, by `x-reader`. */
+const echoOctets = (
+  port: number,
+  { body, fields }: { body: string; fields: readonly string[] }
+): string => {
+  return [
+    'POST /api/Transcoding/echo HTTP/1.1',
+    `host: 127.0.0.1:${String(port)}`,
+    'content-type: application/json',
+    ...fields,
+    '',
+    body,
+  ].join('\r\n');
 };
 
 // tests
@@ -385,6 +469,35 @@ test('draws one Bead connection per exchange, and closes it as its response ends
   expect(opened.length).toBe(2);
 });
 
+test('gives each exchange’s client the router limits it is given', async () => {
+  await using limited = await startTranscoding({ limits: { maximumPayloadBytes: 16 } });
+  await using unlimited = await startTranscoding();
+  const past = `{"aString":"${'a'.repeat(40)}"}`;
+
+  // a request within its client's bound goes
+  expect(
+    await send(limited.port, { body: '{"aString":"a"}', path: '/api/Transcoding/echo' })
+  ).toMatchObject({ body: '{"aString":"a"}', status: 200 });
+
+  // * one past it refused by its exchange's own client before it goes, each exchange alike
+  for (let count = 1; count <= 2; count += 1) {
+    const refused = await send(limited.port, { body: past, path: '/api/Transcoding/echo' });
+
+    expect(refused.status).toBe(413);
+    expect(JSON.parse(refused.body)).toMatchObject({
+      code: 34,
+      detail: 'a payload is 16 bytes at most, not 42',
+      title: 'PAYLOAD_TOO_LARGE',
+    });
+  }
+
+  // a gateway given none holds by the defaults
+  expect(await send(unlimited.port, { body: past, path: '/api/Transcoding/echo' })).toMatchObject({
+    body: past,
+    status: 200,
+  });
+});
+
 test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt', async () => {
   await using elsewhere = await startTranscoding();
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
@@ -479,6 +592,39 @@ test('refuses a request with no Origin from a page of another site, and a naviga
       })
     ).status
   ).toBe(200);
+});
+
+test('refuses a HEAD navigation, and one an object or an embed makes, from another site, to a route and to the document', async () => {
+  await using fixture = await startTranscoding({ origins: [ORIGIN] });
+  const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' };
+
+  for (const path of ['/v1/books/2', '/openapi.json']) {
+    for (const [method, destination] of [
+      ['HEAD', 'document'],
+      ['GET', 'object'],
+      ['GET', 'embed'],
+    ] as const) {
+      const refused = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method,
+        path,
+      });
+
+      expect(refused.status, `${method} ${path}, ${destination}`).toBe(403);
+      expect(refused.headers['bead-refusal']).toBe('origin-refused');
+    }
+
+    // * a GET navigation any other destination makes, a frame's among them, is taken
+    for (const destination of ['document', 'iframe']) {
+      const taken = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method: 'GET',
+        path,
+      });
+
+      expect(taken.status, `GET ${path}, ${destination}`).toBe(200);
+    }
+  }
 });
 
 test('answers a call whose peer closes before its result with 502 and releases its place', async () => {
@@ -597,6 +743,63 @@ test('answers a stream’s request that carries Last-Event-ID with 204 and no ca
       path: '/api/Transcoding/ticks',
     })
   ).toMatchObject({ body: '{"ticks":2}', status: 200 });
+});
+
+test('answers a HEAD that asks a stream as its GET begins, and ends at its head, its subscription with it', async () => {
+  await using fixture = await startTranscoding({ maximumConnectionsPerAddress: 1 });
+  const drawn: string[] = [];
+  const closed: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+  fixture.memory.on('close', (_wasClean, handle) => {
+    closed.push(handle);
+  });
+
+  const host = `host: 127.0.0.1:${String(fixture.port)}`;
+  const asked = (method: string): string => {
+    return [`${method} /v1/watch HTTP/1.1`, host, 'accept: text/event-stream', '', ''].join('\r\n');
+  };
+  // * one socket, kept alive: every byte it takes, in order
+  const socket = opened(fixture.port, asked('HEAD'));
+  const chunks: Buffer[] = [];
+  const received = (): string => {
+    return Buffer.concat(chunks).toString('latin1');
+  };
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  await until(() => {
+    return received().includes('\r\n\r\n');
+  });
+
+  const head = received().slice(0, received().indexOf('\r\n\r\n')).toLowerCase();
+
+  expect(head).toMatch(/^http\/1\.1 200 /u);
+  expect(head).toContain('content-type: text/event-stream');
+  expect(head).toContain('cache-control: no-store');
+  expect(head).not.toContain('content-length');
+
+  // its call made on a connection of its own, closed as its response ended: its subscription with it
+  await until(() => {
+    return closed.length === 1;
+  });
+  expect(closed).toEqual(drawn);
+
+  // its place freed: the same socket's next request, the GET of its stream, opens it, nothing between
+  socket.write(asked('GET'));
+  await until(() => {
+    return received().includes('data: {}\n\n');
+  });
+  socket.destroy();
+
+  const next = received().slice(received().indexOf('\r\n\r\n') + 4);
+
+  expect(next).toMatch(/^HTTP\/1\.1 200 /u);
+  expect(next).toContain('event: result\nid: 1\ndata: {}\n\n');
+  expect(drawn).toHaveLength(2);
 });
 
 test('answers a preflight with the methods its URL’s routes take', async () => {
@@ -817,6 +1020,113 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
 });
 
 // transcoding 7.6.27
+test('refuses 500 a body read before it by the server it is mounted on, reported, its call never made', async () => {
+  await using fixture = await mountedBehindReader();
+  const reported = reportedBy(fixture.gateway);
+  const words = 'a body read before the gateway took its request';
+  const parted: string[] = [];
+  let calls = 0;
+
+  fixture.memory.on('connection', () => {
+    calls += 1;
+  });
+
+  for (const reader of ['end', 'later', 'peek', 'unshift']) {
+    for (const [framing, fields, body] of [
+      ['JSON, content-length', ['content-length: 13'], '{"anInt32":1}'],
+      ['JSON, chunked', ['transfer-encoding: chunked'], 'd\r\n{"anInt32":1}\r\n0\r\n\r\n'],
+      ['chunked, empty', ['transfer-encoding: chunked'], '0\r\n\r\n'],
+    ] as const) {
+      // * a peek or a chunk put back of an empty body got nothing, which Node shows as untouched
+      if (framing === 'chunked, empty' && (reader === 'peek' || reader === 'unshift')) {
+        continue;
+      }
+
+      const cell = `${reader}, ${framing}`;
+      const before = { calls, reported: reported.length };
+      const answered = await exchanged(
+        fixture.port,
+        echoOctets(fixture.port, { body, fields: [...fields, `x-reader: ${reader}`] }),
+        { within: 1_000 }
+      );
+      const made = calls - before.calls;
+      const told = reported.slice(before.reported);
+      // * its place released: the address's one call answers
+      const next = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+      parted.push(
+        ...[
+          answered.status === 500 ? '' : `status ${String(answered.status)}`,
+          answered.headers['bead-refusal'] === undefined
+            ? ''
+            : `bead-refusal ${String(answered.headers['bead-refusal'])}`,
+          answered.body === '{"status":500,"title":"Internal Server Error","type":"about:blank"}'
+            ? ''
+            : `body ${answered.body}`,
+          answered.headers.connection === 'close'
+            ? ''
+            : `connection ${String(answered.headers.connection)}`,
+          JSON.stringify(told) === JSON.stringify([words])
+            ? ''
+            : `reported ${JSON.stringify(told)}`,
+          made === 0 ? '' : `${String(made)} call(s)`,
+          next.status === 200 ? '' : `next ${String(next.status)}`,
+        ]
+          .filter((part) => {
+            return part !== '';
+          })
+          .map((part) => {
+            return `${cell}: ${part}`;
+          })
+      );
+    }
+  }
+
+  expect(parted).toEqual([]);
+});
+
+// transcoding 10.1.10
+test('reads a body that came empty as empty, whatever read it before', async () => {
+  await using fixture = await mountedBehindReader();
+  const reported = reportedBy(fixture.gateway);
+  const parted: string[] = [];
+
+  for (const [framing, fields, body, readers] of [
+    ['content-length: 0', ['content-length: 0'], '', ['end', 'later', 'peek', 'unshift']],
+    ['chunked, empty', ['transfer-encoding: chunked'], '0\r\n\r\n', ['peek', 'unshift']],
+  ] as const) {
+    const untouched = await exchanged(
+      fixture.port,
+      echoOctets(fixture.port, { body, fields: [...fields, 'connection: close'] })
+    );
+
+    expect(untouched).toMatchObject({
+      headers: { 'content-type': 'application/problem+json' },
+      status: 400,
+    });
+
+    for (const reader of readers) {
+      const answered = await exchanged(
+        fixture.port,
+        echoOctets(fixture.port, {
+          body,
+          fields: [...fields, 'connection: close', `x-reader: ${reader}`],
+        }),
+        { within: 1_000 }
+      );
+      const seen = [answered.status, answered.headers['bead-refusal'], answered.body];
+
+      if (JSON.stringify(seen) !== JSON.stringify([untouched.status, undefined, untouched.body])) {
+        parted.push(`${reader}, ${framing}: ${JSON.stringify(seen)}`);
+      }
+    }
+  }
+
+  expect(parted).toEqual([]);
+  expect(reported).toEqual([]);
+});
+
+// transcoding 7.6.28
 test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
   // * a clock that breaks as a body is read, past every gate
   const broken: IClock = {
@@ -844,6 +1154,145 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
     status: 500,
   });
   expect(reported).toEqual(['the clock broke']);
+});
+
+// transcoding 7.6
+test('ends an exchange whose host throws as its head is written, reported, and answers the next', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+
+  process.on('unhandledRejection', onUnhandled);
+
+  try {
+    // its host fails a refusal's head once, its 500 then answered, or each time, its response then
+    // destroyed; or each time after a call that failed, the 500 of what no gate foresaw destroyed
+    for (const [failing, times, isCall] of [
+      ['setHeader', 1, false],
+      ['writeHead', 1, false],
+      ['writeHead', Infinity, false],
+      ['writeHead', Infinity, true],
+    ] as const) {
+      let fails = times;
+      let isFirst = true;
+      // a clock that breaks once, as the call's body is read, past every gate
+      let breaks = isCall ? 1 : 0;
+      const clock: IClock = {
+        clearInterval: (timer) => {
+          clearInterval(timer as Parameters<typeof clearInterval>[0]);
+        },
+        clearTimeout: (timer) => {
+          clearTimeout(timer as Parameters<typeof clearTimeout>[0]);
+        },
+        Date,
+        performance: {
+          now: () => {
+            if (breaks > 0) {
+              breaks -= 1;
+              throw new Error('the clock broke');
+            }
+
+            return performance.now();
+          },
+        },
+        setInterval,
+        setTimeout,
+      };
+      await using fixture = await startTranscoding({
+        clock,
+        origins: [ORIGIN],
+        createServer: (listener) => {
+          return createNodeServer((request, response) => {
+            // * the first exchange's host throws as its head is written
+            if (isFirst) {
+              isFirst = false;
+
+              const writeHead = response.writeHead.bind(response);
+              const setHeader = response.setHeader.bind(response);
+              const fail = (named: string): void => {
+                if (failing === named && fails > 0) {
+                  fails -= 1;
+                  throw new Error('the host would not write its head');
+                }
+              };
+
+              response.writeHead = ((statusCode: number, headers?: OutgoingHttpHeaders) => {
+                fail('writeHead');
+
+                return writeHead(statusCode, headers);
+              }) as typeof response.writeHead;
+              response.setHeader = (name, value) => {
+                fail('setHeader');
+
+                return setHeader(name, value);
+              };
+            }
+
+            listener(request, response);
+          });
+        },
+      });
+      const reported = reportedBy(fixture.gateway);
+      // a listed origin's GET to a path that takes POST alone: its fields set, then refused 405
+      const refused = {
+        headers: { origin: ORIGIN },
+        method: 'GET',
+        path: '/api/Transcoding/echo',
+      };
+      const first = isCall ? { body: '{}', path: '/api/Transcoding/echo' } : refused;
+      const arm = `${failing} failing ${String(times)} times${isCall ? ' after a call' : ''}`;
+
+      if (times === 1) {
+        expect(await send(fixture.port, first)).toMatchObject({
+          body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+          status: 500,
+        });
+      } else {
+        await expect(send(fixture.port, first)).rejects.toThrow();
+      }
+
+      expect(reported, arm).toEqual([
+        isCall ? 'the clock broke' : 'the host would not write its head',
+      ]);
+      expect(await send(fixture.port, refused)).toMatchObject({ status: 405 });
+      expect(reported, arm).toHaveLength(1);
+    }
+
+    await sleep(50);
+
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('answers a route’s variable that names no field 500, reported, none of its words in the problem', async () => {
+  // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+  // programmer's error its binding meets, past every gate, before any connection is drawn
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.getBook
+        ? { ...init, routes: [{ method: 'GET', template: '/v1/{nope}' }] }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  let connections = 0;
+
+  fixture.server.transport.on('connection', () => {
+    connections += 1;
+  });
+
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/x' });
+
+  expect(answered).toMatchObject({
+    body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(connections).toBe(0);
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain('nope');
 });
 
 test('answers 500 a connection its server failed to draw but by refusing it, reported, with no detail', async () => {
@@ -3209,12 +3658,15 @@ test('finishes accepted document slices with no pending bytes before their callb
   callbacks[2]?.();
 });
 
-test('stops a document at its failed write callback without ending a partial response', async () => {
+test('stops a document silently when its client goes during a write', async () => {
   for (const inline of [true, false]) {
     const waiting = Promise.withResolvers<void>();
     const sizes: number[] = [];
     let complete: ((error?: Error | null) => void) | undefined;
     let destroy: (() => void) | undefined;
+    let isDestroyed = (): boolean => {
+      return false;
+    };
     let ends = 0;
     await using fixture = await startTranscoding({
       document: 'a'.repeat(2 * 64 * 1024 + 7),
@@ -3224,6 +3676,9 @@ test('stops a document at its failed write callback without ending a partial res
 
           destroy = () => {
             response.destroy();
+          };
+          isDestroyed = () => {
+            return response.destroyed;
           };
           response.end = () => {
             ends += 1;
@@ -3265,6 +3720,7 @@ test('stops a document at its failed write callback without ending a partial res
       expect(sizes).toEqual([65536]);
       expect(ends).toBe(0);
       expect(reported).toEqual([]);
+      expect(isDestroyed()).toBe(true);
     } finally {
       destroy?.();
     }
@@ -3303,6 +3759,86 @@ test('stops a document when its response write throws', async () => {
   expect(sizes).toEqual([65536]);
   expect(ends).toBe(0);
   expect(reported).toEqual(['the document write failed']);
+});
+
+test('stops a stream when its response write throws', async () => {
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+
+  process.on('unhandledRejection', onUnhandled);
+
+  try {
+    await using fixture = await startTranscoding({
+      clock,
+      heartbeat: 1_000,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            chunks.push(new TextDecoder().decode(chunk));
+
+            // * its result goes; the write of its first notification throws
+            if (chunks.length > 1) {
+              throw new Error('the stream write failed');
+            }
+
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const socket = opened(
+      fixture.port,
+      octetsOf(fixture.port, {
+        body: '{}',
+        lines: [
+          'POST /api/Transcoding/watch HTTP/1.1',
+          'content-type: application/json',
+          'accept: text/event-stream',
+        ],
+      })
+    );
+    let isClosed = false;
+
+    socket.on('close', () => {
+      isClosed = true;
+    });
+
+    try {
+      await readUntil(socket, 'data: {}\n\n');
+      await fixture.watched(2);
+      await until(() => {
+        return chunks.length === 2;
+      });
+      await clock.tickAsync(1_000);
+      await fixture.watched(1);
+      await sleep(50);
+
+      expect(chunks).toEqual([
+        'event: result\nid: 1\ndata: {}\n\n',
+        'id: 2\ndata: {"remaining":2}\n\n',
+      ]);
+      expect(reported).toEqual(['the stream write failed']);
+      expect(unhandled).toEqual([]);
+      await until(() => {
+        return isClosed && fixture.memory.clients.length === 0;
+      });
+    } finally {
+      socket.destroy();
+    }
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {

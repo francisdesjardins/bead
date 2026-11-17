@@ -5,7 +5,7 @@ import { createServer as createTlsServer } from 'node:https';
 import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
-import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
   CancelError,
   ConnectError,
@@ -56,12 +56,15 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type IWebSocketTransportClientConnectOptions,
+  type IWebSocketTransportClientOptions,
   type WebSocketTransportClient,
 } from '../websocket-transport-client';
+import type { TransportServerConnectionHandle } from '../../server/types';
 import { createWebSocketTransportServer } from '../../server/websocket-transport-server';
 import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
+import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
@@ -1395,8 +1398,9 @@ test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
     sockets[0]?.fireOpen();
     drop(client);
 
-    await expect(disposed).rejects.toThrow('closed as it opened');
-    expect(client.isOpen()).toBe(false);
+    // * told by the dispose's own words (spec 15.15)
+    await expect(disposed).rejects.toThrow('the transport client was disposed as it connected');
+    expect(client.isClosed()).toBe(true);
     expect(client.socket).toBeNull();
 
     const closed = client.connect({ host: 'h', port: 1 });
@@ -1404,9 +1408,83 @@ test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
     sockets[1]?.fireOpen();
     sockets[1]?.fireClose({ code: 1006, reason: '' });
 
-    await expect(closed).rejects.toBeInstanceOf(ConnectError);
+    // * it opened all the same (RFC 6455 §4.1): its connect resolves, its client closed
+    await closed;
     expect(client.isClosed()).toBe(true);
     // the close of a connection that did open, once
+    expect(closes).toEqual([[false, false]]);
+  });
+
+  // * the connect that ends after the close leaves alone what its listener began
+  test('a reconnection a close listener begins as the socket closes before its connect ends keeps its own socket', async () => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const told: unknown[] = [];
+    let reconnecting: Promise<void> | undefined;
+
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.once('close', (...params) => {
+      told.push(['close', ...params]);
+      reconnecting = client.reconnect({ delay: 10_000, maximumAttempts: 2 });
+    });
+
+    const connecting = client.connect({ host: 'h', port: 1 });
+
+    sockets[0]?.fireOpen();
+    sockets[0]?.fireClose({ code: 1006, reason: '' });
+    await connecting;
+
+    expect(told).toEqual([['close', false, false], 'reconnect']);
+    expect(client.isReconnecting()).toBe(true);
+    expect(client.socket).toBe(sockets[1]);
+    expect(sockets[1]?.closeCodes).toEqual([]);
+
+    sockets[1]?.fireOpen();
+    await reconnecting;
+
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect();
+
+    // a connect a close listener begins instead: a dispose still fails it, in its own words
+    let following: Promise<void> | undefined;
+
+    client.once('close', () => {
+      following = client.connect({ host: 'h', port: 1, timeout: 1_000 });
+    });
+
+    const again = client.connect({ host: 'h', port: 1 });
+
+    sockets[2]?.fireOpen();
+    sockets[2]?.fireClose({ code: 1006, reason: '' });
+    await again;
+    drop(client);
+
+    await expect(following).rejects.toThrow('the transport client was disposed as it connected');
+  });
+
+  // a reconnection's attempt that opened is its success, whatever closed it before it ended
+  test('a reconnection whose socket closes before its attempt’s connect ends resolves, its client closed, its close told once', async () => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const closes: unknown[] = [];
+
+    const connecting = client.connect({ host: 'h', port: 1 });
+
+    sockets[0]?.fireOpen();
+    await connecting;
+    client.on('close', (...params) => {
+      closes.push(params);
+    });
+
+    const reconnecting = client.reconnect({ delay: 10_000, maximumAttempts: 1 });
+
+    sockets[1]?.fireOpen();
+    sockets[1]?.fireClose({ code: 1006, reason: '' });
+    await reconnecting;
+
+    expect(client.isClosed()).toBe(true);
     expect(closes).toEqual([[false, false]]);
   });
 
@@ -2704,6 +2782,76 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     expect(client.isClosed()).toBe(true);
   });
 
+  // RFC 6455 §8.1 and §7.4.1, spec 15.3: in Node, `ws` and the global WebSocket alike close both
+  // with 1007, .NET the reason with 1002; a page's as its browser does; rows of docs/support.md
+  test('closes with 1007 a text message from its server that is no UTF-8, and with 1007 a close whose reason is no UTF-8', async () => {
+    await using raw = await startRaw();
+    const heard: Record<string, unknown[]> = {};
+
+    for (const [label, Tracked] of [
+      ['the global WebSocket', TrackedGlobal],
+      ['ws', TrackedWs],
+    ] as const) {
+      const told: unknown[][] = [];
+      const sent: (number | undefined)[] = [];
+
+      for (const frame of [
+        frameOf(0x1, Uint8Array.of(0xff, 0xfe)),
+        frameOf(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)),
+      ]) {
+        const client = createWebSocketTransportClient({ WebSocket: Tracked });
+        const upgraded = raw.next();
+
+        client.on('error', (error) => {
+          told.push(['error', (error as Error & { code?: string }).code]);
+        });
+        client.on('close', (wasClean, wasQuick) => {
+          told.push(['close', wasClean, wasQuick]);
+        });
+        await client.connect({ host, port: raw.port });
+
+        const socket = await upgraded;
+        const closed = nextEvent(client, 'close');
+
+        // it ends its socket once the client's close came, answering none
+        socket.on('data', (chunk: Buffer) => {
+          const code = closeCodeOfMasked(chunk);
+
+          if (code !== undefined) {
+            sent.push(code);
+            socket.end();
+          }
+        });
+        socket.write(frame);
+        await closed;
+
+        expect(client.isClosed()).toBe(true);
+      }
+
+      heard[label] = [told, sent];
+    }
+
+    // * one error then the close over `ws`, its close alone over the global WebSocket (spec 15.1)
+    expect(heard).toEqual({
+      'the global WebSocket': [
+        [
+          ['close', false, false],
+          ['close', false, false],
+        ],
+        [1007, 1007],
+      ],
+      ws: [
+        [
+          ['error', 'WS_ERR_INVALID_UTF8'],
+          ['close', false, false],
+          ['error', 'WS_ERR_INVALID_UTF8'],
+          ['close', false, false],
+        ],
+        [1007, 1007],
+      ],
+    });
+  });
+
   test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when its server answers its close', async () => {
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
@@ -2835,6 +2983,105 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
 
       expect(told).toEqual([['close', false, false]]);
     }
+  });
+});
+
+/**
+ * A listener that answers each upgrade with its 101 and `frames` in one write, which its client reads
+ * in one read, then ends its socket once the client's close came.
+ */
+const answeringWith = async (frames: Buffer) => {
+  const peers = new Set<Socket>();
+  const listener = createTcpServer((socket) => {
+    let head = '';
+
+    peers.add(socket);
+    socket.on('error', () => {});
+
+    const onHead = (chunk: Buffer): void => {
+      head += chunk.toString('latin1');
+
+      const key = /^sec-websocket-key:[ \t]*(\S+)/imu.exec(head)?.[1];
+
+      if (!head.includes('\r\n\r\n') || key === undefined) {
+        return;
+      }
+
+      socket.off('data', onHead);
+      endOnClose(socket);
+
+      const accept = createHash('sha1')
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest('base64');
+
+      socket.write(
+        Buffer.concat([
+          Buffer.from(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+            'latin1'
+          ),
+          frames,
+        ])
+      );
+    };
+
+    socket.on('data', onHead);
+  });
+
+  listener.listen(0, host);
+  await once(listener, 'listening');
+
+  return {
+    port: (listener.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: async () => {
+      for (const peer of peers) {
+        peer.destroy();
+      }
+
+      await new Promise((resolve) => {
+        listener.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+// spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
+test.describe('WebSocketTransportClient, a close its server wrote with its 101', () => {
+  test('opens on a 101 written together with a close, hears what came before it once open, and tells one close', async () => {
+    const message = frameOf(0x2, Uint8Array.of(0x2a));
+    const close = frameOf(0x8, Uint8Array.of(0x03, 0xe8));
+    const heard: Record<string, unknown[]> = {};
+
+    for (const [label, Tracked] of IMPLEMENTATIONS) {
+      for (const frames of [[close], [message, close]]) {
+        await using server = await answeringWith(Buffer.concat(frames));
+        const client = createWebSocketTransportClient({ WebSocket: Tracked });
+        const told: unknown[] = [];
+        const closed = nextEvent(client, 'close');
+
+        client.on('message', ({ data }) => {
+          told.push(['message', [...new Uint8Array(data as ArrayBuffer)], client.isOpen()]);
+        });
+        client.on('close', (wasClean, wasQuick) => {
+          told.push(['close', wasClean, wasQuick]);
+        });
+
+        await client.connect({ host, port: server.port });
+        told.push('connected');
+        await closed;
+
+        (heard[label] ??= []).push([told, client.isClosed()]);
+      }
+    }
+
+    // * the connect first, then what came before the close, heard open, then one unclean close
+    const expected = [
+      [['connected', ['close', false, false]], true],
+      [['connected', ['message', [0x2a], true], ['close', false, false]], true],
+    ];
+
+    expect(heard).toEqual({ 'the global WebSocket': expected, ws: expected });
   });
 });
 
@@ -3009,6 +3256,41 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     expect(await closed).toEqual([false, false]);
     expect([socket?.pings, socket?.wasTerminated]).toEqual([4, true]);
     expect(client.isClosed()).toBe(true);
+  });
+
+  test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
+    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const connecting = client.connect({ host, port: 80 });
+    const socket = made[0];
+    const told: unknown[] = [];
+
+    client.on('error', (error) => {
+      told.push(['error', error.message]);
+    });
+    client.on('close', (...args) => {
+      told.push(['close', ...args]);
+    });
+
+    // no ping answered, and a socket that never closes as it is terminated
+    if (socket !== undefined) {
+      socket.terminateBehaviour = 'throw';
+    }
+
+    socket?.fireOpen();
+    await connecting;
+    await nextEvent(client, 'close');
+
+    expect(socket?.wasTerminated).toBe(true);
+    expect(told).toEqual([
+      ['error', 'terminate refused'],
+      ['close', false, false],
+    ]);
+    expect(client.isClosed()).toBe(true);
+
+    // a socket that closes after its connection ended tells nothing more
+    socket?.fireClose({ code: 1006, reason: '' });
+    expect(told).toHaveLength(2);
   });
 
   test('beats every HEARTBEAT when told nothing', async () => {
@@ -3200,6 +3482,42 @@ test.describe('WebSocketTransportClient, an upgrade refused', () => {
     }
   });
 
+  test('fails its connect on an upgrade refused whose socket’s terminate throws, what it threw the cause', async () => {
+    await using refusing = await startRefusing(FORBIDDEN);
+    const stubborn: WsWebSocket[] = [];
+    // `ws`'s own socket, which throws as it is terminated, ending nothing
+    const StubbornWs = class extends WsClient {
+      override terminate(): void {
+        stubborn.push(this);
+
+        throw new Error('terminate refused');
+      }
+    };
+    const client = createWebSocketTransportClient({
+      WebSocket: StubbornWs as unknown as IWebSocketConstructor,
+    });
+
+    try {
+      const reason: unknown = await client
+        .connect({ host, port: refusing.port })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect(reason).toBeInstanceOf(ConnectError);
+      expect((reason as ConnectError).message).toBe(
+        'the server refused the upgrade: 403 host-refused'
+      );
+      expect((reason as ConnectError).cause).toEqual(new Error('terminate refused'));
+      expect(stubborn).toHaveLength(1);
+      expect(client.isClosed()).toBe(true);
+    } finally {
+      for (const socket of stubborn) {
+        WsClient.prototype.terminate.call(socket);
+      }
+    }
+  });
+
   test('names nothing of an upgrade refused but its close, over the global WebSocket', async () => {
     await using refusing = await startRefusing(FORBIDDEN);
     const client = createWebSocketTransportClient({ WebSocket: TrackedGlobal });
@@ -3351,5 +3669,246 @@ test.describe('WebSocketTransportClient, paused by its router', () => {
       await stopServer(server);
       await allClosed();
     }
+  });
+});
+
+test('delivers binary as bytes', async () => {
+  const server = await startServer();
+  await using client = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+  try {
+    const connected = nextConnection(server);
+    await client.connect({ host, port: portOf(server) });
+    const { socket } = await connected;
+    const heard = once(socket, 'message');
+
+    await client.send({ data: new TextEncoder().encode('hello') });
+
+    const [data, isBinary] = (await heard) as [Buffer, boolean];
+    expect([Array.from(data), isBinary]).toEqual([[104, 101, 108, 108, 111], true]);
+  } finally {
+    await client.disconnect({ isQuick: true });
+    await stopServer(server);
+    await allClosed();
+  }
+});
+
+test('rejects with a ready state error before connecting', async () => {
+  await using client = createWebSocketTransportClient();
+
+  await expect(client.disconnect()).rejects.toMatchObject({
+    got: ReadyState.UNINITIALIZED,
+    name: 'ReadyStateError',
+  });
+});
+
+test('rejects with a ready state error on a closed connection', async () => {
+  const server = await startServer();
+  await using client = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+  try {
+    await client.connect({ host, port: portOf(server) });
+    await client.disconnect();
+
+    await expect(client.disconnect()).rejects.toMatchObject({
+      got: ReadyState.CLOSED,
+      name: 'ReadyStateError',
+    });
+  } finally {
+    await stopServer(server);
+    await allClosed();
+  }
+});
+
+// spec 15.39: a client's TLS over ws's WebSocket, against a front over the spec's test PKI that pipes
+// to a plain transport server
+test.describe('createWebSocketTransportClient, a client certificate', () => {
+  const TLS = Object.freeze({
+    authorities: PKI.root,
+    certificate: PKI.clientChain,
+    key: PKI.clientKey,
+  });
+  // ws's WebSocket, its sockets tracked so that each test ends with them closed
+  const [, [, TRACKED_WS]] = IMPLEMENTATIONS;
+
+  /** A plain transport server on the loopback, and what closes it. */
+  const startPlain = async () => {
+    const server = createWebSocketTransportServer({ WebSocketServer });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+
+    return {
+      port,
+      server,
+      [Symbol.asyncDispose]: async () => {
+        await server.stop();
+        await allClosed();
+      },
+    };
+  };
+
+  /** A client over ws's WebSocket, given `tls`. */
+  const clientOf = (tls: IWebSocketTransportClientOptions['tls']) => {
+    return createWebSocketTransportClient({
+      tls,
+      WebSocket: TRACKED_WS as unknown as IWebSocketConstructor,
+    });
+  };
+
+  /** Connects `client` to `port`, sends a message each way, and disconnects. */
+  const exchangeOver = async (
+    client: WebSocketTransportClient,
+    {
+      port,
+      secured,
+      server,
+    }: { port: number; secured: boolean; server: Awaited<ReturnType<typeof startPlain>>['server'] }
+  ) => {
+    const received = new Promise<Data>((resolve) => {
+      server.once('message', ({ data }) => {
+        resolve(data);
+      });
+    });
+
+    await client.connect({ host, port, secured });
+    await client.send({ data: Buffer.from('hello') });
+    expect(Buffer.from((await received) as Uint8Array)).toEqual(Buffer.from('hello'));
+
+    const heard = nextEvent(client, 'message');
+    const handle = server.clients[0]?.connectionHandle as TransportServerConnectionHandle;
+
+    expect(handle).toBeDefined();
+    await server.send({ data: Buffer.from('again') }, handle);
+    expect(Buffer.from((await heard)[0].data as ArrayBuffer)).toEqual(Buffer.from('again'));
+    await client.disconnect();
+  };
+
+  /** What a connect through `port` under TLS rejected with. */
+  const refusedOf = async (client: WebSocketTransportClient, port: number) => {
+    return client.connect({ host, port, secured: true }).then(
+      () => {
+        return 'connected';
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+  };
+
+  // spec 15.39
+  test('connects presenting a client certificate under an intermediate to a server that requires one, trusting the server by the authorities it is given, over TLS 1.2 and TLS 1.3', async () => {
+    await using plain = await startPlain();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(plain.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+      const client = clientOf(TLS);
+
+      await exchangeOver(client, { port: front.port, secured: true, server: plain.server });
+      expect(client.isSecure).toBe(true);
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect presenting a client certificate its server does not trust, or none, over TLS 1.2 and TLS 1.3', async () => {
+    await using plain = await startPlain();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      await using front = await createTlsFront(plain.port, {
+        maxVersion,
+        requiresCertificate: true,
+      });
+
+      for (const tls of [
+        { ...TLS, certificate: PKI.strangerClient, key: PKI.strangerClientKey },
+        { authorities: PKI.root },
+      ]) {
+        const client = clientOf(tls);
+
+        expect(await refusedOf(client, front.port)).toBeInstanceOf(ConnectError);
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+  });
+
+  // spec 15.39
+  test('fails its connect to a server under no authority it trusts, given or of its platform', async () => {
+    await using plain = await startPlain();
+
+    for (const [serves, tls] of [
+      ['stranger', TLS],
+      ['server', { certificate: PKI.clientChain, key: PKI.clientKey }],
+    ] as const) {
+      await using front = await createTlsFront(plain.port, { serves });
+
+      expect(await refusedOf(clientOf(tls), front.port)).toBeInstanceOf(ConnectError);
+    }
+  });
+
+  // spec 15.39
+  test('connects to a server by a host its certificate names, and fails its connect by one it does not', async () => {
+    await using plain = await startPlain();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      // * each leaf names one host alone, which takes it, and the other host of the same front
+      // refuses it
+      for (const [serves, named, other] of [
+        ['named', 'localhost', '127.0.0.1'],
+        ['addressed', '127.0.0.1', 'localhost'],
+      ] as const) {
+        await using front = await createTlsFront(plain.port, { maxVersion, serves });
+        const taken = clientOf({ authorities: PKI.root });
+
+        await taken.connect({ host: named, port: front.port, secured: true });
+        expect(taken.isSecure).toBe(true);
+        await taken.disconnect();
+
+        const refused = clientOf({ authorities: PKI.root });
+        const outcome = await refused
+          .connect({ host: other, port: front.port, secured: true })
+          .then(
+            () => {
+              return 'connected';
+            },
+            (reason: unknown) => {
+              return reason;
+            }
+          );
+
+        expect(outcome).toBeInstanceOf(ConnectError);
+        expect(refused.isClosed()).toBe(true);
+      }
+    }
+  });
+
+  // spec 15.39
+  test('connects in the clear with tls given, which a secured connect alone uses', async () => {
+    await using plain = await startPlain();
+
+    await exchangeOver(clientOf(TLS), { port: plain.port, secured: false, server: plain.server });
+  });
+
+  // spec 15.39
+  test('refuses tls beside what it is given that keeps a TLS of its own', () => {
+    const refusal = new ProgrammerError(
+      "tls is refused beside a WebSocket without ws's shape, which keeps a TLS of its own"
+    );
+
+    // Node's global WebSocket, the default, and one shaped as a page's
+    expect(() => {
+      return createWebSocketTransportClient({ tls: TLS });
+    }).toThrow(refusal);
+    expect(() => {
+      return createWebSocketTransportClient({
+        tls: TLS,
+        WebSocket: createFakeWebSocket().FakeWebSocket,
+      });
+    }).toThrow(refusal);
+
+    // a tls of no member is none, and stands beside it
+    expect(() => {
+      return createWebSocketTransportClient({ tls: {} });
+    }).not.toThrow();
   });
 });

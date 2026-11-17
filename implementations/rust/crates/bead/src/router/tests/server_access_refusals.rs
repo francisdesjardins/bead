@@ -231,6 +231,229 @@ fn jwt_vectors() -> (Vec<JwtVector>, usize) {
     (entries, refused)
 }
 
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the two source twins' credential and admission events share one ordered batch"
+)]
+async fn tells_each_access_it_refuses_its_stage_its_code_its_reason_and_what_was_called_with_the_connection_and_the_request_s_address_and_port_never_the_credential()
+ {
+    let vector = jwt_vectors()
+        .0
+        .into_iter()
+        .find(|vector| vector.verdict.reason.as_deref() == Some("exp"))
+        .expect("an expired JWT");
+    let Audiences::One(audience) = vector.audience else {
+        panic!("the expired JWT has one audience")
+    };
+    let clock =
+        SteppingClock::new(instants::instant_of(&vector.now).expect("the vector's instant"));
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let served = Served::on(
+        (shared, clock),
+        &RouterServerOptions {
+            credentials: Some(Credentials {
+                audience: Some(audience),
+                keys: vector
+                    .keys
+                    .into_iter()
+                    .map(|key| JwtKey {
+                        issuer: key.issuer,
+                        algorithm: JwtAlgorithm::named(&key.algorithm)
+                            .expect("the vector's algorithm"),
+                        jwk: key.jwk,
+                    })
+                    .collect(),
+                ..Credentials::default()
+            }),
+            relay: Some(RelayOptions::default()),
+            ..RouterServerOptions::default()
+        },
+    );
+    served.transport.open(&first(), true);
+    served.transport.open(&second(), true);
+    served
+        .router
+        .register_destination(
+            RelayTarget::Connection(second()),
+            &DestinationOptions {
+                destination_id: Some(4),
+                ..DestinationOptions::default()
+            },
+        )
+        .expect("destination 4");
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        |_| false,
+        Some(
+            Failure::protocol(ProtocolCode::ACCESS_DENIED, crate::RouterSide::Server)
+                .saying("not this one"),
+        ),
+    ));
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(|_, _| {
+            panic!("a refused request reaches no resolver")
+        }))
+        .expect("echo registered");
+    let guarded = crate::identity::Procedure {
+        procedure_id: 9,
+        procedure_name: "guarded".to_owned(),
+        ..echo()
+    };
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
+    dependencies.before_request = Some(require_session());
+    served
+        .services
+        .get_request_resolver(&guarded, dependencies)
+        .expect("guarded resolved")
+        .on(Arc::new(|_, _| {
+            panic!("a refused request reaches no resolver")
+        }))
+        .expect("guarded registered");
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let telling = Arc::clone(&told);
+    served.router.on_access_refused(Arc::new(move |refusal| {
+        locked(&telling).push(refusal.clone());
+    }));
+    let expired = vector.token;
+    let malformed = "eyJ.not.a-token";
+    for (call_id, credential) in [
+        (
+            1,
+            Credential::ToCome {
+                scheme: CredentialScheme::new(4),
+                bytes: Bytes::from_static(&[1, 2]),
+            },
+        ),
+        (3, Credential::Opaque(token())),
+        (
+            5,
+            Credential::Jwt(Bytes::copy_from_slice(expired.as_bytes())),
+        ),
+        (
+            11,
+            Credential::Jwt(Bytes::from_static(malformed.as_bytes())),
+        ),
+    ] {
+        let mut request = presenting((credential, None));
+        let Envelope::Request { header, .. } = &mut request else {
+            panic!("a request")
+        };
+        header.call_id = call_id;
+        served
+            .transport
+            .deliver_message(&message(&request, None), &first());
+    }
+    for (call_id, procedure, destination_id) in
+        [(7, echo(), None), (9, echo(), Some(4)), (13, guarded, None)]
+    {
+        served.transport.deliver_message(
+            &message(
+                &Envelope::Request {
+                    header: RequestHeader {
+                        destination_id,
+                        ..header_of((call_id, &procedure))
+                    },
+                    payload: Bytes::new(),
+                },
+                None,
+            ),
+            &first(),
+        );
+    }
+    served.settle().await;
+    let mut refusals = locked(&told).clone();
+    assert_eq!(refusals.len(), 7);
+    // * both JWTs settle in a later turn; their relative order is no part of either source twin
+    refusals[5..].sort_by(|left, right| left.reason.cmp(&right.reason));
+    let admission = AccessRefusal {
+        stage: AccessRefusalStage::Admission,
+        credential_scheme: None,
+        reason: None,
+        ..expected((
+            ProtocolCode::ACCESS_DENIED.get().get(),
+            CredentialScheme::NONE,
+            "",
+        ))
+    };
+    assert_eq!(
+        refusals,
+        [
+            expected((
+                ProtocolCode::CREDENTIAL_UNSUPPORTED.get().get(),
+                CredentialScheme::new(4),
+                "scheme"
+            )),
+            expected((
+                ProtocolCode::SESSION_REQUIRED.get().get(),
+                CredentialScheme::OPAQUE,
+                "session"
+            )),
+            admission.clone(),
+            AccessRefusal {
+                destination_id: Some(4),
+                reason: Some("no-before-route".to_owned()),
+                ..admission.clone()
+            },
+            AccessRefusal {
+                code: ProtocolCode::SESSION_REQUIRED.get().get(),
+                procedure_id: 9,
+                reason: Some("requireSession".to_owned()),
+                ..admission
+            },
+            expected((
+                ProtocolCode::SESSION_REQUIRED.get().get(),
+                CredentialScheme::JWT,
+                "exp"
+            )),
+            expected((
+                ProtocolCode::SESSION_REQUIRED.get().get(),
+                CredentialScheme::JWT,
+                "token"
+            )),
+        ]
+    );
+    let sent = served.transport.take();
+    let answers: Vec<_> = sent
+        .iter()
+        .map(|(handle, envelope)| {
+            assert_eq!(*handle, first());
+            let Envelope::Failure { header, failure } = envelope else {
+                panic!("each refusal answers with a failure")
+            };
+            (header.call_id, failure.code)
+        })
+        .collect();
+    assert_eq!(
+        answers[..5],
+        [
+            (1, ProtocolCode::CREDENTIAL_UNSUPPORTED.get()),
+            (3, ProtocolCode::SESSION_REQUIRED.get()),
+            (7, ProtocolCode::ACCESS_DENIED.get()),
+            (9, ProtocolCode::ACCESS_DENIED.get()),
+            (13, ProtocolCode::SESSION_REQUIRED.get()),
+        ]
+    );
+    let mut jwt_answers = answers[5..].to_vec();
+    jwt_answers.sort();
+    assert_eq!(
+        jwt_answers,
+        [
+            (5, ProtocolCode::SESSION_REQUIRED.get()),
+            (11, ProtocolCode::SESSION_REQUIRED.get())
+        ]
+    );
+    let printed = format!("{refusals:?}");
+    for secret in [expired.as_str(), malformed, "not this one"] {
+        assert!(!printed.contains(secret));
+    }
+    assert_eq!(served.reported(), Vec::<String>::new());
+    served.router.dispose().await;
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays every refusing verdict of the vectors in one pass"

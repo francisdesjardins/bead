@@ -7,8 +7,8 @@
 // `checkProto` not run, a refusal skipping buf's half beside a committed blueprint and exit 2
 // without one; its `beadc.yaml` for its source and its blueprint alone. A committed blueprint its
 // `.proto` contradicts, or one named and missing, is AGAINST_BLUEPRINT's warning. A `.binpb` is
-// refused: a release's `.proto` is its tag's (decision 0022). An archive is extracted under the
-// project's `.beadc/` where a `beadc.yaml` is read, on the drive buf builds from.
+// refused: a release's `.proto` is its tag's (decision 0022). An archive is extracted in the run's
+// work area.
 
 // dependencies
 
@@ -17,7 +17,6 @@ import nodePath, { join, relative, sep } from 'node:path';
 
 import { compile } from '../compile.ts';
 import { againstOfText, CONFIG_FILE, type IAgainstConfig, type Source } from '../config.ts';
-import { temporaryFolderOf } from '../config-files.ts';
 import { diagnosticOf, type IDiagnostic, InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
@@ -25,6 +24,7 @@ import { type IBlueprint, type PlaceOf, readBlueprint } from '../model/blueprint
 import { assertRoots, displayOf } from '../roots.ts';
 import { Category } from '../rules.ts';
 import { extractArchive } from './archive.ts';
+import { temporaryFolderOf } from '../work-area.ts';
 import { compareBlueprints } from './compare.ts';
 
 // types
@@ -102,7 +102,7 @@ const compileEarlier = (
 ): { blueprint: IBlueprint; placeOf: PlaceOf; image: Uint8Array } => {
   assertRoots(roots, { from: folder });
 
-  const image = compile(roots, { image: true, folder });
+  const image = compile(roots, { image: true });
 
   return { ...blueprintOf(readSet(image, { roots })), image };
 };
@@ -256,10 +256,7 @@ export const againstOf = (path: string, options: IAgainstOptions): IEarlier => {
       throw new InputError('--against - reads a tar on standard input, and none came');
     }
 
-    const folder = temporaryFolderOf(
-      'against-',
-      options.config === undefined ? {} : { folder: options.config.folder }
-    );
+    const folder = temporaryFolderOf('against-');
 
     try {
       extractArchive(options.archive, { into: folder });

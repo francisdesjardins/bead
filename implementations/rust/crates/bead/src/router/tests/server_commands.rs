@@ -118,10 +118,11 @@ async fn tells_a_command_made_with_the_call_id_its_router_drew_on_its_connection
 }
 
 // spec 9.1
-#[tokio::test]
-async fn commands_go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connections_result_alone()
- {
-    let served = Served::new(&RouterServerOptions::default());
+async fn command_connection() {
+    let served = Served::new(&RouterServerOptions {
+        session_token_of: Some(Arc::new(|_| Ok(Some(super::token())))),
+        ..RouterServerOptions::default()
+    });
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
     let running = served
@@ -179,8 +180,7 @@ async fn commands_go_to_the_connection_their_options_name_on_even_call_ids_and_r
 }
 
 // spec 9.1, 11
-#[tokio::test]
-async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_subscription() {
+async fn command_preconditions() {
     let served = Served::new(&RouterServerOptions::default());
     served
         .router
@@ -233,8 +233,7 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
 }
 
 // spec 9.1
-#[tokio::test]
-async fn commands_reach_a_connection_that_spoke_before_the_router_saw_it_open() {
+async fn implicit_connection() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.deliver_message(
         &TransportMessage {
@@ -257,9 +256,7 @@ async fn commands_reach_a_connection_that_spoke_before_the_router_saw_it_open() 
 }
 
 // spec 9.1, 10.1
-#[tokio::test]
-async fn commands_reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
- {
+async fn command_endings() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
@@ -299,8 +296,7 @@ async fn commands_reject_with_the_failure_answered_time_out_and_are_rejected_whe
 }
 
 // spec 9.1, 12.1
-#[tokio::test]
-async fn commands_refuse_a_payload_too_large_here() {
+async fn command_payload_limit() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.open(&first(), true);
     let called = served
@@ -317,4 +313,57 @@ async fn commands_refuse_a_payload_too_large_here() {
     );
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn commands_go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connections_result_alone()
+ {
+    command_connection().await;
+}
+
+#[tokio::test]
+async fn go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connections_result_alone()
+ {
+    command_connection().await;
+}
+
+#[tokio::test]
+async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_subscription() {
+    command_preconditions().await;
+}
+
+#[tokio::test]
+async fn name_their_connection_and_it_must_be_open_a_server_holds_no_subscription() {
+    command_preconditions().await;
+}
+
+#[tokio::test]
+async fn commands_reach_a_connection_that_spoke_before_the_router_saw_it_open() {
+    implicit_connection().await;
+}
+
+#[tokio::test]
+async fn reach_a_connection_that_spoke_before_the_router_saw_it_open() {
+    implicit_connection().await;
+}
+
+#[tokio::test]
+async fn commands_reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
+ {
+    command_endings().await;
+}
+
+#[tokio::test]
+async fn reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes() {
+    command_endings().await;
+}
+
+#[tokio::test]
+async fn commands_refuse_a_payload_too_large_here() {
+    command_payload_limit().await;
+}
+
+#[tokio::test]
+async fn refuse_a_payload_too_large_here() {
+    command_payload_limit().await;
 }

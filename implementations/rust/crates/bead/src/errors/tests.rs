@@ -225,3 +225,13 @@ fn converting_a_failure_or_ready_state_keeps_its_diagnostic_and_source_chain() {
         "a disposed owner names its refusal"
     );
 }
+
+#[test]
+fn is_a_generic_error_of_its_own_name() {
+    let error = CallError::Disconnected("closed before the answer".to_owned());
+    assert!(
+        matches!(&error, CallError::Disconnected(reason) if reason == "closed before the answer")
+    );
+    assert_eq!(error.to_string(), "closed before the answer");
+    assert!(error.source().is_none());
+}

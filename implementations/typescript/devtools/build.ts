@@ -1,7 +1,8 @@
 // ── DevTools extension, built ─────────────────────────────────────────────────
 
 // The extension as Chrome loads it unpacked, into `devtools/dist/`: each script bundled with what it
-// takes of the package, its pages, and its manifest at the package's version. The hook and the panel
+// takes of the package, its pages, its manifest at the package's version, and its name and
+// description in English and in French. The hook and the panel
 // are every browser's; the rest, Chrome's own glue, is in `chrome/`. Node runs it as it is, its
 // types stripped, as it runs the demo's builds.
 
@@ -9,11 +10,12 @@
 
 import { build } from 'esbuild';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // constants
 
 const DEVTOOLS = new URL('./', import.meta.url);
+const PACKAGE = new URL('../', DEVTOOLS);
 const OUT = new URL('dist/', DEVTOOLS);
 
 /**
@@ -40,6 +42,23 @@ const STYLES: readonly string[] = Object.freeze([
   'penumbra/tokens.system.css',
 ]);
 
+/**
+ * The extension's icons, Bead's mark at each size the manifest names: `site/icons.mjs` writes them
+ * from `site/src/favicon.svg`.
+ */
+const ICONS: readonly string[] = Object.freeze([
+  'chrome/icons/icon-16.png',
+  'chrome/icons/icon-32.png',
+  'chrome/icons/icon-48.png',
+  'chrome/icons/icon-128.png',
+]);
+
+/** The name and the description the manifest names by message, in each language the store lists. */
+const LOCALES: readonly string[] = Object.freeze([
+  'chrome/_locales/en/messages.json',
+  'chrome/_locales/fr/messages.json',
+]);
+
 /** What the manifest holds in place of the package's version. */
 const VERSION = '%VERSION%';
 
@@ -60,13 +79,15 @@ await build({
   entryPoints: Object.entries(SCRIPTS).map(([name, path]) => {
     return { in: pathOf(path), out: name };
   }),
+  // ! the bundles' path comments are relative to it: the package's root, whatever the cwd
+  absWorkingDir: fileURLToPath(PACKAGE),
   format: 'iife',
   outdir: fileURLToPath(OUT),
   platform: 'browser',
   target: 'chrome111',
 });
 
-const { version } = JSON.parse(await readFile(pathOf('../package.json'), 'utf8')) as {
+const { version } = JSON.parse(await readFile(pathOf('package.json', PACKAGE), 'utf8')) as {
   version: string;
 };
 const manifest = await readFile(pathOf('chrome/manifest.json'), 'utf8');
@@ -80,6 +101,22 @@ await writeFile(pathOf('manifest.json', OUT), manifest.replace(VERSION, version)
 await Promise.all(
   Object.entries(PAGES).map(([page, path]) => {
     return copyFile(pathOf(path), pathOf(page, OUT));
+  })
+);
+
+await mkdir(new URL('icons/', OUT), { recursive: true });
+await Promise.all(
+  ICONS.map((path) => {
+    return copyFile(pathOf(path), pathOf(path.replace(/^chrome\//u, ''), OUT));
+  })
+);
+
+await Promise.all(
+  LOCALES.map(async (path) => {
+    const to = pathOf(path.replace(/^chrome\//u, ''), OUT);
+
+    await mkdir(new URL('./', pathToFileURL(to)), { recursive: true });
+    await copyFile(pathOf(path), to);
   })
 );
 

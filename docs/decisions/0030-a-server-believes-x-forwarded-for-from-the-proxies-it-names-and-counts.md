@@ -10,6 +10,9 @@
   the listening address and the form of an IP literal,
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; a
   WebSocket server's bound per address, [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
+  A gateway's bounds per address read the same walk and gauge nothing, a gauge of them ahead beside
+  the event of each refusal of the gateway's own
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 ## Context
 

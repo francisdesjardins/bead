@@ -92,6 +92,15 @@ impl ProtoSchema {
         self.message
     }
 
+    /// The schema of the message `message` of its pool, its shapes shared.
+    #[cfg(feature = "transcoding")]
+    pub(crate) fn at(&self, message: MessageIndex) -> Self {
+        Self {
+            shapes: Arc::clone(&self.shapes),
+            message,
+        }
+    }
+
     /// The shape of its message.
     pub(crate) fn root(&self) -> &Shape {
         self.shape(self.message)
@@ -536,12 +545,12 @@ fn length_into(output: &mut Vec<u8>, length: usize) {
 ///
 /// A [`CodecRefusal`] for bytes that are no encoding of the message, its reason `not its message`,
 /// or that nest too deep, `nested past 100`: spec 17.2's words, the record refused in its cause.
-pub fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal> {
+pub fn check_proto_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal> {
     checked(bytes, schema).map(|_| ())
 }
 
-/// Checks `bytes` as [`check_records`] does: whether they hold a singular closed enum's record of
-/// a number its enum declares no value of (17.9.8), which [`filtered`] drops.
+/// Checks `bytes` as [`check_proto_records`] does: whether they hold a singular closed enum's
+/// record of a number its enum declares no value of (17.9.8), which [`filtered`] drops.
 pub(crate) fn checked(bytes: &[u8], schema: &ProtoSchema) -> Result<bool, CodecRefusal> {
     let mut reader = Reader::of(bytes, schema);
 
@@ -557,10 +566,11 @@ pub(crate) fn checked(bytes: &[u8], schema: &ProtoSchema) -> Result<bool, CodecR
     Ok(reader.undeclared)
 }
 
-/// `bytes`, checked as [`check_records`] checks them, without each singular closed enum's record of
-/// a number its enum declares no value of, the length of each record that held one written again
-/// (17.9.8): what protobuf keeps among the unknown fields, Buffa then never reads as the field's,
-/// which holds the last declared number its records give, or none. Borrowed where they hold none.
+/// `bytes`, checked as [`check_proto_records`] checks them, without each singular closed enum's
+/// record of a number its enum declares no value of, the length of each record that held one
+/// written again (17.9.8): what protobuf keeps among the unknown fields, Buffa then never reads as
+/// the field's, which holds the last declared number its records give, or none. Borrowed where
+/// they hold none.
 pub(crate) fn filtered<'a>(
     bytes: &'a [u8],
     schema: &ProtoSchema,

@@ -220,9 +220,7 @@ async fn reports_a_request_of_its_own_parity_or_on_a_call_open_and_answers_the_o
 }
 
 // spec 9.0
-#[tokio::test]
-async fn abort_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
- {
+async fn closed_call_signals() {
     let handed = Handed::default();
     let keeping = Arc::clone(&handed);
     let answers = Arc::new(Mutex::new(Vec::new()));
@@ -359,13 +357,11 @@ async fn answers_a_request_of_a_layout_to_come_with_the_layouts_it_reads_under_o
 }
 
 // spec 10.4, 12.2
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays peer and local calls, a reservation, stray credits and the pending call cancelled"
 )]
-async fn report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drop_one_on_a_call_id_reserved_and_a_credit_in_silence()
- {
+async fn stray_chunks() {
     let (served, _handed) = held();
     let call = asking(&served, Duration::from_secs(1));
 
@@ -472,4 +468,28 @@ async fn report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_
         matches!(answered(call).await, Err(CallError::Cancelled(_))),
         "the pending call stays until cancelled"
     );
+}
+
+#[tokio::test]
+async fn abort_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
+ {
+    closed_call_signals().await;
+}
+
+#[tokio::test]
+async fn cancels_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
+ {
+    closed_call_signals().await;
+}
+
+#[tokio::test]
+async fn report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drop_one_on_a_call_id_reserved_and_a_credit_in_silence()
+ {
+    stray_chunks().await;
+}
+
+#[tokio::test]
+async fn reports_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drops_one_on_a_call_id_reserved_and_a_credit_in_silence()
+ {
+    stray_chunks().await;
 }

@@ -377,6 +377,7 @@
         "clauses": { "$ref": "#/$defs/clauses" },
         "options": { "$ref": "#/$defs/options" },
         "realTime": { "const": true },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" },
         "steps": {
           "type": "array",
           "minItems": 2,

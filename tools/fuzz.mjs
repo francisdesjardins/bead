@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
-// pull request's gate (decision 0006). Eight targets, the same on each side and named alike, one
-// of beadc's and one of the Rust side's own, each fed raw bytes:
+// pull request's gate (decision 0006). Nine targets, the same on each side and named alike, one
+// of beadc's and two of the Rust side's own, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
 // - `payload-codecs`: the `json` and `text` codecs' readers, and the writers behind them;
@@ -17,11 +17,18 @@
 // - `proto-codecs`: the `proto` codecs over `spec/codecs.proto`'s `Probe`, spec 17.9, the first
 //   three bytes drawing a path, a depth and a number of unknown groups to wrap what reads in,
 //   before it is written;
+// - `json-form`: protobuf's JSON read by Bead's mapping, transcoding 5.2, over
+//   `spec/transcoding.proto`'s `Everything`, the first byte even, or its `Edges`, odd, the rest
+//   its body: what reads is written, what was written reads, and it writes again to the same
+//   text, byte for byte (decision 0052);
 // - `blueprint`, the TypeScript side's alone, as beadc has no other: beadc's blueprint reader, its
 //   JSON, its schema and its rules, and its form written back;
 // - `mqtt-packets`, the Rust side's alone: its MQTT 5 client's reader of a broker's packets, which
 //   the other sides leave to MQTT.js and MQTTnet, spec 15.29, a PUBLISH it reads written again in
-//   the bytes spec 15.30 counts (decision 0050).
+//   the bytes spec 15.30 counts (decision 0050);
+// - `mqtt-websocket-frames`, the Rust side's alone: its MQTT 5 client's reader of a WebSocket's
+//   frames, which the other sides leave to their WebSocket clients, spec 15.25, the same events
+//   whether its bytes come whole or cut, nothing held past a frame's head (decision 0050).
 //
 // A target lets the refusal its parser is designed to give pass; anything else it throws, an input
 // past a second, or memory past 256 MiB of its own is a finding, which the fuzzer keeps.
@@ -37,17 +44,18 @@
 //   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
 // - Rust: cargo-fuzz's libFuzzer, over `implementations/rust/fuzz/`, a project outside the side's
 //   workspace, on the nightly its `-Z sanitizer` needs, pinned by its date as CI's fuzz build is,
-//   on Linux or WSL, every twin, over its core's judgement and codecs, and `mqtt-packets`, over
-//   its MQTT 5 client's reader (decisions 0044, 0049, 0050). Its runs read the folder's
-//   `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer compiler's warnings are no
-//   gate of the pinned one's.
+//   on Linux or WSL, every twin, over its core's judgement and codecs, and `mqtt-packets` and
+//   `mqtt-websocket-frames`, over its MQTT 5 client's readers (decisions 0044, 0049, 0050). Its
+//   runs read the folder's `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer
+//   compiler's warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
-//   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf and Google.Protobuf in a copy
-//   of its build. `fuzz/fuzzer.json` pins both: the fuzzer's release and its SHA-256, checked
-//   before a byte of it is written, and the instrumenter's version, which is the SharpFuzz
-//   library's in implementations/dotnet/Directory.Packages.props. Both land in `.fuzzer/` beside
-//   the project, which git ignores. The child's runtime holds its managed heap to 256 MiB.
+//   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf, Google.Protobuf and
+//   Bead.Transcoding in a copy of its build. `fuzz/fuzzer.json` pins both: the fuzzer's release and
+//   its SHA-256, checked before a byte of it is written, and the instrumenter's version, which is
+//   the SharpFuzz library's in implementations/dotnet/Directory.Packages.props. Both land in
+//   `.fuzzer/` beside the project, which git ignores. The child's runtime holds its managed heap to
+//   256 MiB.
 //
 //   node tools/fuzz.mjs seed                     every target's corpora, from the conformance files
 //   node tools/fuzz.mjs fetch                    the C# side's fuzzer and instrumenter, by the pin
@@ -92,16 +100,17 @@ export const TWINS = Object.freeze([
   'ws-handshake',
   'broker-parcel',
   'proto-codecs',
+  'json-form',
 ]);
 
 /**
  * Each side's targets, by their names: the twins, on the TypeScript side beadc's `blueprint` beside
- * them, on the Rust side its MQTT 5 client's `mqtt-packets`.
+ * them, on the Rust side its MQTT 5 client's `mqtt-packets` and `mqtt-websocket-frames`.
  */
 export const TARGETS = Object.freeze({
   typescript: Object.freeze([...TWINS, 'blueprint']),
   csharp: TWINS,
-  rust: Object.freeze([...TWINS, 'mqtt-packets']),
+  rust: Object.freeze([...TWINS, 'mqtt-packets', 'mqtt-websocket-frames']),
 });
 
 /** Every side's targets, each once, in the order the sides list them. */
@@ -350,6 +359,24 @@ const MQTT_PACKETS = Object.freeze([
   'E0 07 8E 05 1F 00 02 6E 6F',
 ]);
 
+// the messages of `spec/transcoding.proto` the `json-form` target reads, by its first byte, even
+// or odd: a seed's is its message's index here
+const JSON_FORM_MESSAGES = Object.freeze([
+  'bead.transcoding.v1.Everything',
+  'bead.transcoding.v1.Edges',
+]);
+
+// the frames a server sends a client of MQTT 5 over a WebSocket, as the Rust side's frame mutation
+// test, `tests/mqtt_websocket_frames_fuzz.rs`, seeds from them: a binary frame whole, its CONNACK;
+// one fragmented with a ping between; a pong; a close; a head of a 64-bit length
+const MQTT_WEBSOCKET_FRAMES = Object.freeze([
+  '82 05 20 03 00 00 00',
+  '02 02 20 03 89 04 62 65 61 74 80 03 00 00 00',
+  '8A 00',
+  '88 02 03 E8',
+  '82 7F 00 00 00 00 00 01 00 00 30 00',
+]);
+
 // what the `proto-codecs` target reads before its payload: the path, the count and the number of
 // unknown groups, each 0, so the payload is read as it is and written as it was read
 const PLAIN = Buffer.of(0, 0, 0);
@@ -376,11 +403,14 @@ const entryBytesOf = (entry, key) => {
  * `vectors.json`; the WebSocket cases' upgrades, whole and part by part; the parcels of
  * `vectors.json`, read and refused, no byte at all among them, the seeds of every side's parcel
  * mutation tests; the `proto` payloads of `codecs.json` and the bytes its `proto` values are
- * written as, each after three zero bytes, the plain path; `blueprints`, the repository's
- * blueprints as bytes; and the packets a broker sends, the Rust side's packet mutation seeds.
+ * written as, each after three zero bytes, the plain path; the bodies of `transcoding.json`'s
+ * readings of `Everything` and of `Edges`, each after its message's byte, its text in UTF-8 or its
+ * bytes; `blueprints`, the repository's blueprints as bytes; the packets a broker sends, the Rust
+ * side's packet mutation seeds; and the frames a server sends, the Rust side's frame mutation seeds.
  */
 export const seedsOf = (files) => {
-  const { blueprints, codecs, conversations, debugFilters, transports, vectors } = files;
+  const { blueprints, codecs, conversations, debugFilters, transcoding, transports, vectors } =
+    files;
   const isTextual = (entry) => {
     return entry.encoding === 'json' || entry.encoding === 'text';
   };
@@ -428,9 +458,26 @@ export const seedsOf = (files) => {
     ].map((bytes) => {
       return Buffer.concat([PLAIN, bytes]);
     }),
+    'json-form': transcoding.readings.flatMap((entry) => {
+      const index = JSON_FORM_MESSAGES.indexOf(entry.message);
+
+      if (index === -1) {
+        return [];
+      }
+
+      const body =
+        entry.bodyBytes === undefined
+          ? Buffer.from(entry.body, 'utf8')
+          : entryBytesOf(entry, 'bodyBytes');
+
+      return [Buffer.concat([Buffer.of(index), body])];
+    }),
     blueprint: blueprints,
     'mqtt-packets': MQTT_PACKETS.map((packet) => {
       return hexBytesOf(packet);
+    }),
+    'mqtt-websocket-frames': MQTT_WEBSOCKET_FRAMES.map((frame) => {
+      return hexBytesOf(frame);
     }),
   };
 };
@@ -494,6 +541,7 @@ const seed = () => {
     codecs: readSpec('codecs.json'),
     conversations: readSpec('conversations.json'),
     debugFilters: readSpec('debug-filters.json'),
+    transcoding: readSpec('transcoding.json'),
     transports: readSpec('transports.json'),
     vectors: readSpec('vectors.json'),
   });
@@ -758,13 +806,15 @@ const buildCSharp = () => {
       cwd: SIDES.csharp,
     }
   );
-  // the assemblies whose parsers the targets read: Bead.Core's, the WebSocket judgement's, and the
-  // proto codecs', Bead.Protobuf's and the library it reads through
+  // the assemblies whose parsers the targets read: Bead.Core's, the WebSocket judgement's, the
+  // proto codecs', Bead.Protobuf's and the library it reads through, and the JSON form's,
+  // Bead.Transcoding's
   for (const assembly of [
     'Bead.Core.dll',
     'Bead.Transport.WebSockets.dll',
     'Bead.Protobuf.dll',
     'Google.Protobuf.dll',
+    'Bead.Transcoding.dll',
   ]) {
     runOrThrow(sharpfuzz, [join(BUILD, assembly)]);
   }

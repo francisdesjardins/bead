@@ -31,7 +31,6 @@ Bead.Protobuf.PatternTable.Transitions.get -> System.Collections.Immutable.Immut
 Bead.Protobuf.PatternTable.Transitions.init -> void
 Bead.Protobuf.ProtoCodecs
 Bead.Protobuf.ProtoRecords
-Bead.Protobuf.ProtoRequired
 Bead.Protobuf.Validators
 Bead.Protobuf.ViolationRule
 Bead.Protobuf.ViolationRule.<Clone>$() -> Bead.Protobuf.ViolationRule!
@@ -57,7 +56,6 @@ static Bead.Protobuf.PatternTable.operator ==(Bead.Protobuf.PatternTable? left, 
 static Bead.Protobuf.ProtoCodecs.Of<T>() -> Bead.IPayloadCodec<T>!
 static Bead.Protobuf.ProtoCodecs.Read(Google.Protobuf.Reflection.MessageDescriptor! descriptor, System.ReadOnlyMemory<byte> bytes) -> Google.Protobuf.IMessage!
 static Bead.Protobuf.ProtoRecords.Check(System.ReadOnlySpan<byte> bytes, Google.Protobuf.Reflection.MessageDescriptor! message) -> void
-static Bead.Protobuf.ProtoRequired.Check(Google.Protobuf.IMessage! message) -> void
 static Bead.Protobuf.Validators.BoundsOf(string! json) -> System.Text.Json.JsonElement
 static Bead.Protobuf.Validators.ByKey<TKey, TValue>(System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>! map) -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<TKey, TValue>>!
 static Bead.Protobuf.Validators.CodePointLength(string! text) -> int

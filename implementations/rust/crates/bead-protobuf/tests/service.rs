@@ -41,8 +41,12 @@ async fn pair() -> Result<Pair, String> {
     Pair::connected(new_year(), &PairOptions::default()).await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "Probe opens its closed enums, as its generator is set"
+)]
 fn typed() -> ProtoCodec<Probe> {
-    ProtoCodec::new()
+    ProtoCodec::new().expect("its codec")
 }
 
 // Probe's dynamic codec, by the pool its generated code embeds

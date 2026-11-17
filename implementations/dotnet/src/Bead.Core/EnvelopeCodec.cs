@@ -12,6 +12,12 @@ internal sealed record EnvelopeReadOptions
     /// <summary>A whole envelope, its header included, in bytes.</summary>
     public int MaximumEnvelopeBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
 
+    /// <summary>
+    /// The bytes a request and a result hold at most, whole or a transfer's opening, as their sender
+    /// sends one (spec 12.2); the envelope's bound when none.
+    /// </summary>
+    public int? ChunkBytes { get; init; }
+
     /// <summary>A failure's detail, in bytes, cut at a character's boundary.</summary>
     public int MaximumDetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
 }
@@ -133,8 +139,9 @@ internal static partial class EnvelopeCodec
     /// An envelope, as a router of <see cref="EnvelopeReadOptions.Side"/> reads it from
     /// <paramref name="bytes"/>: none for an advisory kind. Its payload is a copy, so the
     /// transport's buffer is not held. Throws a <see cref="FailureException"/> for bytes that are
-    /// not an envelope, one larger than <see cref="EnvelopeReadOptions.MaximumEnvelopeBytes"/>, or
-    /// one it does not read.
+    /// not an envelope, a request or a result larger than
+    /// <see cref="EnvelopeReadOptions.ChunkBytes"/>, any other envelope larger than
+    /// <see cref="EnvelopeReadOptions.MaximumEnvelopeBytes"/>, or one it does not read.
     /// </summary>
     public static Envelope? ReadEnvelope(ReadOnlySpan<byte> bytes, EnvelopeReadOptions options)
     {
@@ -143,9 +150,29 @@ internal static partial class EnvelopeCodec
         var side = options.Side;
 
         // the first byte says whether these are an envelope's at all, whatever their length
-        ReadPrefix(bytes, side);
+        var prefix = ReadPrefix(bytes, side);
 
-        if (bytes.Length > options.MaximumEnvelopeBytes)
+        // ! a request and a result, whole or a transfer's opening, are held to chunkBytes, as their
+        // sender sends them, whatever their layout: one past it is refused before its header is read,
+        // nothing of it held (spec 12.1, 12.2)
+        var what = prefix.Kind switch
+        {
+            (byte)EnvelopeKind.Request => "request",
+            (byte)EnvelopeKind.Result => "result",
+            _ => null,
+        };
+
+        if (what is not null && options.ChunkBytes is { } chunkBytes)
+        {
+            if (bytes.Length > chunkBytes)
+            {
+                throw FailureException.OfProtocol(
+                    ProtocolCode.EnvelopeTooLarge,
+                    side,
+                    $"a {what} is {chunkBytes} bytes at most, not {bytes.Length}");
+            }
+        }
+        else if (bytes.Length > options.MaximumEnvelopeBytes)
         {
             throw FailureException.OfProtocol(
                 ProtocolCode.EnvelopeTooLarge,

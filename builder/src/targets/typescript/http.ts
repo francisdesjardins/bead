@@ -15,8 +15,9 @@ import type { GeneratedFile, Printable } from '@bufbuild/protoplugin';
 
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
+import { upperFirst } from '../names.ts';
 import type { IHttpInput } from '../target.ts';
-import { deprecatedOf } from './templates.ts';
+import { deprecatedOf, literalOf } from './templates.ts';
 
 // types
 
@@ -36,15 +37,6 @@ export interface IHttpTemplateOptions {
 
 /** The file an output with a `gateway` writes its route table in, at its root. */
 export const HTTP_FILE = 'bead_http.ts';
-
-// a text as a single-quoted literal, the TypeScript side's own quotes
-const quotedOf = (text: string): string => {
-  return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
-};
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 // definition
 
@@ -106,12 +98,12 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
 
       for (const route of routes) {
         const members = [
-          `method: ${quotedOf(route.method)}`,
-          `template: ${quotedOf(route.template)}`,
-          ...(route.body === undefined ? [] : [`body: ${quotedOf(route.body)}`]),
+          `method: ${literalOf(route.method)}`,
+          `template: ${literalOf(route.template)}`,
+          ...(route.body === undefined ? [] : [`body: ${literalOf(route.body)}`]),
           ...(route.responseBody === undefined
             ? []
-            : [`responseBody: ${quotedOf(route.responseBody)}`]),
+            : [`responseBody: ${literalOf(route.responseBody)}`]),
         ];
 
         f.print(`      { ${members.join(', ')} },`);
@@ -242,7 +234,7 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
   f.print(
     f.export('const', 'HTTP_PROBLEM_TYPES'),
     ' = ',
-    http.problemTypes === undefined ? 'undefined' : quotedOf(http.problemTypes),
+    http.problemTypes === undefined ? 'undefined' : literalOf(http.problemTypes),
     ';'
   );
   f.print();

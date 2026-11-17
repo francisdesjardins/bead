@@ -111,3 +111,19 @@ fn propagates_a_bind_failure_whose_platform_errors_name_no_absent_loopback_or_oc
     assert_eq!(draws.load(Ordering::SeqCst), 1, "one port drawn");
     assert!(calls.lock().unwrap().is_empty(), "nothing bound");
 }
+
+#[test]
+fn propagates_a_bind_failure_that_names_no_code_as_it_is() {
+    let calls: Calls = Arc::default();
+    let binding = binding_of(|| Ok(42_000), |_port| Some(io::Error::other("bind")));
+
+    let refused = bind_loopbacks(recording(&calls), &binding).unwrap_err();
+
+    assert_eq!(
+        refused.kind(),
+        io::ErrorKind::Other,
+        "of no kind of its own"
+    );
+    assert_eq!(refused.to_string(), "bind", "as it is");
+    assert!(calls.lock().unwrap().is_empty(), "nothing bound");
+}

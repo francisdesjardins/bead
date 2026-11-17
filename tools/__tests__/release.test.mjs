@@ -476,6 +476,9 @@ const releasing = () => {
       'commit.gpgsign': 'false',
       'tag.gpgsign': 'false',
       'core.autocrlf': 'false',
+      // ! no maintenance after a commit: git detaches it, and it keeps .git/objects/maintenance.lock
+      // after the commit returns, so a copy of the template finds the lock listed, then gone
+      'maintenance.auto': 'false',
     })) {
       git(template, 'config', key, value);
     }
@@ -558,6 +561,8 @@ describe('prepare', () => {
   for (const [lock, own] of [
     ['implementations/rust/fuzz/Cargo.lock', 'bead-fuzz'],
     ['implementations/rust/tools/protobuf-conformance/Cargo.lock', 'bead-protobuf-conformance'],
+    ['implementations/rust/tools/protovalidate-differential/Cargo.lock', 'bead-differential'],
+    ['examples/hello/rust/Cargo.lock', 'hello'],
   ]) {
     test(`moves the Rust workspace members in ${lock} and keeps its own package and registry versions`, () => {
       const root = releasing();
@@ -571,7 +576,7 @@ describe('prepare', () => {
         'implementations/rust/Cargo.lock': member,
         [lock]: `${fuzz}\n${member}\n${registry}`,
       });
-      git(root, 'add', 'implementations/rust');
+      git(root, 'add', 'implementations/rust', lock);
 
       const dry = prepared(root, { moves: { spec: 'minor' }, dryRun: true });
       assert.deepEqual(dry.plan.written, []);

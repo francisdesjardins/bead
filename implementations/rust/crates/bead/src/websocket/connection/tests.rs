@@ -235,7 +235,7 @@ async fn settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_
 }
 
 #[tokio::test]
-async fn settles_a_quiet_close_when_its_peer_never_answers_dropping_it_once_its_close_timeout_passed()
+async fn drops_a_connection_that_never_answers_its_close_once_close_timeout_has_passed_telling_no_error()
  {
     let (connection, commands, _peer) =
         opened(bounds_of(None, Duration::from_millis(1)), 1_024).await;
@@ -385,6 +385,46 @@ async fn fails_a_peer_s_close_of_a_status_no_end_sends_as_a_protocol_error_answe
         .unwrap();
 
     assert_eq!(ended.failure, None, "a peer's own 1002: no error");
+}
+
+#[tokio::test]
+async fn fails_a_text_message_or_a_close_s_reason_that_is_no_utf_8_answered_1007() {
+    for (index, frame) in [
+        masked_frame(0x1, (&[0xff, 0xfe], true)),
+        masked_frame(0x8, (&[0x03, 0xe8, 0xff, 0xfe], true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;
+        let delivered = Delivered::default();
+
+        peer.write_all(&frame).await.unwrap();
+
+        let running = spawn(connection.run(hooks_of(&delivered)));
+        // the peer reads its 1007, then ends
+        let mut close = [0_u8; 4];
+
+        patience(PATIENCE, peer.read_exact(&mut close))
+            .await
+            .unwrap()
+            .unwrap();
+        drop(peer);
+
+        let ended = patience(PATIENCE, running).await.unwrap().unwrap();
+
+        assert_eq!(close, [0x88, 0x02, 0x03, 0xef], "case {index}: 1007");
+        assert!(
+            matches!(ended.failure, Some(Failed::InvalidPayload(_))),
+            "case {index}: no UTF-8, {:?}",
+            ended.failure
+        );
+        assert!(ended.is_ended_here, "case {index}: failed here");
+        assert!(
+            delivered.lock().unwrap().is_empty(),
+            "case {index}: nothing delivered"
+        );
+    }
 }
 
 #[tokio::test]

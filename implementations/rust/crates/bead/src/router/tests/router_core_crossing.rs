@@ -30,9 +30,7 @@ fn receive(state: &mut State, envelope: &Envelope) {
 }
 
 // spec 10.1, 12.3
-#[tokio::test]
-async fn arms_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_handed_back_as_a_chunk_went()
- {
+async fn send_reentry_ending() {
     let peer = Peer::new(
         RouterSide::Server,
         &RouterLimitsOptions {
@@ -124,8 +122,7 @@ async fn arms_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_ha
 }
 
 // spec 10.1, 12.3, 12.4
-#[tokio::test]
-async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_request_goes() {
+async fn send_reentry_result() {
     for hold_last_send in [false, true] {
         let peer = Peer::new(
             RouterSide::Server,
@@ -152,7 +149,7 @@ async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_re
                 ]);
                 state.on_transmit = Some(Box::new(|state, envelope| {
                     if matches!(envelope, Envelope::Chunk { header, .. } if header.is_last) {
-                        receive(state, &opening(2, (pattern(32), 100)));
+                        receive(state, &opening(2, (pattern(28), 100)));
                     }
                 }));
             })
@@ -191,7 +188,7 @@ async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_re
     );
     let mut asked = peer.request((pattern(300), request_of("a")));
     peer.receive((credit(1, 172), Arc::from("a")));
-    peer.receive((opening(1, (pattern(32), 300)), Arc::from("a")));
+    peer.receive((opening(1, (pattern(28), 300)), Arc::from("a")));
     peer.receive((credit(1, 300), Arc::from("a")));
     peer.settle().await;
     assert!(
@@ -213,4 +210,26 @@ async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_re
         Some(&(EnvelopeKind::Cancel, 1, None, 0))
     );
     quiet(&peer).await;
+}
+
+#[tokio::test]
+async fn arms_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_handed_back_as_a_chunk_went()
+ {
+    send_reentry_ending().await;
+}
+
+#[tokio::test]
+async fn arm_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_handed_back_as_a_chunk_went()
+ {
+    send_reentry_ending().await;
+}
+
+#[tokio::test]
+async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_request_goes() {
+    send_reentry_result().await;
+}
+
+#[tokio::test]
+async fn keep_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_request_goes() {
+    send_reentry_result().await;
 }

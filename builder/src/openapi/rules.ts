@@ -15,7 +15,7 @@
 // dependencies
 
 import type { FieldType, IEnumEntry, ScalarName } from '../model/blueprint.ts';
-import type { IJudgment, IMessagePlan, IValuePlan } from '../model/rules.ts';
+import { type IJudgment, type IMessagePlan, type IValuePlan, scalarOf } from '../model/rules.ts';
 
 // types
 
@@ -218,10 +218,6 @@ const enumNameOf = (entry: IEnumEntry | undefined, number: number): string | num
       return value.number === number;
     })?.name ?? number
   );
-};
-
-const scalarOf = (type: FieldType): ScalarName | undefined => {
-  return 'scalar' in type ? type.scalar : 'wrapper' in type ? type.wrapper : undefined;
 };
 
 // what one judgment adds, or says where no keyword holds it

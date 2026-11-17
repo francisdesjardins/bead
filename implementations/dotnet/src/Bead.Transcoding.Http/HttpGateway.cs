@@ -250,11 +250,31 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
             Report(reason);
+            await AnswerUnforeseen(context);
+        }
+    }
 
-            if (!context.Response.HasStarted)
-            {
-                await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
-            }
+    // what no gate foresaw, answered 500 while its head is unsent, with none of the fields set before
+    // it; a head already sent, or a 500 that fails too, aborts its exchange, so no partial response
+    // reads as whole
+    private async Task AnswerUnforeseen(HttpContext context)
+    {
+        if (context.Response.HasStarted)
+        {
+            context.Abort();
+
+            return;
+        }
+
+        try
+        {
+            context.Response.Headers.Clear();
+            await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
+        }
+        catch (Exception failed) when (failed is not OutOfMemoryException)
+        {
+            // its host's failure told once already
+            context.Abort();
         }
     }
 
@@ -424,7 +444,19 @@ public sealed class HttpGateway : IAsyncDisposable
                 return;
             }
 
-            // 10. its body as it comes
+            // 10. its body as it comes, none of it read before by the server it is mounted on,
+            // judged before its first byte is awaited
+            if (IsBodyTaken(context))
+            {
+                // ! a failure of its own: its words reported, never in the problem; over HTTP/1, its
+                // connection closed, since what is left of the body is never read (RFC 9112 §9.3)
+                Report(new InvalidOperationException("a body read before the gateway took its request"));
+                CloseBehind(context);
+                await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
+
+                return;
+            }
+
             var (body, refused) = await BodyOf(context);
 
             if (refused is { IsHttp: true } framing)
@@ -452,11 +484,14 @@ public sealed class HttpGateway : IAsyncDisposable
         }
     }
 
-    // whether a navigation from another site with no origin is taken (10.1, step 5): to the
-    // document, to a default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
+    // whether a navigation from another site with no origin is taken (10.1, step 5): a GET that no
+    // object or embed makes, as web.dev's resource isolation policy takes one, to the document, to a
+    // default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
     private static bool IsNavigationTaken(HttpContext context, (bool IsDocument, Dictionary<string, Served> Matched) asked)
     {
-        if (HeaderOf(context.Request, "sec-fetch-mode") != "navigate")
+        var request = context.Request;
+
+        if (HeaderOf(request, "sec-fetch-mode") != "navigate" || !IsMethod(request, "GET") || HeaderOf(request, "sec-fetch-dest") is "object" or "embed")
         {
             return false;
         }
@@ -466,9 +501,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return true;
         }
 
-        var isRead = IsMethod(context.Request, "GET") || IsMethod(context.Request, "HEAD");
-
-        return isRead && asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
+        return asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
     }
 
     // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)
@@ -710,6 +743,12 @@ public sealed class HttpGateway : IAsyncDisposable
     // rate once its grace passed, on the gateway's clock (spec 15.12); or how it is refused
     private async Task<(byte[]? Body, Refused? End)> BodyOf(HttpContext context)
     {
+        // * a body its server buffered, read from its start
+        if (context.Request.Body.CanSeek)
+        {
+            context.Request.Body.Position = 0;
+        }
+
         var headAt = _clock.GetTimestamp();
         var reader = context.Request.BodyReader;
         var body = new MemoryStream();
@@ -903,10 +942,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         // its client declares no resolver: a command its server sends is answered SERVICE_UNKNOWN
-        // (transcoding 2.6). Its notifications' callbacks run on a scheduler of the exchange's own,
-        // which a stream's end follows
+        // (transcoding 2.6), and holds by the router limits the gateway is given. Its notifications'
+        // callbacks run on a scheduler of the exchange's own, which a stream's end follows
         var callbacks = new SerialScheduler();
-        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, ResolverScheduler = callbacks });
+        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, Limits = _options.Limits, ResolverScheduler = callbacks });
 
         using var aborted = context.RequestAborted.Register(() =>
         {
@@ -1183,6 +1222,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         finally
         {
+            drop.Over();
             settled.TrySetResult();
         }
     }
@@ -1229,6 +1269,21 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
+        // * a HEAD that asks a stream: its GET's head, with no content, and its response ends there
+        // (8.1). Nothing written yet: its exchange's connection closes and its place is freed as this
+        // returns, before its server writes that head, so its next request finds both gone
+        if (IsMethod(context.Request, "HEAD"))
+        {
+            // ! ended before its result, so the notifications it held and any that come write nothing
+            events.Failure(ReadOnlyMemory<byte>.Empty, out _);
+            settled.TrySetResult();
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            Stamp(context.Response);
+            context.Response.ContentType = EventStreamType;
+
+            return;
+        }
+
         // * the result and the notifications held enqueued at once, the failure that ends them after
         var written = events.Result(data);
 
@@ -1252,7 +1307,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             await events.Heartbeat();
         }
-        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException)
+        catch (Exception reason) when (reason is IOException or OperationCanceledException)
         {
             // its client went: its stream ends with it
         }
@@ -1388,18 +1443,40 @@ public sealed class HttpGateway : IAsyncDisposable
     {
         // one report shared by every write of the exchange
         private int _told;
+        private int _over;
+
+        // whether its exchange returned: a write after that is a timer's late one, never a host's bug
+        public bool IsOver
+        {
+            get
+            {
+                return Volatile.Read(ref _over) == 1;
+            }
+        }
+
         public bool Take()
         {
             return Interlocked.Exchange(ref _told, 1) == 0;
+        }
+
+        public void Over()
+        {
+            Volatile.Write(ref _over, 1);
         }
     }
 
     // a drop belongs to the exchange that still owns the context, reported once before its abort
     private void DropWriter(HttpContext context, (DropState State, string Detail) drop)
     {
-        if (_drops.TryGetValue(context, out var current) && current == drop.State && drop.State.Take())
+        FailWriter(context, (drop.State, new IOException(drop.Detail)));
+    }
+
+    // a writer's failure, a drop's or a host's write that threw, reported once before its abort
+    private void FailWriter(HttpContext context, (DropState State, Exception Reason) failure)
+    {
+        if (_drops.TryGetValue(context, out var current) && current == failure.State && failure.State.Take())
         {
-            Report(new IOException(drop.Detail));
+            Report(failure.Reason);
             context.Abort();
         }
     }
@@ -1446,6 +1523,17 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             await body.WriteAsync(bytes, aborted);
             await body.FlushAsync(aborted);
+        }
+        catch (Exception reason) when (reason is not (IOException or OperationCanceledException or OutOfMemoryException))
+        {
+            // ! a host's write that throws is no client gone but what no gate foresaw (7.6): reported
+            // once and its exchange aborted, and the writes behind it go nowhere, as a client gone's
+            if (!drop.IsOver)
+            {
+                FailWriter(context, (drop, reason));
+            }
+
+            throw new IOException(reason.Message, reason);
         }
         finally
         {
@@ -1502,6 +1590,21 @@ public sealed class HttpGateway : IAsyncDisposable
         var values = request.Headers[name];
 
         return values.Count == 0 ? null : values.ToString();
+    }
+
+    // whether the server it is mounted on read a body before it, wholly or in part (transcoding
+    // 10.1, step 10): a seekable one it buffered is read from its start, and one its server tells
+    // begun is taken; a host that tells nothing reads as untouched
+    // ! a stream of a middleware's own in the body's place, not seekable, is taken: its server's
+    // body was read, whatever the stream holds
+    private static bool IsBodyTaken(HttpContext context)
+    {
+        if (context.Request.Body.CanSeek)
+        {
+            return false;
+        }
+
+        return context.Features.Get<IHttpMaxRequestBodySizeFeature>()?.IsReadOnly == true;
     }
 
     private static bool HasBody(HttpRequest request)
@@ -1726,7 +1829,8 @@ public sealed class HttpGateway : IAsyncDisposable
 
         public async Task<IReadOnlyList<Exception>> Trigger(ReadOnlyMemory<byte> payload)
         {
-            if (_isEnding)
+            // its own end begun, or its stream's ended without it, as a HEAD's ends at its head
+            if (_isEnding || stream.Events.IsEnded)
             {
                 return [];
             }

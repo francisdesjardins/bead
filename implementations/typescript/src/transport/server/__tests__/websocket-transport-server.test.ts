@@ -4,7 +4,12 @@ import { Server } from 'node:http';
 import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import {
+  type ServerOptions,
+  WebSocket as WsClient,
+  type WebSocket as WsWebSocket,
+  WebSocketServer,
+} from 'ws';
 import type {
   TRANSPORT_CLIENT_EVENTS,
   TransportClientEventMap,
@@ -91,15 +96,36 @@ const textFrame = (text: string) => {
   return Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, masked]);
 };
 
-// a frame of `opcode` a client sends, masked as every client's is (RFC 6455 §5.2, §5.3), its
-// payload under 126 bytes
-const maskedFrame = (opcode: number, payload: Uint8Array) => {
+// a frame of its own first byte, FIN and opcode, a client sends, masked as every client's is
+// (RFC 6455 §5.2, §5.3), its payload under 126 bytes
+const maskedFrameOf = (head: number, payload: Uint8Array) => {
   const mask = randomBytes(4);
   const masked = payload.map((byte, index) => {
     return byte ^ (mask[index % 4] ?? 0);
   });
 
-  return Buffer.concat([Buffer.from([0x80 | opcode, 0x80 | payload.length]), mask, masked]);
+  return Buffer.concat([Buffer.from([head, 0x80 | payload.length]), mask, masked]);
+};
+
+// a frame of `opcode` a client sends, whole, its FIN set
+const maskedFrame = (opcode: number, payload: Uint8Array) => {
+  return maskedFrameOf(0x80 | opcode, payload);
+};
+
+// the frames a server sent after its 101, unmasked, as a server's are: each its first byte, then
+// its payload, each under 126 bytes
+const framesOf = (received: Buffer): [number, number[]][] => {
+  const frames: [number, number[]][] = [];
+  let rest = received.subarray(received.indexOf('\r\n\r\n') + 4);
+
+  while (rest.length >= 2 && rest.length >= 2 + ((rest[1] ?? 0) & 0x7f)) {
+    const length = (rest[1] ?? 0) & 0x7f;
+
+    frames.push([rest[0] ?? 0, [...rest.subarray(2, 2 + length)]]);
+    rest = rest.subarray(2 + length);
+  }
+
+  return frames;
 };
 
 // the code of the close a server sent right after its 101, once it came: its frame unmasked, as a
@@ -821,18 +847,15 @@ test.describe('WebSocketTransportServer, on the wire', () => {
     ]);
   });
 
-  // RFC 6455 §8.1 and §7.4.1: `ws` closes a text message that is no UTF-8, and a close whose reason
-  // is no UTF-8, with 1007, where .NET sends 1002 for the reason and tungstenite 1002 for both; a row
-  // of docs/support.md
-  test('closes with 1007 a text message that is no UTF-8 and a close whose reason is no UTF-8', async () => {
+  // RFC 6455 §8.1: `ws` judges a text message whole, failing one in fragments that is no UTF-8 with
+  // 1007 at its last fragment, .NET and tungstenite at the first that breaks it; a close's reason,
+  // 1007 here and on the Rust side, 1002 on .NET's; rows of docs/support.md
+  test('closes with 1007 a text message in fragments that is no UTF-8 once its last fragment came, and with 1007 a close whose reason is no UTF-8', async () => {
     const codes: (number | undefined)[] = [];
 
     server.on('error', () => {});
 
-    for (const frame of [
-      maskedFrame(0x1, Uint8Array.of(0xff, 0xfe)),
-      maskedFrame(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)),
-    ]) {
+    const open = async () => {
       const closed = nextServerEvent(server, 'close');
       const connection = nextServerEvent(server, 'connection');
       const socket = await openTcp(port);
@@ -843,16 +866,60 @@ test.describe('WebSocketTransportServer, on the wire', () => {
       });
       socket.write(upgradeRequest());
       await connection;
-      socket.write(frame);
-      await expect
-        .poll(() => {
-          return closeCodeOf(Buffer.concat(received));
-        })
-        .toBeDefined();
-      codes.push(closeCodeOf(Buffer.concat(received)));
-      socket.destroy();
-      await closed;
-    }
+
+      return {
+        closed,
+        // the frames it sent so far
+        sent: () => {
+          return framesOf(Buffer.concat(received));
+        },
+        socket,
+      };
+    };
+    const closeCodeAmong = (frames: [number, number[]][]): number | undefined => {
+      const [, payload] =
+        frames.find(([head]) => {
+          return head === 0x88;
+        }) ?? [];
+
+      return payload && payload.length >= 2
+        ? ((payload[0] ?? 0) << 8) | (payload[1] ?? 0)
+        : undefined;
+    };
+
+    // its first fragment, `FF` without FIN, then a ping, answered with a pong and no close
+    const fragmented = await open();
+
+    fragmented.socket.write(maskedFrameOf(0x01, Uint8Array.of(0xff)));
+    fragmented.socket.write(maskedFrameOf(0x89, new Uint8Array(0)));
+    await expect
+      .poll(() => {
+        return fragmented.sent();
+      })
+      .toEqual([[0x8a, []]]);
+
+    // its last fragment, `FE` with FIN, the message whole: failed
+    fragmented.socket.write(maskedFrameOf(0x80, Uint8Array.of(0xfe)));
+    await expect
+      .poll(() => {
+        return closeCodeAmong(fragmented.sent());
+      })
+      .toBeDefined();
+    codes.push(closeCodeAmong(fragmented.sent()));
+    fragmented.socket.destroy();
+    await fragmented.closed;
+
+    const closing = await open();
+
+    closing.socket.write(maskedFrame(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)));
+    await expect
+      .poll(() => {
+        return closeCodeAmong(closing.sent());
+      })
+      .toBeDefined();
+    codes.push(closeCodeAmong(closing.sent()));
+    closing.socket.destroy();
+    await closing.closed;
 
     expect(codes).toEqual([1007, 1007]);
   });
@@ -2183,9 +2250,13 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     await starting;
 
     const closes: unknown[] = [];
+    const errors: unknown[] = [];
 
     server.on('close', (...args) => {
       closes.push(args);
+    });
+    server.on('error', (error, handle) => {
+      errors.push([error.message, handle]);
     });
     const stubborn = createFakeSocket({ onClose: 'throw' });
     const connectionHandle = fake.connect(stubborn, { server });
@@ -2194,7 +2265,122 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     expect(stubborn.wasTerminated).toBe(true);
     expect(server.clients).toHaveLength(0);
     expect(server.gauges().connectionHandles).toEqual(new Set());
+    // what its close threw is its error
+    expect(errors).toEqual([['close refused', connectionHandle]]);
     expect(closes).toEqual([[false, connectionHandle]]);
+    await server.stop();
+  });
+
+  test('ends a connection whose drop throws at its close timeout, telling what it threw once and its close, at a close and at a stop', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      closeTimeout: 10,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const closes: unknown[] = [];
+    const errors: unknown[] = [];
+
+    server.on('close', (...args) => {
+      closes.push(args);
+    });
+    server.on('error', (error, connectionHandle) => {
+      errors.push([error.message, connectionHandle]);
+    });
+
+    // neither answers its close, and neither closes as it is terminated
+    const closed = createFakeSocket({ onClose: 'ignore', onTerminate: 'throw' });
+    const stopped = createFakeSocket({ onClose: 'ignore', onTerminate: 'throw' });
+    const closedHandle = fake.connect(closed, { remotePort: 40_001, server });
+    const stoppedHandle = fake.connect(stopped, { remotePort: 40_002, server });
+
+    await expect(server.close(closedHandle)).resolves.toBe(true);
+    await server.stop();
+
+    expect([closed.wasTerminated, stopped.wasTerminated]).toEqual([true, true]);
+    expect(server.clients).toHaveLength(0);
+    expect(closes).toEqual([
+      [false, closedHandle],
+      [false, stoppedHandle],
+    ]);
+    expect(errors).toEqual([
+      ['terminate refused', closedHandle],
+      ['terminate refused', stoppedHandle],
+    ]);
+
+    // a socket that closes after its connection ended tells nothing more
+    closed.hear('close', 1006);
+    expect([closes.length, errors.length]).toEqual([2, 2]);
+  });
+
+  test('ends a connection dropped behind a bound whose drop throws, telling the bound, not what its drop threw, and its close', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      maximumUnsentBytes: 65_536,
+      minimumSendBytesPerSecond: 0,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    // a socket that never closes as it is terminated, sent more than its bound holds
+    const behind = createFakeSocket({ onTerminate: 'throw' });
+    const connectionHandle = fake.connect(behind, { server });
+
+    await server.send({ data: new Uint8Array(65_537) }, connectionHandle);
+
+    expect(behind.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      [
+        'error',
+        `${connectionHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+        connectionHandle,
+      ],
+      ['close', false, connectionHandle],
+    ]);
+    await server.stop();
+  });
+
+  test('ends a connection whose close and drop both throw, telling what its close threw, not its drop’s, and its close', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    const stubborn = createFakeSocket({ onClose: 'throw', onTerminate: 'throw' });
+    const connectionHandle = fake.connect(stubborn, { server });
+
+    await expect(server.close(connectionHandle)).resolves.toBe(true);
+    expect(stubborn.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      ['error', 'close refused', connectionHandle],
+      ['close', false, connectionHandle],
+    ]);
     await server.stop();
   });
 });
@@ -2386,6 +2572,47 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       await server.stop();
       await allClosed();
     }
+  });
+
+  test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    using timers = spyIntervals();
+    const fake = createFakeWebSocketServer();
+    const server = createWebSocketTransportServer({
+      heartbeat: 20,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const told: unknown[] = [];
+
+    server.on('error', (error, handle) => {
+      told.push(['error', error.message, handle]);
+    });
+    server.on('close', (wasClean, handle) => {
+      told.push(['close', wasClean, handle]);
+    });
+
+    // no ping answered, and a socket that never closes as it is terminated
+    const silent = createFakeSocket({ onTerminate: 'throw' });
+    const connectionHandle = fake.connect(silent, { server });
+
+    // a ping, then the beat that drops its peer
+    timers.armed[0]?.beat();
+    timers.armed[0]?.beat();
+
+    expect(silent.wasTerminated).toBe(true);
+    expect(server.clients).toHaveLength(0);
+    expect(told).toEqual([
+      ['error', 'terminate refused', connectionHandle],
+      ['close', false, connectionHandle],
+    ]);
+
+    // a socket that closes after its connection ended tells nothing more
+    silent.hear('close', 1006);
+    expect(told).toHaveLength(2);
+    await server.stop();
   });
 });
 
@@ -3200,6 +3427,66 @@ test.describe('WebSocketTransportServer, its bounds', () => {
     }
   });
 
+  test('gives back the place of a connection whose drop throws before its close is told, and ends its TCP connection', async () => {
+    // `ws`'s own server, whose sockets send no close and throw as they are terminated
+    const StubbornWebSocketServer = class extends WebSocketServer {
+      constructor(options: ServerOptions) {
+        super(options);
+        this.on('connection', (socket: WsWebSocket) => {
+          socket.close = () => {};
+          socket.terminate = () => {
+            throw new Error('terminate refused');
+          };
+        });
+      }
+    };
+    const server = createWebSocketTransportServer({
+      closeTimeout: 50,
+      heartbeat: Infinity,
+      maximumConnectionsPerAddress: 1,
+      WebSocketServer: StubbornWebSocketServer,
+    });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const told: unknown[] = [];
+
+    try {
+      server.on('error', (error, handle) => {
+        told.push(['error', error.message, handle]);
+      });
+      // the places its address holds as its close is told
+      server.on('close', (wasClean, handle) => {
+        told.push(['close', wasClean, handle, server.gauges().counts['largestAddressConnections']]);
+      });
+
+      const connection = nextServerEvent(server, 'connection');
+      const first = await upgradeOn(port, upgradeRequest());
+      const [, connectionHandle] = await connection;
+
+      // its close never goes out, and its drop at the close timeout throws
+      await expect(server.close(connectionHandle)).resolves.toBe(true);
+
+      expect(told).toEqual([
+        ['error', 'terminate refused', connectionHandle],
+        ['close', false, connectionHandle, 0],
+      ]);
+      // its TCP connection ended by the server
+      await expect
+        .poll(() => {
+          return first.socket.closed;
+        })
+        .toBe(true);
+
+      // its address's one place is free again
+      const again = await upgradeOn(port, upgradeRequest());
+
+      expect(again.status).toBe('HTTP/1.1 101 Switching Protocols');
+      again.socket.destroy();
+    } finally {
+      await server.stop();
+      await allClosed();
+    }
+  });
+
   test('takes no more upgrades than its places when they cross', async () => {
     await using started = await startDated({ hosts: ['bead.test'], maximumConnections: 4 });
     const { port } = started;
@@ -3679,4 +3966,24 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     ]);
     expect(server.clients).toHaveLength(0);
   });
+});
+
+test('dispose stops it closing with 1001 and refusing what comes after', async () => {
+  const server = createWebSocketTransportServer({ WebSocketServer });
+  const { port } = await server.start({ address: host, findOpenPort: true });
+  const socket = new WsClient(`ws://${host}:${String(port)}`);
+
+  try {
+    await once(socket, 'open');
+    const closing = once(socket, 'close');
+
+    await server[Symbol.asyncDispose]();
+
+    expect((await closing)[0]).toBe(1001);
+    await expect(server.start({ address: host, findOpenPort: true })).rejects.toThrow();
+    expect(server.isClosed()).toBe(true);
+  } finally {
+    socket.terminate();
+    await server[Symbol.asyncDispose]();
+  }
 });

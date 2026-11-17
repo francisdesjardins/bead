@@ -8,7 +8,8 @@
   [`spec/spec.md`](../../spec/spec.md)'s 15.12 on a request's target and
   [`spec/transcoding.md`](../../spec/transcoding.md)'s 3.6, which reads it, with the cases of
   `spec/transports.json` and `spec/transcoding.json` that play it; a text message over WebSocket at
-  its router, spec 15.2, on every side; and a transport server that ends its connections stops,
+  its router, spec 15.2, and one that is no UTF-8, spec 15.3, on every side; and a transport
+  server that ends its connections stops,
   with no `closeAll`, on every side. It holds the reading of an absolute-form target's scheme and a
   `#` in a target, which
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) and
@@ -155,18 +156,21 @@ by its standard:
   resource. `%23` is an octet the target encodes, a character of its path or its query. Each side
   judges the `#` itself, never by its platform's patch level: Kestrel refuses it first since 10.0.15,
   and the C# side's judgement of `RawTarget` refuses it alike on an earlier runtime. The Rust side's
-  HTTP address cannot: hyper's `Uri` has cut the `#` before Bead reads the target, over HTTP/1.1 and
-  in HTTP/2's `:path` alike, so it serves the target cut, a row of Differences, `A # in a target`,
-  lifted when `http`'s `PathAndQuery::from_shared` refuses a fragment as its `from_static` does.
+  HTTP address and its gateway cannot: hyper's `Uri` has cut the `#` before Bead reads the target,
+  over HTTP/1.1 and in HTTP/2's `:path` alike, so each serves the target cut, a row of Differences,
+  `A # in a target`, lifted when hyper's HTTP/1.1 server refuses a request-target that holds a `#`
+  before it builds its `Uri` and h2's server treats a `:path` that holds one as malformed, the two
+  changes asked of them
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 - **A scheme is read in any case** (RFC 3986 §3.1), as hyper reads it and Node hands it on. Kestrel
   answers any other than lower case 400 before the application runs: a row of Differences,
   `A target in absolute-form, its scheme's case`.
 
 `spec/transports.json` holds seven cases of these, four over HTTP and three at a WebSocket's
 address, beside those of a control character; `spec/transcoding.json` refuses `/v1/books/a"b` in the
-exchange that reads a target, and `/v1/books/a#b` in one of its own, which reads `/v1/books/a%23b`
-as `a#b`. A side plays them all but those a `differs` excuses it from: the C# side the two of a
-scheme's case, and the Rust side's HTTP address the one of a `#`.
+exchange that reads a target, and `/v1/books/a#b` in one of its own, beside the one that reads
+`/v1/books/a%23b` as `a#b`. A side plays them all but those a `differs` excuses it from: the C# side
+the two of a scheme's case, and the Rust side's HTTP address and its gateway the ones of a `#`.
 
 ### The WebSocket server reads its own head
 
@@ -205,7 +209,10 @@ fetched as the platform fetches them (RFC 5280). Where the platform checks revoc
 macOS, it checks the end certificate's, and rustls calls the verifier within its handshake, so a
 slow OCSP responder or CRL holds a thread of the runtime while it fetches, up to 10 s on Windows;
 neither other side's HTTP or WebSocket transport sets a revocation mode, leaving its platform's
-default. An application's own `ClientConfig` is taken in its place when given; a server's `tls` is
+default. A client takes `tls`, a `TlsOptions`
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), from which Bead builds its config: webpki over the authorities given, the platform's
+verifier otherwise, the certificate by `with_client_auth_cert`; an application's own `ClientConfig`
+is its `client_config`, refused beside `tls`. A server's `tls` is
 the application's `ServerConfig`, Bead's copy of it offering `h2` and `http/1.1` by ALPN. A client's
 trust roots per platform are a row of Differences, `A client's trust roots`.
 
@@ -249,7 +256,7 @@ The transports' surface takes one name a concept on every side, in its language'
 `TransportServerStartOptions`, whatever its transport, the C# side's in `Bead.Core`; a WebSocket or
 HTTP client's connect names its `host` and its `port`, required on every side; and a WebSocket
 client's `pathname` is `/` by default. The HTTP client's facade keeps its three names, one row of
-`tools/names.tsv` rendered by its platform: `HTTPClient`, `BeadHttpClient` beside .NET's own
+`tools/names.tsv`, `rendered: platform`: `HTTPClient`, `BeadHttpClient` beside .NET's own
 `System.Net.Http.HttpClient`, and `HttpClient`.
 
 ### A text message reaches its router
@@ -269,6 +276,17 @@ transport refuses to send a text, before anything goes, the connection kept: "an
 connection carries envelopes, as bytes", "a broker connection carries envelopes, as bytes"
 (TypeScript `ProgrammerError`, C# `ArgumentException`, Rust a `ProgrammerError`). A WebSocket or
 HTTP transport sends what it is given as binary, the mark unread.
+
+A text message that is no UTF-8 never reaches its router: every side's transport fails its
+connection with 1007, "Invalid frame payload data" (spec 15.3,
+[RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
+[§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), a page's client as its browser
+does; the Rust side reads tungstenite's `Error::Utf8` so, its `Failed::InvalidPayload`. A close
+whose reason is no UTF-8 closes as each platform does, `ws` with 1007 and .NET with 1002, a row of
+the matrix, the Rust side with 1007 since tungstenite raises the same error for it; no standard
+picks that code, and none is worth a second framer under `ws` or under .NET. A text message in
+fragments fails at the first that breaks it on the C# and Rust sides, and once its last came on the
+TypeScript side, `ws` judging a text message whole: a row of the matrix too.
 
 ### A server that ends its connections stops
 
@@ -304,14 +322,16 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
   sends `<`, `{` or `#` raw in a path, or `"` in a query, is answered 400; nothing a browser writes
   is.
 - **No application sees a `#` in a target**: every side refuses it, but the Rust side's HTTP
-  address, which serves the target cut at it, its application never seeing what followed.
+  address and its gateway, which serve the target cut at it, its application never seeing what
+  followed.
 - **The C# side keeps one row of Differences**, Kestrel's refusal of an upper-case scheme, and the
-  Rust side one, its HTTP address serving a target cut at its `#`; a case's `differs` excuses its
-  player from each.
+  Rust side one, its HTTP address and its gateway serving a target cut at its `#`; a case's or an
+  exchange's `differs` excuses its player from each.
 - **A build with a socket feature needs a C compiler**, aws-lc-rs's; the core with no feature does
   not.
-- **CI lints the core's library four ways**, with no feature, with `websocket` alone, with `http`
-  alone and with all, and checks the browser's target by its features, no socket among them.
+- **CI lints the core's library** with no feature, with each of `websocket`, `http`, `mqtt`,
+  `transcoding` and `gateway` alone, and with all, and checks the browser's target by its features,
+  no socket among them.
 - **Ahead**: a Rust client in a page, over the page's `WebSocket` and `fetch`, with the open row
   `The core in a page and in a worker`; the Rust bench's loopback layers, beside the in-memory one.
 
@@ -322,7 +342,7 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds, each at xhigh effort. Their objections, each with the answer that holds:
+four rounds, each at xhigh effort. Their objections, each with the answer that holds:
 
 ### On the sockets and a target's reading
 
@@ -405,3 +425,24 @@ earlier runtime still needs its own judgement; every side cutting, which Kestrel
 C# side do without that switch; a pre-read or a wrapper of the socket that finds each request line,
 the second parser this record refuses; and a mark per address, or `orLost`, in the conformance
 files.
+
+### On a text message, and a close's reason, that is no UTF-8
+
+Seven objections, each checked against its probe, the code or the source it cites: six accepted,
+one in part, none refused.
+
+| Objection                                                                                                                                                                                                                                          | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No single code for a close's reason is reachable at the cost stated: ws and .NET pick and send theirs before Bead reads anything, so the reason is a row of kind platform, neither open nor leveled down, and no side moves.                       | Accepted. ws sends 1007 and .NET 1002, each before its error reaches Bead (`ManagedWebSocket.cs:1106-1108, 1271-1273`, re-read); the levers exist, but a stream under either is a second framer. The reason is the row `A close whose reason is no UTF-8`, of kind platform: TypeScript 1007, C# 1002, Rust 1007. The proposal's leveled-down fallback and the C# side's move are dropped.                                                              |
+| The Rust mechanism does not exist: tungstenite raises one identical `Error::Utf8` for both and writes nothing, Bead's catch-all sends the 1002, and one arm for 1007 brings a `Failed` variant, its reports, its docs and the Rust client with it. | Accepted. Re-read at 0.30.0: both go through `From<str::Utf8Error>`. The arm `Some(Err(error @ WsError::Utf8(_)))` fails with `INVALID_PAYLOAD`, 1007, as `Failed::InvalidPayload`, after RFC 6455 §11.7's name; the reports say "closed with 1007", the server's and client's docs and `Ended`'s name it; the Rust client moves and gets its twin. The row and the three test comments stop blaming tungstenite. No check of its own, no upstream ask. |
+| Neither citation for 1007 on the reason holds, and no norm picks a code: a close is a control frame, not a message; §5.5.1 calls nothing a violation; Autobahn 7.5.1 lists 1002 first; implementations split.                                      | Accepted. §7.4.1 names 1007 for a text message's data alone; §5.5.1 leaves the reason's interpretation undefined; 7.5.1 takes either. The record says both codes conform and the tie breaks on cost. One correction: §8.1 binds the libraries under Bead, which decode the reason, and that is why they fail it; it does not bind the Rust MQTT link, which does not.                                                                                   |
+| "Every side" cannot hold for clients, not even for text: a page's `WebSocket` gives no lever, Chromium sends 1002 for both, no client side has a test, and no Bead peer branches on the code.                                                      | Accepted. Spec 15.3's sentence leaves a page's client to its browser, as 15.3 already leaves it its close timeout; the row `A text message that is no UTF-8 at a page's client` holds it, Chromium 1002 and Firefox 1007 by reading. Every other client gets a twin: Node's ws and global `WebSocket` 1007 for both (probed), C# 1007 and 1002, Rust 1007 for both. The matrix's MQTT row that said "a browser alike" is corrected.                     |
+| The text half is a shared behaviour, so it belongs in the spec and `spec/transports.json`, at the cost of a spec version and regenerated files.                                                                                                    | In part. One unfragmented case, `a text message that is not UTF-8 fails its connection with 1007`, frames `{1, true, FF FE}`, expecting `close: 1007`, written by `make_transports.py`, and a sentence in 15.3, its unit's hash moved. The cost is refused: the release moves the version and every `specVersion`, and the spec already holds unreleased changes under 0.14.0.                                                                          |
+| The sides agree on the code but not on the moment: ws judges a text message whole, so one in fragments fails at its last; .NET and tungstenite at the first bad one.                                                                               | Accepted. The case is unfragmented. The row `A text message that is no UTF-8 in fragments`, of kind platform, states the moment, and each side's server twin plays it: a first fragment `FF` and a ping, ws answering the pong and failing at the continuation, .NET and tungstenite failing at once.                                                                                                                                                   |
+| The Rust MQTT 5 link now answers a broker's close with a close of no body, its reason not judged: a third answer, which no row holds.                                                                                                              | Accepted. The link's code stays; the row `An MQTT 5 WebSocket's close whose reason is no UTF-8`, of kind platform: ws 1007, .NET 1002, the Rust link a close of no body, which §5.5.1 allows and §8.1 does not reach. A Rust test pins it.                                                                                                                                                                                                              |
+
+Refused besides, each weighed: a stream under `ManagedWebSocket` or ws to send one code for a
+close's reason, a second framer for a code no side reads; a Rust sniffer beside tungstenite, or an
+upstream variant of its error, which only a split of the two codes would need; ws's
+`skipUTF8Validation`, which fails nothing; the spec stating a close's reason's code; and the spec's
+version moved before its release.

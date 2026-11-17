@@ -13,7 +13,7 @@ import { MqttClient } from 'mqtt';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { generate, type IPublishPacket, type ISubscribePacket, type Packet } from 'mqtt-packet';
-import { WebSocketServer as WsServer } from 'ws';
+import { type WebSocket as WsSocket, WebSocketServer as WsServer } from 'ws';
 import { ParcelKind, readParcel, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
@@ -31,6 +31,7 @@ import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
+import { PKI } from './tls-front';
 
 // constants
 
@@ -38,6 +39,10 @@ const ID = 'ada';
 const INBOX = Object.freeze(['bead', 'i', ID]);
 const NAME = Object.freeze(['bead', 's', 'interop']);
 const PASSWORD = 'secret';
+
+// the fixture's certificate as a client's, under its key
+const CERTIFIED = Object.freeze({ certificate: TLS_FIXTURE.cert, key: TLS_FIXTURE.key });
+
 // how long a case waits on what its adapter does, as the script waits on a packet
 const PATIENCE = 5_000;
 
@@ -220,6 +225,43 @@ const withClients = async (run: (clients: MqttClient[]) => Promise<void>): Promi
 };
 
 /**
+ * A broker over a WebSocket of subprotocol mqtt, which answers each CONNECT by `answer`, a binary
+ * CONNACK of 0x00 unless told; its server, its URL, and its close.
+ */
+const wsBrokerOf = async (answer?: (socket: WsSocket) => void) => {
+  const broker = new WsServer({
+    handleProtocols: () => {
+      return 'mqtt';
+    },
+    host: '127.0.0.1',
+    port: 0,
+  });
+
+  await once(broker, 'listening');
+  broker.on('connection', (socket) => {
+    socket.once('message', () => {
+      if (answer === undefined) {
+        socket.send(Uint8Array.from(CONNACK_BYTES));
+      } else {
+        answer(socket);
+      }
+    });
+  });
+
+  return {
+    [Symbol.asyncDispose]: () => {
+      return new Promise<void>((resolve) => {
+        broker.close(() => {
+          resolve();
+        });
+      });
+    },
+    broker,
+    url: `ws://127.0.0.1:${String((broker.address() as AddressInfo).port)}/mqtt`,
+  };
+};
+
+/**
  * `client`'s receiving seam, the first `bytes.length` bytes it receives pushed as one read, which
  * must be `bytes`, whatever chunks TCP hands it; what comes after passes as it comes. The reads it
  * pushed so.
@@ -269,6 +311,49 @@ const publishOf = (
     payload: Buffer.from(packet.payload),
   };
 };
+
+/** A PUBACK to `identifier`, of `code`, its fixed header's flags `flags` where told: what no encoder writes. */
+const pubackBytes = (
+  identifier: number,
+  code: number,
+  options?: { flags?: number | undefined }
+): number[] => {
+  return [0x40 | (options?.flags ?? 0), 0x03, identifier >> 8, identifier & 0xff, code];
+};
+
+/** A SUBACK (9) or an UNSUBACK (11) to `identifier`, of `codes`, after `properties`. */
+const ackBytes = (
+  type: 9 | 11,
+  {
+    codes,
+    identifier,
+    properties = [],
+  }: { codes: number[]; identifier: number; properties?: number[] }
+): number[] => {
+  return [
+    type << 4,
+    3 + properties.length + codes.length,
+    identifier >> 8,
+    identifier & 0xff,
+    properties.length,
+    ...properties,
+    ...codes,
+  ];
+};
+
+// a PUBLISH of QoS 0 to its inbox, written behind a packet a case plays
+const INBOX_PUBLISH = Object.freeze([
+  0x30,
+  0x0e,
+  0x00,
+  0x0a,
+  ...Buffer.from('bead/i/ada'),
+  0x00,
+  0x78,
+]);
+
+// an identifier no request of a link uses
+const UNUSED = 0x7777;
 
 // definition
 
@@ -331,7 +416,7 @@ test.describe('createMqttBrokerAdapter', () => {
     try {
       const certified = createMqttBrokerAdapter({
         id: ID,
-        tls: { ca: TLS_FIXTURE.cert, cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key },
+        tls: { ...CERTIFIED, authorities: TLS_FIXTURE.cert },
         url: secured.url,
       });
       const { connect: bare } = await linkUp({ adapter: certified, script: secured });
@@ -341,14 +426,73 @@ test.describe('createMqttBrokerAdapter', () => {
       expect((bare as { password?: Buffer }).password).toBeUndefined();
       expect(certified.isSecure).toBe(true);
       await certified.stop();
+
+      // * under the authorities alone, its broker judged by them: its User Name and its Password
+      const trusting = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: TLS_FIXTURE.cert },
+        url: secured.url,
+      });
+      const { connect: named } = await linkUp({ adapter: trusting, script: secured });
+
+      expect((named as { username?: string }).username).toBe(ID);
+      expect(String((named as { password?: Buffer }).password)).toBe(PASSWORD);
+      await trusting.stop();
     } finally {
       await secured[Symbol.asyncDispose]();
     }
 
     // a certificate in the clear is refused as it is built
     expect(() => {
-      return createMqttBrokerAdapter({ id: ID, tls: TLS_FIXTURE, url: script.url });
+      return createMqttBrokerAdapter({ id: ID, tls: CERTIFIED, url: script.url });
     }).toThrow('a TLS client certificate is carried over mqtts or wss');
+  });
+
+  test('fails its start on a refusing CONNACK, naming its code and its MQTT 5 name', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+
+    for (const [code, name] of [
+      [0x80, 'Unspecified error'],
+      [0x81, 'Malformed Packet'],
+      [0x82, 'Protocol Error'],
+      [0x83, 'Implementation specific error'],
+      [0x84, 'Unsupported Protocol Version'],
+      [0x85, 'Client Identifier not valid'],
+      [0x86, 'Bad User Name or Password'],
+      [0x87, 'Not authorized'],
+      [0x88, 'Server unavailable'],
+      [0x89, 'Server busy'],
+      [0x8a, 'Banned'],
+      [0x8c, 'Bad authentication method'],
+      [0x90, 'Topic Name invalid'],
+      [0x95, 'Packet too large'],
+      [0x97, 'Quota exceeded'],
+      [0x99, 'Payload format invalid'],
+      [0x9a, 'Retain not supported'],
+      [0x9b, 'QoS not supported'],
+      [0x9c, 'Use another server'],
+      [0x9d, 'Server moved'],
+      [0x9f, 'Connection rate exceeded'],
+      [0x01, undefined],
+    ] as const) {
+      const starting = adapter.start();
+      const link = await script.link();
+
+      link.send({ cmd: 'connack', reasonCode: code, sessionPresent: false });
+
+      const reason = `0x${code.toString(16).toUpperCase().padStart(2, '0')}${name === undefined ? '' : `, ${name}`}`;
+
+      await expect(starting).rejects.toMatchObject({
+        message: `its broker refused the link of ada: CONNACK ${reason}`,
+      });
+      expect(adapter.isLinked).toBe(false);
+      expect(await closedWithin(link)).toBe(true);
+      expect(cmdsOf(link)).toEqual(['connect']);
+    }
+
+    expect(downs).toEqual([]);
   });
 
   test('fails its start on a CONNACK whose Maximum QoS is 0, naming it (spec 15.26)', async () => {
@@ -375,7 +519,7 @@ test.describe('createMqttBrokerAdapter', () => {
     const refused = await script.link();
 
     refused.send({ cmd: 'connack', reasonCode: 0x86, sessionPresent: false });
-    await expect(starting).rejects.toThrow('Bad User Name or Password');
+    await expect(starting).rejects.toThrow('CONNACK 0x86, Bad User Name or Password');
 
     // and so does no CONNACK within connectTimeout
     const waiting = adapterOf(script, { connectTimeout: 200 });
@@ -424,7 +568,7 @@ test.describe('createMqttBrokerAdapter', () => {
     try {
       const untrusting = createMqttBrokerAdapter({
         id: ID,
-        tls: { cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key },
+        tls: CERTIFIED,
         url: secured.url,
       });
 
@@ -433,6 +577,39 @@ test.describe('createMqttBrokerAdapter', () => {
       await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
     } finally {
       await secured[Symbol.asyncDispose]();
+    }
+  });
+
+  // spec 15.39
+  test('links over TLS by a host its broker’s certificate names, and fails its start by one it does not', async () => {
+    // * each leaf names one host alone, which takes it, and the other host of the same script
+    // refuses it
+    for (const [cert, key, named, other] of [
+      [PKI.namedServer, PKI.namedServerKey, 'localhost', '127.0.0.1'],
+      [PKI.addressedServer, PKI.addressedServerKey, '127.0.0.1', 'localhost'],
+    ] as const) {
+      await using secured = await createMqttScript({ tls: { cert, key } });
+      const { port } = new URL(secured.url);
+      const taken = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: PKI.root },
+        url: `mqtts://${named}:${port}`,
+      });
+
+      await linkUp({ adapter: taken, script: secured });
+      await taken.stop();
+
+      const refused = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: PKI.root },
+        url: `mqtts://${other}:${port}`,
+      });
+
+      await expect(refused.start()).rejects.toThrow('the link of ada ended before its CONNACK');
+      // * no CONNECT went: its broker's certificate was refused before it
+      await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
     }
   });
 
@@ -447,31 +624,91 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  // spec 15.26, where the sides part: MQTT.js keeps its own under 0 and takes a longer one, where the
-  // Rust side sends no PINGREQ under 0 and the C# side keeps its own under both; a row of
-  // docs/support.md
-  test('keeps its own Keep Alive under a Server Keep Alive of 0, and takes one longer than its own (spec 15.26)', async () => {
-    const zero = adapterOf(script, { keepAlive: 1_000 });
-    const unbounded = await linkUp(
-      { adapter: zero, script },
-      { properties: { serverKeepAlive: 0 } }
-    );
-    let startedAt = Date.now();
+  test('keeps its own Keep Alive under a Server Keep Alive of 0 or longer than its own (spec 15.26)', async () => {
+    // * a longer one of 3, not 2, so that a side that took it, its PINGREQ at 3,000 ms, fails
+    for (const serverKeepAlive of [0, 3]) {
+      const adapter = adapterOf(script, { keepAlive: 1_000 });
+      const link = await linkUp({ adapter, script }, { properties: { serverKeepAlive } });
+      const startedAt = Date.now();
 
-    await unbounded.next('pingreq', { within: 3_000 });
-    expect(Date.now() - startedAt).toBeLessThan(2_500);
-    unbounded.send({ cmd: 'pingresp' });
-    await zero.stop();
+      await link.next('pingreq', { within: 3_000 });
+      expect(Date.now() - startedAt).toBeLessThan(2_500);
+      link.send({ cmd: 'pingresp' });
+      await adapter.stop();
+    }
+  });
 
-    const longer = adapterOf(script, { keepAlive: 1_000 });
-    const link = await linkUp({ adapter: longer, script }, { properties: { serverKeepAlive: 2 } });
+  test('loses its link once its PINGREQ has no PINGRESP within half its Keep Alive in force (spec 15.26)', async () => {
+    // * a broker that answers nothing after its CONNACK, each case an adapter and a scripted link of
+    // its own, at once
+    const isLostUnder = async ({
+      keepAlive,
+      properties,
+    }: {
+      keepAlive: number;
+      properties: Record<string, unknown>;
+    }): Promise<void> => {
+      const silent = await createMqttScript();
 
-    startedAt = Date.now();
-    await expect(link.next('pingreq', { within: 1_500 })).rejects.toThrow();
-    await link.next('pingreq', { within: 2_000 });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_900);
+      try {
+        const adapter = adapterOf(silent, { keepAlive });
+        const { downs } = heardOf(adapter);
+        const link = await linkUp({ adapter, script: silent }, { properties });
+        const upAt = Date.now();
+
+        await link.next('pingreq', { within: 3_000 });
+
+        const pingedAt = Date.now();
+
+        expect(pingedAt - upAt).toBeLessThan(2_600);
+        await sleep(700);
+        expect(downs).toEqual([]);
+        await until(() => {
+          return downs.length > 0;
+        });
+        expect(Date.now() - pingedAt).toBeLessThan(1_700);
+        expect(await closedWithin(link)).toBe(true);
+        // * told once, its link lost, not taken over, and no DISCONNECT sent
+        await sleep(50);
+        expect(downs).toEqual([{ isTakenOver: false }]);
+        expect(adapter.isLinked).toBe(false);
+        expect(cmdsOf(link)).toEqual(['connect', 'pingreq']);
+      } finally {
+        await silent[Symbol.asyncDispose]();
+      }
+    };
+
+    await Promise.all([
+      // (a) no Server Keep Alive
+      isLostUnder({ keepAlive: 2_000, properties: {} }),
+      // (b) a Server Keep Alive shorter than its own
+      isLostUnder({ keepAlive: 30_000, properties: { serverKeepAlive: 2 } }),
+      // (c) a Server Keep Alive of 0
+      isLostUnder({ keepAlive: 2_000, properties: { serverKeepAlive: 0 } }),
+    ]);
+  });
+
+  test('runs a Keep Alive under a second as its CONNECT announces it, a whole second rounded up (spec 15.26)', async () => {
+    const adapter = adapterOf(script, { keepAlive: 200 });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+    const upAt = Date.now();
+
+    expect(link.connect).toMatchObject({ keepalive: 1 });
+    await expect(link.next('pingreq', { within: 700 })).rejects.toThrow('no pingreq came');
+    await link.next('pingreq', { within: 2_000 - (Date.now() - upAt) });
+    expect(Date.now() - upAt).toBeGreaterThanOrEqual(900);
+
+    // * its PINGRESP awaited half of the second it runs, not half of 200 ms
+    await sleep(300);
+    expect([adapter.isLinked, downs]).toEqual([true, []]);
     link.send({ cmd: 'pingresp' });
-    await longer.stop();
+    await adapter.stop();
+    expect(
+      cmdsOf(link).filter((cmd) => {
+        return cmd === 'pingreq';
+      })
+    ).toHaveLength(1);
   });
 
   test('leaves a will of its GONE, QoS 1, RETAIN 0 and a Will Delay Interval of 0, and stops with a DISCONNECT of 0x00 (spec 15.26)', async () => {
@@ -589,7 +826,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1 and refused otherwise (spec 15.27)', async () => {
+  test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1, refused on QoS 0 or 2 granted, its filter kept, and on 0x80 or more (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
     let isHeld = false;
@@ -627,21 +864,39 @@ test.describe('createMqttBrokerAdapter', () => {
     });
     await leaving;
 
-    // QoS 0 granted is refused, as a failure is
-    const downgraded = adapter.subscribe(['bead', 'd', 'bob']);
+    // QoS 0 or 2 granted is refused, its filter kept, since its broker holds it
+    for (const [code, name] of [
+      [0x00, 'bob'],
+      [0x02, 'carol'],
+    ] as const) {
+      const downgraded = adapter.subscribe(['bead', 'd', name]);
 
-    await subackOf(link, 0);
-    await expect(downgraded).rejects.toThrow('0x00');
+      await subackOf(link, code);
+      await expect(downgraded).rejects.toThrow(code === 0 ? '0x00' : '0x02');
+    }
 
-    const failed = adapter.subscribe(['bead', 'd', 'eve']);
+    // * 0x80 or more is refused, its filter forgotten, its table naming the code or not
+    for (const [code, name] of [
+      [0x87, 'eve'],
+      [0x95, 'mallory'],
+    ] as const) {
+      const failed = adapter.subscribe(['bead', 'd', name]);
 
-    await subackOf(link, 0x87);
-    await expect(failed).rejects.toThrow('0x87');
-    // * its stop lets go of what its broker holds, QoS 0 granted among it, and of nothing refused
-    expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/i/ada', 'bead/d/bob']);
+      await subackOf(link, code);
+      await expect(failed).rejects.toThrow(code === 0x87 ? '0x87' : '0x95');
+    }
+
+    expect(adapter.isLinked).toBe(true);
+    // * its stop lets go of what its broker holds, QoS 0 or 2 granted among it, and of nothing
+    // refused at 0x80 or more
+    expect(await unsubackedOf(link, adapter.stop())).toEqual([
+      'bead/i/ada',
+      'bead/d/bob',
+      'bead/d/carol',
+    ]);
   });
 
-  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on any other code (spec 15.27)', async () => {
+  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on a code of 0x80 or more (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
     const answered = async (
@@ -671,9 +926,9 @@ test.describe('createMqttBrokerAdapter', () => {
     await subackOf(link, 1);
     await subscribing;
 
-    // * each refusal MQTT 5 names an UNSUBACK by: MQTT.js's parser hands no code it does not name,
-    // refusing a packet of any other, 0x01 among them, which loses its link (spec 15.29)
-    for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91]) {
+    // * each refusal MQTT 5 names an UNSUBACK by, and 0x95, which its table does not: a code under
+    // 0x80 it does not name loses its link instead (spec 15.29)
+    for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91, 0x95]) {
       const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
 
       await expect(answered(['bead', 'd', 'eve'], code), refused).rejects.toThrow(refused);
@@ -1244,22 +1499,39 @@ test.describe('createMqttBrokerAdapter', () => {
     ]);
   });
 
-  test('reads a PUBACK of 0x10 as no subscriber, under 0x80 as taken, and 0x80 or more as refused (spec 15.28)', async () => {
+  test('reads a PUBACK of 0x00, or of none, as taken, 0x10 as no subscriber, and 0x80 or more as refused (spec 15.28)', async () => {
     const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
     const link = await linkUp({ adapter, script });
-    const answered = async (reasonCode: number) => {
+    // * each PUBACK as its bytes, its Remaining Length 2 where it carries no code
+    const answered = async (code: number | undefined) => {
       const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
-      const publish = await link.next('publish');
+      const identifier = (await link.next('publish')).messageId ?? 0;
 
-      link.send({ cmd: 'puback', messageId: publish.messageId ?? 0, reasonCode });
+      link.write(
+        Uint8Array.from(
+          code === undefined
+            ? [0x40, 0x02, identifier >> 8, identifier & 0xff]
+            : pubackBytes(identifier, code)
+        )
+      );
 
       return publishing;
     };
 
-    expect(await answered(0x10)).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+    expect(await answered(undefined)).toBe(BROKER_PUBLISHED.TAKEN);
     expect(await answered(0x00)).toBe(BROKER_PUBLISHED.TAKEN);
-    await expect(answered(0x87)).rejects.toThrow('0x87');
-    await expect(answered(0x80)).rejects.toThrow('0x80');
+    expect(await answered(0x10)).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+
+    // * each refusal its table names, and 0x95, which it does not
+    for (const code of [0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99, 0x95]) {
+      const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+
+      await expect(answered(code), refused).rejects.toThrow(refused);
+    }
+
+    expect(adapter.isLinked).toBe(true);
+    expect(downs).toEqual([]);
     expect(adapter.capabilities.noSubscriber).toBe(true);
     await adapter.stop();
   });
@@ -1515,6 +1787,340 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('loses its link, no DISCONNECT, on an acknowledgement of a Reason Code under 0x80 its table does not name or of a count of codes other than one, awaited or not, its start failed before its CONNACK (spec 15.26, 15.27, 15.28, 15.29)', async () => {
+    test.setTimeout(60_000);
+
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    const lost = `the link of ${ID} went down: its broker sent`;
+    // * its request asked, then the acknowledgement `bytesOf` writes for its identifier, the PUBLISH
+    // to its inbox behind it in one write
+    const awaitedCases: {
+      ask: () => Promise<unknown>;
+      bytesOf: (identifier: number) => number[];
+      cmd: Packet['cmd'];
+      packet: string;
+    }[] = [
+      {
+        ask: () => {
+          return adapter.unsubscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(11, { codes: [0x01], identifier });
+        },
+        cmd: 'unsubscribe',
+        packet: 'UNSUBACK',
+      },
+      {
+        ask: () => {
+          return adapter.subscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(9, { codes: [0x03], identifier });
+        },
+        cmd: 'subscribe',
+        packet: 'SUBACK',
+      },
+      {
+        ask: () => {
+          return adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+        },
+        bytesOf: (identifier) => {
+          return pubackBytes(identifier, 0x01);
+        },
+        cmd: 'publish',
+        packet: 'PUBACK',
+      },
+      ...[[0x01, 0x01], [0x01, 0x87], []].map((codes) => {
+        return {
+          ask: () => {
+            return adapter.subscribe(['bead', 'd', 'bob']);
+          },
+          bytesOf: (identifier: number) => {
+            return ackBytes(9, { codes, identifier });
+          },
+          cmd: 'subscribe' as const,
+          packet: 'SUBACK',
+        };
+      }),
+      ...[[0x00, 0x11], []].map((codes) => {
+        return {
+          ask: () => {
+            return adapter.unsubscribe(['bead', 'd', 'bob']);
+          },
+          bytesOf: (identifier: number) => {
+            return ackBytes(11, { codes, identifier });
+          },
+          cmd: 'unsubscribe' as const,
+          packet: 'UNSUBACK',
+        };
+      }),
+      // * both wrong, a property MQTT 5 does not define and a code its table does not name: lost
+      // all the same, whichever check finds it
+      {
+        ask: () => {
+          return adapter.subscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(9, { codes: [0x03], identifier, properties: [0x7f, 0x00] });
+        },
+        cmd: 'subscribe',
+        packet: 'SUBACK',
+      },
+      // its reserved flags set, which MQTTnet reads, its code judged on every side
+      {
+        ask: () => {
+          return adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+        },
+        bytesOf: (identifier) => {
+          return pubackBytes(identifier, 0x01, { flags: 0x02 });
+        },
+        cmd: 'publish',
+        packet: 'PUBACK',
+      },
+    ];
+    const isLostIn = async (link: IScriptedLink, count: number): Promise<void> => {
+      expect(await closedWithin(link)).toBe(true);
+      await until(() => {
+        return downs.length >= count;
+      });
+      expect(downs).toHaveLength(count);
+      expect(downs.at(-1)).toEqual({ isTakenOver: false });
+      expect(adapter.isLinked).toBe(false);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+    };
+
+    for (const [index, { ask, bytesOf, cmd, packet }] of awaitedCases.entries()) {
+      const link = await linkUp({ adapter, script });
+      const failing = failureOf(ask());
+      const request = await link.next(cmd);
+
+      link.write(Uint8Array.from([...bytesOf(request.messageId ?? 0), ...INBOX_PUBLISH]));
+      // * failed with the loss, never refused nor taken
+      expect(await failing, `${String(index)}: ${packet}`).toMatchObject({
+        message: expect.stringMatching(new RegExp(`^${lost} an? ${packet} of `, 'u')),
+      });
+      await isLostIn(link, index + 1);
+    }
+
+    // * no request awaiting it
+    const unawaited = [
+      ackBytes(11, { codes: [0x01], identifier: UNUSED }),
+      pubackBytes(UNUSED, 0x01),
+      ackBytes(9, { codes: [0x01, 0x01], identifier: UNUSED }),
+      ackBytes(11, { codes: [], identifier: UNUSED }),
+    ];
+
+    for (const [index, bytes] of unawaited.entries()) {
+      const link = await linkUp({ adapter, script });
+
+      link.write(Uint8Array.from([...bytes, ...INBOX_PUBLISH]));
+      await isLostIn(link, awaitedCases.length + index + 1);
+    }
+
+    // * before its CONNACK, in the same write: its start failed, no down
+    const starting = failureOf(adapter.start());
+    const early = await script.link();
+
+    early.write(
+      Uint8Array.from([...ackBytes(11, { codes: [0x01], identifier: UNUSED }), ...CONNACK_BYTES])
+    );
+    expect(await starting).toMatchObject({
+      message: expect.stringContaining(`${lost} an UNSUBACK of 0x01`),
+    });
+    expect(await closedWithin(early)).toBe(true);
+    await sleep(50);
+    expect(downs).toHaveLength(awaitedCases.length + unawaited.length);
+    expect(cmdsOf(early)).toEqual(['connect']);
+    expect(adapter.isLinked).toBe(false);
+    expect(messages).toEqual([]);
+  });
+
+  test('ends its stop at once, no DISCONNECT and no down, on a packet its client cannot read, an acknowledgement under 0x80 its table does not name or of a count other than one among it (spec 15.26, 15.29)', async () => {
+    test.setTimeout(60_000);
+
+    const adapter = adapterOf(script, { connectTimeout: 5_000 });
+    const { downs } = heardOf(adapter);
+    const lost = `the link of ${ID} went down: its broker sent`;
+    // a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F
+    const unreadable = [0x30, 0x0f, 0x00, 0x0a, ...Buffer.from('bead/i/ada'), 0x02, 0x7f, 0x00];
+    const subscribed = async (link: IScriptedLink, topics: readonly (readonly string[])[]) => {
+      for (const topic of topics) {
+        const subscribing = adapter.subscribe(topic);
+
+        await subackOf(link, 1);
+        await subscribing;
+      }
+    };
+    // * `bytes` written once its stop is under way, then its stop settled within half its
+    // connectTimeout, its link closed with no DISCONNECT and no down told
+    const endsAtOnce = async (
+      link: IScriptedLink,
+      { bytes, stopping }: { bytes: number[]; stopping: Promise<void> }
+    ): Promise<void> => {
+      const writtenAt = Date.now();
+
+      link.write(Uint8Array.from(bytes));
+      await stopping;
+      expect(Date.now() - writtenAt, 'its stop settled at once').toBeLessThan(2_500);
+      expect(await closedWithin(link)).toBe(true);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+      expect(downs).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+    };
+
+    // (a) in its let-go, a PUBLISH it cannot read
+    {
+      const link = await linkUp({ adapter, script });
+
+      await subscribed(link, [INBOX]);
+
+      const stopping = adapter.stop();
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, { bytes: unreadable, stopping });
+    }
+
+    // (b) in its let-go, an UNSUBACK of 0x01 while another's is withheld, and (c) one of no code
+    for (const codes of [[0x01], []]) {
+      const link = await linkUp({ adapter, script });
+
+      await subscribed(link, [INBOX, ['bead', 'd', 'bob']]);
+
+      const stopping = adapter.stop();
+      const first = await link.next('unsubscribe');
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, {
+        bytes: ackBytes(11, { codes, identifier: first.messageId ?? 0 }),
+        stopping,
+      });
+    }
+
+    // (d) in its drain, a PUBACK of 0x01 to its publication, which fails with the loss
+    {
+      const link = await linkUp({ adapter, script });
+      const publishing = failureOf(adapter.publish({ payload: Uint8Array.of(1), topic: NAME }));
+      const publish = await link.next('publish');
+      const stopping = adapter.stop();
+
+      await sleep(50);
+      await endsAtOnce(link, { bytes: pubackBytes(publish.messageId ?? 0, 0x01), stopping });
+      expect(await publishing).toMatchObject({
+        message: expect.stringContaining(`${lost} a PUBACK of 0x01`),
+      });
+    }
+
+    // (e) a SUBACK of two codes to a SUBSCRIBE under way at its stop
+    {
+      const link = await linkUp({ adapter, script });
+      const subscribing = failureOf(adapter.subscribe(INBOX));
+      const subscribe = await link.next('subscribe');
+      const stopping = adapter.stop();
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, {
+        bytes: ackBytes(9, { codes: [0x01, 0x01], identifier: subscribe.messageId ?? 0 }),
+        stopping,
+      });
+      expect(await subscribing).toBeInstanceOf(Error);
+    }
+  });
+
+  test('reads an acknowledgement of 0x80 or more its table does not name as a refusal, awaited or not, naming its code, its link kept (spec 15.27, 15.28)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    // * a PUBACK of 0x95, as Mosquitto 2.1.2 sends one past its message_size_limit: refused, the
+    // next publication taken
+    const refused = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+    const publish = await link.next('publish');
+
+    link.write(Uint8Array.from(pubackBytes(publish.messageId ?? 0, 0x95)));
+    await expect(refused).rejects.toThrow('0x95');
+
+    const taken = adapter.publish({ payload: Uint8Array.of(2), topic: NAME });
+    const next = await link.next('publish');
+
+    link.send({ cmd: 'puback', messageId: next.messageId ?? 0, reasonCode: 0 });
+    expect(await taken).toBe(BROKER_PUBLISHED.TAKEN);
+
+    // a SUBACK of 0x95: refused, its filter forgotten, since 0x80 or more installs none
+    const subscribing = adapter.subscribe(['bead', 'd', 'bob']);
+    const subscribe = await link.next('subscribe');
+
+    link.write(
+      Uint8Array.from(ackBytes(9, { codes: [0x95], identifier: subscribe.messageId ?? 0 }))
+    );
+    await expect(subscribing).rejects.toThrow('0x95');
+
+    // an UNSUBACK of 0x95: refused, its filter kept for its stop
+    const held = adapter.subscribe(['bead', 'd', 'eve']);
+
+    await subackOf(link, 1);
+    await held;
+
+    const leaving = adapter.unsubscribe(['bead', 'd', 'eve']);
+    const unsubscribe = await link.next('unsubscribe');
+
+    link.write(
+      Uint8Array.from(ackBytes(11, { codes: [0x95], identifier: unsubscribe.messageId ?? 0 }))
+    );
+    await expect(leaving).rejects.toThrow('0x95');
+
+    // * an UNSUBACK of 0xFF no request awaits: ignored
+    link.write(Uint8Array.from(ackBytes(11, { codes: [0xff], identifier: UNUSED })));
+    await sleep(100);
+    expect(downs).toEqual([]);
+    expect(adapter.isLinked).toBe(true);
+    expect(cmdsOf(link)).not.toContain('disconnect');
+    expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/d/eve']);
+  });
+
+  test('hands on what came before a packet its client cannot read in one read as far as its side does (spec 15.29)', async () => {
+    // ! docs/support.md's row "What an MQTT 5 link lost on a packet its client cannot read hands on
+    // of what came before it in one read": what held 40 runs of 40 on this side, each case one write
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    const unreadable = [0x30, 0x0f, 0x00, 0x0a, ...Buffer.from('bead/i/ada'), 0x02, 0x7f, 0x00];
+    const cases = [
+      // (i) its guard's trip: the PUBACK before it handled at once, the PUBLISH a tick later
+      {
+        outcome: BROKER_PUBLISHED.TAKEN,
+        tail: ackBytes(11, { codes: [0x01], identifier: UNUSED }),
+      },
+      // (ii) its parser's refusal, told ahead of every packet it parsed in that read
+      { outcome: undefined, tail: unreadable },
+    ];
+
+    for (const [index, { outcome, tail }] of cases.entries()) {
+      const link = await linkUp({ adapter, script });
+      const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+      const identifier = (await link.next('publish')).messageId ?? 0;
+
+      link.write(Uint8Array.from([...pubackBytes(identifier, 0x00), ...INBOX_PUBLISH, ...tail]));
+
+      if (outcome === undefined) {
+        expect(await failureOf(publishing)).toMatchObject({
+          message: expect.stringContaining(`the link of ${ID} went down: its broker sent`),
+        });
+      } else {
+        expect(await publishing).toBe(outcome);
+      }
+
+      expect(await closedWithin(link)).toBe(true);
+      await until(() => {
+        return downs.length > index;
+      });
+      // ! nothing of its link handed on once its down was told
+      await sleep(30);
+      expect(messages, 'the PUBLISH before it not handed on').toEqual([]);
+      expect(downs).toHaveLength(index + 1);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+    }
+  });
+
   test('loses its link once on a packet past its Maximum Packet Size beside its CONNACK in one read (spec 15.29)', async () => {
     const adapter = adapterOf(script, { maximumPacketSize: 1_100 });
     const { downs, messages } = heardOf(adapter);
@@ -1700,7 +2306,7 @@ test.describe('createMqttBrokerAdapter', () => {
 
   test('fails its start on a CONNACK that refuses or says Maximum QoS 0 beside a packet past its Maximum Packet Size in one read, naming the CONNACK (spec 15.26, 15.29)', async () => {
     const answers = [
-      { connack: [0x20, 0x03, 0x00, 0x86, 0x00], named: 'CONNACK 0x86' },
+      { connack: [0x20, 0x03, 0x00, 0x86, 0x00], named: 'CONNACK 0x86, Bad User Name or Password' },
       { connack: [0x20, 0x03, 0x00, 0x01, 0x00], named: 'CONNACK 0x01' },
       // * its properties a Maximum QoS (0x24) of 0
       { connack: [0x20, 0x05, 0x00, 0x00, 0x02, 0x24, 0x00], named: 'Maximum QoS 0' },
@@ -1979,7 +2585,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('gives up a start, a subscription or a publication its signal aborts, a publication that waits on its quota leaving it unsent, and retires its link where what it asked may have gone', async () => {
+  test('gives up a start, a subscription or a publication its signal aborts, a publication that waits on its quota leaving it unsent, and retires its link where what it asked may have gone (spec 15.26)', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);
     const given = new AbortController();
@@ -2122,7 +2728,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('retires its link where a publication at most once is given up before its packet is written (spec 15.28)', async () => {
+  test('retires its link where a publication at most once is given up before its packet is written (spec 15.26, 15.28)', async () => {
     const adapter = adapterOf(script, { delivery: BROKER_DELIVERIES.AT_MOST_ONCE });
     const { downs } = heardOf(adapter);
     const link = await linkUp({ adapter, script });
@@ -2422,11 +3028,11 @@ test.describe('createMqttBrokerAdapter', () => {
       return PASSWORD;
     };
     const refusals = [
-      { password: PASSWORD, tls: TLS_FIXTURE },
-      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, tls: CERTIFIED },
+      { passwordProvider: provider, tls: CERTIFIED },
       { password: PASSWORD, passwordProvider: provider },
       // * both, and a certificate: the first refusal, in one order on every side
-      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider, tls: CERTIFIED },
     ].map((given) => {
       const refusal = refusalOf(() => {
         return createMqttBrokerAdapter({ id: ID, url: secured, ...given });
@@ -2453,6 +3059,24 @@ test.describe('createMqttBrokerAdapter', () => {
     await bare.stop();
   });
 
+  // spec 15.39
+  test('takes a password beside tls that names authorities alone', () => {
+    const provider = (): string => {
+      return PASSWORD;
+    };
+
+    for (const given of [{ password: PASSWORD }, { passwordProvider: provider }]) {
+      expect(() => {
+        return createMqttBrokerAdapter({
+          id: ID,
+          tls: { authorities: TLS_FIXTURE.cert },
+          url: 'mqtts://127.0.0.1:8883',
+          ...given,
+        });
+      }).not.toThrow();
+    }
+  });
+
   test('refuses a TLS client certificate in a page, whose browser chooses it', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'process');
 
@@ -2462,7 +3086,7 @@ test.describe('createMqttBrokerAdapter', () => {
       expect(() => {
         return createMqttBrokerAdapter({
           id: ID,
-          tls: TLS_FIXTURE,
+          tls: CERTIFIED,
           url: 'wss://broker.example/mqtt',
         });
       }).toThrow(
@@ -2655,20 +3279,10 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
     expect(outcomes.length, 'each connect made').toBeGreaterThan(20);
   });
 
-  // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: MQTT.js reads its WebSocket as a
-  // stream of packets, each held to its Maximum Packet Size alone, where the Rust side bounds a
-  // message as a packet; a row of docs/support.md
+  // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: each held to its Maximum Packet
+  // Size alone, on every side
   test('reads a WebSocket message of two packets past its Maximum Packet Size together, each within it', async () => {
-    const broker = new WsServer({
-      handleProtocols: () => {
-        return 'mqtt';
-      },
-      host: '127.0.0.1',
-      port: 0,
-    });
-
-    await once(broker, 'listening');
-
+    await using broker = await wsBrokerOf();
     const publish = generate(
       {
         cmd: 'publish',
@@ -2684,7 +3298,7 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       id: ID,
       maximumPacketSize: 1_024,
       password: PASSWORD,
-      url: `ws://127.0.0.1:${String((broker.address() as AddressInfo).port)}/mqtt`,
+      url: broker.url,
     });
     const heard = heardOf(adapter);
 
@@ -2695,16 +3309,11 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       publish.length < 1_024 && publish.length * 2 > 1_024 + 14,
       `${String(publish.length)} bytes a packet`
     ).toBe(true);
-    // its CONNECT, then its CONNACK; then one message of two PUBLISHes of 700 bytes or so each
-    broker.on('connection', (socket) => {
-      socket.once('message', () => {
-        socket.send(Uint8Array.from(CONNACK_BYTES));
-      });
-    });
 
     try {
       await adapter.start();
-      [...broker.clients][0]?.send(Buffer.concat([publish, publish]));
+      // * one message of two PUBLISHes of 700 bytes or so each
+      [...broker.broker.clients][0]?.send(Buffer.concat([publish, publish]));
       await until(() => {
         return heard.messages.length === 2;
       });
@@ -2712,9 +3321,151 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(adapter.isLinked).toBe(true);
     } finally {
       await adapter.stop();
-      await new Promise((resolve) => {
-        broker.close(resolve);
+    }
+  });
+
+  test('reads a packet across two WebSocket messages whole (spec 15.25)', async () => {
+    // * its CONNACK in two binary messages, split after its fixed header
+    await using broker = await wsBrokerOf((socket) => {
+      socket.send(Uint8Array.from(CONNACK_BYTES.slice(0, 2)));
+      socket.send(Uint8Array.from(CONNACK_BYTES.slice(2)));
+    });
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+    const { downs } = heardOf(adapter);
+
+    try {
+      await adapter.start();
+      expect([adapter.isLinked, downs]).toEqual([true, []]);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('offers no extension in its WebSocket’s upgrade to its broker, permessage-deflate among them', async () => {
+    await using broker = await wsBrokerOf();
+    const offered: unknown[] = [];
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+
+    broker.broker.on('connection', (_socket, request) => {
+      offered.push(request.headers['sec-websocket-extensions']);
+    });
+
+    try {
+      await adapter.start();
+      expect(offered).toEqual([undefined]);
+      expect(adapter.isLinked).toBe(true);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  // ! `ws` hands a message on once its last fragment came: its packet is judged at its Remaining
+  // Length only then, where the C# and Rust sides judge it as its first fragment comes; a row of
+  // docs/support.md
+  test('loses its link on a WebSocket message holding a packet past its Maximum Packet Size once its last fragment came', async () => {
+    await using broker = await wsBrokerOf();
+    const adapter = createMqttBrokerAdapter({
+      id: ID,
+      maximumPacketSize: 1_024,
+      password: PASSWORD,
+      url: broker.url,
+    });
+    const { downs, messages } = heardOf(adapter);
+    // * a PUBLISH of 2,003 bytes, its fixed header announcing a Remaining Length of 2,000
+    const publish = generate(
+      {
+        cmd: 'publish',
+        dup: false,
+        payload: Buffer.alloc(1_987),
+        qos: 0,
+        retain: false,
+        topic: `bead/i/${ID}`,
+      },
+      { protocolVersion: 5 }
+    );
+
+    expect([publish.length, [...publish.subarray(0, 3)]]).toEqual([2_003, [0x30, 0xd0, 0x0f]]);
+
+    try {
+      await adapter.start();
+
+      const socket = [...broker.broker.clients][0];
+      const read: Buffer[] = [];
+
+      expect(socket).toBeDefined();
+      socket!.on('message', (data: Buffer) => {
+        read.push(data);
       });
+
+      const closed = once(socket!, 'close');
+
+      // its fixed header and its topic's first bytes, then the rest, one message of two fragments
+      socket!.send(publish.subarray(0, 8), { binary: true, fin: false });
+      await sleep(100);
+      expect([downs, adapter.isLinked], 'its first fragment held').toEqual([[], true]);
+      socket!.send(publish.subarray(8), { binary: true, fin: true });
+      await until(() => {
+        return downs.length > 0;
+      });
+      expect(downs).toEqual([{ isTakenOver: false }]);
+      await closed;
+      expect(
+        read.filter((data) => {
+          return data[0] === 0xe0;
+        }),
+        'no DISCONNECT'
+      ).toEqual([]);
+      expect(messages).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('gives its WebSocket in Node a message bound of 100 MiB, or of its Maximum Packet Size where larger', async () => {
+    await using broker = await wsBrokerOf();
+
+    await withClients(async (clients) => {
+      for (const maximumPacketSize of [1_024, LARGEST_PACKET_SIZE]) {
+        const adapter = createMqttBrokerAdapter({
+          id: ID,
+          maximumPacketSize,
+          password: PASSWORD,
+          url: broker.url,
+        });
+
+        try {
+          await adapter.start();
+        } finally {
+          await adapter.stop();
+        }
+      }
+
+      // * `ws`'s own bound, 100 MiB, as its options reach MQTT.js, then the largest packet's
+      expect(
+        clients.map(({ options }) => {
+          return options.wsOptions;
+        })
+      ).toEqual([
+        { maxPayload: 104_857_600, perMessageDeflate: false },
+        { maxPayload: 268_435_460, perMessageDeflate: false },
+      ]);
+      expect(LARGEST_PACKET_SIZE).toBe(268_435_460);
+    });
+  });
+
+  // [MQTT-6.0.0-1] closes the link on a text message: MQTT.js reads its bytes, a row of docs/support.md
+  test('reads a CONNACK sent as a text WebSocket message, its link up', async () => {
+    await using broker = await wsBrokerOf((socket) => {
+      socket.send(Buffer.from(CONNACK_BYTES), { binary: false });
+    });
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+
+    try {
+      await adapter.start();
+      expect(adapter.isLinked).toBe(true);
+    } finally {
+      await adapter.stop();
     }
   });
 

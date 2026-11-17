@@ -51,8 +51,9 @@
         --removed: rgb(197 34 31 / 0.12);
         --syntax-string: #925b12;
         --list-bar-height: calc(var(--app-space-8) + var(--app-space-1));
-        /* the compact DevTools control floor is independent of text padding */
-        --control-height: 22px;
+        /* the compact DevTools control floor, independent of text padding: a button inside a group
+           keeps WCAG 2.5.8's 24 px, and a group stands as tall as a control */
+        --control-height: 28px;
         /* a button inside a group: the control's height less the group's two hairlines and insets */
         --segment-height: calc(var(--control-height) - 4px);
         --menu-row-height: calc(var(--app-space-6) + var(--app-space-1));
@@ -165,6 +166,7 @@
         }
 
         select {
+          align-items: center;
           gap: var(--app-space-3);
           padding-right: var(--app-space-2);
           background-image: none;
@@ -253,7 +255,8 @@
         opacity: 0.5;
       }
 
-      button[aria-pressed='true'] {
+      button[aria-pressed='true'],
+      button[aria-checked='true'] {
         border-color: var(--app-accent);
         background: var(--app-flame-wash);
         color: var(--app-accent);
@@ -339,7 +342,8 @@
         background: transparent;
       }
 
-      .group button[aria-pressed='true'] {
+      .group button[aria-pressed='true'],
+      .group button[aria-checked='true'] {
         border-color: var(--app-accent);
         background: var(--app-flame-wash);
       }
@@ -562,7 +566,8 @@
         white-space: nowrap;
       }
 
-      td.outcome {
+      td.outcome,
+      td.parts {
         width: 100%;
         /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
@@ -646,6 +651,7 @@
         vertical-align: -2px;
       }
 
+      /* a call's track, the Waterfall's and the Timeline's: every place a percentage of it */
       .wf {
         position: relative;
         /* this fixed drawing width keeps the small glyph or data meter legible */
@@ -654,7 +660,8 @@
         height: 10px;
       }
 
-      .wf i {
+      .wf .extent {
+        --mark: var(--app-info);
         position: absolute;
         /* the marker’s pixel offset aligns it inside its data track */
         top: 2px;
@@ -664,42 +671,108 @@
         min-width: 2px;
         border-radius: var(--app-radius-xs);
         background: var(--app-info);
+        /* ! the instant reads the bar's own width: the bar is its container */
+        container: bar / inline-size;
       }
 
-      .wf i.failed {
+      .wf .extent.failed {
+        --mark: var(--app-error);
         background: var(--app-error);
       }
 
-      .wf i.ended {
+      .wf .extent.ended {
+        --mark: var(--ended);
         /* a one-pixel hairline separates the surfaces */
         border: 1px dashed var(--ended);
         background: none;
       }
 
-      .wf i.flight {
+      .wf .extent.flight {
         background: var(--app-info-wash);
         /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: inset 0 0 0 1px var(--app-info);
       }
 
-      .wf i.open,
-      .wf i.closed {
+      .wf .extent.open,
+      .wf .extent.closed {
+        --mark: var(--app-text-secondary);
         top: var(--app-space-1);
         /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 2px;
         background: var(--app-text-secondary);
       }
 
-      .wf b {
-        position: absolute;
-        /* the marker’s pixel offset aligns it inside its data track */
-        top: 1px;
-        /* this fixed drawing width keeps the small glyph or data meter legible */
-        width: 1px;
-        height: var(--app-space-2);
-        background: var(--app-text);
+      .wf .extent.closed {
+        /* the dashes of an ended subscription: three pixels drawn, two left */
+        background: repeating-linear-gradient(
+          to right,
+          var(--app-text-secondary) 0 3px,
+          transparent 3px 5px
+        );
       }
 
+      /* * an ended subscription stops where it ended: a cap across its line's end, in the line's
+         colour, so an open line (solid, to the track's edge) and an ended one (dashed, capped) read
+         apart in either theme */
+      .wf .cap {
+        position: absolute;
+        /* the cap stands three pixels past each side of the two-pixel line */
+        top: -3px;
+        right: 0;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 2px;
+        /* the line's two pixels and three on each side */
+        height: 8px;
+        background: var(--app-text-secondary);
+      }
+
+      /* * a call too short for a bar of 6 px is an instant: a diamond on its start, its bar
+         under it, as the Trace Event Format's viewers mark an instant event */
+      .wf .instant {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        display: none;
+        /* the instant's diamond, wider than the shortest bar and as tall as the track */
+        width: 7px;
+        /* the instant's diamond, wider than the shortest bar and as tall as the track */
+        height: 10px;
+        background: var(--mark);
+        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+        transform: translate(-50%, -50%);
+      }
+
+      /* the bar's width under which its call is an instant */
+      @container bar (width < 6px) {
+        .wf .instant {
+          display: block;
+        }
+      }
+
+      .wf .ring {
+        position: absolute;
+        top: 50%;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 6px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
+        height: 6px;
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-text);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-paper);
+        transform: translate(-50%, -50%);
+      }
+
+      .wf .tick {
+        position: absolute;
+        /* the marker extends past the data track by its stroke width */
+        top: -2px;
+        /* the marker extends past the data track by its stroke width */
+        bottom: -2px;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 1px;
+        background: var(--app-text);
+      }
       .detail-tabs {
         position: sticky;
         top: 0;
@@ -1245,42 +1318,88 @@
         background: var(--app-info);
       }
 
-      #timeline svg {
-        display: block;
-        width: 100%;
-        /* a content-width floor keeps this label or plot readable before it scrolls */
-        min-width: 560px;
+      #timeline {
+        /* ! a row the keyboard reaches scrolls clear of the sticky head over it */
+        scroll-padding-top: calc(var(--app-space-6) + var(--app-space-1));
+      }
+
+      #timeline th {
+        top: 0;
+      }
+
+      #timeline-rows {
+        --grid: 100%;
+        position: relative;
         user-select: none;
       }
 
-      #timeline .grid {
-        stroke: var(--app-divider);
+      #timeline .track {
+        width: 100%;
+        /* the grid: a hairline at each tick of the axis, from the column's start */
+        background-image: linear-gradient(to right, var(--app-divider) 1px, transparent 1px);
+        background-size: var(--grid) 100%;
+        background-origin: content-box;
       }
 
-      #timeline .axis,
-      #timeline .row-id {
-        fill: var(--app-text-secondary);
-        font: var(--app-text-sm) var(--app-font-mono);
+      #timeline td.track .wf {
+        width: 100%;
       }
 
-      #timeline .row-name {
-        fill: var(--app-text);
-        font: var(--app-text-sm) var(--app-font-body);
+      #timeline th.track {
+        overflow: hidden;
       }
 
-      #timeline .hit {
-        fill: transparent;
+      #timeline tr[data-key]:focus-visible {
+        /* the offset tracks the two-pixel focus stroke */
+        outline-offset: -2px;
       }
 
-      #timeline .hit:hover {
-        fill: var(--app-flame-wash);
+      .axis {
+        position: relative;
+        height: 1lh;
+        /* ! the labels are absolute: the axis takes its width from its column, never from them */
+        container: axis / inline-size;
       }
 
-      #timeline .brush {
-        fill: var(--app-flame-wash);
-        stroke: var(--app-accent);
+      .axis span {
+        position: absolute;
+        top: 0;
+        padding-left: var(--app-space-1);
+        color: var(--app-text-secondary);
+        font-family: var(--app-font-mono);
+        font-size: var(--app-text-sm);
+        font-weight: 400;
+        white-space: nowrap;
       }
 
+      /* the axis's measured labels set this breakpoint: under it, every other one is read */
+      @container axis (width < 480px) {
+        .axis span:nth-child(even) {
+          display: none;
+        }
+      }
+
+      #timeline-rows .brush {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        /* a one-pixel hairline separates the surfaces */
+        border-inline: 1px solid var(--app-accent);
+        background: var(--app-flame-wash);
+        pointer-events: none;
+      }
+
+      .legend .key {
+        display: inline-flex;
+        white-space: nowrap;
+        align-items: center;
+        gap: var(--app-space-1);
+      }
+
+      .wf.swatch {
+        flex: none;
+        width: var(--app-space-4);
+      }
       .tl-bar {
         display: flex;
         flex-wrap: wrap;
@@ -1674,6 +1793,8 @@
       }
       .participant-detail h2 {
         margin: 0 0 var(--app-space-2);
+        font-size: var(--app-text-md);
+        font-weight: 600;
       }
       .participant-header.sect,
       #broker > .note {
@@ -1706,6 +1827,12 @@
         overflow: auto;
         overflow-anchor: none;
       }
+      /* * the Calls list's spacing: the parcels' ten columns fit their pane at 1280 px, the parts
+         cut where they run long, whole in the row's detail */
+      .participant-table table.plain td,
+      .participant-table table.plain th {
+        padding-inline: var(--app-space-1);
+      }
       .participant-detail {
         min-width: 0;
         min-height: 0;
@@ -1717,6 +1844,9 @@
         top: 0;
         background: var(--app-paper);
         z-index: 1; /* the header stays above the scrolling rows */
+      }
+      .participant-detail .facts {
+        margin-bottom: var(--app-space-2);
       }
       .participant-detail pre {
         white-space: pre-wrap;
@@ -1905,9 +2035,19 @@
       >
         <div id="list" class="rows" tabindex="0" aria-label="Calls, newest first">
           <div class="list-bar">
-            <span class="group" role="group" aria-label="Show">
-              <button type="button" data-mode="calls" aria-pressed="true">Calls</button>
-              <button type="button" data-mode="envelopes" aria-pressed="false">Envelopes</button>
+            <span class="group" role="radiogroup" aria-label="Show">
+              <button type="button" role="radio" data-mode="calls" aria-checked="true" tabindex="0">
+                Calls
+              </button>
+              <button
+                type="button"
+                role="radio"
+                data-mode="envelopes"
+                aria-checked="false"
+                tabindex="-1"
+              >
+                Envelopes
+              </button>
             </span>
             <span id="range"></span>
           </div>

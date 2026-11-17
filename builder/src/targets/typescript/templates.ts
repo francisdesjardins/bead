@@ -58,8 +58,11 @@ const SERVER_MEMBERS: readonly (readonly [string, string])[] = [
 
 // helpers
 
-// a string as a single-quoted literal, whatever it holds
-const literalOf = (text: string): string => {
+/**
+ * A string as a TypeScript literal in single quotes, the TypeScript side's own, whatever it holds:
+ * JSON's escapes, a `"` left as it is and a `'` escaped.
+ */
+export const literalOf = (text: string): string => {
   const escaped = JSON.stringify(text).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'");
 
   return `'${escaped}'`;

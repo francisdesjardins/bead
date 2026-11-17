@@ -139,12 +139,12 @@ it holds, so a message holds itself.
   references no Google.Protobuf: a project that binds `proto` references `Bead.Protobuf`, which
   carries the library its generated messages need.
 - **Rust**: the crate `bead-protobuf`, beside the core, which depends on no protobuf library,
-  `check_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as every
-  codec of `bead` does; its tests in `src/records/tests.rs`.
+  `check_proto_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as
+  every codec of `bead` does; its tests in `src/records/tests.rs`.
 
 The three map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
-`ProtoRecords.Check`, `bead-protobuf` and `check_records`. A request whose check refuses it is
-answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
+`ProtoRecords.Check`, `bead-protobuf` and `check_proto_records`. A request whose check refuses it
+is answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
 panics, other than by its refusal is its side's own error, answered `PROCEDURE_FAILED` with no
 detail and reported; a result's or a notification's fails as a refusal does (spec 9.0, 17.2). The
 target still writes data and types, the call and the descriptor its library gives, and the check
@@ -201,8 +201,10 @@ and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descri
 transports take ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
-type-check and its build until it is regenerated. On the Rust side, whose beadc target is ahead,
-an application makes the runtime codec itself.
+type-check and its build until it is regenerated. The Rust runtime holds 7 and 8, and 5 under its
+core's feature `gateway`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)),
+since no Rust code names another ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -281,12 +283,13 @@ codec, the check in front:
   **Its floor**: a side's successes and its expected failures are 5,601, and its skips 48, its JSON
   tests answered through Bead's mapping of protobuf's JSON
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))
-  on the TypeScript and C# sides, and on the Rust side through Buffa's `DynamicMessage`, Bead's
-  mapping coming with its gateway, ahead; the runner
+  on every side, the Rust side's by `JsonForm`
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)); the runner
   closes a text-format suite after it, whose 909 tests a testee skips, since Bead's `proto` carries
   no text form. Each count moves only with the pin, or with a form the testees answer. The Rust
-  side's beadc target is ahead, so for it protoc writes the set of the suite's test messages and
-  `Probe` instead, which its testee's build script hands to Buffa's generator
+  testee takes its messages from its build script, as a Rust output of `messages: external` does
+  ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)): protoc writes the set of the suite's test messages and `Probe`, which it hands to
+  Buffa's generator through `bead_protobuf_build`
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); each
   language after it adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's
@@ -314,8 +317,8 @@ codec, the check in front:
   message's unknown fields back by number and wire type, a platform row; and each names besides the
   two JSON tests of an extension's JSON name, which Bead's mapping reads as no field of its message
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
-  The Rust side's names the extension's test alone, its JSON read by Buffa's `DynamicMessage`, Bead's
-  mapping coming with its gateway, ahead.
+  The Rust side's names the TypeScript side's three, its JSON read by Bead's mapping, `JsonForm`
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 **How the pin moves.** One runner serves every side's library. The tool fails when `runner.json`'s
 `upstreamVersion` and Google.Protobuf's pin name different protobuf releases, `v36` and `3.36`
@@ -386,8 +389,8 @@ v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/
 sentence each set of twins, hold what no entry of `Probe` reaches.
 
 **The Rust side** checks a payload's records by its message's descriptors, `bead-protobuf`'s
-`check_records` over the pool the code Buffa generates from protoc's set embeds, or the one its
-dynamic codec is given, plays the entries, and answers the suite through its testee
+`check_proto_records` over the pool the code Buffa generates from protoc's set embeds, or the one
+its dynamic codec is given, plays the entries, and answers the suite through its testee
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); **each
 language after it** checks by its own library's descriptors, plays the entries, and adds its testee
 to the suite.

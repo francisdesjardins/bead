@@ -99,9 +99,9 @@ at its root, and its in-memory broker; every feature's item sits at its root (00
   and **[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)**: the core's TLS, its verifier and its
   Happy Eyeballs, as 0049 has them.
 - **[Cargo's features](https://doc.rust-lang.org/cargo/reference/features.html)**: additive, an
-  optional dependency behind a feature, the twin of npm's optional peer; the
-  **[Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)**' C-FEATURE, a feature named
-  for what it brings, and C-REEXPORT, an item where its user looks for it.
+  optional dependency behind a feature, the twin of npm's optional peer; the **[Rust API
+  Guidelines](https://rust-lang.github.io/api-guidelines/)**' C-FEATURE, a feature's name free of
+  placeholder words, `use-` or `with-`, and C-REEXPORT, an item where its user looks for it.
 
 **The options not taken**, each with its reason:
 
@@ -189,13 +189,14 @@ adapter's password take, which the other sides write in place.
 
 `MqttBrokerAdapterOptions::new(url, id)` is `#[non_exhaustive]`, not `Copy`, with no `Default`, its
 two required settings its constructor's, every other field a public `Option`: `password`,
-`password_provider`, `tls` (an `Arc<rustls::ClientConfig>`), `maximum_packet_size`, `keep_alive`,
+`password_provider`, `tls` (a `TlsOptions`,
+[0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), `maximum_packet_size`, `keep_alive`,
 `connect_timeout`, `delivery`, `groups`, `clock` and `runtime`. `AmqpBrokerAdapterOptions::new(url,
 id)` takes `maximum_message_size`, `link_credit`, `idle_timeout` and `virtual_host` in place of the
 MQTT-only three, as the C# side's options hold them. `MqttBrokerAdapter::new(&options)` gives
 `Result<Self, ProgrammerError>`, refusing as built what the other sides refuse as built: a password
-and a provider both, either beside a client certificate, read as the TLS configuration's
-`client_auth_cert_resolver.has_certs()`, and the ranges. Each adapter implements `BrokerAdapter`,
+and a provider both, either beside a `tls` that names a `certificate`, and the ranges; it takes no
+`ClientConfig` of the application's. Each adapter implements `BrokerAdapter`,
 with `is_linked()` and `unsettled()` its own.
 
 ### MQTT 5: a client of Bead's own, over the core's sockets
@@ -207,19 +208,30 @@ them, the will of GONE at QoS 1, RETAIN 0, Delay 0), PUBLISH (QoS 0 or 1, RETAIN
 Interval alone), PUBACK (0x00), SUBSCRIBE (one filter, QoS 1, No Local 0, Retain As Published 0,
 Retain Handling 2), UNSUBSCRIBE (one filter), PINGREQ and DISCONNECT (0x00); it reads CONNACK,
 PUBLISH, PUBACK, SUBACK, UNSUBACK, PINGRESP and DISCONNECT, each property in any order §2.2.2
-allows, and refuses AUTH. Eleven packets, which `mqtt-packets.ts` and `MqttPackets.cs` count too.
+allows, and refuses AUTH; it refuses a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under 0x80
+its table does not name as it reads it, and its adapter a SUBACK or an UNSUBACK of more than one
+code, before it looks for what awaits it (15.29). Eleven packets, which the other sides' libraries
+write and read; `mqtt-packets.ts` and `MqttPackets.cs` count a PUBLISH as `packets.rs` does (15.30).
 
 What it holds by construction: its quota per incarnation, **no other packet delayed for it**
 ([MQTT-3.3.4-8]); each packet counted `S = 1 + v(R) + R` before it goes, refused past its CONNACK's
 bound (15.30); a received packet past its own bound closes its network connection, no DISCONNECT,
-its link lost (15.29), as the row of Leveled down has it; 0x8E a takeover (15.21); one filter per
+its link lost (15.29), as the row of Leveled down has it, and so does one it cannot read, an AUTH
+among them, as on every side but the C# side on an AUTH, the row of Differences `An MQTT 5 AUTH its
+CONNECT never asked for`; over a WebSocket, its frames too: its upgrade written and judged as
+[RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1) has a client judge one, no
+extension offered, each binary frame's payload handed to its packet reader as it comes, with no
+bound on a message and nothing reserved at a frame's head, so a packet past its bound is judged at
+its length as over TCP; a ping answered with its pong, a close with a close, a text message closing
+its network connection ([MQTT-6.0.0-1], [MQTT-6.0.0-2]); 0x8E a takeover (15.21); one filter per
 UNSUBSCRIBE; no request cancelled once its packet may have gone; each WebSocket message one binary
 frame, one packet; every callback gated by its incarnation. **Its connection is one task's**,
 spawned through `crate::platform`, owning the socket, the quota, the filters and the PUBACK
-reasons; an operation takes effect as it is made, its future only waits (0044). **Its reader faces
-a peer's bytes**: it parses by checked operations under the workspace's lints, `indexing_slicing`
-and `arithmetic_side_effects` denied, held by seeded mutations, `tests/mqtt_packets_fuzz.rs`, and a
-cargo-fuzz target, `mqtt-packets`.
+reasons; an operation takes effect as it is made, its future only waits (0044). **Its readers face
+a peer's bytes**, its packets' reader and its WebSocket's frames': each parses by checked
+operations under the workspace's lints, `indexing_slicing` and `arithmetic_side_effects` denied,
+held by seeded mutations, `tests/mqtt_packets_fuzz.rs` and `tests/mqtt_websocket_frames_fuzz.rs`,
+and by a cargo-fuzz target of its own, `mqtt-packets` and `mqtt-websocket-frames`.
 
 ### AMQP 1.0's client, ahead
 
@@ -254,55 +266,64 @@ branches carry the rest:
 trait, the twin of the C# side's `IBrokerCaseBroker`, the in-memory broker's and Mosquitto's,
 `testing::link_relay` cutting a link for `lose`; against the broker `BEAD_MQTT_URL` names with the
 run's password, skipped saying so where none is given, failed where `BEAD_MQTT_REQUIRED=1`.
-`tests/vectors.rs` plays `mqttPublishBounds`, and `tests/durations.rs` the places
-`mqttBrokerAdapter.keepAlive` and `mqttBrokerAdapter.connectTimeout`. The adapter's twins of the
-other sides' tests run against `testing::mqtt_script`, a peer that writes what it sends from the
-test's own bytes, never through the client's codec, and against the fixture over TCP and WebSocket.
-**The interop**: `bead-interop-server` serves over MQTT 5, its id `rs-server`, its names
-`interop-rs` and `interop-both`, and its trials, `rs-client`, run against the TypeScript and C#
-servers; the TypeScript and C# interop tests run against it.
+`tests/vectors.rs` plays `mqttPublishBounds` and `mqttAcknowledgementCodes`, and
+`tests/durations.rs` the places `mqttBrokerAdapter.keepAlive` and
+`mqttBrokerAdapter.connectTimeout`. The adapter's twins of the other sides' tests run against
+`testing::mqtt_script`, a peer that writes what it sends from the test's own bytes, never through
+the client's codec, and against the fixture over TCP and WebSocket. **The interop**:
+`bead-interop-server` serves over MQTT 5, its id `rs-server`, its names `interop-rs` and
+`interop-both`, and its trials, `rs-client`, run against the TypeScript and C# servers; the
+TypeScript and C# interop tests run against it.
 
 ### CI
 
-The `rust` job lints the core's library with `mqtt` alone beside `websocket` and `http`; its
-`--all-features` steps take every feature. The `mqtt` job **keeps its `needs`**: it installs the
-pinned toolchain, restores the `rust` job's Linux cache read-only, builds what it runs, and runs the
-Rust side's cases, its adapter's fixture twins, its trials and the TypeScript and C# clients against
-its server over its broker, on the runner's host, beside `rust`. `fuzz.yml` and `tools/fuzz.mjs` run
-`mqtt-packets` ten minutes a week, named as the Rust side's alone, as `blueprint` is the TypeScript
-side's. The Windows leg runs every scripted twin; the fixture's twins and the cases skip there,
-saying so.
+The `rust` job lints the core's library with `mqtt` alone, beside each of `websocket`, `http`,
+`transcoding` and `gateway` alone; its `--all-features` steps take every feature. The `mqtt` job
+**keeps its `needs`**: it installs the pinned toolchain, restores the `rust` job's Linux cache
+read-only, builds what it runs, and runs the Rust side's cases, its adapter's fixture twins, its
+trials and the TypeScript and C# clients against its server over its broker, on the runner's host,
+beside `rust`. `fuzz.yml` and `tools/fuzz.mjs` run `mqtt-packets` and `mqtt-websocket-frames` ten
+minutes a week each, named as the Rust side's alone, as `blueprint` is the TypeScript side's. The
+Windows leg runs every scripted twin; the fixture's twins and the cases skip there, saying so.
 
 ## Consequences
 
 - **A build with a broker binding needs aws-lc-rs's C compiler**, as one with a socket feature does,
   the fuzz build among them.
-- **The Rust side owns one more reader of a peer's bytes**, MQTT 5's, fuzzed by a target of its own,
-  `mqtt-packets`, and by the seeded mutations of `tests/mqtt_packets_fuzz.rs`; neither has a twin,
-  since the other sides read a broker's bytes through their libraries.
+- **The Rust side owns two more readers of a peer's bytes**, MQTT 5's packets and its WebSocket's
+  frames, fuzzed by targets of their own, `mqtt-packets` and `mqtt-websocket-frames`, and by the
+  seeded mutations of `tests/mqtt_packets_fuzz.rs` and `tests/mqtt_websocket_frames_fuzz.rs`; none
+  has a twin, since the other sides read a broker's bytes through their libraries.
 - **No crate joins the lock** with `mqtt`.
-- **CI lints the core's library five ways**: with no feature, with `websocket`, `http` or `mqtt`
-  alone, and with all.
+- **CI lints the core's library** with no feature, with each of `websocket`, `http`, `mqtt`,
+  `transcoding` and `gateway` alone, and with all.
 - **Three serve `interop-both`**, the TypeScript, C# and Rust servers.
-- **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, each
-  WebSocket message one frame, a Password as text. The first is
+- **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, 0x81
+  or 0x82, and none at its stop after a packet it cannot read, each WebSocket message one frame, a
+  Password as text. The first is
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s,
-  its reason Mosquitto's will handling.
+  its reason Mosquitto's will handling. It parts from the other sides in the rows of Differences
+  `What dates an MQTT 5 link's Keep Alive, and what answers its PINGREQ`,
+  `An MQTT 5 WebSocket message, read as its frames come or once whole` and
+  `An MQTT 5 WebSocket message of text`.
 - **The `mqtt` job builds from the `rust` job's cache**, beside it, not behind it.
 - **Ahead**: AMQP 1.0's binding, `Rust's AMQP 1.0 binding`, its client by one of the three branches
   above, its fuzz target, its cases, its groups `amqpMessages` and `amqpPublishBounds`, its places
   and its interop.
 
-**Its gates**: the cases over `mqtt` of `spec/transports.json`, the group `mqttPublishBounds`, the
-two places of `mqttBrokerAdapter`, the adapter's twins, the interop over MQTT 5 both ways, the `mqtt`
-job running the Rust side, and the fuzz target `mqtt-packets`.
+**Its gates**: the cases over `mqtt` of `spec/transports.json`, the groups `mqttPublishBounds` and
+`mqttAcknowledgementCodes`, the two places of `mqttBrokerAdapter`, the adapter's twins, the interop
+over MQTT 5 both ways, the `mqtt` job running the Rust side, and the fuzz targets `mqtt-packets` and
+`mqtt-websocket-frames`.
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round, at xhigh effort. Seven objections, each checked against its probe or the code before it
-was answered: six accepted and one in part, none refused. The first is answered as the record
-stands, AMQP 1.0's client ahead.
+two rounds, at xhigh effort. The first: seven objections, each checked against its probe or the code
+before it was answered, six accepted and one in part, none refused, its first objection answered as
+the record stands, AMQP 1.0's client ahead. The second, on how its link reads a WebSocket message:
+nine objections, each checked against its probe or the code, six accepted and three in part, none
+refused.
 
 | Objection                                                                                                                                                                                                                                 | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -313,3 +334,17 @@ stands, AMQP 1.0's client ahead.
 | A new row of Differences, "A broker client's reader, fuzzed", is of no kind the table admits and states a gate as a behaviour.                                                                                                            | Accepted. No row. The Consequences, the Rust README and `tools/fuzz.mjs`'s doc name `mqtt-packets` as the Rust side's alone, as `blueprint` is the TypeScript side's, and why it has no twin: the other sides read a broker's bytes through their libraries.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | With the Rust side's client, two sides of three can send a DISCONNECT of 0x95; the leveled row's C# half is stale and its lift cell misstates what lifting takes.                                                                         | Accepted. The C# adapter's inspector reads each packet's size and ends the link, and MQTTnet's `MqttClientDisconnectOptionsReason` holds `PacketTooLarge`. The row says what forces it and what would lift it, every side keeping to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | "A build without the feature compiles nothing of it" contradicts codecs always built, compiled by every user of neither binding and by the browser's check.                                                                               | Accepted. Each codec is under its feature, `internal` re-exporting it under the same `cfg`, and the fuzz project, outside the workspace, turns the features on in its own manifest, which no application unifies with. 0049's head's parse is always built because the core consumes it; a broker's codec has no consumer but its feature. The fuzz build then compiles aws-lc-rs, which the `rust` job's fuzz build proves.                                                                                                                                                                                                                                                                                                                                  |
+
+### How a WebSocket message is read
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                            | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The proposal asks two things tungstenite 0.30 cannot give together: a frame bound of B and a bounded reservation per head. `read_frame` reserves a head's whole length once it passes its bound check, before any payload; one 10-byte head committed 101 MiB at B = 104,857,600 and 258 MiB at the largest packet's bound. Keeping the frame bound low fails EMQX, whose single batch is one frame. | Accepted. The design takes neither horn under tungstenite. The MQTT link reads its frames itself and reserves nothing at a head, which is that link's own lift in the row `What a WebSocket frame's head alone has a side hold`. That row's MQTT clause goes.                                                                                                                                                                                                                                                                             |
+| The premise misreads [MQTT-6.0.0-2]. The Rust side already reads a stream across messages; what it has is a size limit, which RFC 6455 §10.4 asks of a side that reassembles. No finite bound repairs a MUST: an EMQX batch has no ceiling.                                                                                                                                                          | Accepted. The record reads §6 so: no side assumes alignment, and a message bound is a resource limit. The design removes the reassembly on the Rust side, so it needs no limit of its own. The row is re-scoped to the one side whose platform reassembles, TypeScript, with that side's bound named.                                                                                                                                                                                                                                     |
+| There is no common effective bound to copy. C# has none. TypeScript in Node has 100 MiB and 16,384 fragments, below its own largest packet. A page cannot set one. A copied constant would carry the TypeScript side's defect over, and how the WebSocket ends past the bound is unsaid.                                                                                                             | In part. No bound is copied. C# and Rust read as frames come with no message bound, and TypeScript's reassembly is a platform row naming ws's 100 MiB and 16,384 fragments, closed by ws with 1009. The TypeScript defect is fixed in this change: in Node, `maxPayload` is the larger of 100 MiB and `maximumPacketSize`, with its own test. The 1009 question applies to TypeScript alone, and the row states it. One B on every side, the objection's first design, is refused, since two sides need none.                             |
+| 15.29 and 0041's invariant, the read at the length, regress over a WebSocket under any B: tungstenite hands on whole frames, so a packet past its bound is read whole up to B before its length is judged.                                                                                                                                                                                           | Accepted. Under the design, the Rust side judges a packet's Remaining Length as the bytes holding it come, as the C# side does. 15.29 names the WebSocket case, and the TypeScript platform's judgement once a message is whole, in the row. 0041's table is unchanged: its invariant holds on two sides of three, and the third is a platform row.                                                                                                                                                                                       |
+| A large B costs more than one reservation: a message copied into the link's buffer (2B while parsed), and k messages on the owner's unbounded queue (k×B). A constant B ignores `maximumPacketSize`. Tie B to it (EMQX: 2 × (packet + head)), parse in place, bound the queue.                                                                                                                       | In part. Under the design, every B-sized term goes: no reservation at a head, pieces of at most 64 KiB on the queue, and `link.buffer` bounded by the packet reader at `maximum_packet_size`, as over TCP. EMQX's formula, B tied to the packet bound, was weighed and refused: it doubles the reservation per head, and leaves 15.29 and the row `What a WebSocket frame's head alone has a side hold` open. The owner's unbounded queue stays as it is over TCP; bounding it is a change for every transport of the link, not this one. |
+| "The bound is the defence" against a slow peer does not hold. Under tungstenite, B is the attack's size, paid at the head. The time defence is Keep Alive, which a publishing participant keeps from firing. B bounds one buffer, not the link (65,535 unacknowledged PUBLISHes).                                                                                                                    | Accepted. The record weighs a message bound as a reassembly buffer's size and nothing more. Under the design, a slow peer costs nothing up front, only what came, and a stalled packet is held as over TCP. A bound on read progress is a separate change for every transport.                                                                                                                                                                                                                                                            |
+| The list of changes misses tests and documents: the frame test would pass vacuously (its zero bytes refused as a reserved packet type); the renamed test keeps a half its title denies; the split-packet case has no twin on TypeScript and C#; and five places state today's bound.                                                                                                                 | Accepted. The frame test is replaced by the one that sends a PUBLISH head announcing more than the bound in a message's first fragment, its link lost before the rest. The renamed test loses its second half. The split-packet twin is added on every side. The five places move in the same change: the row `What a WebSocket frame's head alone has a side hold`, 0050's Consequences, `open`'s doc, `OpenOptions`'s doc and the module's doc.                                                                                         |
+| The proposal passes over the design that removes the failure: reading each frame's payload as it comes, as over TCP. That means no message bound, no reservation, 15.29 kept, EMQX's batch read whatever its size, parity with C#, and the row `What a WebSocket frame's head alone has a side hold` lifted for the MQTT link; it costs an upgrade, a frame reader and a fuzz target of Bead's own.  | Accepted. It is the design, chosen over a named bound with its cost weighed: it keeps 0041's invariant and 0050's path, and leaves no divergence open. Several of tungstenite's public pieces serve it: `generate_key`, `derive_accept_key`, `FrameHeader::parse` and `Frame::format`. The rest is Bead's own: the upgrade over the core's socket, the fragment state, control frames between fragments, the refusals of RFC 6455 §5, and a fuzz target `mqtt-websocket-frames` under 0050's rule.                                        |
+| MQTT §6 is read from one side only. On [MQTT-6.0.0-1], TypeScript and C# read a text message's bytes as packets, which Rust refuses. TypeScript in Node offers permessage-deflate, which no other link does. Neither is a row.                                                                                                                                                                       | In part. Both are recorded. The deflate offer is closed in this change: TypeScript in Node passes `perMessageDeflate: false`, Rust refuses a 101 naming an extension, and a twin on every side checks the offer. The text message becomes an open row of Differences, with a test on each side showing it. Its lift, a `createWebsocket` of the TypeScript side's own in Node and a C# channel of its own, is named in the row and left to its own change, to keep this one about a message's reading.                                    |

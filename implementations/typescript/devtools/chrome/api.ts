@@ -47,6 +47,8 @@ export interface IChrome {
     | undefined;
   runtime: {
     id?: string | undefined;
+    // set only while a callback or a disconnect's listeners run, as Chrome tells them what failed
+    readonly lastError?: { message?: string } | undefined;
     onConnect: IExtensionEvent<(port: IPort) => void>;
     connect(options: { name: string }): IPort;
     getURL(path: string): string;
@@ -58,4 +60,12 @@ export interface IChrome {
 /** The extension API, where the extension's own scripts run. */
 export const chromeOf = (): IChrome => {
   return (globalThis as unknown as { chrome: IChrome }).chrome;
+};
+
+/**
+ * Why a port closed, read as its disconnect's listener must read it: Chrome reports a
+ * `runtime.lastError` that no listener read as unchecked.
+ */
+export const lastErrorOf = (): string | undefined => {
+  return chromeOf().runtime.lastError?.message;
 };

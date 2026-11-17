@@ -6,17 +6,13 @@ platform's own conversion — JavaScript's arithmetic on a double, .NET's TimeSp
 ticks, and Rust's Duration, rounded to the nanosecond — and fails on any outcome one reaches
 otherwise, unless that outcome, or its input, crosses a row of docs/support.md for that language;
 and on any input in seconds within a platform's error of a half: a tick, or half a nanosecond."""
-import json
 import math
-import os
 from decimal import Decimal
 from fractions import Fraction
 
 from bounds import DEFAULTS
+from conformance import unit_order, write_json
 from spec_version import spec_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 
 # the ceiling, 2³¹ − 1 ms, as every platform's timers hold one alike
 CEILING = 2 ** 31 - 1
@@ -478,14 +474,15 @@ places = [
         ],
         'observed': 'held',
     },
-    # MQTT 5's adapter (spec 15.26, 15.27, 15.30): its Keep Alive, on its library's timer, and the
-    # wait for its password, where it asks its provider, and its CONNACK, from its start's call; a
-    # subscription let go's, for its UNSUBACK from its UNSUBSCRIBE; and its stop's, for what it was
-    # handed and its UNSUBACKs from its call, then for its DISCONNECT, each observed by its refusal
-    # alone; a Keep Alive is held in whole seconds, 65,535 at most, a ceiling of its own below 1.4's
+    # MQTT 5's adapter (spec 15.26, 15.27, 15.30): its Keep Alive, on its library's timer, a shorter
+    # Server Keep Alive replacing it (spec 15.26), and the wait for its password, where it asks its
+    # provider, and its CONNACK, from its start's call; a subscription let go's, for its UNSUBACK from
+    # its UNSUBSCRIBE; and its stop's, for what it was handed and its UNSUBACKs from its call, then
+    # for its DISCONNECT, each observed by its refusal alone; a Keep Alive is held in whole seconds,
+    # 65,535 at most, a ceiling of its own below 1.4's
     {
         'id': 'mqttBrokerAdapter.keepAlive',
-        'name': "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
+        'name': "an MQTT 5 adapter's Keep Alive, its CONNECT's, which its broker counts its link lost by where its CONNACK names no Server Keep Alive",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.30',
@@ -607,12 +604,6 @@ def outcome_of(value, place):
     return met
 
 
-def unit_order(unit):
-    """A unit's place: the spec's first, then a companion's, behind its name and a colon."""
-    document, _, number = unit.rpartition(':')
-    return document, tuple(int(part) for part in number.split('.'))
-
-
 def clauses_of(place):
     """The units a place cites: what it observes of each, and nothing else — 1.4, which holds and
     refuses its durations; the clause that says whether it may be without end, where 1.4 does not
@@ -695,9 +686,7 @@ document = {
                                             'observed', 'outcomes') if key in place} for place in places],
 }
 
-with open(ROOT + 'durations.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+write_json('durations.json', document)
 
 print(len(places), 'places,', sum(len(place['ways']) for place in places), 'ways,', len(inputs), 'inputs,',
       sum(len(place['outcomes']) for place in places), 'outcomes')

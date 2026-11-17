@@ -316,6 +316,73 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
     assert_eq!(*locked(&called), [true, true]);
 }
 
+#[tokio::test]
+async fn declares_each_resolver_and_requester_once_to_a_registry() {
+    let pair = pair().await;
+    let greeter = Greeter::new();
+    let service = greeter.service(loud());
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let declaring = Arc::clone(&declared);
+    pair.server
+        .router()
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(move |procedure, _| {
+                locked(&declaring).push(format!("requester {}", procedure.procedure_name));
+            }),
+            called: Arc::new(|_| {}),
+        });
+    service
+        .on(
+            &greeter.hello,
+            Arc::new(|_, response| response.result("hi".to_owned())),
+        )
+        .expect("hello registered");
+    service
+        .on_notifying(
+            &greeter.news,
+            Arc::new(|_, response| response.result("subscribed".to_owned())),
+        )
+        .expect("news registered");
+    service.offer(&pair.server).expect("offered");
+    service
+        .on(
+            &greeter.login,
+            Arc::new(|_, response| response.result("in".to_owned())),
+        )
+        .expect("login registered after the offer");
+
+    let mut options = CommandOptions::new(Arc::clone(&pair.connection_handle));
+    options.timeout = Some(core::time::Duration::from_millis(50));
+    let call = service
+        .command_of(&greeter.clock)
+        .expect("clock requester")
+        .call("now".to_owned(), &options)
+        .expect("clock called");
+    drop(
+        crate::testing::patience(core::time::Duration::from_secs(10), call)
+            .await
+            .expect("the command settles"),
+    );
+
+    // * a second resolver at an address is refused; read what the router actually holds
+    let resolvers = pair
+        .server
+        .router()
+        .owner()
+        .run(|state| {
+            locked(&state.core.resolvers)
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
+        })
+        .await
+        .expect("the registered resolvers");
+    assert_eq!(resolvers, [(7, 1), (7, 2), (7, 5)]);
+    let mut declarations = locked(&declared).clone();
+    declarations.sort();
+    assert_eq!(declarations, ["requester clock", "requester guarded"]);
+}
+
 async fn call(
     pair: &Pair,
     (descriptor, payload): (&TextDescriptor, &str),

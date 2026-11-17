@@ -326,6 +326,47 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Gives_each_exchange_s_client_the_router_limits_it_is_given()
+    {
+        var limited = await Started((options) =>
+        {
+            return options with { Limits = new RouterLimits { MaximumPayloadBytes = 16 } };
+        });
+        var unlimited = await Started();
+        var past = $"{{\"aString\":\"{new string('a', 40)}\"}}";
+
+        try
+        {
+            // a request within its client's bound goes
+            using var within = await limited.Client.SendAsync(Json("/api/Transcoding/echo", "{\"aString\":\"a\"}"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, "{\"aString\":\"a\"}"), (within.StatusCode, await within.Content.ReadAsStringAsync(Cancelled)));
+
+            // * one past it refused by its exchange's own client before it goes, each exchange alike
+            for (var count = 1; count <= 2; count += 1)
+            {
+                using var refused = await limited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+                using var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync(Cancelled));
+
+                Assert.Equal(HttpStatusCode.RequestEntityTooLarge, refused.StatusCode);
+                Assert.Equal(
+                    (34, "PAYLOAD_TOO_LARGE", "a payload is 16 bytes at most, not 42"),
+                    (problem.RootElement.GetProperty("code").GetInt32(), problem.RootElement.GetProperty("title").GetString(), problem.RootElement.GetProperty("detail").GetString()));
+            }
+
+            // a gateway given none holds by the defaults
+            using var echoed = await unlimited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, past), (echoed.StatusCode, await echoed.Content.ReadAsStringAsync(Cancelled)));
+        }
+        finally
+        {
+            await Stopped(limited);
+            await Stopped(unlimited);
+        }
+    }
+
+    [Fact]
     public async Task Presents_the_Authorization_field_ELSEWHERE_or_as_a_JWT_under_bearer_jwt()
     {
         var elsewhere = await Started();
@@ -446,6 +487,61 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Refuses_a_HEAD_navigation_and_one_an_object_or_an_embed_makes_from_another_site_to_a_route_and_to_the_document()
+    {
+        var started = await Started();
+
+        static HttpRequestMessage Navigated(HttpMethod method, (string Path, string? Destination) to)
+        {
+            var request = new HttpRequestMessage(method, to.Path);
+
+            request.Headers.TryAddWithoutValidation("sec-fetch-site", "cross-site");
+            request.Headers.TryAddWithoutValidation("sec-fetch-mode", "navigate");
+
+            if (to.Destination is { } destination)
+            {
+                request.Headers.TryAddWithoutValidation("sec-fetch-dest", destination);
+            }
+
+            return request;
+        }
+
+        try
+        {
+            // a GET of a method marked NO_SIDE_EFFECTS, and the document
+            foreach (var path in new[] { "/v1/books/2", "/openapi.json" })
+            {
+                // * a GET a page or a frame navigates to, taken, as web.dev's resource isolation policy takes one
+                foreach (var destination in new[] { null, "document", "iframe" })
+                {
+                    using var taken = await started.Client.SendAsync(Navigated(HttpMethod.Get, (path, destination)), Cancelled);
+
+                    Assert.Equal((path, destination, HttpStatusCode.OK), (path, destination, taken.StatusCode));
+                }
+
+                // a HEAD navigation, and a GET an object or an embed makes, refused
+                foreach (var (method, destination) in new[] { (HttpMethod.Head, (string?)null), (HttpMethod.Head, "document"), (HttpMethod.Get, "object"), (HttpMethod.Get, "embed") })
+                {
+                    using var refused = await started.Client.SendAsync(Navigated(method, (path, destination)), Cancelled);
+
+                    Assert.Equal(
+                        (path, method, destination, HttpStatusCode.Forbidden, "origin-refused"),
+                        (path, method, destination, refused.StatusCode, refused.Headers.GetValues("bead-refusal").Single()));
+                }
+
+                // a HEAD from no page of another site, taken
+                using var own = await started.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path), Cancelled);
+
+                Assert.Equal((path, HttpStatusCode.OK), (path, own.StatusCode));
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_a_stream_s_request_that_carries_Last_Event_ID_with_204_and_no_call()
     {
         var started = await Started();
@@ -529,6 +625,75 @@ public sealed class HttpGatewayTests
         }
         finally
         {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_HEAD_that_asks_a_stream_as_its_GET_begins_and_ends_at_its_head_its_subscription_with_it()
+    {
+        // * on its own listener, and mounted on an application's server: each holds one stream an address
+        static HttpGatewayOptions OneStream(HttpGatewayOptions options)
+        {
+            return options with { MaximumConnectionsPerAddress = 1 };
+        }
+
+        var started = await Started(OneStream);
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(OneStream(Exchanges.OptionsOf(service.Memory, null)));
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            foreach (var (where, at, memory) in new[] { ("its own listener", started.Port, started.Service.Memory), ("mounted", port, service.Memory) })
+            {
+                var drawn = 0;
+                var closed = 0;
+
+                memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+                memory.Close += (_, _) => { Interlocked.Increment(ref closed); };
+
+                using var socket = await Opened(at, Encoding.ASCII.GetBytes($"HEAD /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\n\r\n"));
+                var head = await ReadUntil(socket, "\r\n\r\n");
+                var lines = head[..head.IndexOf("\r\n\r\n", StringComparison.Ordinal)].Split("\r\n");
+                var fields = lines.Skip(1).ToDictionary(
+                    (field) =>
+                    {
+                        return field[..field.IndexOf(':', StringComparison.Ordinal)].Trim();
+                    },
+                    (field) =>
+                    {
+                        return field[(field.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim();
+                    },
+                    StringComparer.OrdinalIgnoreCase);
+
+                // its GET's head, its call made: 200 text/event-stream and 6.2's fields, with no content
+                Assert.Equal((where, "HTTP/1.1 200 OK"), (where, lines[0]));
+                Assert.Equal(
+                    (where, "text/event-stream", "no-store", "nosniff", "Origin"),
+                    (where, fields.GetValueOrDefault("content-type"), fields.GetValueOrDefault("cache-control"), fields.GetValueOrDefault("x-content-type-options"), fields.GetValueOrDefault("vary")));
+                Assert.False(fields.ContainsKey("content-length"), where);
+                Assert.False(fields.ContainsKey("transfer-encoding"), where);
+                Assert.EndsWith("\r\n\r\n", head, StringComparison.Ordinal);
+                Assert.Equal(1, Volatile.Read(ref drawn));
+
+                // * its exchange's connection closed with its response, and its subscription with it
+                await Until(() => { return Volatile.Read(ref closed) == 1; });
+
+                // its response ended at its head, and its place freed: the next request on its socket, a
+                // GET that opens the same stream, answered
+                await socket.SendAsync(Encoding.ASCII.GetBytes($"GET /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"), Cancelled);
+
+                var stream = await ReadUntil(socket, "event: result\nid: 1\ndata: {}\n\n");
+
+                Assert.StartsWith("HTTP/1.1 200 OK\r\n", stream, StringComparison.Ordinal);
+                Assert.Contains("text/event-stream", stream, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
             await Stopped(started);
         }
     }
@@ -835,6 +1000,178 @@ public sealed class HttpGatewayTests
 
     // transcoding 7.6.27
     [Fact]
+    public async Task Refuses_500_a_body_read_before_it_by_the_server_it_is_mounted_on_reported_its_call_never_made()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            BodyGracePeriod = TimeSpan.FromMilliseconds(100),
+            MaximumExchangesPerAddress = 1,
+        });
+        var told = new List<string>();
+        var parted = new List<string>();
+        var calls = 0;
+
+        gateway.Error += (reason) =>
+        {
+            lock (told)
+            {
+                told.Add($"{reason.GetType().Name}: {reason.Message}");
+            }
+        };
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref calls); };
+
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+
+            foreach (var reader in new[] { "taken", "peek", "completed", "examine" })
+            {
+                foreach (var (framing, fields, body) in new[]
+                {
+                    ("JSON, content-length", new[] { "content-length: 13" }, "{\"anInt32\":1}"),
+                    ("JSON, chunked", ["transfer-encoding: chunked"], "d\r\n{\"anInt32\":1}\r\n0\r\n\r\n"),
+                    ("chunked, empty", ["transfer-encoding: chunked"], "0\r\n\r\n"),
+                })
+                {
+                    var cell = $"{reader}, {framing}";
+                    var before = (Calls: Volatile.Read(ref calls), Told: told.Count);
+                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body)));
+                    var made = Volatile.Read(ref calls) - before.Calls;
+                    List<string> reported;
+
+                    lock (told)
+                    {
+                        reported = told[before.Told..];
+                    }
+
+                    // * its place released: the address's one call answers
+                    using var next = await client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+                    parted.AddRange(new[]
+                    {
+                        answered.Status == 500 ? "" : $"status {answered.Status}",
+                        answered.Fields.GetValueOrDefault("bead-refusal") is { } reason ? $"bead-refusal {reason}" : "",
+                        answered.Body == "{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}" ? "" : $"body {answered.Body}",
+                        answered.Fields.GetValueOrDefault("connection") == "close" ? "" : $"connection {answered.Fields.GetValueOrDefault("connection")}",
+                        reported is ["InvalidOperationException: a body read before the gateway took its request"] ? "" : $"reported [{string.Join(", ", reported)}]",
+                        made == 0 ? "" : $"{made} call(s)",
+                        next.StatusCode == HttpStatusCode.OK ? "" : $"next {(int)next.StatusCode}",
+                    }.Where((part) =>
+                    {
+                        return part.Length > 0;
+                    }).Select((part) =>
+                    {
+                        return $"{cell}: {part}";
+                    }));
+                }
+            }
+
+            Assert.Empty(parted);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    // transcoding 10.1.10
+    [Fact]
+    public async Task Reads_a_body_that_came_empty_as_empty_whatever_read_it_before()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            BodyGracePeriod = TimeSpan.FromMilliseconds(100),
+            MaximumExchangesPerAddress = 1,
+        });
+        var reported = ReportedBy(gateway);
+        var parted = new List<string>();
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            string[] fields = ["content-length: 0", "connection: close"];
+            var untouched = await Exchanged(port, EchoOctetsOf(port, (fields, "")));
+
+            Assert.Equal((400, "application/problem+json"), (untouched.Status, untouched.Fields.GetValueOrDefault("content-type")));
+
+            // * a chunked body that came empty, untouched, read as the empty body: only a body its
+            // server tells begun is taken
+            var chunked = await Exchanged(port, EchoOctetsOf(port, (["transfer-encoding: chunked", "connection: close"], "0\r\n\r\n")));
+
+            Assert.Equal((untouched.Status, null, untouched.Body), (chunked.Status, chunked.Fields.GetValueOrDefault("bead-refusal"), chunked.Body));
+
+            foreach (var reader in new[] { "taken", "peek", "examine" })
+            {
+                var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], "")));
+                var seen = (answered.Status, Reason: answered.Fields.GetValueOrDefault("bead-refusal"), answered.Body);
+
+                if (seen != (untouched.Status, null, untouched.Body))
+                {
+                    parted.Add($"{reader}, content-length: 0: {seen}");
+                }
+            }
+
+            Assert.Empty(parted);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Reads_from_its_start_a_body_the_server_it_is_mounted_on_buffered()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var reported = ReportedBy(gateway);
+        var parted = new List<string>();
+        var calls = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref calls); };
+
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            foreach (var reader in new[] { "buffered", "buffered-partial", "buffered-pipe", "replaced" })
+            {
+                foreach (var (framing, fields, body) in new[]
+                {
+                    ("content-length", new[] { "content-length: 13" }, "{\"anInt32\":1}"),
+                    ("chunked", ["transfer-encoding: chunked"], "d\r\n{\"anInt32\":1}\r\n0\r\n\r\n"),
+                })
+                {
+                    var before = Volatile.Read(ref calls);
+                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, "connection: close", $"x-reader: {reader}"], body)));
+                    var made = Volatile.Read(ref calls) - before;
+
+                    if ((answered.Status, answered.Body, made) != (200, "{\"anInt32\":1}", 1))
+                    {
+                        parted.Add($"{reader}, {framing}: {answered.Status} {answered.Body}, {made} call(s)");
+                    }
+                }
+            }
+
+            Assert.Empty(parted);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    // transcoding 7.6.28
+    [Fact]
     public async Task Answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem()
     {
         // * a clock that breaks as a body is read, past every gate
@@ -851,6 +1188,90 @@ public sealed class HttpGatewayTests
             Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
             Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
             Assert.Equal(["the clock broke"], reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // transcoding 7.6
+    [Fact]
+    public async Task Ends_an_exchange_whose_host_throws_as_its_head_is_written_reported_and_answers_the_next()
+    {
+        // its host fails a refusal's head once, its 500 then answered with none of the refusal's
+        // fields, or each time, its exchange then aborted; or each time after a call that failed, the
+        // 500 of what no gate foresaw aborted alike
+        foreach (var (times, isCall) in new[] { (1, false), (int.MaxValue, false), (int.MaxValue, true) })
+        {
+            await using var service = await TranscodingService.Start();
+            var options = Exchanges.OptionsOf(service.Memory, null);
+            // * a clock that breaks as the call's body is read, past every gate
+            await using var gateway = new HttpGateway(isCall ? options with { Clock = new BrokenClock() } : options);
+            var reported = ReportedBy(gateway);
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var lifetime = new DeadlineLifetime(cancelling);
+            // a path no route matches, refused 404 as its head is written; or a call
+            var context = PaceContext(isCall ? "answer" : "problem", cancelling.Token);
+            using var body = new MemoryStream();
+
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Features.Set<IHttpResponseFeature>(new FailingHeadFeature(times));
+            context.Response.Body = body;
+
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+            if (times == 1)
+            {
+                Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+                Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", Encoding.UTF8.GetString(body.ToArray()));
+                Assert.False(context.Response.Headers.ContainsKey("bead-refusal"));
+                Assert.Equal(0, lifetime.Aborts);
+            }
+            else
+            {
+                Assert.Empty(body.ToArray());
+                Assert.Equal(1, lifetime.Aborts);
+            }
+
+            Assert.Equal([isCall ? "the clock broke" : "the host would not write its head"], reported);
+
+            var next = PaceContext("problem", Cancelled);
+
+            await gateway.Answer(next).WaitAsync(Patience, Cancelled);
+            Assert.Equal(StatusCodes.Status404NotFound, next.Response.StatusCode);
+            Assert.Single(reported);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_route_s_variable_that_names_no_field_500_reported_none_of_its_words_in_the_problem()
+    {
+        // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+        // programmer's error its binding meets, past every gate, before any connection is drawn
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.GetBook.Procedure ? route with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/v1/{nope}" }] } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            using var answered = await started.Client.GetAsync(new Uri("/v1/x", UriKind.Relative), Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
+            Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(0, drawn);
+            Assert.Contains("nope", Assert.Single(reported), StringComparison.Ordinal);
         }
         finally
         {
@@ -2636,7 +3057,7 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
-    public async Task Stops_a_document_when_its_response_write_throws()
+    public async Task Stops_a_document_silently_when_its_client_goes_during_a_write()
     {
         var bytes = Enumerable.Repeat((byte)'a', 2 * 65536 + 7).ToArray();
         await using var service = await TranscodingService.Start();
@@ -2645,7 +3066,7 @@ public sealed class HttpGatewayTests
         var lifetime = new DeadlineLifetime(cancelling);
         var context = PaceContext("document", cancelling.Token);
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
-        using var body = new FailedDocumentBody();
+        using var body = new FailedDocumentBody(new IOException("the document write failed"));
         context.Response.Body = body;
         var reported = ReportedBy(gateway);
 
@@ -2655,6 +3076,86 @@ public sealed class HttpGatewayTests
         Assert.Equal([65536], body.Sizes);
         Assert.Equal(0, lifetime.Aborts);
         Assert.Empty(reported);
+    }
+
+    [Fact]
+    public async Task Stops_a_document_when_its_response_write_throws()
+    {
+        var bytes = Enumerable.Repeat((byte)'a', 2 * 65536 + 7).ToArray();
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = bytes });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var context = PaceContext("document", cancelling.Token);
+        using var body = new FailedDocumentBody(new InvalidOperationException("the document write failed"));
+        // * its head counts as sent once its body is written to, as on a host, so no problem follows the report
+        context.Features.Set<IHttpResponseFeature>(new WrittenResponseFeature(() => { return body.Sizes.Count > 0; }));
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(body.ToArray());
+        Assert.Equal([65536], body.Sizes);
+        Assert.Equal(["the document write failed"], reported);
+    }
+
+    [Fact]
+    public async Task Stops_a_stream_when_its_response_write_throws()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var lifetime = new DeadlineLifetime(cancelling);
+        var context = PaceContext("event", cancelling.Token);
+        using var body = new FailedStreamBody();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Features.Set<IHttpResponseFeature>(new WrittenResponseFeature(() => { return body.Writes > 0; }));
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            // * its result goes; the write of its first notification throws, which ends its exchange
+            await body.FirstWritten.Task.WaitAsync(Patience, Cancelled);
+            await service.Watched(2);
+            await serving.WaitAsync(Patience, Cancelled);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+
+            Assert.Equal(2, body.Writes);
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal(["the stream write failed"], reported);
+            Assert.Equal(1, lifetime.Aborts);
+        }
+        finally
+        {
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class FailedStreamBody : MemoryStream
+    {
+        public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Writes { get; private set; }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Writes += 1;
+
+            if (Writes > 1)
+            {
+                throw new InvalidOperationException("the stream write failed");
+            }
+
+            var written = base.WriteAsync(buffer, cancellationToken);
+
+            FirstWritten.TrySetResult();
+
+            return written;
+        }
     }
 
     [Fact]
@@ -2748,7 +3249,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    private sealed class FailedDocumentBody : MemoryStream
+    private sealed class FailedDocumentBody(Exception failure) : MemoryStream
     {
         public List<int> Sizes { get; } = [];
 
@@ -2756,7 +3257,100 @@ public sealed class HttpGatewayTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Sizes.Add(buffer.Length);
-            throw new IOException("the document write failed");
+            throw failure;
+        }
+    }
+
+    // a response whose host throws as its status is set, `times` times; the rest a plain feature's
+    private sealed class FailingHeadFeature(int times) : IHttpResponseFeature
+    {
+        private readonly HttpResponseFeature _feature = new();
+        private int _fails = times;
+
+        public int StatusCode
+        {
+            get
+            {
+                return _feature.StatusCode;
+            }
+            set
+            {
+                if (_fails > 0)
+                {
+                    _fails -= 1;
+
+                    throw new InvalidOperationException("the host would not write its head");
+                }
+
+                _feature.StatusCode = value;
+            }
+        }
+
+        public string? ReasonPhrase
+        {
+            get
+            {
+                return _feature.ReasonPhrase;
+            }
+            set
+            {
+                _feature.ReasonPhrase = value;
+            }
+        }
+
+        public IHeaderDictionary Headers
+        {
+            get
+            {
+                return _feature.Headers;
+            }
+            set
+            {
+                _feature.Headers = value;
+            }
+        }
+
+        [Obsolete("The body is the response body feature's.")]
+        public Stream Body
+        {
+            get
+            {
+                return _feature.Body;
+            }
+            set
+            {
+                _feature.Body = value;
+            }
+        }
+
+        public bool HasStarted
+        {
+            get
+            {
+                return _feature.HasStarted;
+            }
+        }
+
+        public void OnStarting(Func<object, Task> callback, object state)
+        {
+            _feature.OnStarting(callback, state);
+        }
+
+        public void OnCompleted(Func<object, Task> callback, object state)
+        {
+            _feature.OnCompleted(callback, state);
+        }
+    }
+
+    // a response started once its body was written to, as a host's is
+    private sealed class WrittenResponseFeature(Func<bool> isWritten) : HttpResponseFeature
+    {
+        public override bool HasStarted
+        {
+            get
+            {
+                return isWritten();
+            }
         }
     }
 
@@ -2941,7 +3535,6 @@ public sealed class HttpGatewayTests
     [Theory]
     [InlineData("io")]
     [InlineData("cancelled")]
-    [InlineData("state")]
     public async Task Stops_heartbeats_after_their_write_loses_its_response(string kind)
     {
         await using var service = await TranscodingService.Start();
@@ -2955,8 +3548,7 @@ public sealed class HttpGatewayTests
         Exception failure = kind switch
         {
             "io" => new IOException("the heartbeat response is gone"),
-            "cancelled" => new OperationCanceledException("the heartbeat response is gone", cancelling.Token),
-            _ => new InvalidOperationException("the heartbeat response is gone"),
+            _ => new OperationCanceledException("the heartbeat response is gone", cancelling.Token),
         };
         using var body = new HeartbeatResponseBody(failure);
         var context = new DefaultHttpContext();
@@ -3214,6 +3806,129 @@ public sealed class HttpGatewayTests
         }
 
         return (int.Parse(head[0].Split(' ')[1], CultureInfo.InvariantCulture), fields, text[(end + 4)..]);
+    }
+
+    // a gateway mapped as the fallback of an application of Kestrel's, behind a middleware that
+    // reads each request's body first, by its x-reader, as the server it is mounted on may; and
+    // the port it listens on
+    private static async Task<(WebApplication Application, int Port)> MountedBehindReader(HttpGateway gateway)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrel((kestrel) =>
+        {
+            kestrel.Listen(IPAddress.Loopback, 0);
+        });
+
+        var application = builder.Build();
+
+        application.Use(ReadBefore);
+        application.MapBeadGateway(gateway);
+        await application.StartAsync(Cancelled);
+
+        return (application, new Uri(application.Urls.First()).Port);
+    }
+
+    // a request's body read before the gateway takes it, by its x-reader: taken whole, two bytes
+    // peeked, its reader completed, its first read examined and left, or buffered and read whole,
+    // in part or through its reader, or copied into a stream of the middleware's own; any other,
+    // untouched
+    private static async Task ReadBefore(HttpContext context, RequestDelegate next)
+    {
+        var request = context.Request;
+        var aborted = context.RequestAborted;
+
+        switch (request.Headers["x-reader"].ToString())
+        {
+            case "taken":
+                {
+                    await request.Body.CopyToAsync(Stream.Null, aborted);
+
+                    break;
+                }
+            case "peek":
+                {
+                    _ = await request.Body.ReadAsync(new byte[2], aborted);
+
+                    break;
+                }
+            case "completed":
+                {
+                    await Drained(request);
+                    await request.BodyReader.CompleteAsync();
+
+                    break;
+                }
+            case "examine":
+                {
+                    var read = await request.BodyReader.ReadAsync(aborted);
+
+                    request.BodyReader.AdvanceTo(read.Buffer.Start, read.Buffer.End);
+
+                    break;
+                }
+            case "buffered":
+                {
+                    request.EnableBuffering();
+                    await request.Body.CopyToAsync(Stream.Null, aborted);
+
+                    break;
+                }
+            case "buffered-partial":
+                {
+                    request.EnableBuffering();
+                    _ = await request.Body.ReadAsync(new byte[2], aborted);
+
+                    break;
+                }
+            case "buffered-pipe":
+                {
+                    request.EnableBuffering();
+                    await Drained(request);
+
+                    break;
+                }
+            case "replaced":
+                {
+                    var copy = new MemoryStream();
+
+                    await request.Body.CopyToAsync(copy, aborted);
+                    request.Body = copy;
+
+                    break;
+                }
+            default:
+                {
+                    break;
+                }
+        }
+
+        await next(context);
+    }
+
+    // a request's body read through its reader to its end, its reader left open
+    private static async Task Drained(HttpRequest request)
+    {
+        while (true)
+        {
+            var read = await request.BodyReader.ReadAsync(request.HttpContext.RequestAborted);
+
+            request.BodyReader.AdvanceTo(read.Buffer.End);
+
+            if (read.IsCompleted)
+            {
+                return;
+            }
+        }
+    }
+
+    // a request to echo's route, its fields and its body as they go
+    private static byte[] EchoOctetsOf(int port, (string[] Fields, string Body) request)
+    {
+        string[] lines = ["POST /api/Transcoding/echo HTTP/1.1", $"host: 127.0.0.1:{port}", "content-type: application/json", .. request.Fields, "", request.Body];
+
+        return Encoding.UTF8.GetBytes(string.Join("\r\n", lines));
     }
 
     // what a case's response parts from it: its status, its mark, and its problem's words exactly

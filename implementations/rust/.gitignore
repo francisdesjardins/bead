@@ -10,3 +10,7 @@
 # it, and its build
 /tools/protobuf-conformance/generated/
 /tools/protobuf-conformance/target/
+# the testee of the protovalidate differential: the code tools/protovalidate-differential.mjs
+# generates into it, and its build
+/tools/protovalidate-differential/src/generated/
+/tools/protovalidate-differential/target/

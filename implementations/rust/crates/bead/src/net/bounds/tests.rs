@@ -241,7 +241,8 @@ fn reports_a_connection_dropped_behind_its_pace_by_its_handle_naming_minimum_sen
 }
 
 #[test]
-fn holds_a_whole_number_above_0_and_refuses_0_naming_its_option() {
+fn holds_a_whole_number_above_0_or_from_0_where_0_holds_none_and_refuses_any_other_naming_its_option()
+ {
     assert_eq!(hold_count("n", 1).unwrap(), 1, "a whole number above 0");
     assert_eq!(
         hold_count("n", 0).unwrap_err().to_string(),

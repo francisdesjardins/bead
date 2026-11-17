@@ -104,7 +104,10 @@ runtime reader drops such a record before its library reads, which narrows what 
 reads in the library's place, where protobuf keeps it among the unknown fields: a row of "Leveled
 down" ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md#on-the-corpus-that-writes-every-field-of-probe)).
 A repeated field's items and a map's values keep the number on every side, the Rust side's generator
-opening each such field of a closed enum: a row of "Leveled down".
+opening each such field of a closed enum, and its `ProtoCodec::new` refusing a message whose
+generator left one closed, a `ProgrammerError`
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)): a
+row of "Leveled down".
 
 **One runtime codec of a schema on each side holds 17.9 once**: `protoCodecOf(schema)` of
 `@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor, bytes)`
@@ -121,10 +124,10 @@ TypeScript side throws a `SyntaxError` when it reads and a `TypeError` when it w
 codecs do; the C# side a `FormatException` both ways, its codecs' type; the Rust side a
 `CodecRefusal` both ways; the words are 17.2's, `a required field unset`, and the field's full name,
 of the schema and never a key the peer sent, and its path ride in the refusal's cause
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The public walks, the C#
-side's `ProtoRequired.Check` and the Rust side's `check_required`, refuse past 17.9.3's bound with
-the same refusal. The walk is Bead's own on every side, its facts in the one shape per descriptor
-`ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The walks, internal on every
+side, the C# side's `ProtoRequired.Check` and the Rust side's `checked`, refuse past 17.9.3's bound
+with the same refusal. The walk is Bead's own on every side, its facts in the one shape per
+descriptor `ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
 `ProtoSchema`, read once from its pool: each message's required fields, the message fields that
 reach one, and its singular closed enums, each with the numbers its enum declares. Reachability is
 one search over the descriptor's closure, cycles included, with no flag cached mid-search.
@@ -160,7 +163,7 @@ unset does not read at the gateway, 502 (7.5.2), and an `Any`'s message is writt
 the field left out, as C++ and Go write one.
 
 **A PATCH's derived mask is set on the message**, by proto names, after steps 1 to 3 and before step
-4, on the TypeScript and C# sides, never read back through 5.4's form, so a required `update_mask`
+4, on every side, never read back through 5.4's form, so a required `update_mask`
 binds and a body naming `line_1` binds. A required field of the body's message is always among the
 derived paths, so a caller keeps one unchanged only by an `update_mask` of its own, as
 [AIP-203](https://google.aip.dev/203) has a required field marked by `field_behavior` and not by
@@ -198,7 +201,8 @@ parity. A singular closed enum's undeclared number, written back: dropped on eve
 library reads, where Enum Behavior keeps it, a row of "Leveled down" that lifts when Google.Protobuf
 keeps it among a message's unknown fields and protobuf-es keeps it wherever it reads it. A repeated
 closed enum's item, or a map's value, of an undeclared number: kept on every side, the Rust side's
-generator opening such a field, where Enum Behavior moves it among the unknown fields, a row of
+generator opening such a field and its codec refusing a message whose generator left one closed,
+where Enum Behavior moves it among the unknown fields, a row of
 "Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the C# side can drop
 it in its filter and the Rust side's generator can leave such a field closed, together.
 

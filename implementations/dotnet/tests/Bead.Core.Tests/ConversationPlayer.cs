@@ -56,7 +56,7 @@ internal static class ConversationPlayer
     // never passes with what it asks left unplayed
     private static readonly HashSet<string> StepKeys =
     [
-        "advance", "carried", "carries", "close", "counted", "expect", "on", "open", "procedures", "report",
+        "advance", "carried", "carries", "close", "closed", "counted", "expect", "on", "open", "procedures", "report",
         "secure", "send", "token", "twoWay", "until", "wall",
     ];
 
@@ -618,6 +618,23 @@ internal static class ConversationPlayer
                     await scheduler.WhenIdle();
                 }
 
+                // * the server closed it of its own accord, within the player's patience, and nothing
+                // more came on it
+                if (step.TryGetProperty("closed", out _))
+                {
+                    var waited = System.Diagnostics.Stopwatch.StartNew();
+
+                    while (!transport.IsClosedByServer(connection))
+                    {
+                        Assert.True(waited.Elapsed < Patience, $"the server closed {connection}");
+                        await scheduler.WhenIdle();
+                        await Task.Delay(1, TestContext.Current.CancellationToken);
+                    }
+
+                    await scheduler.WhenIdle();
+                    Assert.Null(transport.Next(connection));
+                }
+
                 // a timer armed on the server's clock, due that many milliseconds from now, within a patience
                 if (step.TryGetProperty("until", out var until))
                 {
@@ -757,6 +774,9 @@ internal static class ConversationPlayer
 
         Task Closed(string name);
 
+        // whether the server closed the connection a name opened last, of its own accord
+        bool IsClosedByServer(string name);
+
         Task CloseEach();
 
         (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name);
@@ -776,6 +796,9 @@ internal static class ConversationPlayer
 
         // by name, its client, its handle and its port; and back
         private readonly Dictionary<string, MemoryTransportClient> _clients = [];
+
+        // the handles whose connection closed while the player did not close it: the server did
+        private readonly HashSet<string> _closedByServer = [];
         private readonly Dictionary<string, string> _handles = [];
         private readonly Dictionary<string, string> _names = [];
         private readonly Dictionary<string, int> _ports = [];
@@ -849,7 +872,25 @@ internal static class ConversationPlayer
                     sent.Enqueue((message.Bytes, message.Credential));
                 }
             };
-            _clients[name] = client;
+
+            // * a close the player did not ask for is the server's: the player's own takes its client
+            // out first
+            client.Close += (_, _) =>
+            {
+                lock (_gate)
+                {
+                    if (_clients.ContainsValue(client))
+                    {
+                        _closedByServer.Add(handle);
+                    }
+                }
+            };
+
+            lock (_gate)
+            {
+                _clients[name] = client;
+            }
+
             _handles[name] = handle;
             _names[handle] = name;
         }
@@ -859,13 +900,34 @@ internal static class ConversationPlayer
             return _clients[name].Send(message);
         }
 
-        // closed by its client, unclean, as the scripted transport tells it
+        // closed by its client, unclean, as the scripted transport tells it; one the server closed
+        // is let go
         public async Task Closed(string name)
         {
-            if (_clients.Remove(name, out var client))
+            bool isTaken;
+            MemoryTransportClient? client;
+
+            lock (_gate)
             {
-                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
+                isTaken = _clients.Remove(name, out client);
+            }
+
+            if (isTaken)
+            {
+                if (client!.ReadyState == ReadyState.Open)
+                {
+                    await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
+                }
+
                 await client.DisposeAsync();
+            }
+        }
+
+        public bool IsClosedByServer(string name)
+        {
+            lock (_gate)
+            {
+                return _closedByServer.Contains(HandleOf(name));
             }
         }
 
@@ -926,6 +988,9 @@ internal static class ConversationPlayer
 
         // by name, its client and its handle; and back
         private readonly Dictionary<string, BrokerTransportClient> _clients = [];
+
+        // the handles whose connection closed while the player did not close it: the server did
+        private readonly HashSet<string> _closedByServer = [];
         private readonly Dictionary<string, string> _handles = [];
         private readonly Dictionary<string, string> _names = [];
 
@@ -1005,7 +1070,25 @@ internal static class ConversationPlayer
                     sent.Enqueue((message.Bytes, message.Credential));
                 }
             };
-            _clients[name] = client;
+
+            // * a close the player did not ask for is the server's: the player's own takes its client
+            // out first
+            client.Close += (_, _) =>
+            {
+                lock (_gate)
+                {
+                    if (_clients.ContainsValue(client))
+                    {
+                        _closedByServer.Add(handle);
+                    }
+                }
+            };
+
+            lock (_gate)
+            {
+                _clients[name] = client;
+            }
+
             _handles[name] = handle;
             _names[handle] = name;
         }
@@ -1015,13 +1098,34 @@ internal static class ConversationPlayer
             return _clients[name].Send(message);
         }
 
-        // closed by its client, unclean, as the scripted transport tells it
+        // closed by its client, unclean, as the scripted transport tells it; one the server closed
+        // is let go
         public async Task Closed(string name)
         {
-            if (_clients.Remove(name, out var client))
+            bool isTaken;
+            BrokerTransportClient? client;
+
+            lock (_gate)
             {
-                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
+                isTaken = _clients.Remove(name, out client);
+            }
+
+            if (isTaken)
+            {
+                if (client!.ReadyState == ReadyState.Open)
+                {
+                    await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
+                }
+
                 await client.DisposeAsync();
+            }
+        }
+
+        public bool IsClosedByServer(string name)
+        {
+            lock (_gate)
+            {
+                return _closedByServer.Contains(HandleOf(name));
             }
         }
 
@@ -1097,9 +1201,10 @@ internal static class ConversationPlayer
         // by handle, what was sent on it and not yet taken, in order
         private readonly Dictionary<string, Queue<(ReadOnlyMemory<byte> Bytes, string? Carried)>> _sent = [];
 
-        // the handles of the connections open, and what each carries
+        // the handles of the connections open, and what each carries; and those the server closed
         private readonly HashSet<string> _open = [];
         private readonly Dictionary<string, Carrying> _carrying = [];
+        private readonly HashSet<string> _closedByServer = [];
 
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
@@ -1168,9 +1273,9 @@ internal static class ConversationPlayer
             lock (_gate)
             {
                 _carrying[handle] = carrying;
+                _open.Add(handle);
             }
 
-            _open.Add(handle);
             Connection?.Invoke(handle);
 
             return Task.CompletedTask;
@@ -1187,18 +1292,37 @@ internal static class ConversationPlayer
         {
             var handle = HandleOf(name);
 
-            _open.Remove(handle);
+            lock (_gate)
+            {
+                _open.Remove(handle);
+            }
+
             Close?.Invoke(false, handle);
 
             return Task.CompletedTask;
         }
 
+        public bool IsClosedByServer(string name)
+        {
+            lock (_gate)
+            {
+                return _closedByServer.Contains(HandleOf(name));
+            }
+        }
+
         // closes every connection still open
         public Task CloseEach()
         {
-            foreach (var handle in _open.ToList())
+            List<string> open;
+
+            lock (_gate)
             {
-                _open.Remove(handle);
+                open = [.. _open];
+                _open.Clear();
+            }
+
+            foreach (var handle in open)
+            {
                 Close?.Invoke(false, handle);
             }
 
@@ -1269,9 +1393,27 @@ internal static class ConversationPlayer
             }
         }
 
-        public Task<bool> CloseConnection(string connectionHandle)
+        // * a connection the server closes of its own accord is told closed in a later turn, as every
+        // transport tells it
+        public async Task<bool> CloseConnection(string connectionHandle)
         {
-            return Task.FromResult(false);
+            lock (_gate)
+            {
+                if (!_open.Remove(connectionHandle))
+                {
+                    return false;
+                }
+            }
+
+            await Task.Yield();
+            Close?.Invoke(false, connectionHandle);
+
+            lock (_gate)
+            {
+                _closedByServer.Add(connectionHandle);
+            }
+
+            return true;
         }
 
         public Task Shutdown()

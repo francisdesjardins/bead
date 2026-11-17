@@ -34,15 +34,19 @@ This repository holds the protocol and its implementations, side by side:
   half; sessions and credentials with a `JWT`'s verification; the clock it is given and every
   duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
   trace of its parcels; the WebSocket, HTTP and in-memory transports; the broker's core over an
-  in-memory broker, MQTT 5 over a broker, and the joined transport; and the `proto` payload's codec
-  on Buffa — playing every conformance file it reaches, each part it lacks a row of the support
-  matrix ahead
+  in-memory broker, MQTT 5 over a broker, and the joined transport; the `proto` payload's codec on
+  Buffa and the validators' runtime; the same gateway, on its own listener or mounted on hyper, with
+  protobuf's JSON by Bead's mapping; and what beadc writes for it, each package's typed server and
+  client beside the messages Buffa writes, and an output's route table, document and HTTP client —
+  playing every conformance file it reaches, each part it lacks a row of the support matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
   [0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
-  [0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
+  [0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md),
+  [0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md),
+  [0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
 - **an interop service** every side offers, which each other side's client calls over WebSocket,
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
-  the other side's generated HTTP client calls.
+  each other side's generated HTTP client calls.
 
 **Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
 build on a commit, pinned. Publication is ahead.
@@ -50,8 +54,8 @@ build on a commit, pinned. Publication is ahead.
 ## At a glance
 
 A service is declared once, in a `.proto` with Bead's options, and `beadc` generates its server and
-its client in TypeScript and in C#. What is left to write is the resolvers and the calls, here
-abridged from [`examples/hello`](examples/hello), whose C# half writes the same:
+its client in TypeScript, in C# and in Rust. What is left to write is the resolvers and the calls,
+here abridged from [`examples/hello`](examples/hello), whose C# and Rust halves write the same:
 
 ```ts
 // the server: its admission hooks, by the names the .proto gives them, and a resolver that asks
@@ -83,6 +87,15 @@ await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
   // a window of 1: the next tick waits until this callback settles
 })();
 ```
+
+## Getting started for teams
+
+**[Getting started](docs/guides/getting-started.md)** builds a service from an empty folder to a
+running C# server and a TypeScript client, in Node and in a page: a request held to its rules, a
+command the server sends mid-call, and a subscription the client paces. Beside it,
+[real-time recipes](docs/guides/cookbook-realtime.md) — a `JWT` and admission hooks, reconnection,
+Prometheus in .NET, Chrome's DevTools — and [how Bead fits together](docs/guides/architecture-overview.md),
+with Bead beside gRPC-Web, Connect and SignalR.
 
 ## Next to the alternatives
 
@@ -119,9 +132,21 @@ and AMQP 1.0 on RabbitMQ 4 its second
   implementation plays them, the Rust side the part it reaches; the three call each other in CI over
   WebSocket, HTTP and MQTT 5, and the TypeScript and C# ones over AMQP 1.0 too, and through each
   other's gateway.
-- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
-  a project that binds `proto` brings protobuf-es, an optional peer, one over MQTT 5 brings
-  MQTT.js, another, and one over AMQP 1.0 brings rhea, a third.
+- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
+  Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
+  MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
+
+Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
+reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec whose
+conformance files every language plays; a builder that writes each language's typed sides from one
+`.proto`; a DevTools panel that reads a page's calls; a dissenter bound to argue against every
+change the others agree on. Each can be taken into another project, and each has the record that
+says why it is so, in [`docs/decisions/`](docs/decisions/README.md).
+
+Bead is built to production standards: a spec every side plays, the three sides calling each other
+in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold a side,
+and its pages held to WCAG 2.2 AA. It is not proven in production, and before 1.0.0 a minor may
+break.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
@@ -135,10 +160,9 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: beadc's Rust target, then the Rust side's gateway and its AMQP 1.0 binding, each a
-  record of its own
+- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
-  each a row of the [support matrix](docs/support.md#differences) ahead.
+  a row of the [support matrix](docs/support.md#differences) ahead.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
@@ -159,6 +183,7 @@ envelopes.
 spec/                         spec.md, debugging.md, transcoding.md, the conformance files every side reads, and check.py
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
+  pki/                        the test PKI every side's TLS tests read, and make.sh, which writes it
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
@@ -168,8 +193,8 @@ builder/                      beadc, the builder: a Yarn project of its own: src
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
   licenses/                   protobuf's licence, which the image ships for protoc and a package that carry none
 examples/
-  hello/                      a project as a consumer writes one, its TypeScript and C# halves generated by beadc
-site/                         the page francisdesjardins.ca serves at /bead/, in English and French: src/, diagrams/, dist/index.html, built
+  hello/                      a project as a consumer writes one, its TypeScript, C# and Rust halves generated by beadc
+site/                         the page beadproto.dev serves, in English and French: src/, diagrams/, dist/index.html, built; its icons and its deploy
 beadc.yaml                    the interop's code, generated from its blueprint by beadc
 docs/
   decisions/                  the decision records, and their index
@@ -199,28 +224,29 @@ side traces, filters and counts beside the wire, and its second,
 [`spec/transcoding.md`](spec/transcoding.md), what a side's gateway answers over HTTP of its
 procedures, each under a version of its own. Beside them:
 
-| File                                                            | What it holds                                                                                                                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                             | 460 named vectors in 16 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, and an AMQP 1.0 message written and counted to its every byte |
-| [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                       |
-| [`transports.json`](spec/transports.json)                       | 268 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                          |
-| [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                           |
-| [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                            |
-| [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                              |
-| [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                         |
-| [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                  |
-| [`debug-filters.json`](spec/debug-filters.json)                 | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                                                                                                                                                                                                |
-| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 54 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                             |
-| [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                 |
-| [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates the TypeScript and C# sides' validators for                                                                                                                                                                                                                                                    |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 79 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                        |
-| [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates the TypeScript and C# sides' code, route table and document of                                                                                                                                                                                          |
-| [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                   |
-| [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                 |
-| [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                   |
+| File                                                            | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                             | 472 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
+| [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
+| [`transports.json`](spec/transports.json)                       | 269 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
+| [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
+| [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
+| [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
+| [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                                                                                     |
+| [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                                                                              |
+| [`debug-filters.json`](spec/debug-filters.json)                 | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                                                                                                                                                                                                                                                            |
+| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 55 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
+| [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
+| [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 83 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
+| [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
+| [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
+| [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
+| [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                                                                               |
 
-Every implementation reads these files from `spec/` in its tests; none keeps a copy. Eleven
-generators write them, and regenerating must give the same bytes:
+Every implementation reads these files from `spec/` in its tests; none keeps a copy, nor of
+`spec/pki/`, the test PKI its TLS tests read, whose keys `spec/check.py` holds to `spec/` and the
+tests. Eleven generators write the files, and regenerating must give the same bytes:
 
 ```sh
 python spec/generators/make_vectors.py
@@ -311,8 +337,8 @@ nothing it generates is committed.
 
 In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
 rustup installs with clippy, rustfmt, llvm-tools and the browser's target, `wasm32-unknown-unknown`;
-on Windows, the MSVC build tools: the core pure Rust, its socket transports' and its MQTT 5
-binding's TLS, aws-lc-rs, built by the platform's C compiler
+on Windows, the MSVC build tools: the core pure Rust, its socket transports', its MQTT 5
+binding's and its gateway's TLS, aws-lc-rs, built by the platform's C compiler
 ([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints are denied,
 `unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
@@ -333,13 +359,18 @@ cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
 cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
 cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
+cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
+cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
 ```
 
 The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes
@@ -355,20 +386,23 @@ under one `#[expect]` of the workspace's lints.
 
 In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
 `.proto` or a blueprint by rule name, writes a blueprint in its form, holds a project to its last
-release, `beadc breaking`, and generates a typed server and client, in TypeScript and in C#: each
-side's interop is its output
+release, `beadc breaking`, and generates a typed server and client, in TypeScript, in C# and in
+Rust: each side's interop is its output
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
 `.yarn/releases/`, buf from its lockfile, and protoc, which writes the C# messages, by its pin,
-`protoc.json`, whose archive `tools/fetch-protoc.mjs` fetches and checks by its sha256. Node runs
-`src/cli.ts` as written.
+`protoc.json`, whose archive `tools/fetch-protoc.mjs` fetches and checks by its sha256.
+protoc-gen-buffa writes the Rust messages by its pin, `protoc-gen-buffa.json`, whose binary
+`tools/fetch-protoc-gen-buffa.mjs` fetches and checks by its sha256. Node runs `src/cli.ts` as
+written.
 
 ```sh
 cd builder
 yarn install --immutable
 export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
+export BEADC_PROTOC_GEN_BUFFA="$(node tools/fetch-protoc-gen-buffa.mjs)"   # protoc-gen-buffa, by its pin
 yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
-yarn test         # beadc's tests, the interop's .proto and its blueprint, and both targets' goldens among them
+yarn test         # beadc's tests, the interop's .proto and its blueprint, and the three targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
@@ -382,50 +416,132 @@ interop's blueprint binds no message, so neither needs protoc:
 node builder/src/cli.ts generate --check
 ```
 
-Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript and
-C# targets, the image and its wrappers, and what each option of `bead/options.proto` means.
+Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript, C#
+and Rust targets, the image and its wrappers, and what each option of `bead/options.proto` means.
 
 ## An example
 
 [`examples/hello`](examples/hello/README.md) is a project written as a consumer writes one: a
 `.proto` of `proto` messages, a procedure that notifies at a window of 1, its request held to a
-rule, a command, a catalogue and a hook, generated by beadc into a TypeScript half and a C# half,
-each of whose servers answers its routes over HTTP and JSON by a gateway beside it
-([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
-Each half reaches its runtime from its source, the TypeScript half by a Yarn `portal:` and the C#
-half by a `ProjectReference`, takes the house's rules by reference where its platform can, a copy
-held to them where it cannot, and builds twice: its messages generated by beadc, and by its
-platform's own generator, protoc-gen-es under `buf generate` and Grpc.Tools.
+rule, a command, a catalogue and a hook, generated by beadc into a TypeScript half, a C# half and
+a Rust half, each server answering its routes over HTTP and JSON by a gateway beside it
+([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md),
+[0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md),
+[0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
+Each half reaches its runtime from its source, the TypeScript half by a Yarn `portal:`, the C#
+half by a `ProjectReference` and the Rust half by a path, takes the house's rules by reference
+where its platform can, a copy held to them where it cannot, and builds twice: its messages
+generated by beadc, and by its platform's own generator, protoc-gen-es under `buf generate`,
+Grpc.Tools and Buffa through `bead_protobuf_build` in a build script.
 [`pairs.mjs`](examples/hello/pairs.mjs) plays each client against each server, both modes of each
-half, sixteen pairs, then asks that server's gateway, and holds what each client writes and the
+half, thirty-six pairs, then asks that server's gateway, and holds what each client writes and the
 gateway answers to [`transcript.txt`](examples/hello/transcript.txt), byte for byte. Its README says
 how to generate, build and run it, and what a project outside this repository writes instead.
 
 ## The page
 
-[`site/`](site) holds the page francisdesjardins.ca serves at `/bead/`: Bead presented to a reader
-who visits the author's site, in English and in French, in one document that shows the language
-the site would choose. Its content is `src/content.en.html` and `src/content.fr.html`, its byte
+[`site/`](site) holds the page beadproto.dev serves, and the demo at its `/playground/`: Bead
+presented to a reader, in English and in French, in one document that shows the language the page
+chooses, `?lng=`, then the choice it stored, then the browser's; its way back leads to the author's
+site, francisdesjardins.ca. Its content is `src/content.en.html` and `src/content.fr.html`, its byte
 examples and tables `src/data.mjs`, its snippets `src/snippets/`; the versions, the conformance
 files' counts and the excerpts of the sources it shows are read from the repository as it builds.
 Each diagram is a Mermaid source per language under `diagrams/`, rendered at build time into an SVG
 that follows both themes: drawn with sentinel colours, each replaced by a token of the page. Every
 SVG records the sha256 of its source.
 
-`build.mjs` and `check.mjs` need Node alone; `render.mjs` needs the Yarn project's Mermaid and a
-Chromium, its own from Playwright or one it is given, and the site's three faces, so that labels
-are measured in the face the page draws them with:
+Bead's mark is `src/favicon.svg`, Baily's beads at the Moon's edge; `icons.mjs` rasterizes it, in the same
+Chromium, into the page's `src/favicon.ico` and `src/apple-touch-icon.png` and the DevTools
+extension's icons, and records the sha256 of the mark and of each in `src/icons.json`. The page's
+three faces, Geist, Geist Mono and Newsreader, are in `src/fonts/`, with their licence, the SIL Open
+Font License.
+
+The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over
+penumbra's two sheets and Bead's overrides of them, and share one top bar, `chrome.css`, all five in
+`implementations/typescript/devtools/penumbra/`. The bar holds Bead's name and its navigation alone:
+the mark and the name, a link to the other surface, the language where there are two, the theme. It
+keeps 56 px at every width, on one line. The demo's own state, its transport, its connection, who
+it calls as and the wire, is a strip under it. The demo links the sheets; the build inlines them
+into the page, under `src/styles.css`, and into the not-found page, under the styles of
+`src/404.html`.
+
+The DevTools extension's privacy policy is a second page of both languages, at `/privacy/`: its
+content is `src/privacy.en.html` and `src/privacy.fr.html`, in the page's shell, its bar and its
+scripts, and the page's footer links it. Its build refuses a key of the extension's manifest, or an
+address its content scripts match, that the policy does not state.
+
+`build.mjs` and `check.mjs` need Node alone; `render.mjs`, `icons.mjs` and `layout.mjs` need the
+Yarn project's Playwright and a Chromium, its own or one it is given, `render.mjs` Mermaid too and
+the page's faces, so that labels are measured in the face the page draws them with. `layout.mjs`
+holds the page, the privacy policy and the not-found page to their layout: the bar 56 px tall and on
+one line from 320 to 1440 px, in both languages and both themes, no page wider than a phone, every
+control a finger reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in
+a table split inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with
+the focus given back, and the theme set before the first paint:
 
 ```sh
 cd site
-node build.mjs     # writes dist/index.html, committed and never edited by hand
-node check.mjs     # each SVG its source's render, and the build gives dist/index.html byte for byte
+node build.mjs     # writes dist/index.html, dist/privacy/index.html and dist/404.html, committed
+node check.mjs     # each SVG its source's render, each icon the mark's, and the pages the build's
 yarn install --immutable
-node render.mjs --chromium <chrome> --fonts <folder of geist.woff2, geist-mono.woff2, newsreader.woff2>
+node render.mjs --chromium <chrome> --fonts src/fonts
+node icons.mjs --chromium <chrome>
+node layout.mjs --chromium <chrome>
 ```
 
 `render.mjs` renders the diagrams whose SVG is stale, `--all` every one, and fails on a colour left
-that is no token. CI's `commits` job runs `check.mjs`.
+that is no token. CI's `commits` job runs `check.mjs`, and the tests of `deploy.mjs`; its `site`
+job runs `layout.mjs`.
+
+`tools/check-a11y.mjs` holds the page, the privacy policy, the not-found page and the demo's scenes
+to WCAG 2.2 AA, at
+1280 and 390 px: axe's rules of the `wcag2a`, `wcag2aa`, `wcag21aa` and `wcag22aa` tags and the
+colour of statuses in both themes, with each disclosure and menu open; in the first theme, the
+checks axe cannot make, the reflow at 320 px, the text spacing, the keyboard's order and its focus
+shown and never under a sticky bar, 44 px targets on a coarse pointer, the states of tabs, radios
+and toggles, and motion under reduced motion. Axe and Playwright are the TypeScript side's. It serves a
+folder as the host does, or reads any address, so beadproto.dev after a deploy and
+francisdesjardins.ca are held the same way:
+
+```sh
+node site/deploy.mjs --assemble
+node tools/check-a11y.mjs --serve site/out / "/?lng=fr" /privacy/ /nowhere /playground/ /playground/#calls
+node tools/check-a11y.mjs https://beadproto.dev/ "https://beadproto.dev/?lng=fr" https://beadproto.dev/playground/
+node tools/check-a11y.mjs https://francisdesjardins.ca/ --scheme dark --width 390
+```
+
+It prints each violation by its rule, its element and the pages it is on, and exits 1 on any. An
+exception is a line of `tools/a11y-exceptions.json`, its rule, its selector and its reason. The
+demo's page tests and the DevTools panel's call it for what a test brings about: the served
+transports, a call opened in each of its tabs. CI's `typescript` job runs it over `site/out`.
+
+beadproto.dev is a Cloudflare Worker that serves files alone, `beadproto`, which `wrangler.jsonc`
+configures: no script, no workers.dev address, no preview address, and a path nothing answers a 404. `deploy.mjs` assembles `out/` from the files it lists, and nothing else: the page at `/`, the
+demo's static build at `/playground/`, built there from its sources, Bead's mark and the page's
+faces, the 404 page, and, written as it assembles, `_redirects`, which sends `/bead` and each path
+under it to the same path at the root in one 301, `_headers`, the security headers and a Content-Security-Policy
+that names the page's inline scripts by their hashes, `robots.txt` and `sitemap.xml`. Then it
+uploads `out/` by the Wrangler `package.json` pins:
+
+```sh
+cd site
+yarn install --immutable
+yarn wrangler login       # once, the operator's own login, kept in the operator's profile
+node deploy.mjs           # a commit on origin, nothing changed: out/, then wrangler deploy
+node deploy.mjs --assemble    # out/ alone, from the tree as it is: a trial, never uploaded
+```
+
+No token and no account is in the repository: the login is the operator's `wrangler login`, and a
+`CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` in the environment is refused unless `--token` says
+it is meant. `deploy.mjs` refuses a tree with changes and a commit no branch of origin holds, says
+which commit it ships, and lists what it wrote.
+
+The table of the three implementations is drawn from `src/data.mjs` and held to the support matrix:
+each part lists the rows of `docs/support.md`'s Features and Transports it stands for, the rest
+listed as not on the page, and each cell declares the stages it says are ahead. A side's cell of the
+matrix says a part ahead by the token `` ahead: `<stage>` ``, the title of a row of its differences
+of kind open; the build fails on a row in no list or in two, on "ahead" said in a cell's own words,
+and on a cell of the page that says otherwise than its rows.
 
 ## Interop, both ways
 
@@ -451,12 +567,14 @@ other's over AMQP 1.0 too
   it, they are ignored, saying so. A trial is a case, a transport and a server, named by the
   TypeScript side's sentence in snake case.
 
-In the same runs, each side's generated HTTP client calls the gateway the other side's interop
+In the same runs, each side's generated HTTP client calls the gateway each other side's interop
 server serves beside it, of `spec/transcoding.proto`'s service: protobuf's JSON and every native
 encoding, its problems and the authorization it presents, a stream's result, notifications and
-ending failure, and the gateway's own refusals of a route, a size and a busy stream; and both
-served OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under
-`the C# server of the interop service`; `HttpInteropTests.cs`).
+ending failure, and the gateway's own refusals of a route, a size and a busy stream; and the served
+OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under `the C#
+server of the interop service` and the Rust server's; `HttpInteropTests.cs`, under `server=Rust`
+too; the Rust client's gateway trials of `bead-interop-server`)
+([0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 Where the other runtime is missing, each skips its interop, saying so. `BEAD_INTEROP_REQUIRED=1`
 turns that skip into a failure, as the CI sets it: there, a skip could only be a path to the other
@@ -529,7 +647,9 @@ on a desktop and a sheet on a phone, logs the calls and envelopes as the client 
 it: a sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its
 payload rules show each violation under its field; the server, and what the client's and the
 server's metrics registries count; and Packages, a blueprint cut into the outputs of `beadc.yaml`
-by the builder's own selection and reading of it, run in the page, the YAML to copy.
+by the builder's own selection and reading of it, run in the page, the YAML to copy. Its top bar is
+the page's; under it, its own strip holds the transport, the connection, who it calls as and the
+wire.
 
 ```sh
 cd implementations/typescript
@@ -556,8 +676,15 @@ covers every view, and each view counts what it hides
 ```sh
 cd implementations/typescript
 yarn devtools:build   # unpacked, into devtools/dist/: chrome://extensions, then Load unpacked
+yarn devtools:package # the zip the Chrome Web Store takes, into devtools/release/, and its SHA-256
 yarn test:devtools    # its tests, once it and the demo's static build are built
 ```
+
+`yarn devtools:package` builds the extension, then zips `devtools/dist/` from its own list of files:
+a file the build leaves that the list does not know is a refusal. The zip is the same bytes for the
+same commit, its entries sorted and stored at one fixed time, and it refuses a tree with changes
+(`--trial` packages the tree as it is, a zip never to upload). The extension's privacy policy is the
+page's [`/privacy/`](https://beadproto.dev/privacy/), in English and in French.
 
 Where a broker is given, `BEAD_MQTT_URL` and `BEAD_MQTT_WS_URL`, its tests also follow the demo's
 client over MQTT 5 to the panel, as CI's job `mqtt` runs them (`yarn test:devtools --grep "over
@@ -575,9 +702,9 @@ branches or regions run, then the lines no report ran; with `--floor`, it fails 
 floor, when it measured nothing, or on a measure the floor names and no report measured, and with
 `--summary`, it writes the report into the run's summary. A floor sits half a point under what was measured, and
 rises with `--raise`, never down but by a decision
-([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Each run keeps its reports 14 days, among its
-artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`, the
-cobertura files, and `coverage-rust`, the LLVM export. Locally, the same commands as CI's:
+([0006](docs/decisions/0006-a-rule-has-its-gate.md)). A run that fails keeps its reports 14 days,
+among its artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`,
+the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's. Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
@@ -594,7 +721,7 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ```sh
 cd implementations/rust
-cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$' --output-path coverage/rust.json
+cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$' --output-path coverage/rust.json
 node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust
 ```
 
@@ -698,9 +825,10 @@ codec, `codec.roundTrip`, as the other sides' do, and the interop service's echo
 over its in-memory transport, locally alone: calls, `call.p50`, `call.p95`, `call.p99` and
 `call.throughput`, on one connection kept, and exchanges, `exchange.p50` to `exchange.throughput`,
 each a client and its connection drawn, called once and closed, at 0 B, 1 KiB and 64 KiB, each
-measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, since an
-allocator that counts takes unsafe code, which the side forbids, and no notification, large echo,
-interop or transcoding; its layers on the loopback, as the other sides measure theirs, are ahead.
+measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, and no
+notification, large echo or interop; and protobuf's JSON, `transcoding.read.bead`,
+`transcoding.read.stock`, `transcoding.write.bead` and `transcoding.write.stock`, Bead's mapping
+beside Buffa's own JSON. Its layers on the loopback, as the other sides measure theirs, are ahead.
 `node tools/bench-release.mjs rust` builds it once in release and runs it in fresh processes as it
 runs the others; its report names `rust` for its side and `rustc` for its runtime, and
 `tools/bench-compare.mjs` compares two of them. A release keeps its report, as it keeps the others'
@@ -791,7 +919,7 @@ machine.
 
 ## Fuzzing
 
-Every side fuzzes the same eight parsers, guided by coverage, each fed raw bytes:
+Every side fuzzes the same nine parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -806,11 +934,17 @@ written again, its writer refusing exactly what it documents, and what it writes
 same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s
 `Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
-it back. The Rust side fuzzes all eight, over its core's judgement and codecs, with cargo-fuzz on
+it back; `json-form`, protobuf's JSON read by Bead's mapping over `spec/transcoding.proto`'s
+`Everything` and `Edges` (transcoding 5.2), the first byte picking the message, where what reads is
+written, what was written reads, and it writes again to the same text, byte for byte, never a
+message's bytes compared, since a map's entries are written in 17.7.6's order and a `-0` as `0` or
+left out (5.6). The Rust side fuzzes all nine, over its core's judgement and codecs and
+`bead-protobuf`'s JSON form, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
-and one of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, which the
-other sides leave to MQTT.js and MQTTnet, so it has no twin. The TypeScript side fuzzes one of its
-own, `blueprint`,
+and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
+`mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, which the other sides
+leave to MQTT.js and MQTTnet and to their WebSocket clients, so neither has a twin. The TypeScript
+side fuzzes one of its own, `blueprint`,
 beadc's blueprint reader, its JSON, its schema and its rules, and its form written back and read
 again; beadc has no C# side, so it has no twin. A target lets its parser's documented refusal pass;
 any other exception or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on
@@ -893,17 +1027,26 @@ against each server.
   must also be UTF-8 without a byte order mark.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
-- `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
-  sites that report alone (spec 9.0), on every side, each marked where it stands by
-  `// ! a detail of the side's own words: <why>`. Given files, those alone.
+- `node tools/check-citations.mjs`: every test `docs/support.md` cites, wherever it stands — a
+  file, a C# class or method, a Rust function or trial, a title — is one its side's tests declare,
+  an entry of a conformance file a harness names at run time, a case's label or a row of the
+  matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason.
+  Given files, those alone.
+- `node tools/check-details.mjs`: on every side, no exception's message goes into a failure's detail
+  but at a site that reports alone (spec 9.0) or whose words are the side's own, a built-in codec's
+  reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
+  where it stands by `// ! a detail of the side's own words: <why>` and counted by the tool. What
+  another generator writes is left unread, what beadc writes read. Given files, those alone.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says
   how one renders, why it is one side's own, or which row of the support matrix's Differences holds
   it; a row gives each name its kind, and a row whose kinds do not render each other fails, as one
-  word for a number, a delegate and an enum would. The names no reading has
-  placed, `alone`, are counted against the pin on the file's first line, which only falls.
-  `--seed` writes the file anew from the lists.
+  word for a number, a delegate and an enum would; a rendering names one of the tool's rules and
+  cites the records that rule names, each writing its tag, `rendered: <rule>`; a C# static class
+  of constants is placed by its row or by its members'. The names no reading has placed, `alone`,
+  are counted against the pin on the file's first line, which only falls. `--seed` writes the file
+  anew from the lists.
 - `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.
@@ -930,12 +1073,14 @@ against each server.
   two. The suite runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38
   or later; it needs the TypeScript side and the builder installed, .NET for the C# side, and
   Rust's toolchain for the Rust side.
-- `node tools/protovalidate-differential.mjs oracle|typescript|csharp`: protovalidate-es, at the pin
-  `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the verdicts of
-  `spec/validations.json`; or those verdicts and a corpus mutated from them through one side's
-  generated validators and through protovalidate-es, the violations compared by rule and by path
-  elements. It needs the TypeScript side and the builder installed, and .NET for the C# side.
-- `node tools/check-validations.mjs [typescript|csharp]`: each side's validators of
+- `node tools/protovalidate-differential.mjs oracle|typescript|csharp|rust`: protovalidate-es, at
+  the pin `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the
+  verdicts of `spec/validations.json`; or those verdicts and a corpus mutated from them through one
+  side's generated validators and through protovalidate-es, the violations compared by rule and by
+  path
+  elements. It needs the TypeScript side and the builder installed, .NET for the C# side, and
+  Rust's toolchain for the Rust side.
+- `node tools/check-validations.mjs [typescript|csharp|rust]`: each side's validators of
   `spec/validations.proto`, committed beside its verdicts test, are what beadc writes for it;
   `--write` writes them. It needs the builder installed.
 - `node tools/check-transcoding.mjs [typescript|csharp]`: each side's route table and document of
@@ -962,9 +1107,15 @@ against each server.
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
 - `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
-  committed `site/dist/index.html` byte for byte ([The page](#the-page)).
+  committed `site/dist/index.html` and `site/dist/404.html` byte for byte
+  ([The page](#the-page)).
+- `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
+  axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
+  installed, with Playwright's Chromium.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
-  repositories it makes under the system's temporary folder.
+  repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
+  saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
+  fails them there instead.
 
 Two run before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `pre-commit` holds the staged root files to their format, when the TypeScript side is installed,
@@ -1059,8 +1210,9 @@ its digest, its heartbeat lowered, and a password and TLS certificates drawn for
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
 AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket`, `http` and `mqtt` each alone, the
-core's clippy for the browser's target, the documentation, a build on the default features alone,
+core's library linted with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and
+`gateway` each alone, `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's
+target with `transcoding`, the documentation, a build on the default features alone,
 the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
 descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
 holding each library crate's public surface to its list among them, lines and regions held to the
@@ -1072,9 +1224,9 @@ of another origin in Chromium against every HTTP server, the Rust one among them
 `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against a stand-in engine, then beadc
 over the interop's blueprint, its rules and its form, `beadc generate --check` over the root's
 `beadc.yaml`, each side's interop, and over the demo's, and `tools/check-validations.mjs` and
-`tools/check-transcoding.mjs`, the TypeScript and C# sides' validators of `spec/validations.proto`
-and their route tables and documents of `spec/transcoding.proto` held to what beadc writes, on Node
-26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
+`tools/check-transcoding.mjs`, every side's validators of `spec/validations.proto` and every
+side's route table and document of `spec/transcoding.proto` held to what beadc
+writes, on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
 among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node 26,
 amd64 and arm64, each natively: beadc's image built, its test stage run on the image itself, each
@@ -1083,13 +1235,15 @@ the wrappers' lint, each linter at its pin); `examples` on Node 26 and on 24.9, 
 TypeScript half declares (what each example copies, or takes from beadc's wrapper and init, held to
 its source; beadc on Node holding `examples/hello`'s generated files; buf's lint and layout over its
 `.proto`; each half's gates and both its builds; then each client against each server, both modes of
-each half, sixteen pairs, each server's gateway asked after its client); `protobuf-conformance`
+each half, thirty-six pairs on Node 26 and the TypeScript and C# halves' sixteen on 24.9, each
+server's gateway asked after its client);
+`protobuf-conformance`
 (protobuf's conformance suite, its runner by its pin's sha512, through each side's generated `proto`
 codec and its JSON, each held to its failure list and the floor, the C# and Rust testees' format,
 then one corpus of `Probe` through every side's testee); `protovalidate-differential`
 (protovalidate-es, by its pin's sha512, over the verdicts of `spec/validations.json`, then those
-verdicts and a corpus mutated from them through the TypeScript and C# sides' generated validators
-and through protovalidate-es, the violations compared, and the C# testee's format); and `commits`
+verdicts and a corpus mutated from them through every side's generated validators and through
+protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`
 (the subjects, the links, the details, the page, the versions, the root's tools' own tests, then the
 supply chain: every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and
 Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its

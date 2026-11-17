@@ -1488,7 +1488,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     /// closing its input. It reads the run's variables as its own: over MQTT 5, where
     /// <c>BEAD_MQTT_URL</c> names a broker, its participant <c>rs-server</c>, linked with
     /// <c>BEAD_MQTT_PASSWORD</c>, serves <c>interop-rs</c> alone and <c>interop-both</c> in the group.
-    /// It serves no gateway, nor AMQP 1.0, which are ahead on the Rust side.
+    /// Its gateway listens on a port of its own; it serves no AMQP 1.0, which is ahead on the Rust side.
     /// </summary>
     public sealed class RustServer : IAsyncDisposable
     {
@@ -1498,6 +1498,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         private readonly SemaphoreSlim _starting = new(1, 1);
         private Process? _process;
         private (int Port, int HttpPort) _ports;
+        private int? _gatewayPort;
         private IReadOnlyList<string> _mqtt = [];
 
         /// <summary>The binary <c>BEAD_INTEROP_RUST_SERVER</c> names, or none.</summary>
@@ -1524,9 +1525,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                         RedirectStandardOutput = true,
                         UseShellExecute = false,
                     }) ?? throw new InvalidOperationException("the Rust interop server did not start");
-                    var (port, httpPort, _, mqtt) = await TypeScriptServer.PortsOf(process);
+                    var (port, httpPort, gatewayPort, mqtt) = await TypeScriptServer.PortsOf(process);
 
-                    (_process, _ports, _mqtt) = (process, (port, httpPort), mqtt);
+                    (_process, _ports, _gatewayPort, _mqtt) = (process, (port, httpPort), gatewayPort, mqtt);
                 }
 
                 return _ports;
@@ -1535,6 +1536,17 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             {
                 _starting.Release();
             }
+        }
+
+        /// <summary>
+        /// The port its gateway listens on, once started: a server whose first line names none fails
+        /// the case, saying so.
+        /// </summary>
+        public async Task<int> GatewayPort()
+        {
+            await Ports();
+
+            return _gatewayPort ?? throw new InvalidOperationException("the Rust interop server said no gatewayPort: its binary predates its gateway");
         }
 
         /// <summary>

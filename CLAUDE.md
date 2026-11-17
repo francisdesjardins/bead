@@ -3,10 +3,11 @@
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
 behavioural parity, and a Rust one in `implementations/rust`, its core, its transports over
-WebSocket and HTTP and its broker binding over MQTT 5, each part it lacks a row of `docs/support.md`
-ahead (decisions 0044, 0049, 0050), the builder, `beadc`, in `builder/`, an example in
-`examples/hello`, the demo, the DevTools extension, and the page francisdesjardins.ca serves at
-`/bead/`, in `site/`. `README.md` says how each part builds and tests.
+WebSocket and HTTP, its broker binding over MQTT 5 and its HTTP/JSON gateway, each part it lacks a
+row of `docs/support.md` ahead (decisions 0044, 0049, 0050, 0052), the builder, `beadc`, in
+`builder/`, an example in `examples/hello`, the demo, the DevTools extension, and the page
+beadproto.dev serves, the demo at its `/playground/`, in `site/`. `README.md` says how each part
+builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
@@ -28,9 +29,10 @@ number never given to another.
 ## Language
 
 - Replies to the user are in French.
-- Public pages are in English: what francisdesjardins.ca serves, the demo included, its messages and
-  refusals. The Bead page at `/bead/` is also in French, the language chosen as the site chooses it:
-  `?lng=`, then the choice the site stored, then the browser's languages, then English.
+- Public pages are in English: what beadproto.dev serves, the demo included, its messages and
+  refusals. The Bead page is also in French, the language chosen as the page chooses it: `?lng=`,
+  then the choice the page stored under `language` on its own origin, then the browser's languages,
+  then English.
 - The repository's files are in English, but the Bead page's French. What `.claude/local/` keeps
   may be in French: the plans.
 
@@ -97,6 +99,12 @@ standard it follows.
 
 Comments are written in the voice of the code around them. Keep each implementation's inside as it
 is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder.
+
+**Plain prose.** A sentence of a document or a comment says one thing a reader needs, plainly: no
+chain of appositives and asides hung on it, no reason a reader does not need ("a character, since
+Chrome draws no image on a panel's tab"), and another project named only where it is the standard
+followed or the reader's own reference, never as an aside that a detail is like it. Two sentences
+over one tangled one.
 
 **Comment tags**, as the Better Comments extension (`aaron-bond.better-comments`) shows them: a
 comment that a reader must not miss opens with its tag, after its marker (`//`, `#`):
@@ -168,17 +176,22 @@ titles that hold one write it `’`, and the citation does the same.
   --locked`, `cargo clippy -p francisdesjardins-bead --lib --features websocket --locked`, `cargo
   clippy -p francisdesjardins-bead --lib --features http --locked`, `cargo clippy -p
   francisdesjardins-bead --lib --features mqtt --locked`, `cargo clippy -p francisdesjardins-bead
-  --lib --features testing --locked --target wasm32-unknown-unknown`, `cargo test --workspace
+  --lib --features transcoding --locked`, `cargo clippy -p francisdesjardins-bead --lib --features
+  gateway --locked`, `cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding
+  --locked`, `cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked
+  --target wasm32-unknown-unknown`, `cargo test --workspace
   --all-features --locked`, `cargo doc --workspace --no-deps --all-features --locked`, `cargo build
   --workspace --locked`, `cargo deny --locked check` and `cargo deny --manifest-path <manifest>
-  --locked check` for `fuzz/` and `tools/protobuf-conformance/` pass, from its folder.
+  --locked check` for `fuzz/`, `tools/protobuf-conformance/`, `tools/protovalidate-differential/`
+  and `../../examples/hello/rust/` pass, from its folder.
 
 ## The Bead page
 
-The page francisdesjardins.ca serves at `/bead/`, in English and in French, is built from `site/`:
-its content in both languages, its diagrams' Mermaid sources, rendered into SVGs by
-`site/render.mjs`, and `site/build.mjs`, which writes `site/dist/index.html`; `site/check.mjs` holds
-both in CI. After any change to the wire or to what the page states, change both languages alike,
+The page beadproto.dev serves, in English and in French, is built from `site/`: its content in both
+languages, its diagrams' Mermaid sources, rendered into SVGs by `site/render.mjs`, Bead's mark,
+`site/src/favicon.svg`, rasterized into its icons by `site/icons.mjs`, and `site/build.mjs`, which
+writes `site/dist/index.html`; `site/check.mjs` holds all three in CI, and `site/deploy.mjs` ships
+the page and the demo to the Worker `site/wrangler.jsonc` names. After any change to the wire or to what the page states, change both languages alike,
 render the diagrams that moved, rebuild it, and look at it in both themes, on a desktop and a phone:
 see the README's "The page".
 

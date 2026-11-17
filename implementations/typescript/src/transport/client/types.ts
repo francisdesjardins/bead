@@ -10,6 +10,7 @@ import type {
   IMemoryEndLike,
   IMemoryTransportServerLike,
   IReadyStateMethods,
+  ITlsOptions,
   ITransportMessage,
   IWorkerPortLike,
 } from '../shared/types';
@@ -387,14 +388,18 @@ export interface IWebSocketConstructor {
   /**
    * `options` is `ws`'s alone, its `headers` written on the upgrade, its `closeTimeout` what it
    * waits on a close within, its own 1009's among them, from ws 8.22; `perMessageDeflate: false`
-   * offers no compression. The global `WebSocket` takes two parameters, and still meets it.
+   * offers no compression; `ca`, `cert` and `key` its client's TLS, which Node's TLS takes. The
+   * global `WebSocket` takes two parameters, and still meets it.
    */
   new (
     url: string,
     protocols?: string | string[],
     options?: {
+      ca?: string;
+      cert?: string;
       closeTimeout?: number;
       headers?: Record<string, string>;
+      key?: string;
       maxPayload?: number;
       perMessageDeflate?: false;
     }
@@ -471,8 +476,15 @@ export interface IWebSocketTransportClientOptions extends ITransportClientOption
    */
   maxPayload?: number | undefined;
   /**
-   * Defaults to the global `WebSocket`; pass `ws`'s where there is none, and where a connect gives a
-   * credential, which `ws` alone writes on the upgrade.
+   * Its TLS in Node (spec 15.39), given to `ws` on each connect under `wss` and held unused under
+   * `ws`. Refused with a {@link ProgrammerError} as it is built: in a page, beside a `WebSocket`
+   * without `ws`'s shape, the global one among them, and as {@link ITlsOptions} says. A handshake
+   * its server refuses fails the connect, the platform's error its cause.
+   */
+  tls?: ITlsOptions | undefined;
+  /**
+   * Defaults to the global `WebSocket`; pass `ws`'s where there is none, where a connect gives a
+   * credential, which `ws` alone writes on the upgrade, and where `tls` is given.
    */
   WebSocket?: IWebSocketConstructor | undefined;
 }
@@ -542,8 +554,9 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   exchangeTimeout?: number | undefined;
   /**
-   * Defaults to the global `fetch`. One given honours `redirect`, and follows no redirect: one whose
-   * answer says it followed one fails the connect, and loses the connection of a send or a listen.
+   * Defaults to the global `fetch`, or with `tls` to undici's. One given honours `redirect`, and
+   * follows no redirect: one whose answer says it followed one fails the connect, and loses the
+   * connection of a send or a listen.
    */
   fetch?: FetchLike | undefined;
   /**
@@ -572,6 +585,14 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    * past the server's inactivity timeout loses the connection. Defaults to `0`.
    */
   pause?: number | undefined;
+  /**
+   * Its TLS in Node (spec 15.39), through undici's own `fetch` and an `Agent` of the client's on
+   * each exchange under `https`, and held unused under `http`. Refused with a
+   * {@link ProgrammerError} as it is built: in a page, beside a `fetch` given, where the package
+   * undici does not resolve, and as {@link ITlsOptions} says. A handshake its server refuses fails
+   * the connect, never a connection drawn and then lost.
+   */
+  tls?: ITlsOptions | undefined;
   /**
    * Milliseconds each listen asks the server to wait for something to bring back, which the server
    * caps; `0` asks it to answer at once, which polls, and from 1 to 2³¹ − 1, rounded to the nearest

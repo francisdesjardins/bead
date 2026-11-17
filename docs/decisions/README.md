@@ -38,28 +38,34 @@ transport, never a network of its own
 ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
-— and proven byte for byte by the conformance files and the interop. Its third language, Rust, has
-its core: the envelope's codec, its routers and managers, the service layer, its server half and its
-client half, its sessions and credentials, the trace, the filter and the registry, the in-memory
-transport, the broker's core over an in-memory broker with the joined transport, and its `proto`
-codec on Buffa, under a toolchain, lints denied whole and a CI job of its own
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
-transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
-its core, with the interop both ways with the TypeScript and C# sides
-([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
-and its MQTT 5 binding, a feature of its core and a client of its own over its sockets, with the
-interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+— and proven byte for byte by the conformance files and the interop.
+
+Its third language, Rust, has its core: the envelope's codec, its routers and managers, the service
+layer, its server half and its client half, its sessions and credentials, the trace, the filter and
+the registry, the in-memory transport, the broker's core over an in-memory broker with the joined
+transport, and its `proto` codec on Buffa, under a toolchain, lints denied whole and a CI job of its
+own ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its
+transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) are features
+of its core, with the interop both ways with the TypeScript and C# sides
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+Its MQTT 5 binding is a feature of its core and a client of its own over its sockets, with the
+interop both ways over it
+([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+beadc's Rust target writes each package's typed shells beside the messages Buffa writes, the lists
+of the procedures a server's transports take and the validators of a blueprint's rules, their
+runtime in `bead-protobuf`; `examples/hello` has its Rust half, and the Rust interop's descriptors
+are generated
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+Its HTTP/JSON gateway is a feature of its core and its JSON mapping a feature of `bead-protobuf`,
+met by one trait; an output with `gateway` writes the route table, the HTTP client and the
+document, `examples/hello`'s Rust half serves a gateway, and the interop runs both ways over it
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **beadc's Rust target**, with `examples/hello`'s Rust half, the lists of the procedures a server's
-  transports take
-  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
-  and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  then the Rust side's gateway; and its AMQP 1.0 binding, its client one of the three branches
+- **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
-  weighs, each stage under a record of its own
+  weighs, under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules
@@ -126,21 +132,23 @@ that meets the Tenth Man:
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
   keeps ahead over MQTT 5: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and
   EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
-  the matrix holds its row of MQTT 5 over TLS "not tested"; and an acknowledgement of a Reason Code
-  its packet's table does not name, and a SUBACK or an UNSUBACK whose count of codes is not one,
-  judged alike on every side;
+  the matrix holds its row of MQTT 5 over TLS "not tested";
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
-  keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
-  of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the
-  payload bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
+  keeps against a peer that holds it: a bound on the resolvers that outlive a closed connection,
+  which neither Go, Kestrel nor a standard bounds, kept by the key 15.12 bounds connections by, an
+  address or a participant's id, in the round of 0030's fit; a relay's fairness among the requesters
+  that share a leg B, so the resolvers one requester's cancels leave at a destination refuse no
+  other; a close on a rate of refusals past the first count, as Kestrel's; a bound on the payload
+  bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
-- what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a budget that
-  sees every transfer it admits to its end, and a stall that names the side that caused it;
+- what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a share of the
+  budget per connection or per address, with
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the eight every side shares
+  the parsers the sides fuzz, the nine every side shares
   ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
   beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
   judges alone; and the `envelope` target's writer held to the refusals it documents, as
@@ -173,6 +181,18 @@ that meets the Tenth Man:
   which a pool of connections would spare a handshake an exchange; a `raw` body streamed as a
   transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events; and
   `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`;
+- what
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)
+  keeps ahead of a gateway: mounting Bead and its gateway in a host, a framework among them, a round
+  of its own; a `Service` that reads its caller's address from an extension of Bead's, beside the
+  Rust side's `answer`; and the Rust caller's typed write in place;
+- what [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)
+  keeps ahead of a client's TLS: a server that takes its peer's certificate as an identity at its
+  admission, the C# HTTP server's client-certificate mode, RFC 9440's fields over a WebSocket and
+  over a believed proxy, and RFC 8705 §3's binding between a `JWT` and the certificate; a platform's
+  TLS object for the brokers, on every side at once; the interop over TLS, each side's client
+  presenting `spec/pki`'s certificate to the others' servers through a TLS front; and a gateway
+  caller's `tls`, on every side at once;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
@@ -208,28 +228,31 @@ table.
 
 ### Services and their names
 
-| #                                                                                                            | Decision                                                                                                                | Status   |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                  | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)              | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
-| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
-| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | accepted |
+| #                                                                                                                                             | Decision                                                                                                                                                | Status   |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                                                   | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made                                  | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)                                               | A service's procedures are typed descriptors, served and called through one layer in each runtime                                                       | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                                                  | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone                                             | accepted |
+| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)                                    | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange                                 | accepted |
+| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)                                  | One contract gives several packages, and a server's transport takes the procedures it is given                                                          | accepted |
+| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                                                 | beadc writes Rust each package's typed shells beside the messages Buffa writes                                                                          | accepted |
+| [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md) | The Rust side's gateway is a feature of its core and its JSON mapping a feature of its proto codec, met by one trait, and a `HEAD` never holds a stream | accepted |
 
 ### Transports and relays
 
-| #                                                                                                                         | Decision                                                                                                                                                           | Status   |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
-| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
-| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
-| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
-| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
-| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
-| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)         | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
+| #                                                                                                                                 | Decision                                                                                                                                                           | Status   |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                                                      | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                            | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                          | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                                 | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                                    | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
+| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                                     | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
+| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)         | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                                    | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
+| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)                 | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
+| [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md) | A client presents the TLS certificate and trusts the authorities its application names, in one shape on every side                                                 | accepted |
 
 ### Over a broker
 
@@ -289,7 +312,7 @@ table.
 
 ## Writing one
 
-The next decision is 0051. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0054. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

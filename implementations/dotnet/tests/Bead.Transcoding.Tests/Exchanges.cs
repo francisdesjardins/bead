@@ -18,13 +18,24 @@ internal static partial class Exchanges
 {
     private const string Host = "127.0.0.1";
 
+    // the language a row of the support matrix names when it excuses this side from an exchange
+    private const string Language = "C#";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
-    /// <summary>Each exchange played, what parts from the file told in <paramref name="parted"/>.</summary>
+    /// <summary>
+    /// Each exchange played but those a row of the support matrix excuses this side from, what parts
+    /// from the file told in <paramref name="parted"/>.
+    /// </summary>
     public static async Task Play(List<string> parted)
     {
         foreach (var entry in Root.GetProperty("exchanges").EnumerateArray())
         {
+            if (IsExcused(entry))
+            {
+                continue;
+            }
+
             var name = entry.GetProperty("name").GetString()!;
 
             try
@@ -120,6 +131,15 @@ internal static partial class Exchanges
         }
 
         return options;
+    }
+
+    // whether a row of the support matrix excuses this side from an exchange
+    private static bool IsExcused(JsonElement entry)
+    {
+        return entry.TryGetProperty("differs", out var differs) && differs.EnumerateArray().Any((row) =>
+        {
+            return row.GetProperty("language").GetString() == Language;
+        });
     }
 
     private static async Task PlayOne(JsonElement entry, List<string> parted)

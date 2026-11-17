@@ -5,7 +5,8 @@
 // escaped, so a procedure's key stays the name its metrics and filters read. builder/README.md lists
 // them. Beside them, C#'s names as protoc's C# generator gives them, over strings, which the C#
 // target and the `.proto` half of NAME_TARGET read; and the characters no C# documentation comment
-// holds, which DESCRIPTION_TARGET refuses. This module imports nothing, so `check` loads no target.
+// holds, which DESCRIPTION_TARGET refuses; and the casings every target and every check write a
+// name in. This module imports nothing, so `check` loads no target.
 
 // constants
 
@@ -118,6 +119,29 @@ export const RUNTIME_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 // definition
+
+/** `name` with its first character raised: `getBook` gives `GetBook`. */
+export const upperFirst = (name: string): string => {
+  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+};
+
+/** `name` with its first character lowered: `GetBook` gives `getBook`. */
+export const lowerFirst = (name: string): string => {
+  return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
+};
+
+/**
+ * A snake case name in Pascal case, each part between underscores its first character raised:
+ * `hello_world` gives `HelloWorld`, as Buffa's `to_pascal_case` writes a oneof's variant.
+ */
+export const pascalOfSnake = (name: string): string => {
+  return name
+    .split('_')
+    .map((part) => {
+      return upperFirst(part);
+    })
+    .join('');
+};
 
 /** The classes a service named `serviceName` gives, in every official target. */
 export const classNamesOf = (serviceName: string): readonly string[] => {

@@ -1,23 +1,17 @@
 """Writes spec/conversations.json: what a server of the interop service does with what a client sends."""
-import base64
-import hashlib
-import hmac
 import json
 import os
 import re
 from datetime import datetime
 
+from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
+from interop import API, PROCEDURES, SERVICE_ID
+from jws import compact, signed, unbase64url
 from make_codecs import payload_outcome
 from spec_version import spec_version
 
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
-# the interop service's API, its one service in its blueprint (decision 0022)
-API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
-SERVICE_ID = API['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 # each procedure's request's encoding, which reads its payload
 ENCODINGS = {procedure['procedureName']: procedure['request']['encoding'] for procedure in API['procedures']}
 # the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here
@@ -33,6 +27,10 @@ CAPACITY_EXCEEDED = 35
 PROTOCOL, APPLICATION = 0, 1
 
 SLOW = '{"milliseconds":3600000}'
+# a slow deaf to its signal, which settles on its timer alone, and one that answers at once, then works
+# on deaf until its timer (interop-service.json): each a resolver that outlives its call (9.2, step 3)
+DEAF = '{"milliseconds":1000,"heeds":false}'
+FIRST_DEAF = '{"milliseconds":1000,"heeds":false,"answersFirst":true}'
 
 # a backslash, which opens a JSON escape, and a JSON string outside ASCII with what a lenient writer escapes
 BACKSLASH = chr(92)
@@ -42,18 +40,6 @@ OUTSIDE_ASCII = '"Jos' + chr(0xE9) + ' a+b <x>"'
 # entry of a conformance file holds
 ESCAPED_NAME = 'a name that holds an escape is read as its escapes say, whatever a payload of its shape read on another connection held'
 SILL = 'onTheSill'
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
-
-
-def word(value, length):
-    return hexadecimal(value.to_bytes(length, 'big'))
-
-
-def text(value):
-    return hexadecimal(value.encode('utf-8'))
 
 
 def request(call_id, procedure, payload, *, service_id=SERVICE_ID, flags=0, words=3, tail=''):
@@ -111,15 +97,6 @@ def answer(call_id, value):
     return {'send': f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'}
 
 
-def armed(milliseconds):
-    """A timer armed on the server's clock, due that many milliseconds from now."""
-    return {'until': {'timer': milliseconds}}
-
-
-def advance(milliseconds):
-    return {'advance': milliseconds}
-
-
 def on(step, connection):
     return {**step, 'on': connection}
 
@@ -130,6 +107,11 @@ def opened(connection, two_way=True):
 
 def closed(connection):
     return {'close': True, 'on': connection}
+
+
+def server_closes(connection=None):
+    """The server closes the connection itself (9.2, step 3)."""
+    return {'closed': True, **({'on': connection} if connection else {})}
 
 
 def opened_as(connection, procedures=None, **declared):
@@ -315,6 +297,10 @@ def chunk_out(call_id, offset, data, last):
 
 ECHOED = json_string(100).encode('utf-8')
 LONG = json_string(300).encode('utf-8')
+# a command's answer that comes whole in 64 bytes, its result's header the 8 others
+ANSWER_56 = json_string(56).encode('utf-8')
+# a payload of 176 bytes: an opening of 44 under chunks of 64, then two full chunks and the last 36
+ECHOED_176 = json_string(176).encode('utf-8')
 # the result bytes answers to a length of 35: 37 bytes, past what an envelope of 64 holds behind a
 # result's header and an announcement's 20 bytes
 RESULT_37 = ('"' + 'x' * 35 + '"').encode('utf-8')
@@ -359,19 +345,6 @@ LEEWAY = 60_000
 HOUR, DAY = 3_600, 86_400
 
 
-def base64url(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-
-def unbase64url(text):
-    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
-
-
-def compact(value):
-    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
-    return json.dumps(value, separators=(',', ':')).encode('ascii')
-
-
 def access(issuer=ISSUERS['HS256'], *, exp=START + HOUR, iat=START, jti, aud=AUDIENCE, sub='grace'):
     """An access token's claims (RFC 9068 §2.2), exp and iat in seconds since the epoch."""
     return {'iss': issuer, 'sub': sub, 'aud': aud, 'exp': exp, 'iat': iat, 'jti': jti, 'client_id': 'bead-interop-client'}
@@ -381,10 +354,7 @@ def hs256(claims, jwk=HS_KEY):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac, typed at+jwt, and named
     by its key's kid when the key has one; its claims a JSON value, or their bytes as given."""
     header = {'alg': 'HS256', 'typ': 'at+jwt', **({'kid': jwk['kid']} if 'kid' in jwk else {})}
-    claims = claims if isinstance(claims, bytes) else compact(claims)
-    signing_input = base64url(compact(header)) + '.' + base64url(claims)
-    signature = hmac.new(unbase64url(jwk['k']), signing_input.encode('ascii'), hashlib.sha256).digest()
-    return signing_input + '.' + base64url(signature)
+    return signed(header, claims, unbase64url(jwk['k']))
 
 
 def jwt(token):
@@ -781,6 +751,27 @@ def elsewhere_conversations():
     ]
 
 TWO_CALLS = {'maximumAnsweringCalls': 2}
+ONE_CALL = {'maximumAnsweringCalls': 1}
+
+# a slow deaf to its signal, padded by a member it ignores to 100 bytes, which comes as a transfer under
+# chunks of 64: its opening carries 44 bytes, then a chunk 48, then the last 8
+PADDED_DEAF = (DEAF[:-1] + ',"pad":"' + 'a' * 56 + '"}').encode('utf-8')
+assert len(PADDED_DEAF) == 100
+
+
+def deaf_transfer(call_id):
+    # a request to slow, deaf to its signal, that comes as a transfer, credited to its total and whole
+    return [opening(call_id, 'slow', PADDED_DEAF[:44], 100), credited(call_id, 100),
+            chunk_in(call_id, 44, PADDED_DEAF[44:92], False), chunk_in(call_id, 92, PADDED_DEAF[92:], True)]
+
+
+def echoed_transfer(call_id):
+    # a request to echo that comes as a transfer, credited, whole, and answered by a transfer its client
+    # credits to its last chunk
+    return [opening(call_id, 'echo', ECHOED[:44], 100), credited(call_id, 100),
+            chunk_in(call_id, 44, ECHOED[44:92], False), chunk_in(call_id, 92, ECHOED[92:], True),
+            result_opening(call_id, ECHOED[:28], 100),
+            credit_in(call_id, 100), chunk_out(call_id, 28, ECHOED[28:76], False), chunk_out(call_id, 76, ECHOED[76:], True)]
 
 
 def answering_calls_conversations():
@@ -852,6 +843,59 @@ def answering_calls_conversations():
              json_request(1, 'echo', '"y"'), result(1, '"y"'),
              opening(3, 'echo', LONG[:45], 300), failure(3, TOO_LARGE),
              json_request(5, 'cancellations', json_string(52)), result(5, '0')]),
+        # 9.2, step 3: a resolver that outlives its call keeps a place on its connection until it
+        # settles, beside the calls answered, both within twice maximumAnsweringCalls; each slow's timer
+        # is armed at the same reading, due a second from it, and settles at the one advance
+        ('a call whose resolver outlives its cancel keeps a place until it settles: a request that comes while the calls answered and those outlived number twice the bound is answered CAPACITY_EXCEEDED',
+         ['9.2.3', '10.2'], ONE_CALL, [
+             json_request(1, 'slow', DEAF), armed(1000), cancel(1),
+             json_request(3, 'echo', '"x"'), result(3, '"x"'),
+             json_request(5, 'slow', DEAF), armed(1000), cancel(5),
+             json_request(7, 'echo', '"y"'), failure(7, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             json_request(9, 'echo', '"z"'), result(9, '"z"')]),
+        ('a resolver that outlives its answer keeps its call\'s place until it settles', ['9.2.3'], ONE_CALL, [
+            json_request(1, 'slow', FIRST_DEAF), result(1, '1000'), armed(1000),
+            json_request(3, 'slow', FIRST_DEAF), result(3, '1000'), armed(1000),
+            json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+            armed(1000), advance(1000),
+            json_request(7, 'echo', '"y"'), result(7, '"y"')]),
+        # the verifier settles on the server's clock whatever its signal, and what it settles to is dropped
+        ('a call cancelled while its ELSEWHERE verifier resolves keeps a place until its verifier settles',
+         ['9.2.3', '10.2', '13.11'], ONE_CALL, [
+             elsewhere(1, 'whoami', 'null', 'Interop sub=ada, after=1000'), armed(1000), cancel(1),
+             elsewhere(3, 'whoami', 'null', 'Interop sub=bob, after=1000'), armed(1000), cancel(3),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             json_request(7, 'echo', '"y"'), result(7, '"y"')]),
+        # 5 is taken at none answered and 2 outlived, 7 at 1 and 2; the cancel of 9 is for no call
+        ('a peer that cancels each request it sends has no more resolvers run than twice the calls it has answered at once',
+         ['9.2.3', '10.2'], TWO_CALLS, [
+             json_request(1, 'slow', DEAF), json_request(3, 'slow', DEAF), armed(1000), cancel(1), cancel(3),
+             json_request(5, 'slow', DEAF), json_request(7, 'slow', DEAF), armed(1000), cancel(5), cancel(7),
+             json_request(9, 'slow', DEAF), failure(9, CAPACITY_EXCEEDED), cancel(9),
+             armed(1000), advance(1000),
+             json_request(11, 'echo', '"z"'), result(11, '"z"')]),
+        # twice maximumAnsweringCalls refusals in a row past the second count, nothing settling between,
+        # close the connection once the last goes; the resolvers then settle, their answers going nowhere
+        ('a connection refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls is closed, and the close reported',
+         ['9.2.3'], ONE_CALL, [
+             json_request(1, 'slow', DEAF), armed(1000), cancel(1),
+             json_request(3, 'slow', DEAF), armed(1000), cancel(3),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             json_request(7, 'echo', '"y"'), failure(7, CAPACITY_EXCEEDED),
+             report(CAPACITY_EXCEEDED), server_closes(),
+             armed(1000), advance(1000)]),
+        # 12.3, item 3: a received transfer whose call's resolver outlives it keeps its place among twice
+        # maximumTransfers, one here; the calls answered and those outlived stay under four
+        ('a transfer received for a call whose resolver outlives it keeps a place among twice maximumTransfers until it settles',
+         ['9.2.3', '10.2', '12.2.6', '12.3.3'], {**CHUNKED, 'maximumTransfers': 1, **TWO_CALLS}, [
+             *deaf_transfer(1), armed(1000), cancel(1),
+             *echoed_transfer(3),
+             *deaf_transfer(5), armed(1000), cancel(5),
+             opening(7, 'echo', ECHOED[:44], 100), failure(7, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             opening(9, 'echo', ECHOED[:44], 100), credited(9, 100), cancel(9)]),
     ]
 
 
@@ -1127,6 +1171,10 @@ conversations = [
         raw('A1 13 00 02  00 00 00 03'), report(KIND_UNSUPPORTED)]),
     ('a chunk for no call is reported CALL_UNKNOWN', ['12.9.4'], None, [
         raw('A1 14 00 04  00 00 00 03  00 00 00 00 00 00 00 00 | 01'), report(CALL_UNKNOWN)]),
+    # 12.2: a chunk is held to chunkBytes within its transfer; one for no transfer under way, of any
+    # size, is judged as 12.9's table says, 65 bytes here past chunkBytes of 64
+    ('a chunk past chunkBytes for no call is reported CALL_UNKNOWN', ['12.2', '12.9.4'], CHUNKED, [
+        chunk_in(3, 0, LONG[:49], False), report(CALL_UNKNOWN)]),
     ('a chunk on a call open without a transfer is reported ENVELOPE_MALFORMED', ['12.9.4'], None, [
         json_request(1, 'slow', SLOW), raw('A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 00 | 01'),
         report(MALFORMED), cancel(1)]),
@@ -1155,6 +1203,11 @@ conversations = [
         chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
         chunk_in(1, 44, LONG[44:92], False),
         chunk_in(1, 172, LONG[172:220], False), report(CREDIT_EXCEEDED)]),
+    # the second chunk 65 bytes, 49 of its payload from 140, running to 189 past the credit of 172
+    ('a chunk past chunkBytes on a call abandoned, past its credit, is reported CREDIT_EXCEEDED', ['12.2', '12.9.4'], CHUNKED, [
+        opening(1, 'echo', LONG[:44], 300), credited(1, 172),
+        chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
+        chunk_in(1, 140, LONG[140:189], False), report(CREDIT_EXCEEDED)]),
     ('a chunk before the last that is not full is answered CHUNK_INVALID', ['12.6.1'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:60], False), failure(1, CHUNK_INVALID)]),
@@ -1178,6 +1231,26 @@ conversations = [
         opening(1, 'echo', b'"ab"', 4), failure(1, CHUNK_INVALID)]),
     ('an opening that carries no byte of its payload is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 100), failure(1, CHUNK_INVALID)]),
+    # 12.3.3: an opening carries what its sender places in it, 44 bytes here, and a result's 28, the
+    # 20 bytes of an announcement counted
+    ('an opening that carries other than its sender places in it is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
+        opening(1, 'echo', LONG[:43], 300), failure(1, CHUNK_INVALID),
+        opening(3, 'echo', LONG[:44], 300), credited(3, 172), cancel(3)]),
+    ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
+    # 12.2: a result, whole or an opening, held to chunkBytes, of 64 here, and one of 64 taken: its 56
+    # bytes go back to ask's caller as a transfer, past what a result's header and an announcement's 20
+    # bytes leave whole
+    ('a result past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it, where one of chunkBytes is taken', ['9.6.3', '12.2'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        answer(2, json_string(56)), result_opening(1, ANSWER_56[:28], 56),
+        credit_in(1, 56), chunk_out(1, 28, ANSWER_56[28:], True),
+        json_request(3, 'ask', 'null'), command(4, 'clock', QUESTION),
+        answer(4, json_string(57)), cancelled(4), failure(3, PROCEDURE_FAILED), report(TOO_LARGE)]),
+    ('a result\'s opening past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it', ['9.6.3', '12.2', '12.3'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:49], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(TOO_LARGE)]),
     ('an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 0), failure(1, PAYLOAD_TOO_LARGE)]),
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
@@ -1187,18 +1260,57 @@ conversations = [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         opening(3, 'echo', b'', 0), failure(3, PAYLOAD_TOO_LARGE),
         opening(5, 'echo', b'"ab"', 4), failure(5, CAPACITY_EXCEEDED), cancel(1)]),
-    ('an opening past the budget left is answered CAPACITY_EXCEEDED, and a transfer it starves is credited once it frees', ['12.3.3', '12.4'], {
+    # 12.4: the budget, of 256 here, admits a transfer by its total, the openings in their order on
+    # any connection; one waits half the transfer's inactivity at most, holding none of it
+    ('an opening the budget left cannot hold waits, one after it waits behind it though it fits, and both are admitted in their turn once the budget frees', ['12.3.3', '12.4'], {
         **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
         opening(1, 'echo', LONG[:44], 200), credited(1, 172),
         opening(3, 'echo', LONG[:44], 200),
-        opening(5, 'echo', LONG[:44], 200), failure(5, CAPACITY_EXCEEDED),
-        cancel(1), credited(3, 172)]),
-    ("a connection that closes ends its transfers, and the budget they held credits a transfer another connection's opening starved", ['12.4', '12.10'], {
+        opening(5, 'echo', LONG[:44], 56),
+        cancel(1), credited(3, 172), credited(5, 56), cancel(3), cancel(5)]),
+    ('an opening still waiting for the budget at half the transfer\'s inactivity is answered CAPACITY_EXCEEDED, and the one behind it is admitted', ['12.2.8', '12.4'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256, 'transferInactivityTimeout': 20_000}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        opening(3, 'echo', LONG[:44], 200), armed(10_000), advance(5_000),
+        opening(5, 'echo', LONG[:44], 56), armed(10_000), advance(5_000),
+        failure(3, CAPACITY_EXCEEDED), credited(5, 56), cancel(1), cancel(5)]),
+    ('two transfers whose totals pass the budget together both complete: the second waits, holding none of it, and is admitted as the first\'s payload is whole, its credit setting its inactivity going', ['12.4', '12.8'], {
+        **CHUNKED, 'bufferedBytesBudget': 280, 'maximumPayloadBytes': 176}, [
+        opening(1, 'echo', ECHOED_176[:44], 176), credited(1, 172),
+        opening(3, 'echo', ECHOED_176[:44], 176),
+        chunk_in(1, 44, ECHOED_176[44:92], False), credited(1, 176),
+        chunk_in(1, 92, ECHOED_176[92:140], False), chunk_in(1, 140, ECHOED_176[140:], True),
+        credited(3, 172), armed(30_000),
+        result_opening(1, ECHOED_176[:28], 176), credit_in(1, 176),
+        chunk_out(1, 28, ECHOED_176[28:76], False), chunk_out(1, 76, ECHOED_176[76:124], False),
+        chunk_out(1, 124, ECHOED_176[124:172], False), chunk_out(1, 172, ECHOED_176[172:], True),
+        chunk_in(3, 44, ECHOED_176[44:92], False), credited(3, 176),
+        chunk_in(3, 92, ECHOED_176[92:140], False), chunk_in(3, 140, ECHOED_176[140:], True),
+        result_opening(3, ECHOED_176[:28], 176), credit_in(3, 176),
+        chunk_out(3, 28, ECHOED_176[28:76], False), chunk_out(3, 76, ECHOED_176[76:124], False),
+        chunk_out(3, 124, ECHOED_176[124:172], False), chunk_out(3, 172, ECHOED_176[172:], True)]),
+    ("a connection that closes ends its transfers, and the budget they reserved admits another connection's opening that waited for it", ['12.4', '12.10'], {
         **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
         opened('first'), opened('second'),
         on(opening(1, 'echo', LONG[:44], 200), 'first'), on(credited(1, 172), 'first'),
         on(opening(1, 'echo', LONG[:44], 200), 'second'),
         closed('first'), on(credited(1, 172), 'second')]),
+    # a result's opening waits as a request's does, its wait of 15 s, half the 30 s by default, taking
+    # over from the command's own 10 s; a timer due in 15 s is the wait's alone
+    ('a result\'s opening that waits for the budget past half its call\'s inactivity ends the command CAPACITY_EXCEEDED, and cancels it', ['8.2', '12.4'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        json_request(3, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 100), armed(15_000), advance(15_000),
+        cancelled(2), failure(3, PROCEDURE_FAILED), report(CAPACITY_EXCEEDED), cancel(1)]),
+    ('a result\'s opening that waits for the budget is credited once it frees, the credit setting its call\'s inactivity going again', ['12.4', '12.8'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        json_request(3, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 100), armed(15_000), advance(5_000),
+        cancel(1), credited(2, 100),
+        armed(30_000), advance(27_000), chunk_in(2, 28, LONG[28:76], False),
+        armed(30_000), advance(30_000), cancelled(2), failure(3, PROCEDURE_FAILED), report('exception')]),
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
         json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
         cancel(1), credit_in(1, 100)]),
@@ -1348,6 +1460,16 @@ conversations += [
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
         armed(2_000), advance(2_000),
         on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')])),
+    # 14.5: a result leg B brings as a transfer waits for the relay's budget, which the client's upload
+    # holds, as any result's does; past half its inactivity leg B ends once its transport had it
+    sharing_leg_b(('a result leg B brings that the relay\'s budget does not admit within its wait ends leg B, cancelled, and leg A is answered DESTINATION_LOST',
+     ['12.4', '14.5.5'], {**CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256, 'transferInactivityTimeout': 20_000}, [
+         opened('client'), opened('device'), *logged_in(), *registered(),
+         on(opening(3, 'echo', LONG[:44], 200), 'client'), on(credited(3, 172), 'client'),
+         on(relayed(5, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+         on(result_opening_in(2, LONG[:28], 100), 'device'), armed(10_000), advance(10_000),
+         on(cancelled(2), 'device'), on(failure(5, DESTINATION_LOST), 'client'),
+         on(report(CAPACITY_EXCEEDED), 'client'), on(cancel(3), 'client')])),
     # 14.5: a result leg B brought whole, 8 + 36 bytes, goes back to leg A counted with the 20 bytes of an
     # announcement: 64 fit chunkBytes; one byte more needs a transfer, which this server sends none of,
     # and is answered as section 12.1 answers a result its side cannot send, its reason reported with
@@ -1673,9 +1795,10 @@ for name, _, _, *rest in conversations:
 
         tokens |= {step['token']} if 'token' in step else set()
 
-# ! a request, whole or an opening, past its chunkBytes is answered ENVELOPE_TOO_LARGE (12.2): one sent
-# so is the conversation's point, its next expect on its connection that refusal, or it would be
-# refused in silence of its intent
+# ! a request or a result, whole or an opening, past its chunkBytes is refused ENVELOPE_TOO_LARGE
+# (12.2): one sent so is the conversation's point, its next expect on its connection that refusal, a
+# request's failure on its call id, a result's cancel on its call id, or it would be refused in
+# silence of its intent
 for name, _, limits, *rest in conversations:
     chunk_bytes = (limits or {}).get('chunkBytes', 1_048_576)
     steps = rest[-1]
@@ -1683,15 +1806,20 @@ for name, _, limits, *rest in conversations:
     for index, step in enumerate(steps):
         octets = step.get('send', '').replace('|', ' ').split()
 
-        if len(octets) < 8 or octets[1] != '10' or len(octets) <= chunk_bytes:
+        if len(octets) < 8 or octets[1] not in ('10', '11') or len(octets) <= chunk_bytes:
             continue
 
         call_id = int(''.join(octets[4:8]), 16)
         answer_ = next((later['expect'] for later in steps[index + 1:]
                         if 'expect' in later and later.get('on') == step.get('on')), None)
-        assert answer_ is not None and answer_.get('callId') == call_id and \
-            answer_.get('failure', {}).get('code') == TOO_LARGE, \
-            f'{name}: sends a request of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
+
+        if octets[1] == '10':
+            assert answer_ is not None and answer_.get('callId') == call_id and \
+                answer_.get('failure', {}).get('code') == TOO_LARGE, \
+                f'{name}: sends a request of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
+        else:
+            assert answer_ is not None and answer_.get('callId') == call_id and answer_.get('kind') == CANCEL, \
+                f'{name}: sends a result of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
 
 document = {
     '$schema': 'schemas/conversations.schema.json',
@@ -1701,7 +1829,7 @@ document = {
         'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
-        'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
+        'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none. closed is the server closing that connection itself: nothing more comes on it, and the conversation\'s next steps name another connection, or none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. procedures beside open declares the procedures that connection\'s transport takes, by service id and procedure id (section 9.11): absent, every one; empty, none. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
@@ -1723,9 +1851,7 @@ document = {
 
 # written when run, and not when make_metrics.py takes its steps from here
 if __name__ == '__main__':
-    with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(document, file, ensure_ascii=False, indent=2)
-        file.write('\n')
+    write_json('conversations.json', document)
 
     # * the conversation of an escaped name proves a reader only while no other payload a side's process
     # reads holds its shape: no entry of any conformance file but it names SILL, as text or as bytes

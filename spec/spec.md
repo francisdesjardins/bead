@@ -96,9 +96,11 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14;
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
-  router, sections 15.2 and 15.12.
+  router, sections 15.2 and 15.12;
+- [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
+  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
 
-**Version: 0.14.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.15.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -340,12 +342,15 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 |      |                            | 65   | `DESTINATION_LOST`       |
 
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
-takes no more: a request past the calls it answers on its connection at once (section 9.2,
-step 3), a notification past its subscription's queue (section 11.10), a transfer past those its
-connection receives at once or past the budget left (section 12.3), a call past those that wait for
-an issuer's deadline (section 13.9). A requester gives it, too, to a call of its own it has no call
-id free for, or that would pass the calls its peer answers at once (section 9.1). It says nothing
-against the call's credential, and withdraws none (section 13.4).
+takes no more: a request past the calls it answers on its connection at once, or past twice as many
+with the calls whose resolvers outlive them (section 9.2, step 3), a notification past its
+subscription's queue (section 11.10), a transfer past those its connection receives at once, or
+past twice as many with those whose resolvers outlive their calls (section 12.3), or that waited for
+the budget past its bound (section 12.4), a call past those that wait for an issuer's deadline
+(section 13.9). A requester gives it, too, to a call of its own it has no call id free for, or that
+would pass the calls its peer answers at once (section 9.1), and ends with it a call whose result's
+transfer waited for its budget past that bound, after its procedure ran (section 12.4). It says
+nothing against the call's credential, and withdraws none (section 13.4).
 
 ## 9. Calls and answers
 
@@ -389,16 +394,29 @@ first that applies:
 1. A call id of the receiver's own parity: the request would answer another call. It MUST NOT be
    answered, and is reported as `ENVELOPE_MALFORMED`.
 2. A call id open already — a call still to be answered, or one held as a subscription: the same.
-3. A request past the calls the receiver answers on its connection at once,
-   `maximumAnsweringCalls` (section 12.2), is answered with `CAPACITY_EXCEEDED`, before anything
-   else of it is read, as an HTTP/2 endpoint refuses a stream past those it lets its peer open
-   ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2),
+3. A request that comes while the calls the receiver answers on its connection number
+   `maximumAnsweringCalls` (section 12.2), or while those calls and the calls on it whose
+   resolvers outlive them number twice as many, is answered with `CAPACITY_EXCEEDED`, before
+   anything else of it is read, as an HTTP/2 endpoint refuses a stream past those it lets its
+   peer open ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2),
    [§8.7](https://www.rfc-editor.org/rfc/rfc9113#section-8.7)). A call is answered from the turn
    its request opens it until its answer is wholly sent — a whole answer handed to its transport,
    or the last chunk of its result's transfer — its cancel comes (section 10.2) or its connection
    closes (section 9.10), its credential resolving and its transfer coming among it; a
    subscription once answered, a call id reserved and a call abandoned (section 12.9) take no
-   place, which sections 11.3, 11.10 and 12.9 bound.
+   place there, which sections 11.3, 11.10 and 12.9 bound. A call's resolver, or its verifier
+   while its credential resolves, _outlives_ the call when it still runs once the call ended,
+   answered or cancelled, a subscription's among them, and counts on its connection until it
+   settles, as Go's HTTP/2 server counts a handler until it returns and Kestrel tracks a stream
+   until its request's processing ends, against HTTP/2's Rapid Reset (CVE-2023-44487): a peer
+   that sends a request then its cancel, again and again, has no more resolvers run on a
+   connection than twice the bound. A call whose resolver outlives it holds no call id and is
+   answered nothing. A receiver that answers `CAPACITY_EXCEEDED` past the second count to twice
+   `maximumAnsweringCalls` requests in a row on a connection, none admitted between them,
+   closes that connection once the last refusal is handed to its transport, and reports
+   it, as an HTTP/2 endpoint MAY treat activity that is suspicious as a connection error of type
+   `ENHANCE_YOUR_CALM`
+   ([RFC 9113 §10.5](https://www.rfc-editor.org/rfc/rfc9113#section-10.5)).
 4. A destination, named to a receiver that relays nothing (section 14.1): answered with
    `DESTINATION_UNKNOWN`.
 5. No resolver for its service among those its connection's transport takes (section 9.11):
@@ -439,8 +457,9 @@ first that applies:
 7. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
 8. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
-9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by its
-   rules (section 18), then handed to its resolver, with its call's session.
+9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by
+   its rules (section 18), then handed to its resolver, with its call's session. A call that
+   ended before its resolver's turn came hands it nothing.
 
 A credential's resolution MAY wait — a `JWT` verified by Web Crypto, a key set asked for a key, a
 service asked whether a token holds — and the admission after it does not. A request presenting
@@ -500,9 +519,11 @@ section 1.4 allows, or without end. While a payload or its result goes as a tran
 inactivity counts instead. Past it, the call ends, and is cancelled.
 
 9.10. A connection that closes ends every call on it: each call waiting fails, and each call to
-answer is ended as cancelled — its resolver told, or, while its credential resolves (section 9.2),
-its verifier, by the call's signal — and answered by nothing. What a verifier settles to then is
-dropped in silence (section 10.2).
+answer is ended as cancelled — its resolver told, or, while its credential resolves (section
+9.2), its verifier, by the call's signal — and answered by nothing. Every resolver still running
+on it whose call ended before is told by its call's signal as well, and the connection's counts
+of section 9.2's step 3 end with it. What a verifier settles to then is dropped in silence
+(section 10.2).
 
 9.11. A server's transport MAY take only the procedures its application names, by their
 addresses — a service id and a procedure id each (section 16.7) — so that a connection it draws
@@ -539,12 +560,13 @@ prefix alone, and is never answered.
 
 10.2. A side receiving a cancel on a call id of its own parity MUST report it as
 `ENVELOPE_MALFORMED`. Otherwise it forgets the call, takes away what the call subscribed, then
-tells the resolver, so nothing more goes out on that call id. A call whose credential still
-resolves (section 9.2) ends alike, at once: its verifier is told by the call's signal, its call id
-is free again for a request that opens a new call, and whatever its verifier settles to after — a
-session, none, or a failure of its own — is dropped in silence: it opens no session, answers
-nothing, and reports nothing. A cancel for no call has crossed its answer, and is dropped in
-silence.
+tells the resolver, so nothing more goes out on that call id: a resolver whose turn had not come
+is handed nothing (section 9.2, step 9), and one that runs on outlives its call (section 9.2,
+step 3). A call whose credential still resolves (section 9.2) ends alike, at once: its verifier
+is told by the call's signal and outlives the call until it settles, its call id is free again
+for a request that opens a new call, and whatever its verifier settles to after — a session,
+none, or a failure of its own — is dropped in silence: it opens no session, answers nothing, and
+reports nothing. A cancel for no call has crossed its answer, and is dropped in silence.
 
 10.3. A requester MUST reserve a call id in three cases: when it sends a cancel on it; when the last
 chunk of a result that came as a transfer completes it; and when a failure ends a call whose result
@@ -639,24 +661,28 @@ always go in one envelope. A side that sends no transfer fails a request whose p
 one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a result with
 `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
-12.2. Both ends of a connection set their limits alike: nothing announces them. A receiver holds
-`chunkBytes` to a CHUNK (section 12.6) and to a request, whole or an opening, as section 12.1 has
-its requester send it; any other envelope it holds to `maximumEnvelopeBytes`. Each is the bound
-section 5.1's second step holds an envelope to, by the kind its prefix names, so a request past
-`chunkBytes` is answered as one too large (section 9.6, item 2), and nothing of it is held.
+12.2. Both ends of a connection set their limits alike: nothing announces them. Section 5.1's
+second step holds an envelope of any layout to the bound its kind gives, as its prefix names it: a
+request and a result, whole or an opening, to `chunkBytes`, as section 12.1 has their sender send
+them; any other envelope to `maximumEnvelopeBytes`. A request past its bound is refused as one too
+large (section 9.6, item 2) before any step of section 9.2 holds it, its credential's resolution
+among them, so nothing of it is held. A result past its bound ends its call as one too large
+(section 9.6, item 3): no sender that keeps section 12.1 writes one. A chunk is held to
+`chunkBytes` within its transfer, by section 12.6, item 1; one for no transfer under way is judged
+as section 12.9's table says, whatever its size.
 
-| Limit                       | By default  | Bounds                                                                                                                 |
-| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                         |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                            |
-| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send                                           |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                  |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each opening's, and each credit it grants past them |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                              |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                   |
-| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                 |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                     |
-| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and the calls a requester has wait on it (sections 9.1, 9.2)   |
+| Limit                       | By default  | Bounds                                                                                                                                                                                                              |
+| --------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                                                                                                                      |
+| `chunkBytes`                | 1,048,576   | a request's and a result's envelope, whole or an opening; a chunk's, within its transfer; and the largest a payload goes whole in                                                                                   |
+| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send: one transfer's share of its connection, so the envelopes beside it go between its chunks, the budget holding its total (section 12.4) |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                                                                                                               |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each one's total, from its admission until its payload is whole or it ends (section 12.4)                                                        |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once, and twice as many with those whose resolvers outlive their calls (section 9.2, step 3); 0 takes none, and sends none                                                   |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                |
+| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit; half of it, how long an opening waits for the budget (section 12.4)                                                                                         |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                  |
+| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and twice as many with the calls whose resolvers outlive them; the calls a requester has wait on it (sections 9.1, 9.2)                                     |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
@@ -680,16 +706,26 @@ bytes or more, 993 or more beside a destination, goes whole only. A side receivi
 2. of a result, ends the call with `PAYLOAD_TOO_LARGE`, and cancels it, for a total past the
    call's limit;
 3. refuses, in this order, a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`;
-   an opening past the transfers its connection receives at once, or past the budget left, with
-   `CAPACITY_EXCEEDED`; an opening that carries no byte of its payload, or holds its whole total,
-   which needed no transfer, with `CHUNK_INVALID`.
+   an opening past the transfers its connection receives at once, or past twice as many with those
+   whose resolvers outlive their calls, with `CAPACITY_EXCEEDED`; an opening that carries no byte of
+   its payload, or holds its whole total, which needed no transfer, or carries other than its sender
+   places in it — `chunkBytes` less its header, a result's counted with the 20 bytes of an
+   announcement in place of any it carries (section 12.1) — with `CHUNK_INVALID`. It admits any
+   other to the budget as section 12.4 says.
 
 12.4. A CREDIT without PACED, on the call id of a transfer, carries the end below which its sender
 may send: absolute, so a credit repeated, late or out of order never grants too much. A credit
 lower than one received grants nothing. The receiver grants as far as `windowBytes` past the bytes
 it holds from the start, once that is half a window past its last credit — or reaches the total,
-when less is left — and never past the budget left. A transfer the budget cannot credit waits until
-the budget frees, the transfers opened first credited first.
+when less is left. It admits a transfer to `bufferedBytesBudget` by its total, which the transfer
+holds from its admission until its payload is whole or it ends: at its opening, when no opening
+waits and the budget left holds it; otherwise once every opening before it, on any connection, is
+admitted or ended and the budget left holds it, the openings opened first admitted first. Until
+then it waits, holding its place and its opening's bytes and none of the budget, and is granted
+nothing. One still waiting once half of `transferInactivityTimeout` passed, in whole milliseconds
+rounded down, is refused `CAPACITY_EXCEEDED`: a request's opening is answered with it, and a
+result's ends its call with it, which is cancelled. No credit waits on the budget, so no transfer
+waits on another's.
 
 12.5. A CHUNK carries its offset on 8 bytes, and MORE on all but the last. A sender MUST send full
 chunks only — `chunkBytes` less the chunk's own 16 bytes of header, exactly — and the last,
@@ -730,7 +766,9 @@ whole ends its call as the stall above has it.
 
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
-the wait for its answer, afresh once the last chunk of its request went.
+the wait for its answer, afresh once the last chunk of its request went. An opening that waits for
+the budget is held by its wait alone (section 12.4); its admission's credit sets its inactivity
+going.
 
 12.9. A call that received a transfer keeps its call id a while once it ends. The side that answered
 holds it abandoned for `transferInactivityTimeout`, `maximumTransfers` per connection at most, the
@@ -746,8 +784,9 @@ where it is known for late, and reported elsewhere:
 | `CREDIT`       | dropped               | dropped                                             | dropped: it may have crossed its transfer's or subscription's end |
 | `CANCEL`       | —                     | dropped                                             | dropped: it may have crossed its answer                           |
 
-12.10. A connection that closes ends every transfer on it, at both ends; what they held of the
-budget goes to the transfers it starved, on any connection, each credited then as section 12.4 says.
+12.10. A connection that closes ends every transfer on it, at both ends, admitted or waiting; what
+they reserved of the budget admits the openings that wait for it, on any connection, as section
+12.4 says.
 
 12.11. A transfer of 20 MiB, with the limits by default:
 
@@ -1251,13 +1290,19 @@ and where its script threw it, its server told the close unclean; a broker conne
 a bound or a parcel that does not read, naming it, and a message a broker's participant takes that
 is no parcel, which it drops and which ends no connection (sections 15.17, 15.19, 15.20) — and what
 a listener throws, as it throws: a connection's own once, as it ends, its close or its drop begun,
-so that no listener's throw keeps it open, and before its close, which is then unclean. It reports
-no peer that drops without its closing handshake, its TCP connection ended or reset, nor, over a
-broker, a RESET, a GONE or its participant's link lost (section 15.21), nor one its heartbeat drops,
-nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
-server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it, unclean, but for a client's own `disconnect`
-left unanswered, whose close is told as the `disconnect` asked.
+so that no listener's throw keeps it open, and before its close, which is then unclean. A drop
+always ends its connection. What a connection's socket throws as its transport drops it, or as it
+sends its close, is that connection's own error, reported as it ends unless it had one: the
+connection ends all the same, its close unclean though its socket may never close, and what it held,
+its place among them (section 15.2), is given back before its close is told. What a socket throws
+before a connection holds it is reported nowhere, but a client's upgrade's, which fails its connect,
+its cause. A transport reports no peer that drops without its closing handshake, its TCP connection
+ended or reset, nor, over a broker, a RESET, a GONE or its participant's link lost (section 15.21),
+nor one its heartbeat drops, nor its own drop of a peer that never answered a close within its close
+timeout, but for what its socket throws as it drops either, nor, over HTTP, a server gone, a refusal
+of its own, an answer of another type, an exchange lost or a listen given up past its inactivity
+timeout: each one's close tells it, unclean, but for a client's own `disconnect` left unanswered,
+whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
@@ -1380,8 +1425,12 @@ connection; a 426 names `upgrade` in its `Connection`.
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
 still comes until the peer's close or its close timeout, then ends the connection, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A side's close timeout, 5 seconds by default, bounds each closing handshake it
-begins, its 1009 among them: a peer that has not answered by then is dropped, and a server tells its
+(section 15.1). A text message that is not UTF-8 fails the connection with 1007
+([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
+[§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
+(section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
+5 seconds by default, bounds each closing handshake it begins, its 1009 among them: a peer that
+has not answered by then is dropped, and a server tells its
 close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
 close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
 or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
@@ -2159,7 +2208,7 @@ type is `BROKER`, and it never leaves the process, so it is secure.
 
 ### MQTT 5
 
-_Vectors: `mqttPublishBounds`._
+_Vectors: `mqttPublishBounds`, `mqttAcknowledgementCodes`._
 
 15.25. A broker of MQTT 5.0
 ([OASIS MQTT 5.0](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)) carries a
@@ -2169,6 +2218,14 @@ participant's link over TCP, over TLS, or over a WebSocket whose subprotocol is 
 carries one. Over a WebSocket, a participant sends each message to its broker as one binary frame,
 never fragmented ([RFC 6455 §5.4](https://www.rfc-editor.org/rfc/rfc6455#section-5.4)), whatever
 packets it holds ([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+It reads the bytes of each binary message its broker sends, in their order, as one stream of
+packets as its frames come, a packet across messages or across a message's fragments read whole
+and several in one frame each read, each held to its own Maximum Packet Size alone (section
+15.29), with no bound on a message of its own; a message of any other type closes its network
+connection ([MQTT-6.0.0-1], [MQTT-6.0.0-2]). Its upgrade offers no extension. A platform that
+hands a message on only once it is whole bounds it
+([RFC 6455 §10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4);
+[`docs/support.md`](../docs/support.md), "Differences").
 A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
 `<root>/i/<id>`, a server's name `<root>/s/<name>`, a departure `<root>/d/<id>`. A name served in a
 group is subscribed as the shared subscription `$share/<name>/<root>/s/<name>`, its share name the
@@ -2193,40 +2250,59 @@ Maximum QoS is not 0, as that CONNACK is read, its packets judged in the order t
 any other Reason Code, or of a Maximum QoS of 0, fails its start whatever comes after it, as does
 no CONNACK within `connectTimeout` of its start, and a start that fails sends no DISCONNECT. Once
 up, a link that ends other than by its stop is lost, its down told once, before or after its start
-settles, and its start succeeds all the same; its stop ends it as it ends any link up. Its
-password is one its adapter is given, or one a provider it is given answers, asked anew at each
-link's start before its network connection opens, under that start's signal and its stop, and
-within the same `connectTimeout`: an ask that outlives it, or that a stop meets, fails that start
-whether or not its provider hears its signal, a later answer serving nothing, and its provider's
-signal is aborted once that start ends, linked or not. A password is UTF-8 text, never empty and
-holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled down"): its adapter is refused as
-it is built given one that is not, a password and a provider both, or either beside a TLS client
-certificate, and its start fails on a provider's answer that is not. It sends a packet within each
-Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
-participant's stop takes no new publication; once what it was handed has gone, each PUBACK come, it
-sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names and its peers'
-departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and awaits their
-UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout` of its call.
-It then ends its link with a DISCONNECT of Reason Code 0x00, within a `connectTimeout` of its own,
-so that no will goes, an UNSUBACK that refuses, or none within that time, ending it all the same.
-The stop of a link that is down sends nothing. A DISCONNECT its broker sends of Reason Code 0x8E
-is its link taken over (section 15.21); any other end of its network connection is its link lost.
-Nothing of a link reaches another: no library reconnects it, subscribes again for it, holds what it
-publishes while it is down, or keeps its aliases, and what is asked of a link that is down is
-refused at once.
+settles, and its start succeeds all the same; its stop ends it as it ends any link up. A
+subscription or a publication its application gives up once its packet may have gone and before its
+outcome came, a SUBSCRIBE or a PUBLISH of QoS 1 sent, or a PUBLISH of QoS 0 not yet written
+(section 15.28), loses its link, no DISCONNECT, since what was asked may take effect yet, and what
+else that link awaits fails with it; a publication given up while it waits on the Receive Maximum
+leaves unsent, its link kept. Its password is one its adapter is given, or one a provider it is
+given answers, asked anew at each link's start before its network connection opens, under that
+start's signal and its stop, and within the same `connectTimeout`: an ask that outlives it, or that
+a stop meets, fails that start whether or not its provider hears its signal, a later answer serving
+nothing, and its provider's signal is aborted once that start ends, linked or not. A password is
+UTF-8 text, never empty and holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled
+down"): its adapter is refused as it is built given one that is not, a password and a provider both,
+or either beside a TLS client certificate, and its start fails on a provider's answer that is not.
+Its Keep Alive in force is the shorter of its CONNECT's Keep Alive and its CONNACK's Server Keep
+Alive, its CONNECT's where its CONNACK names none or 0: a client may send a PINGREQ at any time, and
+one that sends within the shorter never passes the Server Keep Alive it uses ([MQTT-3.1.2-21],
+[MQTT-3.2.2-21],
+[MQTT 5.0 §3.1.2.10](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). It sends a
+packet within each Keep Alive in force, a PINGREQ once nothing else went for that long, and a
+PINGREQ whose PINGRESP has not come within half the Keep Alive in force loses its link, no
+DISCONNECT, its will going. Its broker counts its link lost silent for half again as long as the
+Server Keep Alive its CONNACK names, or as its CONNECT's Keep Alive where it names none, and counts
+nothing under a Server Keep Alive of 0 ([MQTT-3.1.2-22], [MQTT-3.2.2-22]): its will then goes on no
+silence, and its peers find it gone by their heartbeat (section 15.21). A participant's stop takes
+no new publication; once what it was handed has gone, each
+PUBACK come, it sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names
+and its peers' departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and
+awaits their UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout`
+of its call. It then ends its link with a DISCONNECT of Reason Code 0x00, within a `connectTimeout`
+of its own, so that no will goes, an UNSUBACK that refuses, or none within that time, ending it all
+the same. The stop of a link that is down sends nothing. A DISCONNECT its broker sends of Reason
+Code 0x8E is its link taken over (section 15.21); any other end of its network connection is its
+link lost. Nothing of a link reaches another: no library reconnects it, subscribes again for it,
+holds what it publishes while it is down, or keeps its aliases, and what is asked of a link that is
+down is refused at once.
 
 15.27. A participant subscribes each topic in a SUBSCRIBE of its own, at QoS 1, No Local 0, Retain
 As Published 0 and Retain Handling 2, with no Subscription Identifier. A subscription is held once
-its SUBACK grants QoS 1, and refused on any other code, QoS 0 granted among them. A SUBACK says a
-subscription is installed, never that its subscriber may read what it matches: its broker's access
-control decides what it delivers (section 15.31). An UNSUBSCRIBE names one filter, the one its
-SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's packets in their
-order, removes it all the same
+its SUBACK's Reason Code is 0x01, Granted QoS 1; it is refused on 0x00 or 0x02, Granted QoS 0 or 2,
+its filter kept for its stop, and on any code of 0x80 or more, whether or not SUBACK's table names
+it
+([MQTT 5.0 §2.4, §3.9.3, §4.13.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+A SUBACK says a subscription is installed, never that its subscriber may read what it matches: its
+broker's access control decides what it delivers (section 15.31). An UNSUBSCRIBE names one filter,
+the one its SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's packets in
+their order, removes it all the same
 ([MQTT 5.0 §3.10.4](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A
 subscription is let go once its UNSUBACK came with a Reason Code of 0x00 or 0x11, No subscription
-existed, and refused on any other; one whose UNSUBACK has not come within `connectTimeout` of its
-UNSUBSCRIBE fails, its link kept so that no will goes, and its filter kept for its stop (section
-15.26).
+existed, and refused on any code of 0x80 or more
+([MQTT 5.0 §3.11.3](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)); one whose
+UNSUBACK has not come within `connectTimeout` of its UNSUBSCRIBE fails, its link kept so that no will
+goes, and its filter kept for its stop (section 15.26). Any other SUBACK or UNSUBACK is section
+15.29's.
 
 15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
 once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
@@ -2236,20 +2312,35 @@ life sections 15.18 and 15.22 give each, in whole seconds rounded up, 1 at least
 its CONNACK's Receive Maximum, 65,535 where it names none, of its PUBLISH packets of QoS 1
 unacknowledged, later ones waiting in their order, and delays no other packet for them
 ([MQTT 5.0 §4.9](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A PUBLISH of
-QoS 1 is taken once its PUBACK came with a Reason Code under 0x80 but 0x10; 0x10, No matching
-subscribers, says no subscriber takes it; 0x80 or more refuses it. A publication whose packet,
-counted as section 15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is
-asked, and never sent.
+QoS 1 is taken once its PUBACK came with a Reason Code of 0x00, or with none; 0x10, No matching
+subscribers, says no subscriber takes it; any code of 0x80 or more refuses it, whether or not
+PUBACK's table names it
+([MQTT 5.0 §2.4, §3.4.2.1, §4.13.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html));
+any other PUBACK is section 15.29's. A PUBLISH of QoS 0 is taken once it is written to its network
+connection, whatever its broker then reads of it. A publication whose packet, counted as section
+15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is asked, and never
+sent.
 
 15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
 took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
 acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size, counted from
 its fixed header's Remaining Length as section 15.30 counts one, is a Protocol Error
-([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)):
-as it reads that length, before the packet's body comes, it closes its network connection,
-reading nothing more of it, its link lost where it was up, or its start failed where no CONNACK had
-put it up (section 15.26). It sends no DISCONNECT before it closes
-([`docs/support.md`](../docs/support.md), "Leveled down"), and its broker publishes its will.
+([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html));
+so is a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under 0x80 that its packet's table does not
+name, the tables `mqttAcknowledgementCodes` holds ([MQTT-3.4.2-1], [MQTT-3.9.3-2], [MQTT-3.11.3-2]),
+and a SUBACK or an UNSUBACK whose count of Reason Codes is not one, its SUBSCRIBE's or its
+UNSUBSCRIBE's one filter ([MQTT-3.8.4-6], [MQTT-3.11.3-2]), whether or not a request of its link
+awaits it; any other packet its client cannot read is a Malformed Packet or a Protocol Error that
+client finds
+([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+On each it closes its network connection, reading nothing more of it, one past its bound as it reads
+that length, over a WebSocket as the bytes that hold it come, or once its message is whole on a
+platform that hands one on only so (section 15.25), before the packet's body comes: its link lost where it was up, its participant's stop
+letting its names go among it (section 15.21), what that link awaits failed with it, the
+acknowledged request among it, never refused nor taken; its start failed where no CONNACK had put it
+up (section 15.26); its stop ended where it stopped, no down told. It sends no DISCONNECT before it
+closes, at its stop no more than at any other time ([`docs/support.md`](../docs/support.md),
+"Leveled down"), and its broker publishes its will.
 
 15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
 where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry
@@ -2264,11 +2355,11 @@ CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its d
 `maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
 Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
 
-| Bound               | By default | Bounds                                                                                                                                                                                                           |
-| ------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                                                                        |
-| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long                                                                                                     |
-| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT |
+| Bound               | By default | Bounds                                                                                                                                                                                                                |
+| ------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                                                                             |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds, which a shorter Server Keep Alive replaces (section 15.26): its broker counts its link lost silent for half again as long where its CONNACK names no Server Keep Alive |
+| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT      |
 
 Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
 seconds is refused.
@@ -2433,6 +2524,39 @@ connection that held it: at once on a close or a reset, and after three of its h
 close for a connection gone silent, which is how long an inbox outlives a process that held it, a
 parcel to it taken meanwhile, and how long its id's next link is refused. A broker that writes what
 it holds to disk may keep at rest, for its life, a credential a DATA carries (section 15.22).
+
+### A client's TLS
+
+15.39. A client that connects over TLS — `wss`, `https`, a broker's link under TLS — takes from its
+application, outside a page, the authorities it judges its server by and a certificate with its key,
+each as PEM text ([RFC 7468](https://www.rfc-editor.org/rfc/rfc7468)). The authorities are its trust
+anchors, in place of its platform's roots and never added to them
+([RFC 5280 §6.1.1](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.1)); given none, its
+platform's roots and verifier judge its server. Under either, it takes its server's certificate only
+where that certificate names the host its URL names, as section 13.4 reads that host: a name in a
+`dNSName` of its subjectAltName, an address in an `iPAddress` of it, byte for byte, and never in its
+subject's common name ([RFC 9525 §6](https://www.rfc-editor.org/rfc/rfc9525#section-6),
+[RFC 9110 §4.3.4](https://www.rfc-editor.org/rfc/rfc9110#section-4.3.4)). Under its authorities it
+checks no revocation ([RFC 5280 §6.1.3](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.3));
+under its platform's roots, revocation is its verifier's. It presents its certificate when its
+server asks for one at the handshake
+([RFC 8446 §4.3.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.3.2),
+[§4.4.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2)), the certificate first, then the
+intermediates that certify it, each certifying the one before. Its key is PKCS #8, SEC1 or PKCS #1,
+unencrypted. As it is built, a client refuses a certificate without its key, a key without its
+certificate or of another certificate, an encrypted key, and authorities, a certificate or a key
+that read as none. A handshake its server refuses fails the connect, under TLS 1.3 even once its
+first request was written
+([RFC 8446 §4.4.2.4](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2.4)), and so does a
+certificate of its server's that it refuses, chained to none of its anchors or naming another host;
+over HTTP neither is a connection drawn and then lost, and neither names a status or a refusal,
+since a TLS alert is no answer of its server's (section 15.6). A certificate authenticates its
+client to what terminates TLS, never a request, whose credential its server's router alone reads
+(section 13.4), and it is no bearer credential: a client of a transport holds it in the clear and
+uses it on a connect over TLS alone, while a broker's adapter, whose URL and TLS are one, refuses it
+as it is built over a URL that is not TLS. A link's password is refused beside its certificate, and
+taken beside authorities alone (sections 15.26, 15.33). A page's TLS is its browser's, and its
+client takes none.
 
 ## 16. Services and procedures
 

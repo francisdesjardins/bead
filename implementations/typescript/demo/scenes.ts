@@ -2,8 +2,8 @@
 
 // The page's scenes, one a tab: what to try, its payload rules, its OpenAPI document, its server
 // and its code. The scene shown is the address's fragment, `#rules`, so a link opens it and Back
-// returns to the one before; with none named, what to try. Beside them the wire, its calls or its
-// envelopes, folded until a visitor opens it, which this browser alone remembers.
+// returns to the one before; with none named, what to try. Beside them the wire, its calls or its envelopes, folded until a visitor opens
+// it, which this browser alone remembers.
 
 // dependencies
 
@@ -56,7 +56,7 @@ const remember = (isOpen: boolean): void => {
 /** Mounts the wire: folded, or open as this browser remembers it, one log shown at a time. */
 const mountWire = (): void => {
   const wire = elementOf('wire');
-  // the bar's, on a desktop, and the sheet's own, on a phone
+  // the strip's, and the sheet's own on a phone
   const toggles = ['wire-toggle', 'wire-sheet'].map((id) => {
     return elementOf(id);
   });
@@ -130,7 +130,8 @@ export const mountScenes = (): void => {
     });
   };
 
-  const { select, tabs } = mountTabs(elementOf('scene-tabs'), {
+  const list = elementOf('scene-tabs');
+  const { select, tabs } = mountTabs(list, {
     show: (tab) => {
       for (const [each, panel] of panels) {
         panel.hidden = each !== tab;

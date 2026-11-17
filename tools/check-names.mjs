@@ -20,7 +20,9 @@
 //
 //   same                             the names agree under the case rules, and their kinds render
 //                                    each other
-//   rendered: <rule> (<records>)     one name is another's by a rule a record states
+//   rendered: <rule> (<records>)     one name is another's by one of RULES, citing exactly the
+//                                    records RULE_RECORDS gives it, each of which writes the
+//                                    rule's tag
 //   own: <reason> (<record>)         one side's alone, as the record allows
 //   differs: <title>                 a difference to close, the title a row of docs/support.md's
 //                                    Differences
@@ -34,16 +36,20 @@
 //
 // What a side's list names: on the TypeScript side, each name an entry exports; on the C# side,
 // each public type, but a static class, whose static methods, constants and static properties are
-// names of their own, `Holder.Member`; a static class of constants alone is one name, as a frozen
-// object is on the TypeScript side; and every other type's constants, `Type.Name`; on the Rust
-// side, each name a crate's root exports and each item of a public module, `json::read`, a foreign
-// type re-exported aside. Members are left to each side's own surface test. A kind is read from
-// the declaration: a TypeScript interface with a call signature is a function's type or a record,
-// as 0007 holds a callable that carries members, and a primitive branded a record, as a newtype is;
-// a Rust newtype whose associated constants are its values a choice, the open code space 0044
-// states, and an alias of a primitive a scalar. Exit 1 on a problem, each with its line.
+// names of their own, `Holder.Member`; a static class of constants alone is both one name and its
+// members, `Holder.Member`, placed by one or the other: by its own row where the other sides hold
+// one table, a frozen object or a Rust constant, by its members' rows where they hold constants
+// apart, never both and never some members alone; and every other type's constants, `Type.Name`;
+// on the Rust side, each name a crate's root exports and each item of a public module,
+// `json::read`, keyed with its module, `jsonread`, a foreign type re-exported aside. Members are
+// left to each side's own surface test. A kind is read from the declaration: a TypeScript
+// interface with a call signature is a function's type or a record, as 0007 holds a callable that
+// carries members, and a primitive branded a record, as a newtype is; a Rust newtype whose
+// associated constants are its values a choice, the open code space 0044 states, and an alias of a
+// primitive a scalar. Each rendering's records are read for its tag, `rendered: <rule>`. Exit 1 on
+// a problem, each with its line.
 
-import { writeFileSync } from 'node:fs';
+import { readdirSync, writeFileSync } from 'node:fs';
 
 import {
   differencesOf,
@@ -59,6 +65,7 @@ import {
 export { differencesOf, publicLinesOf, SIDES };
 
 const NAMES = 'tools/names.tsv';
+const DECISIONS = 'docs/decisions';
 
 // ── Kinds ──────────────────────────────────────────────────────────────────────
 
@@ -339,8 +346,16 @@ export const cSharpNamesOf = (lines) => {
         return /^(?:const |static readonly )/.test(line);
       });
 
+    // * a table is one name and each of its members, placed by one or the other
     if (isTable) {
-      names.set(name, { kinds: ['constant'] });
+      const placed = owned.map(({ member }) => {
+        return `${holder}.${member}`;
+      });
+
+      names.set(name, { kinds: ['constant'], members: placed });
+      for (const one of placed) {
+        names.set(one, { kinds: ['constant'], table: name });
+      }
       continue;
     }
     for (const { line, member } of owned) {
@@ -526,9 +541,11 @@ export const surfacesOf = (root = ROOT) => {
 
 // ── The case rules ─────────────────────────────────────────────────────────────
 
-// a name's last segment: a Rust module's item, `json::read`, is keyed by `read`
-const lastOf = (name) => {
-  return name.split('::').at(-1);
+// the name a key is made of: a Rust variant's own, `CallError::Failure` by `Failure`, and a Rust
+// module's item with its module, `json::read` by `jsonread`, so a module's word is no key of
+// another side's alone
+const lastOf = (name, kind) => {
+  return kind === 'variant' ? name.split('::').at(-1) : name.split('::').join('');
 };
 
 /**
@@ -536,7 +553,7 @@ const lastOf = (name) => {
  * static member keeps its holder, so `Holder.Name` joins `HOLDER_NAME` by a rendering alone.
  */
 export const keyOf = (name, kind) => {
-  const last = arityless(lastOf(name));
+  const last = arityless(lastOf(name, kind));
   const bare = classOf(kind) === 'type' && /^I[A-Z]/.test(last) ? last.slice(1) : last;
 
   return bare.replace(/_/g, '').toLowerCase();
@@ -551,12 +568,30 @@ const arityless = (name) => {
 
 // ── The renderings ─────────────────────────────────────────────────────────────
 
-// a C# static member's keys, `Holder.Member`: its holder and member, and its member alone; none
-// for a name that has no holder
+// a C# static member's keys, `Holder.Member`: its holder and member, and its member alone where
+// it has two words or more; none for a name that has no holder
+//
+// ! a one-word member, `Read` or `Check`, would meet any Rust item or TypeScript name of that word
 const heldKeysOf = (name, kind) => {
   const [holder, member] = name.split('.');
 
-  return member === undefined ? [] : [keyOf(`${holder}${member}`, kind), keyOf(member, kind)];
+  if (member === undefined) {
+    return [];
+  }
+
+  const held = keyOf(`${holder}${member}`, kind);
+
+  return member.split(/(?=[A-Z])/).length > 1 ? [held, keyOf(member, kind)] : [held];
+};
+
+// a C# `Nouns.Of`'s key, `nounof`, its holder the plural of the noun it makes, as `Validators.Of`
+// makes a validator; none for another name
+const ofKeysOf = (name) => {
+  const [holder, member] = name.split('.');
+
+  return member === 'Of' && /[^s]s$/.test(holder)
+    ? [keyOf(`${holder.slice(0, -1)}Of`, 'function')]
+    : [];
 };
 
 // a key's stem, `suffix` dropped from its end, or none where it does not end so
@@ -672,15 +707,52 @@ export const RULES = Object.freeze({
       return side === 'csharp' ? heldKeysOf(name, kind) : [keyOf(name, kind)];
     });
   },
-  // a function `nounOf` is C#'s `Noun.Of`, or `NounOf` on a static class that holds several, and
-  // Rust's `noun_of` (0007, 0044)
+  // a function `nounOf` is C#'s `Noun.Of`, or `Nouns.Of` on the static class of its nouns, or
+  // `NounOf` on a static class that holds several, and Rust's `noun_of` (0007, 0044)
   of: (cells) => {
     return agree(cells, (side, { name, kind }) => {
       if (kind !== 'function') {
         return [];
       }
 
-      return side === 'csharp' ? heldKeysOf(name, kind) : [keyOf(name, kind)];
+      return side === 'csharp'
+        ? [...heldKeysOf(name, kind), ...ofKeysOf(name)]
+        : [keyOf(name, kind)];
+    });
+  },
+  // a function `nounOf` that makes a `Noun`, C#'s `Nouns.Of`, is Rust's type `Noun` itself, its
+  // `new` the function, as Rust's API guidelines make a value (C-CTOR); never without a Rust cell,
+  // where it would be `of` (0007, 0044)
+  new: (cells) => {
+    if (cells.rust.length === 0) {
+      return false;
+    }
+
+    return agree(cells, (side, { name, kind }) => {
+      if (side === 'rust') {
+        return kind === 'record' ? [`${keyOf(name, kind)}of`] : [];
+      }
+      if (kind !== 'function') {
+        return [];
+      }
+
+      return side === 'csharp' ? ofKeysOf(name) : [keyOf(name, kind)];
+    });
+  },
+  // a function `verbNoun` is C#'s `Noun.Verb`, the noun the static class that holds the verb, and
+  // Rust's `verb_noun` (0007, 0044)
+  verb: (cells) => {
+    return agree(cells, (side, { name, kind }) => {
+      if (kind !== 'function') {
+        return [];
+      }
+      if (side === 'csharp') {
+        const [holder, member] = name.split('.');
+
+        return member === undefined ? [] : [keyOf(`${member}${holder}`, kind)];
+      }
+
+      return [keyOf(name, kind)];
     });
   },
   // an event the others emit is a Rust `…Listener` or `on_…` (0044)
@@ -714,14 +786,43 @@ export const RULES = Object.freeze({
       return kind === (side === 'rust' ? 'record' : 'function type') ? [keyOf(name, kind)] : [];
     });
   },
-  // a platform's own type, as `IClock` is `TimeProvider` (0011): its record alone holds it
-  platform: () => {
-    return true;
+  // a C# name that takes `Bead` before a .NET type's name, as `BeadHttpClient` beside
+  // `System.Net.Http.HttpClient`, and `BeadHttpClientOptions` its options (0007, 0049)
+  platform: (cells) => {
+    return agree(cells, (side, { name, kind }) => {
+      if (side !== 'csharp') {
+        return [keyOf(name, kind)];
+      }
+
+      const isPlatform = PLATFORM_TYPES.some((type) => {
+        return name.startsWith(`Bead${type}`);
+      });
+
+      return isPlatform ? [keyOf(name.slice('Bead'.length), kind)] : [];
+    });
   },
 });
 
+// the .NET types a C# name takes `Bead` before, rather than repeat (0007)
+const PLATFORM_TYPES = Object.freeze(['HttpClient']);
+
+/** The records each rendering cites, exactly, each of which writes the rule's tag. */
+export const RULE_RECORDS = Object.freeze({
+  error: Object.freeze(['0007', '0044']),
+  like: Object.freeze(['0007']),
+  flags: Object.freeze(['0007', '0044']),
+  constant: Object.freeze(['0007']),
+  of: Object.freeze(['0007', '0044']),
+  new: Object.freeze(['0007', '0044']),
+  verb: Object.freeze(['0007', '0044']),
+  listener: Object.freeze(['0044']),
+  keyword: Object.freeze(['0044']),
+  callable: Object.freeze(['0044']),
+  platform: Object.freeze(['0007', '0049']),
+});
+
 // the renderings that hold each side's kind themselves, past the kind table
-const KINDED_BY_RULE = new Set(['flags', 'callable', 'platform']);
+const KINDED_BY_RULE = new Set(['flags', 'callable', 'new']);
 
 // ── The rows ───────────────────────────────────────────────────────────────────
 
@@ -873,6 +974,11 @@ const classProblemsOf = (row) => {
           `the rendering ${written.reason} names the records that state it, "rendered: ${written.reason} (<record>)"`,
         ];
       }
+      if (written.records.join(', ') !== RULE_RECORDS[written.reason].join(', ')) {
+        return [
+          `the rendering ${written.reason} cites its rule's records, (${RULE_RECORDS[written.reason].join(', ')})`,
+        ];
+      }
       if (sides.length < 2) {
         return ['a rendering names two sides or three'];
       }
@@ -880,8 +986,8 @@ const classProblemsOf = (row) => {
         return [`the rendering ${written.reason} does not give its names`];
       }
 
-      // ! a platform's own type is held by its record alone, its kind with it; a set of flags and a
-      // callable, by their rule, which reads each side's kind itself
+      // ! a set of flags, a callable and a type made by its `new` are held by their rule, which
+      // reads each side's kind itself
       return renders || KINDED_BY_RULE.has(written.reason) ? [] : [unkinded(row)];
     }
     case 'own': {
@@ -1000,8 +1106,27 @@ export const problemsOf = (text, surfaces, differences) => {
   }
 
   for (const side of SIDES) {
-    for (const [name, { kinds }] of surfaces[side]) {
-      if (!held[side].has(name)) {
+    for (const [name, { kinds, members, table }] of surfaces[side]) {
+      // a table's member is placed with its table
+      if (table !== undefined) {
+        continue;
+      }
+
+      const placed = (members ?? []).filter((one) => {
+        return held[side].has(one);
+      });
+
+      if (placed.length > 0 && held[side].has(name)) {
+        problems.push(
+          `${NAMES}: ${side}'s ${name} is placed by its row and by its members' rows; one or the other`
+        );
+      } else if (placed.length > 0) {
+        for (const one of members.filter((member) => !held[side].has(member))) {
+          problems.push(
+            `${NAMES}: ${side}'s ${name} is placed by its members: ${one} is in no row`
+          );
+        }
+      } else if (!held[side].has(name)) {
         problems.push(
           `${NAMES}: ${side}'s public ${kinds[0]} ${name} is in no row; give it one, never \`alone\``
         );
@@ -1024,6 +1149,34 @@ export const problemsOf = (text, surfaces, differences) => {
   }
 
   return problems;
+};
+
+// ── The records ────────────────────────────────────────────────────────────────
+
+/**
+ * The problems of the records each rendering cites, `recordOf(number)` giving a record's text or
+ * null: each of its rule's records writes the rule's tag, `rendered: <rule>`, where it states the
+ * rule, before its `## The Tenth Man`, each run of whitespace one space, so a tag a line wraps
+ * still reads.
+ */
+export const citationProblemsOf = (recordOf) => {
+  return Object.entries(RULE_RECORDS).flatMap(([rule, records]) => {
+    return records.flatMap((number) => {
+      const text = recordOf(number);
+
+      if (text === null) {
+        return [`${DECISIONS}/${number}: the rendering ${rule} cites a record no file holds`];
+      }
+
+      const stated = text.split(/^## The Tenth Man\b/m)[0].replace(/\s+/g, ' ');
+
+      return stated.includes(`\`rendered: ${rule}\``)
+        ? []
+        : [
+            `${DECISIONS}/${number}: the rendering ${rule} cites this record, which does not write "rendered: ${rule}"`,
+          ];
+    });
+  });
 };
 
 // ── The seed ───────────────────────────────────────────────────────────────────
@@ -1099,25 +1252,29 @@ const gives = (rule, names, surfaces) => {
   return kindedOf(names, surfaces) !== null && RULES[rule](cellsOf(names, surfaces));
 };
 
-const SEEDED_RULES = Object.freeze([
-  ['error', '0007, 0044'],
-  ['like', '0007'],
-  ['flags', '0007'],
-  ['constant', '0007'],
-  ['of', '0007, 0044'],
-]);
+// the renderings the seed gives, each citing its rule's records
+const SEEDED_RULES = Object.freeze(['error', 'like', 'flags', 'constant', 'of']);
 
 /**
  * The file the lists seed: each key two sides or three share, by name and by the kind's class, a
  * `same` row, a TypeScript `create…` factory beside its type; then each rendering a rule gives, a
  * side's name joining a row or names joining one another, one a side, where the rule gives one
  * alone; then an `alone` row for every other name, each side's count pinned. A Rust module's item,
- * `json::read`, is placed by reading.
+ * `json::read`, is placed by reading, and a C# static class of constants seeds as one name, its
+ * members left to a reading.
  */
 export const seedOf = (surfaces) => {
   const left = Object.fromEntries(
     SIDES.map((side) => {
-      return [side, new Set(surfaces[side].keys())];
+      const names = [...surfaces[side]]
+        .filter(([, { table }]) => {
+          return table === undefined;
+        })
+        .map(([name]) => {
+          return name;
+        });
+
+      return [side, new Set(names)];
     })
   );
   const kindOf = (side, name) => {
@@ -1184,7 +1341,9 @@ export const seedOf = (surfaces) => {
     return found.length === 1 ? found[0] : null;
   };
 
-  for (const [rule, records] of SEEDED_RULES) {
+  for (const rule of SEEDED_RULES) {
+    const records = RULE_RECORDS[rule].join(', ');
+
     for (const row of rows) {
       for (const side of SIDES.filter((one) => row.names[one] === undefined)) {
         const found = unique(side, (name) => {
@@ -1276,7 +1435,18 @@ if (import.meta.main) {
   }
 
   const read = readOf(ROOT);
-  const problems = problemsOf(read(NAMES), surfaces, differencesOf(read(SUPPORT)));
+  const files = readdirSync(`${ROOT}/${DECISIONS}`);
+  const recordOf = (number) => {
+    const file = files.find((name) => {
+      return name.startsWith(`${number}-`) && name.endsWith('.md');
+    });
+
+    return file === undefined ? null : read(`${DECISIONS}/${file}`);
+  };
+  const problems = [
+    ...problemsOf(read(NAMES), surfaces, differencesOf(read(SUPPORT))),
+    ...citationProblemsOf(recordOf),
+  ];
 
   for (const problem of problems) {
     console.error(problem);

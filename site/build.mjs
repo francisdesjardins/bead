@@ -1,14 +1,21 @@
 #!/usr/bin/env node
-// Builds the page francisdesjardins.ca serves at /bead/, `dist/index.html`: one document, both
+// Builds the page beadproto.dev serves, `dist/index.html`: one document, both
 // languages in it, English in the page and French in a template the page swaps in. Each language's
 // content is `src/content.<language>.html`, its placeholders filled from the repository: the
 // versions and the conformance files' counts, the byte examples and tables of `src/data.mjs`, the
 // snippets of `src/snippets/`, excerpts of the sources, and each diagram's SVG, which must be its
-// source's render. Node alone, nothing installed, and the same bytes on every machine.
+// source's render. The table of the three implementations is drawn from `src/data.mjs` and held to
+// `docs/support.md`: each row of its Features and Transports in one part of the table or in
+// OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the union of what its
+// rows' cells say for its sides by the token `ahead: <stage>`, a row of the differences of kind
+// open. It writes the not-found page too, `dist/404.html`, its styles over the same skin. Node
+// alone, nothing installed, and the same bytes on every machine.
 //
-//   node build.mjs   writes dist/index.html
+//   node build.mjs   writes dist/index.html and dist/404.html
 //
-// Exit 1 on a placeholder it cannot fill or a diagram whose SVG is not its source's.
+// Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, or a table the
+// matrix does not hold: a row in no list or in two, a title the matrix lacks, "ahead" in a cell's
+// own words or naming no open difference, or a cell that says otherwise than its rows.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -21,20 +28,42 @@ import {
   FAILURE_HEADINGS,
   FATES,
   HEADER,
+  OFF_THE_PAGE,
+  PARTS,
+  PART_HEADING,
+  SIDES,
   STAGES,
   STATUSES,
   STATUS_HEADINGS,
   WIRE,
 } from './src/data.mjs';
+import { tokensOf } from '../implementations/typescript/demo/highlight.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
+// penumbra's two sheets, Bead's overrides of them, Bead's skin and Bead's top bar, which the demo
+// links too: the page's styles come on top of them, and the not-found page's own; and beside them
+// the theme's script, which the demo loads too
+const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
+const STACK = [
+  'tokens.system.css',
+  'tokens.skin.base.css',
+  'tokens.system.overrides.css',
+  'tokens.skin.css',
+  'chrome.css',
+].map((name) => {
+  return join(PENUMBRA, name);
+});
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
+export const NOT_FOUND = join(HERE, 'dist', '404.html');
+export const PRIVACY = join(HERE, 'dist', 'privacy', 'index.html');
 
 export const LANGUAGES = ['en', 'fr'];
-const ADDRESS = 'https://francisdesjardins.ca/bead/';
+const ADDRESS = 'https://beadproto.dev/';
+const PRIVACY_ADDRESS = `${ADDRESS}privacy/`;
+const MANIFEST = join(ROOT, 'implementations', 'typescript', 'devtools', 'chrome', 'manifest.json');
 const SOURCE = 'https://github.com/francisdesjardins/bead';
 const BLOB = `${SOURCE}/blob/main/`;
 const TREE = `${SOURCE}/tree/main/`;
@@ -56,6 +85,76 @@ const escapeAttribute = (text) => {
 
 const pick = (pair, language) => {
   return pair[LANGUAGES.indexOf(language)];
+};
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+
+// a placeholder of a template: `{{name}}`, `{{name a="…" b="…"}}`, or `{{s:key}}`, a string of the page
+const PLACEHOLDER = /\{\{([\w-]+(?::\w+)?)((?:\s+\w+="[^"]*")*)\s*\}\}/gu;
+
+// what reads as a placeholder once a template is filled: one no filler took
+const LEFT = /\{\{[\w:-]+[^}]*\}\}/gu;
+
+// the attributes of a placeholder, `{{name a="…" b="…"}}`
+const attributesOf = (text) => {
+  return Object.fromEntries(
+    [...text.matchAll(/(\w+)="([^"]*)"/gu)].map(([, key, value]) => {
+      return [key, value];
+    })
+  );
+};
+
+// a filler that gives markup: HTML, a sheet, a script or a script's JSON. Its markup goes in as it
+// is; every other filler gives text, which is escaped.
+const raw = (filler) => {
+  return Object.freeze({ raw: filler });
+};
+
+// the markup's state at the end of `text`, given its state at the start: whether it is inside a
+// tag of the HTML, `<a …>`, and in which quote of an attribute's value
+const markupAfter = (text, state) => {
+  let { inside, quote } = state;
+  for (const character of text) {
+    if (!inside) {
+      inside = character === '<';
+    } else if (quote !== '') {
+      quote = character === quote ? '' : quote;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      inside = false;
+    }
+  }
+  return { inside, quote };
+};
+
+// ! a template's placeholders filled in one pass, each by the filler of its name, which takes its
+// attributes. A filler's text is escaped for where the placeholder stands: as an attribute value
+// inside an HTML tag, as text outside one. A raw filler's markup goes in as it is. What a filler
+// gives is never read for placeholders. A name with no filler, or a placeholder left once filled,
+// is refused.
+const fill = (template, fillers) => {
+  let state = { inside: false, quote: '' };
+  let at = 0;
+  const filled = template.replace(PLACEHOLDER, (placeholder, name, rest, offset) => {
+    state = markupAfter(template.slice(at, offset), state);
+    at = offset + placeholder.length;
+    if (!Object.hasOwn(fillers, name)) {
+      throw new Error(`build: no placeholder ${placeholder}`);
+    }
+    const filler = fillers[name];
+    const attributes = attributesOf(rest);
+    if (typeof filler !== 'function') {
+      return filler.raw(attributes);
+    }
+    const text = filler(attributes);
+    return state.inside ? escapeAttribute(text) : escape(text);
+  });
+  const left = filled.match(LEFT);
+  if (left !== null) {
+    throw new Error(`build: placeholders left: ${[...new Set(left)].join(', ')}`);
+  }
+  return filled;
 };
 
 // a number as each language groups its digits: a comma, or a no-break space
@@ -175,7 +274,7 @@ const headerOf = (language) => {
       return `<div class="word"><code class="word-name">${escape(pick(name, language))}</code><div class="word-bits">${cells}</div></div>`;
     })
     .join('');
-  return `<div class="bitmap" role="img" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
+  return `<div class="bitmap" role="img" tabindex="0" aria-label="${escapeAttribute(pick(HEADER.label, language))}">${rows}</div>`;
 };
 
 const stageOf = (code, language) => {
@@ -187,8 +286,13 @@ const stageOf = (code, language) => {
   );
 };
 
-const fateOf = (fate, language) => {
-  return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+const fateOf = (fates, language) => {
+  return [fates]
+    .flat()
+    .map((fate) => {
+      return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+    })
+    .join(' ');
 };
 
 const failuresOf = (language) => {
@@ -198,7 +302,7 @@ const failuresOf = (language) => {
   const body = FAILURES.map(([name, code, fate, when]) => {
     return `<tr><td class="code-num">${code}</td><td><code>${name}</code></td><td><span class="stage">${escape(stageOf(code, language))}</span></td><td>${fateOf(fate, language)}</td><td>${escape(pick(when, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const statusesOf = (language) => {
@@ -208,7 +312,7 @@ const statusesOf = (language) => {
   const body = STATUSES.map(([status, what]) => {
     return `<tr><td class="code-num">${status}</td><td>${escape(pick(what, language))}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap" tabindex="0"><table class="errors"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const wireOf = (language) => {
@@ -222,49 +326,251 @@ const wireOf = (language) => {
   return `<ul class="files">${items}</ul>`;
 };
 
+// ── The three implementations, held to the support matrix ─────────────────────
+
+const MATRIX = 'docs/support.md';
+
+// a part ahead, in a side's cell of the matrix: `ahead: <stage>`, the stage the title of a row of
+// its differences, of kind open
+const TOKEN = /ahead: `([^`]+)`/gu;
+
+// the cells of a row of a Markdown table, a pipe inside a code span none of their bounds
+const cellsOf = (line) => {
+  const cells = [];
+  let cell = '';
+  let coded = false;
+  for (const character of line.trim().slice(1)) {
+    if (character === '`') {
+      coded = !coded;
+    }
+    if (character === '|' && !coded) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+  return cells;
+};
+
+// the table under a heading of the matrix: its header's cells, and each row's
+const tableOf = (lines, heading) => {
+  const at = lines.indexOf(heading);
+  if (at === -1) {
+    throw new Error(`build: ${MATRIX} has no ${heading}`);
+  }
+  let first = at + 1;
+  while (first < lines.length && !lines[first].startsWith('|')) {
+    first += 1;
+  }
+  let end = first;
+  while (end < lines.length && lines[end].startsWith('|')) {
+    end += 1;
+  }
+  const [header, , ...rows] = lines.slice(first, end).map(cellsOf);
+  return { header, rows };
+};
+
+// what a side's cell says is ahead: the stages its tokens name, whether it is nothing but them, and
+// whether it says "ahead" in its own words, outside a token and a code span
+const aheadIn = (cell) => {
+  const stages = [...cell.matchAll(TOKEN)].map(([, stage]) => {
+    return stage;
+  });
+  const rest = cell.replace(TOKEN, '');
+  return {
+    stages,
+    whole: stages.length > 0 && rest.replace(/[\s,;]/gu, '') === '',
+    bare: /\bahead\b/iu.test(rest.replace(/`[^`]*`/gu, '')),
+  };
+};
+
+// each row of the matrix's Features and Transports, by its title, with what each side has ahead in
+// it: the stages its cells name, and whether every cell of the side is ahead whole; a side's cells
+// are the columns its name heads, `Rust` or `Rust client` and `Rust server`
+const matrixOf = (refusals) => {
+  const lines = read(join(ROOT, MATRIX)).split('\n');
+  const differences = tableOf(lines, '## Differences');
+  const kind = differences.header.indexOf('Kind');
+  const open = new Set(
+    differences.rows
+      .filter((cells) => {
+        return cells[kind] === 'open';
+      })
+      .map(([title]) => {
+        return title;
+      })
+  );
+  const rows = new Map();
+  for (const heading of ['## Features', '## Transports']) {
+    const { header, rows: cellsOfRows } = tableOf(lines, heading);
+    for (const cells of cellsOfRows) {
+      const [title] = cells;
+      if (rows.has(title)) {
+        refusals.push(`${MATRIX} holds two rows “${title}”`);
+      }
+      const sides = {};
+      for (const [side] of SIDES) {
+        const states = header
+          .map((name, index) => {
+            return name === side || name.startsWith(`${side} `)
+              ? aheadIn(cells[index] ?? '')
+              : null;
+          })
+          .filter((state) => {
+            return state !== null;
+          });
+        if (states.length === 0) {
+          throw new Error(`build: ${MATRIX}'s ${heading} has no column for ${side}`);
+        }
+        for (const state of states) {
+          if (state.bare) {
+            refusals.push(
+              `${MATRIX}, “${title}”, ${side}: says ahead in its own words; write ahead: \`<stage>\`, the title of a row of its differences, of kind open`
+            );
+          }
+          for (const stage of state.stages) {
+            if (!open.has(stage)) {
+              refusals.push(
+                `${MATRIX}, “${title}”, ${side}: ahead: \`${stage}\` names no row of its differences of kind open`
+              );
+            }
+          }
+        }
+        sides[side] = {
+          stages: new Set(
+            states.flatMap((state) => {
+              return state.stages;
+            })
+          ),
+          whole: states.every((state) => {
+            return state.whole;
+          }),
+        };
+      }
+      rows.set(title, sides);
+    }
+  }
+  return rows;
+};
+
+const stateText = (stages, whole) => {
+  if (stages.size === 0) {
+    return 'none ahead';
+  }
+  return `${[...stages].sort().join(', ')} ahead, ${whole ? 'whole' : 'in part'}`;
+};
+
+// ! the table holds the matrix: every row of Features and Transports in exactly one list, a part's
+// or OFF_THE_PAGE, and each cell's declaration what its part's rows say for its sides
+const tableRefusals = () => {
+  const refusals = [];
+  const rows = matrixOf(refusals);
+  const listed = new Map();
+  const lists = [
+    ...PARTS.map((part) => {
+      return [`the part “${part.name[0]}”`, part.rows];
+    }),
+    ['OFF_THE_PAGE', OFF_THE_PAGE],
+  ];
+  for (const [list, titles] of lists) {
+    for (const title of titles) {
+      if (!rows.has(title)) {
+        refusals.push(`${list} names “${title}”, which ${MATRIX} has no row of`);
+      } else if (listed.has(title)) {
+        refusals.push(`“${title}” is in ${listed.get(title)} and in ${list}`);
+      } else {
+        listed.set(title, list);
+      }
+    }
+  }
+  for (const title of rows.keys()) {
+    if (!listed.has(title)) {
+      refusals.push(
+        `${MATRIX}'s row “${title}” is in no list of src/data.mjs: a part's rows, or OFF_THE_PAGE`
+      );
+    }
+  }
+  const sides = SIDES.map(([side]) => {
+    return side;
+  });
+  for (const part of PARTS) {
+    const covered = part.cells.flatMap((cell) => {
+      return cell.sides;
+    });
+    if (covered.join() !== sides.join()) {
+      refusals.push(
+        `the part “${part.name[0]}” has cells for ${covered.join(', ')}, not ${sides.join(', ')}`
+      );
+      continue;
+    }
+    const held = part.rows
+      .filter((title) => {
+        return rows.has(title);
+      })
+      .map((title) => {
+        return rows.get(title);
+      });
+    for (const cell of part.cells) {
+      for (const side of cell.sides) {
+        const stages = new Set(
+          held.flatMap((row) => {
+            return [...row[side].stages];
+          })
+        );
+        const whole =
+          held.length > 0 &&
+          held.every((row) => {
+            return row[side].whole;
+          });
+        const said = new Set(cell.ahead);
+        const saidWhole = cell.whole === true;
+        const same =
+          stages.size === said.size &&
+          [...stages].every((stage) => {
+            return said.has(stage);
+          }) &&
+          whole === saidWhole;
+        if (!same) {
+          refusals.push(
+            `the part “${part.name[0]}”, ${side}: the matrix says ${stateText(stages, whole)}; the page says ${stateText(said, saidWhole)}`
+          );
+        }
+      }
+    }
+  }
+  return refusals;
+};
+
+const implementationsOf = (language) => {
+  const head = [
+    `<th scope="col"><span class="visually-hidden">${escape(pick(PART_HEADING, language))}</span></th>`,
+    ...SIDES.map(([, label]) => {
+      return `<th scope="col">${escape(pick(label, language))}</th>`;
+    }),
+  ].join('');
+  const body = PARTS.map((part) => {
+    const cells = part.cells
+      .map((cell) => {
+        const span = cell.sides.length > 1 ? ` colspan="${cell.sides.length}"` : '';
+        return `<td${span}>${pick(cell.says, language)}</td>`;
+      })
+      .join('');
+    return `<tr><th scope="row">${escape(pick(part.name, language))}</th>${cells}</tr>`;
+  }).join('');
+  return `<div class="table-wrap" tabindex="0"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+};
+
 // ── Code ──────────────────────────────────────────────────────────────────────
 
-const KEYWORDS = new Set(
-  'as async await break case catch class const continue default else enum export extends false finally for from function if import in instanceof interface let message new null of package repeated return static switch syntax this throw true try type typeof undefined using var void while yield'.split(
-    ' '
-  )
-);
-
-// a block of code, coloured as the page colours it: comments, strings, numbers and keywords, by a
-// scanner that knows no grammar and needs none for a few lines of a snippet
+// a block of code, coloured by the demo's scanner, which Node runs with its types stripped: each
+// token in a span of its kind's class, the text between them as it is
 const highlight = (source, language) => {
-  if (language === 'plaintext') {
-    return escape(source);
-  }
-  const comment = language === 'toml' || language === 'shell' ? '#' : '//';
-  const pattern = new RegExp(
-    [
-      `(${comment === '#' ? '#[^\\n]*' : '\\/\\/[^\\n]*'})`,
-      '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
-      '(\\b(?:0x[0-9a-fA-F_]+|\\d[\\d_]*(?:\\.\\d+)?(?:e[+-]?\\d+)?)\\b)',
-      '([A-Za-z_$][\\w$]*)',
-    ].join('|'),
-    'gu'
-  );
-  let out = '';
-  let at = 0;
-  for (const match of source.matchAll(pattern)) {
-    out += escape(source.slice(at, match.index));
-    const [text, isComment, isString, isNumber, word] = match;
-    if (isComment !== undefined) {
-      out += `<span class="tok-comment">${escape(text)}</span>`;
-    } else if (isString !== undefined) {
-      out += `<span class="tok-string">${escape(text)}</span>`;
-    } else if (isNumber !== undefined) {
-      out += `<span class="tok-number">${escape(text)}</span>`;
-    } else if (word !== undefined && language !== 'json' && KEYWORDS.has(word)) {
-      out += `<span class="tok-keyword">${escape(text)}</span>`;
-    } else {
-      out += escape(text);
-    }
-    at = match.index + text.length;
-  }
-  return out + escape(source.slice(at));
+  return tokensOf(source, language)
+    .map(({ kind, text }) => {
+      return kind === 'text' ? escape(text) : `<span class="tok-${kind}">${escape(text)}</span>`;
+    })
+    .join('');
 };
 
 const codeBlock = (source, language) => {
@@ -393,59 +699,59 @@ const diagramOf = (name, language) => {
 
 // ── Content ───────────────────────────────────────────────────────────────────
 
-// the attributes of a placeholder, `{{name a="…" b="…"}}`
-const attributesOf = (text) => {
-  return Object.fromEntries(
-    [...text.matchAll(/(\w+)="([^"]*)"/gu)].map(([, key, value]) => {
-      return [key, value];
-    })
-  );
-};
-
-const fill = (template, language, known) => {
-  return template.replace(/\{\{(\w+)((?:\s+\w+="[^"]*")*)\s*\}\}/gu, (placeholder, name, rest) => {
-    const attributes = attributesOf(rest);
-    switch (name) {
-      case 'bytes':
-        return bytesOf(attributes.of, language, attributes.hero === 'true');
-      case 'header':
-        return headerOf(language);
-      case 'failures':
-        return failuresOf(language);
-      case 'statuses':
-        return statusesOf(language);
-      case 'wire':
-        return wireOf(language);
-      case 'diagram':
-        return diagramOf(attributes.of, language);
-      case 'code':
-        return codeBlock(snippetOf(attributes.of, language), attributes.language ?? 'typescript');
-      case 'exposition':
-        return codeBlock(expositionOf(), 'plaintext');
-      case 'excerpt': {
-        const ranges = attributes.lines.split(';;').map((range) => {
-          return range.split('->').map((end) => {
-            return end.trim();
-          });
+// the fillers of the main page's content in `language`, its facts those read from the repository
+const contentFillers = (language, known) => {
+  return {
+    bytes: raw((attributes) => {
+      return bytesOf(attributes.of, language, attributes.hero === 'true');
+    }),
+    header: raw(() => {
+      return headerOf(language);
+    }),
+    failures: raw(() => {
+      return failuresOf(language);
+    }),
+    statuses: raw(() => {
+      return statusesOf(language);
+    }),
+    wire: raw(() => {
+      return wireOf(language);
+    }),
+    implementations: raw(() => {
+      return implementationsOf(language);
+    }),
+    diagram: raw((attributes) => {
+      return diagramOf(attributes.of, language);
+    }),
+    code: raw((attributes) => {
+      return codeBlock(snippetOf(attributes.of, language), attributes.language ?? 'typescript');
+    }),
+    exposition: raw(() => {
+      return codeBlock(expositionOf(), 'plaintext');
+    }),
+    excerpt: raw((attributes) => {
+      const ranges = attributes.lines.split(';;').map((range) => {
+        return range.split('->').map((end) => {
+          return end.trim();
         });
-        const caption = `<figcaption><a href="${BLOB}${attributes.path}"><code>${escape(attributes.path)}</code></a></figcaption>`;
-        return `<figure class="excerpt">${codeBlock(excerptOf(attributes.path, ranges), attributes.language ?? 'typescript')}${caption}</figure>`;
+      });
+      const caption = `<figcaption><a href="${escapeAttribute(`${BLOB}${attributes.path}`)}"><code>${escape(attributes.path)}</code></a></figcaption>`;
+      return `<figure class="excerpt">${codeBlock(excerptOf(attributes.path, ranges), attributes.language ?? 'typescript')}${caption}</figure>`;
+    }),
+    blob: (attributes) => {
+      return `${BLOB}${attributes.path}`;
+    },
+    tree: (attributes) => {
+      return `${TREE}${attributes.path}`;
+    },
+    fact: (attributes) => {
+      const value = known[attributes.of];
+      if (value === undefined) {
+        throw new Error(`build: no fact ${attributes.of}`);
       }
-      case 'blob':
-        return `${BLOB}${attributes.path}`;
-      case 'tree':
-        return `${TREE}${attributes.path}`;
-      case 'fact': {
-        const value = known[attributes.of];
-        if (value === undefined) {
-          throw new Error(`build: no fact ${attributes.of}`);
-        }
-        return typeof value === 'number' ? grouped(value, language) : value;
-      }
-      default:
-        throw new Error(`build: no placeholder ${placeholder}`);
-    }
-  });
+      return typeof value === 'number' ? grouped(value, language) : value;
+    },
+  };
 };
 
 // the table of contents, from each section's id and its `data-toc`, which it then drops
@@ -464,12 +770,14 @@ const STRINGS = Object.freeze({
   en: {
     title: 'Bead: a binary protocol for calls between a client and a server',
     description:
-      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust core.',
+      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports, its MQTT 5 binding, its HTTP/JSON gateway and beadc’s Rust target.',
     skip: 'Skip to the content',
     contents: 'Contents',
     menu: 'Open the contents',
     menuClose: 'Close the contents',
-    home: 'Back to francisdesjardins.ca',
+    home: '#top',
+    top: 'Bead, to the top of the page',
+    demo: 'Demo',
     other: 'Français',
     otherShort: 'FR',
     otherLabel: 'Lire cette page en français',
@@ -479,12 +787,14 @@ const STRINGS = Object.freeze({
   fr: {
     title: 'Bead : un protocole binaire pour les appels entre un client et un serveur',
     description:
-      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un cœur en Rust.',
+      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5, sa passerelle HTTP/JSON et la cible Rust de beadc.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',
     menuClose: 'Fermer le sommaire',
-    home: 'Retour à francisdesjardins.ca',
+    home: '#top',
+    top: 'Bead, en haut de la page',
+    demo: 'Démo',
     other: 'English',
     otherShort: 'EN',
     otherLabel: 'Read this page in English',
@@ -493,69 +803,231 @@ const STRINGS = Object.freeze({
   },
 });
 
-const pageOf = (language, known) => {
-  const strings = STRINGS[language];
+// the privacy policy's strings outside its content, over the page's: its head, and its name, which
+// leads to the page
+const PRIVACY_STRINGS = Object.freeze({
+  en: {
+    ...STRINGS.en,
+    title: 'Bead DevTools: privacy policy',
+    description:
+      'What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser.',
+    home: '/',
+    top: 'Bead’s page',
+  },
+  fr: {
+    ...STRINGS.fr,
+    title: 'Bead DevTools : politique de confidentialité',
+    description:
+      'Ce que lit, garde et envoie l’extension Bead DevTools : elle lit les enregistrements de débogage Bead de la page que vous inspectez, les garde dans son panneau, et n’envoie rien hors de votre navigateur.',
+    home: '/',
+    top: 'La page de Bead',
+  },
+});
+
+// a page's content in `language`, under the bar and beside its contents; `content` is its template,
+// already filled
+const pageOf = (language, { strings, content: filled }) => {
   const other = language === 'en' ? 'fr' : 'en';
-  const filled = fill(read(join(SRC, `content.${language}.html`)), language, known);
   const { items, content } = contentsOf(language === 'fr' ? typeset(filled) : filled);
-  const chrome = read(join(SRC, 'chrome.html'))
-    .replaceAll('{{lang}}', language)
-    .replaceAll('{{other}}', other)
-    .replace(/\{\{s:(\w+)\}\}/gu, (_, key) => {
-      return escapeAttribute(strings[key]);
-    })
-    .replace('{{toc}}', items)
-    .replace('{{content}}', content);
+  const chrome = fill(read(join(SRC, 'chrome.html')), {
+    ...Object.fromEntries(
+      Object.entries(strings).map(([key, text]) => {
+        return [
+          `s:${key}`,
+          () => {
+            return text;
+          },
+        ];
+      })
+    ),
+    other: () => {
+      return other;
+    },
+    toc: raw(() => {
+      return items;
+    }),
+    content: raw(() => {
+      return content;
+    }),
+  });
   return chrome.trim();
 };
 
-export const build = () => {
-  const known = facts();
+// sheets as one, in their order
+const sheetsOf = (paths) => {
+  return paths
+    .map((path) => {
+      return read(path).trim();
+    })
+    .join('\n\n');
+};
+
+// the not-found page: Bead's skin and its bar on penumbra's sheets, under its own styles, and no
+// script
+export const buildNotFound = () => {
+  return fill(read(join(SRC, '404.html')), {
+    stack: raw(() => {
+      return sheetsOf(STACK);
+    }),
+  });
+};
+
+// the main page's content in `language`, its placeholders filled from the repository
+const mainContentOf = (language, known) => {
+  const template = read(join(SRC, `content.${language}.html`));
+  // ! the table of the three implementations is drawn from data alone, where the build holds it
+  if (template.split('{{implementations}}').length !== 2) {
+    throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
+  }
+  return fill(template, contentFillers(language, known));
+};
+
+// one document of both languages in the shell: English in the page, French in a template the page
+// swaps in, each language's head and canonical address in the JSON beside the script
+const documentOf = ({ address, strings, contents }) => {
   const heads = Object.fromEntries(
     LANGUAGES.map((language) => {
       return [
         language,
-        { title: STRINGS[language].title, description: STRINGS[language].description },
+        {
+          title: strings[language].title,
+          description: strings[language].description,
+          canonical: language === 'en' ? address : `${address}?lng=${language}`,
+        },
       ];
     })
   );
-  const shell = read(join(SRC, 'shell.html'));
   const pages = Object.fromEntries(
     LANGUAGES.map((language) => {
-      return [language, pageOf(language, known)];
+      return [
+        language,
+        pageOf(language, { strings: strings[language], content: contents[language] }),
+      ];
     })
   );
-  const page = shell
-    .replace('{{style}}', () => {
-      return read(join(SRC, 'styles.css')).trim();
-    })
-    .replace('{{head-script}}', () => {
+  return fill(read(join(SRC, 'shell.html')), {
+    style: raw(() => {
+      // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
+      // over them
+      return sheetsOf([...STACK, join(SRC, 'styles.css')]);
+    }),
+    'head-script': raw(() => {
       return read(join(SRC, 'head.js')).trim();
-    })
-    .replace('{{page-script}}', () => {
+    }),
+    'theme-script': raw(() => {
+      // * the theme as the demo keeps it too, one script for both
+      return read(join(PENUMBRA, 'theme.js')).trim();
+    }),
+    'page-script': raw(() => {
       return read(join(SRC, 'page.js')).trim();
-    })
-    .replace('{{heads}}', () => {
+    }),
+    heads: raw(() => {
       return JSON.stringify(heads).replaceAll('<', '\\u003c');
-    })
-    .replaceAll('{{title}}', () => {
-      return escapeAttribute(STRINGS.en.title);
-    })
-    .replaceAll('{{description}}', () => {
-      return escapeAttribute(STRINGS.en.description);
-    })
-    .replaceAll('{{address}}', ADDRESS)
-    .replace('{{page-en}}', () => {
+    }),
+    title: () => {
+      return strings.en.title;
+    },
+    description: () => {
+      return strings.en.description;
+    },
+    address: () => {
+      return address;
+    },
+    'page-en': raw(() => {
       return pages.en;
-    })
-    .replace('{{page-fr}}', () => {
+    }),
+    'page-fr': raw(() => {
       return pages.fr;
-    });
-  const left = page.match(/\{\{[\w:-]+[^}]*\}\}/gu);
-  if (left !== null) {
-    throw new Error(`build: placeholders left: ${[...new Set(left)].join(', ')}`);
+    }),
+  });
+};
+
+export const build = () => {
+  const refusals = tableRefusals();
+  if (refusals.length > 0) {
+    throw new Error(
+      refusals
+        .map((refusal) => {
+          return `build: ${refusal}`;
+        })
+        .join('\n')
+    );
   }
-  return page;
+  const known = facts();
+  return documentOf({
+    address: ADDRESS,
+    strings: STRINGS,
+    contents: Object.fromEntries(
+      LANGUAGES.map((language) => {
+        return [language, mainContentOf(language, known)];
+      })
+    ),
+  });
+};
+
+// ── The privacy policy ────────────────────────────────────────────────────────
+
+// ! what the DevTools extension's privacy policy states: each key of its manifest, and every address
+// its content scripts match. A key added, `permissions` or `host_permissions` say, is a refusal
+// until the policy states it and this list takes it.
+const STATED_KEYS = Object.freeze([
+  'manifest_version',
+  'name',
+  'version',
+  'description',
+  'default_locale',
+  'minimum_chrome_version',
+  'icons',
+  'devtools_page',
+  'background',
+  'content_scripts',
+]);
+const STATED_MATCHES = Object.freeze(['<all_urls>']);
+
+// what the extension's manifest, its text, declares that the privacy policy does not state
+export const policyRefusals = (manifest) => {
+  const declared = JSON.parse(manifest);
+  const keys = Object.keys(declared).filter((key) => {
+    return !STATED_KEYS.includes(key);
+  });
+  const matches = (declared.content_scripts ?? [])
+    .flatMap((script) => {
+      return script.matches ?? [];
+    })
+    .filter((match) => {
+      return !STATED_MATCHES.includes(match);
+    });
+  return [
+    ...keys.map((key) => {
+      return `the DevTools manifest declares ${key}, which the privacy policy does not state`;
+    }),
+    ...matches.map((match) => {
+      return `the DevTools content scripts match ${match}, which the privacy policy does not state`;
+    }),
+  ];
+};
+
+// the DevTools extension's privacy policy, at /privacy/, in both languages as the page has them
+export const buildPrivacy = () => {
+  const refusals = policyRefusals(read(MANIFEST));
+  if (refusals.length > 0) {
+    throw new Error(
+      refusals
+        .map((refusal) => {
+          return `build: ${refusal}`;
+        })
+        .join('\n')
+    );
+  }
+  return documentOf({
+    address: PRIVACY_ADDRESS,
+    strings: PRIVACY_STRINGS,
+    contents: Object.fromEntries(
+      LANGUAGES.map((language) => {
+        return [language, fill(read(join(SRC, `privacy.${language}.html`)), {})];
+      })
+    ),
+  });
 };
 
 // the diagrams the content names, each of both languages
@@ -574,9 +1046,17 @@ export const diagramsNamed = () => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const page = build();
-    mkdirSync(dirname(OUT), { recursive: true });
+    const notFound = buildNotFound();
+    const privacy = buildPrivacy();
+    mkdirSync(dirname(PRIVACY), { recursive: true });
     writeFileSync(OUT, page);
+    writeFileSync(NOT_FOUND, notFound);
+    writeFileSync(PRIVACY, privacy);
     console.log(`build: dist/index.html, ${grouped(Buffer.byteLength(page), 'en')} bytes`);
+    console.log(`build: dist/404.html, ${grouped(Buffer.byteLength(notFound), 'en')} bytes`);
+    console.log(
+      `build: dist/privacy/index.html, ${grouped(Buffer.byteLength(privacy), 'en')} bytes`
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

@@ -210,9 +210,10 @@ pub(crate) struct ServerInner {
 /// `Origin`, whose page's browser writes its own authentication; a text message is handed alike,
 /// marked `is_text`, for its router to report as no envelope (spec 15.2). A message past
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
-/// `maximumMessageBytes`, then dropped at its peer's end or its close timeout, unclean; a protocol
-/// error is reported alike, failed with 1002. A peer that drops without its closing handshake tells
-/// its unclean close alone. A close is clean when its peer's carried 1000.
+/// `maximumMessageBytes`, then dropped at its peer's end or its close timeout, unclean; a text
+/// message, or a close's reason, that is no UTF-8 is reported alike, failed with 1007 (spec 15.3),
+/// and any other protocol error, failed with 1002. A peer that drops without its closing handshake
+/// tells its unclean close alone. A close is clean when its peer's carried 1000.
 ///
 /// Each connection is pinged every `heartbeat`, and dropped, unclean and with no error told, when
 /// it left a ping unanswered. What waits for its socket is held to its pace and to
@@ -730,6 +731,9 @@ impl ServerInner {
                 Failed::Protocol(why) => RouterError::Other(Arc::new(io::Error::other(format!(
                     "{handle} is closed with 1002: {why}"
                 )))),
+                Failed::InvalidPayload(why) => RouterError::Other(Arc::new(io::Error::other(
+                    format!("{handle} is closed with 1007: {why}"),
+                ))),
                 Failed::Dropped(why) => dropped_of(handle, why),
             };
 

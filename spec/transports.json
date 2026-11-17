@@ -22,7 +22,7 @@
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
     "Each item of differs names a row of docs/support.md a case crosses, which names the case, and the language it excuses: what that language's platform does otherwise before the transport reads the request. A harness plays every case but those a differs excuses its language from."
   ],
-  "specVersion": "0.14.0",
+  "specVersion": "0.15.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "defaults": {
     "maximumConnections": 10000,
@@ -8431,6 +8431,49 @@
         {
           "expect": {
             "close": 1009
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a text message that is not UTF-8 fails its connection with 1007",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 1,
+                "fin": true,
+                "payload": "FF FE"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1007
           },
           "on": "socket"
         }

@@ -155,9 +155,7 @@ fn shuffled(packets: &[Packet]) -> bool {
     })
 }
 
-#[tokio::test]
-async fn carry_a_request_its_result_and_a_command_as_transfers_their_chunks_and_credits_shuffled_and_doubled()
- {
+async fn shuffled_transfer_link() {
     for (dotnet, seed) in [
         (false, None),
         (false, Some(1)),
@@ -243,4 +241,16 @@ async fn carry_a_request_its_result_and_a_command_as_transfers_their_chunks_and_
         assert_eq!(wire.delivered.len() > wire.sent.len(), altered);
         assert_eq!(shuffled(&wire.delivered), altered);
     }
+}
+
+#[tokio::test]
+async fn carry_a_request_its_result_and_a_command_as_transfers_their_chunks_and_credits_shuffled_and_doubled()
+ {
+    shuffled_transfer_link().await;
+}
+
+#[tokio::test]
+async fn carries_a_request_its_result_and_a_command_as_transfers_their_chunks_and_credits_shuffled_and_doubled()
+ {
+    shuffled_transfer_link().await;
 }

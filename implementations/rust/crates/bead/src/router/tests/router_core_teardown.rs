@@ -44,7 +44,7 @@ fn detached(gauges: &Gauges) {
     clippy::too_many_lines,
     reason = "the teardown twin observes admission, transfer, counted close and application callbacks"
 )]
-async fn close_awaiting((forward, incoming): (bool, u32)) {
+async fn close_awaiting((forward, incoming): (bool, u32)) -> usize {
     let peer = Peer::new(RouterSide::Server, &limits());
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let metrics = registry.attach(RouterSide::Server);
@@ -148,6 +148,7 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
     let reads: Arc<Mutex<Vec<Gauges>>> = Arc::default();
     let observing = Arc::clone(&reads);
     let at_return = Arc::clone(&heard);
+    let readings = peer.monotonic_readings();
     peer.owner
         .run(move |state| {
             state.core.observed_reads = Some(observing);
@@ -168,18 +169,22 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
         })
         .await
         .expect("the connection closed");
+    let close_readings = peer.monotonic_readings().saturating_sub(readings);
     peer.settle().await;
 
-    // * Rust takes one time reading for the whole incoming batch. Each call still ends once;
-    // every transfer and both sets of calls are out before that first counted end.
+    // * The Core.now observer sees each incoming call's end; requester completions read their
+    // captured clock directly. Both sets of calls and every transfer are out before the first
+    // counted end. The port's clock counter includes both paths.
     {
         let reads = locked(&reads);
         assert_eq!(
             reads.len(),
-            1,
-            "the counted incoming batch reads its clock once"
+            usize::try_from(incoming).expect("small count"),
+            "each counted incoming call reads its clock as it ends"
         );
-        detached(&reads[0]);
+        for read in reads.iter() {
+            detached(read);
+        }
     }
     {
         let heard = locked(&heard);
@@ -246,17 +251,56 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
         "{text}"
     );
     assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
+    close_readings
+}
+
+#[tokio::test]
+async fn detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_and_count_its_incoming_close_once()
+ {
+    assert_eq!(
+        close_awaiting((false, 1)).await,
+        2,
+        "each counted call reads its clock as it ends"
+    );
 }
 
 // debugging 9.7
 #[tokio::test]
 async fn detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_given_its_signal_and_fail_that_call_as_closed_never_as_a_cancel()
  {
-    close_awaiting((true, 1)).await;
+    assert_eq!(
+        close_awaiting((true, 1)).await,
+        2,
+        "each counted call reads its clock as it ends"
+    );
 }
 
 #[tokio::test]
 async fn detach_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
  {
-    close_awaiting((false, 2)).await;
+    assert_eq!(
+        close_awaiting((false, 2)).await,
+        4,
+        "each counted call reads its clock as it ends"
+    );
+}
+
+#[tokio::test]
+async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_given_its_signal_and_fails_that_call_as_closed_never_as_a_cancel()
+ {
+    assert_eq!(
+        close_awaiting((true, 1)).await,
+        2,
+        "each counted call reads its clock as it ends"
+    );
+}
+
+#[tokio::test]
+async fn detaches_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
+ {
+    assert_eq!(
+        close_awaiting((false, 2)).await,
+        4,
+        "each counted call reads its clock as it ends"
+    );
 }

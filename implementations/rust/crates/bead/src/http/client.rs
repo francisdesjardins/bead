@@ -42,7 +42,7 @@ use crate::judgement::items::{BareItem, parse_item};
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::racing::{RacingOptions, connect_racing, host_of};
-use crate::net::tls::{connect_tls, http1_config_of};
+use crate::net::tls::{ClientTls, NO_TLS, TlsOptions, client_tls_of, connect_tls, http1_config_of};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
@@ -73,7 +73,7 @@ const RETRY_CEILING: Duration = Duration::from_secs(30);
 
 // how long a pooled connection goes unused before its pool closes it: under Node's 5 s
 // `keepAliveTimeout`, as undici keeps 4 s
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
 
 // what a `Retry-After` that says nothing readable asks: the server's own second
 const RETRY_AFTER_DEFAULT: Duration = Duration::from_secs(1);
@@ -124,9 +124,14 @@ pub struct HttpTransportClientOptions {
     /// How long each listen asks its server to wait for something to bring back, in `bead-wait`:
     /// 25 seconds when none.
     pub wait: Option<Duration>,
-    /// The TLS a secured connect speaks, a copy of which offers HTTP/1.1 alone by ALPN: rustls's
-    /// over aws-lc-rs, the platform's verifier judging its server, when none.
-    pub tls: Option<Arc<ClientConfig>>,
+    /// The TLS a secured connect speaks, the application's own, a copy of which offers HTTP/1.1
+    /// alone by ALPN: of `tls` when none. Refused beside `tls`.
+    pub client_config: Option<Arc<ClientConfig>>,
+    /// The authorities a secured connect judges its server by and the certificate it presents when
+    /// its server asks for one (spec 15.39), read as it is built: rustls's over aws-lc-rs, the
+    /// platform's verifier judging its server, when none. Held in the clear, which a secured
+    /// connect alone uses.
+    pub tls: Option<TlsOptions>,
 }
 
 /// Where an HTTP transport client's connect goes, and how long it waits.
@@ -169,7 +174,7 @@ impl HttpTransportClientConnectOptions {
 
 // what a request carries: an envelope, or nothing
 #[derive(Debug)]
-struct Sending(Option<Bytes>);
+pub(crate) struct Sending(pub(crate) Option<Bytes>);
 
 impl Body for Sending {
     type Data = Bytes;
@@ -196,7 +201,7 @@ impl Body for Sending {
 }
 
 // a socket of the connector's, in clear or under TLS
-enum Socket {
+pub(crate) enum Socket {
     Plain(TcpStream),
     Secured(Box<TlsStream<TcpStream>>),
 }
@@ -248,11 +253,11 @@ impl Connection for Socket {
 }
 
 // hyper's connector: a host's addresses raced (RFC 8305), then TLS for `https`, HTTP/1.1 alone
-// asked by ALPN; the TLS given, or the platform's, built at the first secured connect
+// asked by ALPN; the TLS given, of its `tls`, or the platform's, built at the first secured connect
 #[derive(Clone)]
-struct Connector {
+pub(crate) struct Connector {
     racing: RacingOptions,
-    given: Option<Arc<ClientConfig>>,
+    given: ClientTls,
     tls: Arc<Mutex<Option<Arc<ClientConfig>>>>,
 }
 
@@ -263,6 +268,15 @@ impl fmt::Debug for Connector {
 }
 
 impl Connector {
+    // a connector under the TLS given, of its `tls`, or the platform's, racing by `racing`
+    pub(crate) fn new(given: ClientTls, racing: &RacingOptions) -> Self {
+        Self {
+            racing: racing.clone(),
+            given,
+            tls: Arc::default(),
+        }
+    }
+
     fn tls(&self) -> io::Result<Arc<ClientConfig>> {
         let mut held = locked(&self.tls);
 
@@ -270,7 +284,7 @@ impl Connector {
             return Ok(Arc::clone(config));
         }
 
-        let config = http1_config_of(self.given.as_ref()).map_err(io::Error::other)?;
+        let config = http1_config_of(&self.given).map_err(io::Error::other)?;
 
         *held = Some(Arc::clone(&config));
         drop(held);
@@ -504,7 +518,7 @@ async fn unless_ended<F: Future>(ended: &CancellationToken, future: F) -> Option
 }
 
 // the next data of a body, none at its end
-async fn chunk_of(body: &mut Incoming) -> Result<Option<Bytes>, hyper::Error> {
+pub(crate) async fn chunk_of(body: &mut Incoming) -> Result<Option<Bytes>, hyper::Error> {
     loop {
         match poll_fn(|context| Pin::new(&mut *body).poll_frame(context)).await {
             None => return Ok(None),
@@ -701,7 +715,8 @@ pub(crate) struct ClientInner {
 /// send posts one envelope with that token, its credential, when it has one, in its `Authorization`
 /// as it is given; its disconnect deletes the connection. Its exchanges go on hyper's pooled
 /// client, HTTP/1.1 alone, over a connector of Bead's that races a host's addresses (RFC 8305) and
-/// speaks TLS on rustls under `https`, the platform's verifier judging its server. It writes no
+/// speaks TLS on rustls under `https`, its server judged by the platform's verifier or by the
+/// authorities its `tls` names, its certificate presented where its server asks. It writes no
 /// `Origin`, and follows no redirect: a connect answered with one fails, naming its status, "the
 /// server drew no connection: 302".
 ///
@@ -1493,7 +1508,8 @@ impl HttpTransportClient {
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
-    /// IO driver; for a duration spec 1.4 does not hold; a bound of 0.
+    /// IO driver; for a duration spec 1.4 does not hold; a bound of 0; for a `tls` beside a
+    /// `client_config`, or one that does not read (spec 15.39).
     pub fn new(options: &HttpTransportClientOptions) -> Result<Self, ProgrammerError> {
         let runtime =
             platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP transport client")?;
@@ -1531,11 +1547,13 @@ impl HttpTransportClient {
             .clock
             .clone()
             .unwrap_or_else(|| Arc::clone(&platform));
-        let connector = Connector {
-            racing: RacingOptions::on(Arc::clone(&platform)),
-            given: options.tls.clone(),
-            tls: Arc::default(),
-        };
+        let connector = Connector::new(
+            client_tls_of(
+                options.client_config.as_ref(),
+                options.tls.as_ref().unwrap_or(&NO_TLS),
+            )?,
+            &RacingOptions::on(Arc::clone(&platform)),
+        );
         // * HTTP/1.1 alone, a pooled connection let go once idle on Bead's timer, its executor
         // Bead's; a request no byte of which was written, on a reused connection found closed, sent
         // again: its server never saw it
@@ -1652,6 +1670,10 @@ impl HttpTransportClient {
     ///
     /// A [`TransportError::ReadyState`] when it is not open, refused as it is called, nothing
     /// changed.
+    #[expect(
+        clippy::same_name_method,
+        reason = "the router's disconnect, of its own accord, is this one with its default options, named as on the other sides"
+    )]
     pub fn disconnect(
         &self,
         options: &TransportClientDisconnectOptions,
@@ -1947,6 +1969,14 @@ impl RouterClientTransport for HttpTransportClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // * its close starts as it is called, the future only waiting for its end; not open, nothing
+    fn disconnect(&self) {
+        drop(Self::disconnect(
+            self,
+            &TransportClientDisconnectOptions::default(),
+        ));
     }
 
     // ! no listen asked while paused: what an answer or a batch already read brought is held, in

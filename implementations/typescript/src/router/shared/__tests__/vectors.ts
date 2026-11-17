@@ -40,9 +40,11 @@ interface INamed {
 
 /**
  * Bytes a reader refuses, and the protocol code it answers with; its detail, this implementation's own words; and
- * the bound on a whole envelope it reads them with, where the vector is about that bound.
+ * the bounds it reads them with, a whole envelope's and the one it holds a request and a result to, where the
+ * vector is about those bounds.
  */
 export interface IRefusalVector extends INamed {
+  chunkBytes?: number;
   code: ProtocolCode;
   detail?: string;
   maximumEnvelopeBytes?: number;
@@ -142,6 +144,15 @@ export interface IAmqpPublishBoundVector {
   name: string;
 }
 
+/** The Reason Codes an MQTT 5 acknowledgement's table names, ascending (spec 15.27 to 15.29). */
+export interface IMqttAcknowledgementCodesVector {
+  clauses: string[];
+  name: string;
+  named: number[];
+  packet: 'PUBACK' | 'SUBACK' | 'UNSUBACK';
+  type: 4 | 9 | 11;
+}
+
 export interface IMqttPublishBoundVector {
   clauses: string[];
   expiry: boolean;
@@ -164,7 +175,7 @@ export interface IVectors {
   amqpPublishBounds: IAmqpPublishBoundVector[];
   credentialRefusals: ICredentialRefusalVector[];
   envelopeRefusals: IRefusalVector[];
-  envelopes: (INamed & { envelope: IEnvelopeVector })[];
+  envelopes: (INamed & { chunkBytes?: number; envelope: IEnvelopeVector })[];
   failureRefusals: { code: ProtocolCode; name: string; record: string }[];
   failures: {
     failure: IReceivedFailure;
@@ -175,6 +186,7 @@ export interface IVectors {
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
   jwtVerdicts: IJwtVerdictVector[];
+  mqttAcknowledgementCodes: IMqttAcknowledgementCodesVector[];
   mqttPublishBounds: IMqttPublishBoundVector[];
   parcelRefusals: IParcelRefusalVector[];
   parcels: IParcelVector[];

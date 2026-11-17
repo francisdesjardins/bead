@@ -28,6 +28,7 @@ mod requester;
 mod resolver;
 mod resolver_edges;
 mod sessions;
+mod trace;
 pub(crate) mod trace_clocks;
 mod validation;
 

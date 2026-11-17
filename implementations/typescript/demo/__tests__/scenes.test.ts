@@ -107,6 +107,9 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.click('button[data-action="reader"]');
     await expect(page.locator('#wire-toggle .count')).not.toHaveText('0');
+    // * a desktop counts on the strip's button alone, the strip staying under the bar
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-toggle [data-wire-count]')).toBeVisible();
 
     await page.locator('#wire-toggle').click();
     await expect(page.locator('#calls-log')).toBeVisible();
@@ -121,34 +124,144 @@ test.describe('mountScenes', () => {
     );
   });
 
-  test('lays the page out on a phone with nothing wider than it, the wire a sheet at the bottom', async ({
+  test('scrolls no page sideways, on every scene, at 320 and 390 px, the wire a sheet at the bottom', async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(served?.url ?? '');
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
 
-    for (const scene of SCENES) {
-      await page.goto(`${served?.url ?? ''}#${scene}`);
-      expect(
-        await page.evaluate(() => {
-          return document.documentElement.scrollWidth <= document.documentElement.clientWidth;
-        }),
-        scene
-      ).toBe(true);
+      for (const scene of SCENES) {
+        await page.goto(`${served?.url ?? ''}#${scene}`);
+        await expect(page.locator(`#${scene}-scene`)).toBeVisible();
+        expect(
+          await page.evaluate(() => {
+            return document.documentElement.scrollWidth <= document.documentElement.clientWidth;
+          }),
+          `${scene} at ${String(width)} px`
+        ).toBe(true);
+      }
     }
 
     const sheet = page.locator('#wire-sheet');
 
-    await expect(page.locator('#wire-toggle')).toBeHidden();
+    // * the strip's button opens the same sheet
+    await expect(page.locator('#wire-toggle')).toBeVisible();
     await expect(sheet).toBeVisible();
     await expect(page.locator('#wire-body')).toBeHidden();
+    // * what crossed is counted once, on the sheet's bar, which stays in view as the strip scrolls
+    // away
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-sheet [data-wire-count]')).toBeVisible();
     await sheet.click();
     await expect(page.locator('#wire-body')).toBeVisible();
     await expect(sheet).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#wire-toggle')).toHaveAttribute('aria-expanded', 'true');
+
+    await expect(page.locator('[data-wire-count]:visible')).toHaveCount(1);
+    await expect(page.locator('#wire-sheet [data-wire-count]')).toBeVisible();
 
     // a link out of the sheet folds it, which would cover where it goes
     await page.getByRole('link', { name: 'Code › Go deeper' }).click();
     await expect(page.locator('#code-scene')).toBeVisible();
     await expect(page.locator('#wire-body')).toBeHidden();
+  });
+
+  test('keeps the scene tabs under the bar and the strip as the page scrolls, where the screen is 700 px tall or more', async ({
+    page,
+  }) => {
+    const tabsTopOf = (): Promise<number> => {
+      return page.locator('#scene-tabs').evaluate((tabs) => {
+        return tabs.getBoundingClientRect().top;
+      });
+    };
+
+    // a desktop: under the bar, 56 px, and the strip that stays with it
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${served?.url ?? ''}#rules`);
+    const stripBottom = await page.locator('.strip').evaluate((strip) => {
+      return strip.getBoundingClientRect().height + 56;
+    });
+
+    await page.evaluate(() => {
+      scrollTo(0, 1500);
+    });
+    await expect.poll(tabsTopOf).toBe(stripBottom);
+
+    // * the wire's drawer stays under them too
+    await page.locator('#wire-toggle').click();
+    await page.evaluate(() => {
+      scrollTo(0, 1500);
+    });
+    await expect
+      .poll(() => {
+        return page.locator('#wire').evaluate((wire) => {
+          return wire.getBoundingClientRect().top;
+        });
+      })
+      .toBeGreaterThanOrEqual(stripBottom);
+
+    // a phone: under the bar alone, the strip scrolled away
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      scrollTo(0, 1500);
+    });
+    await expect.poll(tabsTopOf).toBe(56);
+
+    // * the wire's sheet, open, covers the tabs where it reaches them: a refusal long enough to
+    // raise it past them
+    for (const name of ["Break it past the server's bound", 'Sign up']) {
+      await page.getByRole('button', { name, exact: true }).evaluate((button) => {
+        (button as HTMLElement).click();
+      });
+    }
+    await expect(page.locator('#sign-up-status')).toContainText('PAYLOAD_INVALID');
+    await page.evaluate(() => {
+      scrollTo(0, 0);
+    });
+    // the drawer the desktop opened is the sheet, open, on a phone
+    await expect(page.locator('#wire-sheet')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#wire-body')).toBeVisible();
+    // ! the sheet grows as the refusal's envelopes reach the wire's log, after its status shows
+    await expect
+      .poll(() => {
+        return page.evaluate(() => {
+          const tabs = (
+            document.getElementById('scene-tabs') as HTMLElement
+          ).getBoundingClientRect();
+          const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
+          const y = Math.max(tabs.top, sheet.top) + 2;
+          return {
+            reaches: sheet.top < tabs.bottom,
+            onTop: document
+              .getElementById('wire')
+              ?.contains(document.elementFromPoint(tabs.left + 40, y)),
+          };
+        });
+      })
+      .toEqual({ reaches: true, onTop: true });
+
+    // * and the strip's disclosure, opened, lies over the sheet
+    await page.locator('#status-toggle').click();
+    const disclosed = await page.evaluate(() => {
+      const detail = (
+        document.getElementById('status-detail') as HTMLElement
+      ).getBoundingClientRect();
+      const sheet = (document.getElementById('wire') as HTMLElement).getBoundingClientRect();
+      return {
+        reaches: sheet.top < detail.bottom,
+        onTop: document
+          .getElementById('status-detail')
+          ?.contains(document.elementFromPoint(detail.left + 20, detail.bottom - 2)),
+      };
+    });
+    expect(disclosed).toEqual({ reaches: true, onTop: true });
+    await page.locator('#status-toggle').click();
+
+    // a screen too short for them scrolls them away
+    await page.setViewportSize({ width: 390, height: 600 });
+    await page.evaluate(() => {
+      scrollTo(0, 1500);
+    });
+    await expect.poll(tabsTopOf).toBeLessThan(0);
   });
 });

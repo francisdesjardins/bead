@@ -183,11 +183,13 @@ global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
 ```
 
 ```rust
-bead_protobuf::ProtoCodec::<SayHelloRequest>::new()
+::bead_protobuf::ProtoCodec::<super::super::super::messages::hello::v1::SayHelloRequest>::new()?
 ```
 
-The Rust line names the message bare: beadc's Rust target, which is ahead, writes no module of it,
-and an application makes the codec itself.
+The Rust line names the message by its path from the services' module to Buffa's `messages`, and
+`new` refuses, as the set of descriptors is made once a process, a message whose generator left a
+repeated closed enum closed
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 
 What the codec runs, laid out here over lines, its depth pass, its required walk, its check of what
 it wrote and its filter of a closed enum's record aside, which the paragraphs below and
@@ -273,25 +275,26 @@ going to no subscription. The writer runs, in this order:
 3. **The library writes.**
 4. **The reader's own records check over the written bytes**
    ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-   `checkProtoRecords`, `ProtoRecords.Checked`, `check_records`. A refusal there is the writer's
-   refusal, its words the reader's reason. This layer is 17.2's judgment, for every rule of 17.9's
-   records: depth through kept unknown groups and delimited extensions, and anything the pass
-   counts short. It costs one linear pass over the bytes a write, the cost 0028 accepts for every
-   read.
+   `checkProtoRecords`, `ProtoRecords.Checked`, `check_proto_records`. A refusal there is the
+   writer's refusal, its words the reader's reason. This layer is 17.2's judgment, for every rule
+   of 17.9's records: depth through kept unknown groups and delimited extensions, and anything the
+   pass counts short. It costs one linear pass over the bytes a write, the cost 0028 accepts for
+   every read.
 
 A value nested past the bound in its known fields that also leaves a required field unset is
 refused for its depth, as the pass runs first. One residual is the application's: unknown fields it
 builds by hand (Buffa's `UnknownFields` is public) deeper than its stack recurse in the library
 before the check, as the drop of a deep owned message is the application's own recursion. The
-public walks are bounded alike: the C# side's `ProtoRequired.Check` refuses past the bound with the
-same `FormatException`, its `UnsetOf` internal; the Rust side's `check_required` with the same
+required walk is internal on every side, as the TypeScript side's is, and bounded where it would
+recurse. The C# side's `ProtoRequired.Check` refuses past the bound with the same
+`FormatException`, its `UnsetOf` beside it. The Rust side's `checked` refuses with the same
 `CodecRefusal`, its `unset_of`, `Unset`, `UnsetStep` and `Place` the crate's own, which only its
-tests call; the TypeScript side exports no required walk. Every path that writes a `proto` value
-an application gives goes through the codec's write: the typed and dynamic codecs and the generated
-bindings. The HTTP gateway writes the request its JSON reader built, which that reader refuses past
-the bound, counting as the wire nests, and which holds no unknown field, so its library writes it
-directly. On the Rust side the pass rides in the required walk, which carries the depth, and guards
-the walk itself; Buffa's own writer needs no guard.
+tests call. Every path that writes a `proto` value an application gives goes through the codec's
+write: the typed and dynamic codecs and the generated bindings. The HTTP gateway writes the
+request its JSON reader built, which that reader refuses past the bound, counting as the wire
+nests, and which holds no unknown field, so its library writes it directly. On the Rust side the
+pass rides in the required walk, which carries the depth, and guards the walk itself; Buffa's own
+writer needs no guard.
 
 A reading's required walk judges no depth: the records check held the wire to the bound before the
 library read it. Each library gives a map's entry that held no value its value's default, a message

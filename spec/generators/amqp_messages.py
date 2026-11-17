@@ -3,6 +3,7 @@ parcel, and the largest payload a message to a topic carries within a bound, whi
 amqpMessages and amqpPublishBounds and the bounds of spec/transports.json's cases over AMQP 1.0 all
 read from here, so the three cannot disagree. Its writer is the profile's reference, which every side
 is held to by amqpMessages."""
+from conformance import largest
 
 # the largest value of a uint, the largest payload a vbin32 holds, and the bound of a sender's ATTACH
 # that names no max-message-size (AMQP 1.0 Types §1.6.10, §1.6.19; spec 15.37)
@@ -89,16 +90,7 @@ def largest_payload(address, maximum):
     def fits(payload):
         return message_bytes(address_bytes, payload, life=True) <= maximum
 
-    if not fits(0):
-        return None
-
-    low, high = 0, LARGEST_UINT
-
-    while low < high:
-        middle = (low + high + 1) // 2
-        low, high = (middle, high) if fits(middle) else (low, middle - 1)
-
-    return low
+    return largest(fits, LARGEST_UINT)
 
 
 def receive_bound(root, participant, maximum=MAXIMUM_MESSAGE_SIZE):

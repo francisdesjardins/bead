@@ -5,7 +5,7 @@
   [`spec/spec.md`](../../spec/spec.md), section 15's `### MQTT 5`, 15.25 to 15.31, and what it asks
   of the core in 15.18, 15.19, 15.21, 15.22 and 15.24; the cases of
   [`spec/transports.json`](../../spec/transports.json) over `mqtt`, the broker cases 37 to 44, and
-  its `brokers.mqtt`; the group `mqttPublishBounds` of
+  its `brokers.mqtt`; the groups `mqttPublishBounds` and `mqttAcknowledgementCodes` of
   [`spec/vectors.json`](../../spec/vectors.json); the places `mqttBrokerAdapter.keepAlive` and
   `mqttBrokerAdapter.connectTimeout` of [`spec/durations.json`](../../spec/durations.json);
   [`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs), the broker every run plays against; the
@@ -95,14 +95,17 @@ by one participant alone. Its handles' type is `MQTT`.
 Expiry 0, the participant's id its Client Identifier, authenticated by a User Name and a Password,
 given or asked of its provider anew at each link's start
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
-or by a TLS client certificate its broker ties to the id, never both, a User Name alone where it is
+or by a TLS client certificate its broker ties to the id, its `tls` of
+[0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)'s type, never both, a User Name alone where it is
 given neither; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its
-`maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its
-`keepAlive`, 30 s by default and never 0, so its will comes at 45 s, inside the 60 s a connection's
-heartbeat takes. A Server Keep Alive replaces it where it is shorter, on every side; past that the
-sides part, a row of Differences, `An MQTT 5 Server Keep Alive of 0, or longer than its own`:
-MQTT.js keeps its own under 0 and applies a longer one, the C# adapter keeps its own, and the Rust
-side applies any, sending no PINGREQ under 0. A start waits `connectTimeout`, 30 s by default, for
+`maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its `keepAlive`,
+30 s by default and never 0, so that, where its CONNACK names no Server Keep Alive, its will comes
+at 45 s, inside the 60 s a connection's heartbeat takes. Its Keep Alive in force is the shorter of
+its CONNECT's and its CONNACK's Server Keep Alive, its CONNECT's under a Server Keep Alive of 0, on
+every side: a client may send a PINGREQ at any time (MQTT 5.0 §3.1.2.10). A PINGREQ whose PINGRESP
+has not come within half the Keep Alive in force loses its link, the wait MQTT.js and MQTTnet both
+keep. Its broker counts by the Server Keep Alive its CONNACK names, and not at all under 0, its will
+then going on no silence. A start waits `connectTimeout`, 30 s by default, for
 its password, where it asks its provider, and its CONNACK, which fails it on a reason but 0x00 and
 on a Maximum QoS of 0. A link is up as that CONNACK is read, in its packets' order (MQTT 5.0 §4.2,
 RFC 9293 §3.7): what ends it after, but its stop, in the same read or before its start settles, is
@@ -122,30 +125,29 @@ UNSUBACK that refuses, or none in time, going on to it, so no will goes ([MQTT-3
 that is down sends nothing. Once a stop settled, its broker hands the participant nothing, and its
 inbox, and a name no other member serves, find no subscriber. An UNSUBACK is its broker's word,
 which reaches the participant end to end: the subscription is deleted before it goes
-([MQTT-3.10.4-2], §3.11.3), where the DISCONNECT's sender closes the network connection itself
-([MQTT-3.14.4-2]) and a FIN its broker sends back, or the end of a session of Expiry 0, is no word
-a proxy or a gateway carries through. The UNSUBSCRIBEs go after the drain, since an UNSUBSCRIBE
-waits on no Receive Maximum and would overtake a CLOSE that does; one a filter, since an UNSUBSCRIBE
-of every filter passes a CONNACK's Maximum Packet Size, a Protocol Error that ends the link with
-0x95 and publishes the will ([MQTT-3.2.2-15], §4.13).
+([MQTT-3.10.4-1], [MQTT-3.10.4-2], §3.11.3), where the DISCONNECT's sender closes the network
+connection itself ([MQTT-3.14.4-2]) and a FIN its broker sends back, or the end of a session of
+Expiry 0, is no word a proxy or a gateway carries through. The UNSUBSCRIBEs go after the drain,
+since an UNSUBSCRIBE waits on no Receive Maximum and would overtake a CLOSE that does; one a filter,
+since an UNSUBSCRIBE of every filter passes a CONNACK's Maximum Packet Size, a Protocol Error that
+ends the link with 0x95 and publishes the will ([MQTT-3.2.2-15], §4.13).
 
-**A participant's stop lets each name it serves go first** (spec 15.18, 15.21, 15.24, 15.27): in
-its turn it hands its adapter one UNSUBSCRIBE of each name its link holds or asked, each kept wanted
-for its next link, then its CLOSEs of 1001, which its adapter's drain sends; one network connection
+**A participant's stop lets each name it serves go first** (spec 15.18, 15.21, 15.24, 15.27): in its
+turn it hands its adapter one UNSUBSCRIBE of each name its link holds or asked, each kept wanted for
+its next link, then its CLOSEs of 1001, which its adapter's drain sends; one network connection
 carries them in that order, an UNSUBSCRIBE held by no quota, so its broker reads it first. It then
 awaits their UNSUBACKs, its adapter still up, refusing 503 `busy` each OPEN its broker hands it
 meanwhile, and only then stops its adapter as above. Its broker adds no new message of a name once
-it read its UNSUBSCRIBE, and completes, before its UNSUBACK, each it began to send
-([MQTT-3.10.4-2], [MQTT-3.10.4-3]): so an OPEN to the name reaches the participant before its
-UNSUBACK, where it is answered, or after it another member of its group, or finds no subscriber,
-PUBACK 0x10, and none is acknowledged by an adapter that takes no publication and lost. The
-companion's 13.5 tells a `names` event for each name so let go, before `stopped`. A REFUSE 503 is
-the one answer: a member's PUBACK of 0x80 or more makes its broker discard a shared message rather
-than hand it to another ([MQTT-4.8.2-6]), and Mosquitto 2.1.2 hands none of a member's
-unacknowledged messages to another even at its end, for a DISCONNECT of 0x00 and a dropped socket
-alike, though §4.8.2 says it SHOULD. A name whose UNSUBACK refuses, any code but 0x00 or 0x11, or
-has not come within `connectTimeout`, is reported and stays held, its adapter's stop letting it go
-with the link's other subscriptions.
+it read its UNSUBSCRIBE, and completes, before its UNSUBACK, each it began to send ([MQTT-3.10.4-2],
+[MQTT-3.10.4-3]): so an OPEN to the name reaches the participant before its UNSUBACK, where it is
+answered, or after it another member of its group, or finds no subscriber, PUBACK 0x10, and none is
+acknowledged by an adapter that takes no publication and lost. The companion's 13.5 tells a `names`
+event for each name so let go, before `stopped`. A REFUSE 503 is the one answer: a member's PUBACK
+of 0x80 or more makes its broker discard a shared message rather than hand it to another
+([MQTT-4.8.2-6]), and Mosquitto 2.1.2 hands none of a member's unacknowledged messages to another
+even at its end, for a DISCONNECT of 0x00 and a dropped socket alike, though §4.8.2 says it SHOULD.
+A name whose UNSUBACK refuses, a code of 0x80 or more, or has not come within `connectTimeout`, is
+reported and stays held, its adapter's stop letting it go with the link's other subscriptions.
 
 **A link taken over is fenced** (spec 15.21): a DISCONNECT of 0x8E from its broker is its link
 taken over by another of its id. The adapter tells its `down` so, `isTakenOver` / `IsTakenOver`,
@@ -155,25 +157,35 @@ naming it. The later link keeps the id, as Kafka fences its older producer. Any 
 network connection is its link lost, after which the participant links anew as another
 incarnation (0038).
 
-**A subscription is QoS 1, No Local 0, Retain As Published 0, Retain Handling 2** (spec 15.27),
-one filter a SUBSCRIBE, held once its SUBACK grants QoS 1, refused otherwise, a QoS 0 granted among
-the refusals. A SUBACK proves no authorization. An UNSUBSCRIBE names one filter, the one its
-SUBSCRIBE named: a filter is recorded as its SUBSCRIBE goes and kept until its UNSUBACK, so that a
-stop lets go of one whose SUBACK has not come, which its broker, reading a link's packets in their
-order, installed all the same. An unsubscription awaits its UNSUBACK within `connectTimeout` of its
-UNSUBSCRIBE, past which it fails, its link kept so that no will goes and its filter kept so that its
-adapter's stop lets it go again; its library's request is never cancelled, since an UNSUBACK that
-comes for no awaiter may end the link as a protocol violation, its will published.
+**A subscription is QoS 1, No Local 0, Retain As Published 0, Retain Handling 2** (spec 15.27), one
+filter a SUBSCRIBE, held once its SUBACK grants QoS 1, refused on QoS 0 or 2 granted and on any code
+of 0x80 or more, its table's or not (MQTT 5.0 §2.4, §4.13.2). A SUBACK proves no authorization. An
+UNSUBSCRIBE names one filter, the one its SUBSCRIBE named: a filter is recorded as its SUBSCRIBE
+goes and kept until its UNSUBACK, so that a stop lets go of one whose SUBACK has not come, which its
+broker, reading a link's packets in their order, installed all the same. An unsubscription awaits
+its UNSUBACK within `connectTimeout` of its UNSUBSCRIBE, past which it fails, its link kept so that
+no will goes and its filter kept so that its adapter's stop lets it go again; its library's request
+is never cancelled, so that a late UNSUBACK is still read.
 
 **A publication is QoS 1, or QoS 0 at most once, RETAIN 0, and carries nothing but a Message Expiry
 Interval** where the core asks one (spec 15.28): a parcel names its connection, an OPEN and an
-ACCEPT their inbox (0040). The adapter keeps the send quota of its CONNACK's Receive Maximum
-itself, per incarnation, later publications waiting in order, no other packet delayed; reads a
-PUBACK under 0x80 but 0x10 as taken, 0x10 as no subscriber, 0x80 or more as refused; counts each
-packet before it goes, refusing one past its CONNACK's bound; and refuses what is asked while its
-link is down. **The PUBACK goes once the core took the message** (spec 15.29), always 0x00, since one
-of 0x80 or more would discard it for every member of a group ([MQTT-4.8.2-6]); a message whose
-RETAIN is 1 is dropped and acknowledged; a packet past its own bound closes its network connection.
+ACCEPT their inbox (0040). The adapter keeps the send quota of its CONNACK's Receive Maximum itself,
+per incarnation, later publications waiting in order, no other packet delayed; reads a PUBACK of
+0x00, or of none, as taken, 0x10 as no subscriber, any code of 0x80 or more as refused, its table's
+or not; takes a publication at most once once it is written; counts each packet before it goes,
+refusing one past its CONNACK's bound; and refuses what is asked while its link is down. **The
+PUBACK goes once the core took the message** (spec 15.29), always 0x00, since one of 0x80 or more
+would discard it for every member of a group ([MQTT-4.8.2-6]); a message whose RETAIN is 1 is
+dropped and acknowledged. A packet past its own bound, or one its client cannot read, closes its
+network connection with no DISCONNECT, its link lost, on every side, in every phase, its adapter's
+stop ended where it stopped and its start failed before its CONNACK; a packet its client cannot read
+is also, on every side, a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under 0x80 its packet's
+table does not name, or a SUBACK or an UNSUBACK whose count of codes is not one, awaited or not,
+which the TypeScript adapter's guard judges on MQTT.js's stream ahead of its parser, the C# adapter
+at MQTTnet's packet inspector before it decodes, and the Rust side's reader, the count in its
+adapter as it reads it; what each side's client cannot read parting them in rows of Differences; the
+one exception is an AUTH no CONNECT asked for ([MQTT-4.12.0-6]), which the C# adapter answers with
+MQTTnet's DISCONNECT of 0x83, the row `An MQTT 5 AUTH its CONNECT never asked for`.
 
 **Every bound is counted to the byte by one formula** (spec 15.30): `S = 1 + v(R) + R`,
 `R = 2 + T + Q + v(P) + P + N`, a Message Expiry Interval's five bytes counted whatever the
@@ -201,9 +213,9 @@ Receive Maximum that participant sends. No participant writes a retained message
 a broker that serves Bead alone may refuse them. `tools/mqtt-broker.mjs` is its example: Mosquitto
 by its digest, a password drawn per run, a container name and loopback ports of its own.
 
-**The libraries' automation is off**: no reconnection, resubscription, offline queue or alias; a
-new client each incarnation; every callback, closure, quota slot and PUBACK entry gated by the
-incarnation it was made in; a call given up whose packet may have gone retires its link.
+**The libraries' automation is off**: no reconnection, resubscription, offline queue or alias; a new
+client each incarnation; every callback, closure, quota slot and PUBACK entry gated by the
+incarnation it was made in; a call given up whose packet may have gone loses its link (spec 15.26).
 
 ## Consequences
 
@@ -228,33 +240,66 @@ again. A deployment gives each process its own id.
 DISCONNECT of 0x95** that MQTT 5 §4.13.1 says SHOULD go first: Mosquitto 2.1.2 deletes a will on a
 DISCONNECT of any Reason Code but 0x04, against [MQTT-3.1.2-8], and the will is the participant's
 GONE. A row of "Leveled down" in [`docs/support.md`](../support.md). The TypeScript adapter's guard
-on MQTT.js's stream and the C# adapter's on MQTTnet's channel read each packet's size from its
-fixed header, as the Rust side's client does, so a participant's own Maximum Packet Size bounds
-what it holds of a packet ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
+on MQTT.js's stream and the C# adapter's on MQTTnet's channel read each packet's size from its fixed
+header, as the Rust side's client does, so a participant's own Maximum Packet Size bounds what it
+holds of a packet ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
+
+**A Reason Code of 0x80 or more refuses, whatever its packet's table**: Mosquitto 2.1.2 answers a
+publication past its `message_size_limit` with a PUBACK of 0x95, which PUBACK's table does not name
+([MQTT-3.4.2-1]); MQTT 5 gives every such code its meaning, a failure of that packet alone (§2.4,
+§4.13.2), so the publication is refused, its connection ended unclean (spec 15.21), and the link
+kept. The TypeScript adapter's guard hands MQTT.js's parser such a code as 0x80, a refusal every
+table names, its broker's own code kept for the refusal's words. A deployment bounds its broker's
+messages by `max_packet_size`, which its CONNACK carries and every side counts before a publication
+goes (spec 15.30), as Mosquitto itself recommends over `message_size_limit`.
+
+**A broker that sends an acknowledgement under 0x80 its table does not name, or of a count other
+than one, ends the link and publishes the will**, at a participant's stop and its adapter's stop as
+at any other time: one rule in every phase, as for any packet its client cannot read, and no broker
+known sends one. A broker that answers each SUBSCRIBE so never keeps a link, its participant's
+reconnection bounding the attempts.
+
+**At its adapter's stop, a packet its client cannot read, or one past its bound, ends the link with
+no DISCONNECT**, its will going: MQTTnet closes its channel on a packet it cannot decode before the
+stop's DISCONNECT could go, and every side keeps to it, a row of "Leveled down".
 
 **A participant can end another's link through Mosquitto's undercount**, publishing a packet of
 its own past the other's bound: a deployment's access control lets only its participants publish
 to an inbox, so it is a participant's to do to another, as it could flood one. The count is
 Mosquitto's to fix, which Bead does not wait on.
 
-**The will hastens what the heartbeat finds** only under a Keep Alive of half the heartbeat at
-most, 30 s against 60 s by default.
+**The will hastens what the heartbeat finds** only where the Keep Alive its broker counts by is half
+the heartbeat at most, 30 s against 60 s by default. A Server Keep Alive longer than that, or of 0,
+leaves the heartbeat alone to find a participant gone silent.
 
-**A page chooses no TLS client certificate**, its browser does: the TypeScript adapter refuses one
-there, naming why, and a link from a page authenticates by a password, a row of "Differences" in
+**The C# adapter pings a shorter Server Keep Alive itself.** MQTTnet works out the Server Keep Alive
+and runs its loop on its own period all the same, so its own Keep Alive under 0 and under a longer
+one is that loop's. A bump of MQTTnet that applies the value it works out fails the twin that holds
+the longer case.
+
+**A page chooses no TLS client certificate**, its browser does: the TypeScript adapter refuses a
+`tls` there, naming why, as every client of the TypeScript side does
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), and a link from a page authenticates by a password, a row of "Differences" in
 [`docs/support.md`](../support.md).
 
 **A stop costs one UNSUBSCRIBE a subscription**, a departure a peer among them: its names' in its
 turn, their UNSUBACKs within one `connectTimeout`, then the others' in one round trip after its
 drain, before its DISCONNECT. Against a broker that answers nothing it takes up to three
-`connectTimeout`s, 90 s by default, past the 30 s an orchestrator such as Kubernetes grants a
-process before it kills it; its CLOSEs wait on none of them, since they go at its call, and a
-deployment that stops under such a grace lowers `connectTimeout`. A drain that spends its whole
-`connectTimeout` leaves the other UNSUBACKs no time, so a parcel to a stopped participant's inbox
-may still be taken, against a broker that withholds its PUBACKs that long and already fails the
-drain. A stop settles a round trip later where its broker hands it OPENs to refuse while it lets
-its names go, its adapter's drain sending the REFUSEs, and within a few milliseconds of one that
-refuses none otherwise.
+`connectTimeout`s, 90 s by default, one its names' let-go spends and two its adapter's stop spends,
+past the 30 s an orchestrator such as Kubernetes grants a process before it kills it; its CLOSEs
+wait on none of them, since they go at its call, and a deployment that stops under such a grace
+lowers `connectTimeout`. A drain that spends its whole `connectTimeout` leaves the other UNSUBACKs
+no time, so a parcel to a stopped participant's inbox may still be taken, against a broker that
+withholds its PUBACKs that long and already fails the drain. A stop settles a round trip later where
+its broker hands it OPENs to refuse while it lets its names go, its adapter's drain sending the
+REFUSEs, and within a few milliseconds of one that refuses none otherwise.
+
+**A publication at least once given up at a stop, once its packet may have gone, loses its link**,
+as it does at any other time, so its will goes: the rule holds at a stop too, alike on every side.
+
+**At most once, no PUBACK says no subscriber**: no side offers `noSubscriber` there, so a connect to
+a name with no member waits its time, as over AMQP 1.0, and a parcel to a departed peer's inbox is
+not told either, its heartbeat or its GONE finding it.
 
 **A group member's stop hands the others what follows its UNSUBACK**, and refuses 503 `busy` each
 OPEN its broker routed to it before: a reconnecting peer's next attempt places it anew, and a
@@ -265,7 +310,7 @@ member.
 
 **What a broker holds back past its window is the one residual**: a broker that keeps fewer
 publications in flight toward a participant than its Receive Maximum, as MQTT 5.0 §4.9 lets it,
-sends what it held back after the UNSUBACK, under [MQTT-3.10.4-3]'s MAY, and a stop acknowledges
+sends what it held back after the UNSUBACK, under §3.10.4's MAY, and a stop acknowledges
 and loses an OPEN among it: on Mosquitto 2.1.2, 198 of 200 at a Receive Maximum of 2, none at Bead's
 65,535. Spec 15.31 closes it as a deployment's requirement, its broker keeping in flight toward a
 server's participant up to the Receive Maximum that participant sends; closing it in the protocol
@@ -277,26 +322,30 @@ stop that settled is what the broker its link reached acknowledged, never what e
 **Ahead**: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and EMQX played
 beside Mosquitto; Mosquitto under TLS played, a client certificate among it, where the matrix holds
 its row of MQTT 5 over TLS "not tested", since the fixture's Mosquitto listens in clear on the
-loopback; and an acknowledgement of a Reason Code its packet's table does not name, and a SUBACK or
-an UNSUBACK whose count of codes is not one, judged alike on every side, beside 15.28's sentence for
-a publication at most once, by a round of its own, the rows of Differences `An MQTT 5
-acknowledgement of a Reason Code its packet's table does not name` and `An MQTT 5 SUBACK or UNSUBACK
-whose count of codes is not one` closing with it.
+loopback.
 
 **Its gates**: the cases over `mqtt` and the broker cases 37 to 44 of `spec/transports.json`, a
 participant's stop among them, its inbox and its name finding no subscriber once it settled;
-`mqttPublishBounds`; the places `mqttBrokerAdapter.keepAlive` and `mqttBrokerAdapter.connectTimeout`;
-the adapters' twins, against a scripted MQTT 5 peer and against the fixture, a stop's among them:
-against the peer, its order, the drain, the UNSUBSCRIBEs, the UNSUBACKs, the DISCONNECT; an UNSUBACK
-withheld and the DISCONNECT still within its bound; one UNSUBSCRIBE a filter under a small CONNACK
-Maximum Packet Size; a SUBSCRIBE under way let go; nothing overtaking a CLOSE under a Receive
-Maximum of 2; an unsubscription whose UNSUBACK has not come within `connectTimeout` failed, its link
-kept and no will gone, the late UNSUBACK read; against the fixture, a group, whose name one member's
-stop leaves taken while another serves it, and unserved once both stopped, and a group member's stop
-answering each OPEN that comes during it by another member or refusing it 503, none lost; the
-participant's twins of its stop that lets each name go first; the interop over MQTT
-5 both ways, a name served by two in one group proven by no ACCEPT ever answered twice; and the CI
-job `mqtt`, `BEAD_MQTT_REQUIRED=1`.
+`mqttPublishBounds` and `mqttAcknowledgementCodes`; the places `mqttBrokerAdapter.keepAlive` and
+`mqttBrokerAdapter.connectTimeout`; the adapters' twins, against a scripted MQTT 5 peer and against
+the fixture, a stop's among them: against the peer, its order, the drain, the UNSUBSCRIBEs, the
+UNSUBACKs, the DISCONNECT; an UNSUBACK withheld and the DISCONNECT still within its bound; one
+UNSUBSCRIBE a filter under a small CONNACK Maximum Packet Size; a SUBSCRIBE under way let go;
+nothing overtaking a CLOSE under a Receive Maximum of 2; an unsubscription whose UNSUBACK has not
+come within `connectTimeout` failed, its link kept and no will gone, the late UNSUBACK read; an
+acknowledgement under 0x80 its table does not name, or of a count of codes other than one, awaited
+or not, losing its link with no DISCONNECT, and failing its start before its CONNACK; a packet its
+client cannot read ending its adapter's stop at once, no DISCONNECT and no down; an acknowledgement
+of 0x80 or more its table does not name read as a refusal, naming its code, its link kept, a PUBACK
+of 0x95 as Mosquitto 2.1.2 sends it among them; what one read brought before a packet its client
+cannot read handed on as far as its side does; a PUBACK of 0x00, or of none, read as taken, 0x10 as
+no subscriber and 0x80 or more as refused; a subscription held on QoS 1 granted, refused on QoS 0 or
+2 granted, its filter kept, and on 0x80 or more; one let go on an UNSUBACK of 0x00 or 0x11 and
+refused on 0x80 or more; against the fixture, a group, whose name one member's stop leaves taken
+while another serves it, and unserved once both stopped, and a group member's stop answering each
+OPEN that comes during it by another member or refusing it 503, none lost; the participant's twins
+of its stop that lets each name go first; the interop over MQTT 5 both ways, a name served by two in
+one group proven by no ACCEPT ever answered twice; and the CI job `mqtt`, `BEAD_MQTT_REQUIRED=1`.
 
 ## The Tenth Man
 
@@ -429,3 +478,41 @@ MQTT 5 calls malformed that the C# side reads.
 | At QoS 0 a give-up orphans nothing, no PUBACK, quota slot or Packet Identifier, and "it may go yet" is what at most once means: the retire is the costliest answer to the cheapest event, and the C# side's way harms no one.                                                                                                                                                                                                                                                                | **Refused.** The C# side's way does not give up: its caller waits on until its broker reads. A call settled cancelled while its bytes stay queued would free them from `maximumUnsentBytes` (15.23) though the adapter still holds them, and withdrawing a packet its writer has not begun, its link kept, is what no library offers. Each gentler way breaks a contract; the retire breaks a link, by its caller's own act.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | A reset is the Rust side's alone: the TypeScript side's forced end destroys its stream, a close, so what the operating system holds still goes, and no twin can assert that nothing goes. "So that it never goes" is no sentence every side holds.                                                                                                                                                                                                                                           | **Accepted.** Verified through the adapter: the peer read 3 of 64 MiB, three PUBLISH packets, one of them told failed, then the end, no reset. This record says a give-up retires its link, never that it resets; the twin asserts what every side shows, the call cancelled, one down, not taken over, no DISCONNECT, the peer reading less than was queued. A true reset on the TypeScript side over TCP and TLS, Node's `resetAndDestroy`, is weighed and refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | The TypeScript twin of 15.27 says MQTT.js "loses its link on any other, 0x01 among them". It does not.                                                                                                                                                                                                                                                                                                                                                                                       | **Accepted.** Verified through the adapter: the link stayed up on an UNSUBACK of 0x01. With the retire on what MQTT.js's parser refuses, the comment says what the side does, and the twin claims no code it does not send.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+### On an acknowledgement its table does not name, judged alike
+
+The round met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)): nine
+objections, each verified against its probe or its source before it was answered, seven accepted,
+two in part, none refused. Any code of 0x80 or more fails its request alone. A code under 0x80 that
+its table does not name is a Protocol Error, and an adapter's stop keeps that one rule, as every
+phase does.
+
+| Objection                                                                                                                                                                                                                                                                                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A broker does send one: the fixture's Mosquitto 2.1.2 answers a QoS 1 publication past its `message_size_limit` with a PUBACK of 0x95, which PUBACK's table does not name, so one parcel too large would lose every side's link, its connections and its will, where the C# and Rust sides refuse that publication and 15.21 ends one connection. | **In part.** Verified: `40 03 00 02 95`, twice, its CONNACK naming Maximum Packet Size 2,000,000; `handle_publish.c:352-354`; the TypeScript adapter losing its link on it and the C# side refusing it, the next taken. MQTT 5 gives every code of 0x80 or more its meaning, a failure of that packet alone (§2.4, §4.13.2): it refuses its request, its link kept, on every side; the Protocol Error is a code under 0x80 outside its table and a count other than one. The TypeScript adapter's guard reads each acknowledgement's code ahead of mqtt-packet, handing it such a code as 0x80 and naming the broker's own. The fixture twin is not taken: the fixture is one broker of `max_packet_size` 4,096 and `message_size_limit` is global, so a limit that draws 0x95 within that bound refuses the cases' own largest parcels; twin C plays Mosquitto's bytes against the scripted peer on every side. |
+| At its adapter's stop, ending at once with a DISCONNECT of 0x00 leaves the CLOSEs behind the quota unsent and sends no GONE, the worst of three outcomes by the draft's own argument, at the price of a third mechanism on every side; one rule in every phase is simpler and tells the peers.                                                    | **Accepted**; the user chose it. Verified: the drain is where the CLOSEs go (15.21), behind Mosquitto's Receive Maximum of 20. An acknowledgement under 0x80 outside its table, or of a count other than one, is a packet its client cannot read in every phase: at a stop it ends the stop where it stopped, no DISCONNECT, its will going. No new mechanism; 15.26's stop sentence keeps its words. The user's words were "at a stop, a refusal"; the round recommended one rule, since what is left of the class is nothing a known broker sends, and the user chose it.                                                                                                                                                                                                                                                                                                                                      |
+| On the C# side the draft's stop is a race the awaiting context decides: MQTTnet dispatches a packet as its inspector returns, and a token only the stop's waits carry lets MQTTnet hand the code under a posting context.                                                                                                                         | **Accepted.** Verified: 20 of 20 handed under a posting context, none under none; `Life` cancelled in the inspector fails each call 20 of 20 under both. The inspector ends the link through `End`, which cancels `Life` before it returns, and the stop's own UNSUBSCRIBEs carry a token linked from `Life`, its DISCONNECT sent only where the link has not ended. Twin B runs under a posting context too.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Two classes at a stop with two outcomes, and each library draws the line between them elsewhere, validating in its own order as MQTT 5 allows.                                                                                                                                                                                                    | **Accepted.** Verified in mqtt-packet's order and the Rust reader's. One class and one outcome leave no line. A packet unreadable for another reason is that, whatever its code. The C# inspector judges a code by its packet type whatever its flags, so a PUBACK of 0x01 whose reserved flags MQTTnet reads is lost there as on the other sides; twin A plays it, and a SUBACK both of a bad code and of an unknown property, on every side.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| The TypeScript side refuses a code as it parses a whole read, before MQTT.js handles any packet of it, so what came before the refused packet in that read is dropped, by segmentation alone, where the C# and Rust sides settle it.                                                                                                              | **Accepted.** Verified on all three: in one write the publication before fails on the TypeScript side; the C# side settles it but drops a PUBLISH before; the Rust side hands both on. A row of Differences, open, with its twin on every side, each asserting only what its probe of 40 runs holds; 15.29 does not say "as it reads it". Closing it is a round of its own.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Nothing holds the three tables equal, and a vector can; a phase before the CONNACK is played by no twin.                                                                                                                                                                                                                                          | **Accepted.** `mqttAcknowledgementCodes` holds each table; every side plays each code from 0x00 to 0xFF through its own judge, the TypeScript side its guard, the C# side its reader of the inspected bytes, the Rust side `read_packet`; 15.29 names the group. Twin A gains a case before the CONNACK: its start fails, no DISCONNECT.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| The twins of 15.28's "taken once written" hold on the TypeScript side only for publications asked a turn apart: asked in one turn, MQTT.js writes them in one write, which Windows takes whole, so `maximumUnsentBytes` bounds none of such a burst there.                                                                                        | **In part.** Verified by probes: 65 asked in one turn, all 64 taken and the one given up within 3 ms; a turn each, 2 taken and 62 held. The burst is a row of Differences, open, not a platform's, since the adapter could hand MQTT.js one PUBLISH once the one before it was written. The TypeScript and C# twins of the Rust side's two tests leave this round for the row `An MQTT 5 publication at most once still unwritten at its stop`, which owns a twin whose writer blocks on every platform. The sentence stays.                                                                                                                                                                                                                                                                                                                                                                                     |
+| 15.28's "retires its link" is no word of the spec; the give-up rule holds for a subscription too; and the Rust reader giving no code as 0x00 would read none as Success.                                                                                                                                                                          | **Accepted.** "Loses its link". One sentence in 15.26 for a subscription and a publication alike, which the give-up twins now cite. The Rust reader keeps its refusal of an acknowledgement of no code.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Beside the round: decision 0039 says Mosquitto 2.1.2 bounds a packet to about 268 MB by default; it is 2,000,000 bytes.                                                                                                                                                                                                                           | **Accepted.** Verified: its CONNACK and `conf.c:338`. 0039 states 2,000,000 by default and the envelope of 1,999,945 bytes it carries.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### On a Keep Alive in force, and a PINGREQ left unanswered
+
+The round met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)): seven
+objections, each verified against its probe or its source before it was answered, six accepted, one
+in part, none refused. The Keep Alive in force is the shorter of a CONNECT's Keep Alive and its
+CONNACK's Server Keep Alive, and a PINGREQ whose PINGRESP has not come within half of it loses its
+link.
+
+| Objection                                                                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The rule fixes when a PINGREQ goes, not when a link is counted lost. The three sides wait for a PINGRESP half a Keep Alive, half MQTTnet's own period, or a whole Keep Alive, so twins on the PINGREQ alone pass while a dead broker is found at times up to four apart, the shorter case included. | **Accepted.** Verified: the probes against a silent broker give a C# down at 5,747 ms under a Server Keep Alive of 1 against TypeScript's 1,518, since the C# pinger awaits `PingAsync` with no deadline and stays `IsPinging`. The Rust side checks `is_pinged` a whole Keep Alive later (adapter.rs:1482-1517). 15.26 states the wait: a PINGREQ whose PINGRESP has not come within half the Keep Alive in force loses its link, the wait MQTT.js and MQTTnet both keep. The Rust side waits half, the C# pinger gets that deadline, and twin C holds the down's time under its own Keep Alive, a shorter Server Keep Alive and one of 0. The steady-flow test is a matter of what dates a Keep Alive: MQTTnet stamps a packet as it is asked, MQTT.js dates from what it read. It is a row of Differences, open, with the Rust test cited, and with MQTT.js's acknowledgement restarting the wait of an unanswered PINGREQ. |
+| Adopting a longer Server Keep Alive is not what [MQTT-3.2.2-21] asks, and it contradicts the draft's own reason for 0: a Keep Alive is a ceiling, and a client may ping at any time.                                                                                                                | **Accepted.** Verified in MQTT 5.0 §3.1.2.10 and §3.2.2.3.14: a client that sends within the shorter uses the Server Keep Alive, never passing it. The Keep Alive in force is the shorter of its CONNECT's and its CONNACK's, its CONNECT's under 0. The Rust side takes the minimum. The TypeScript side calls `keepaliveManager.setKeepalive` on MQTT.js's `connect`, a public member, kept to its own three times in three by the probe. The C# side keeps its cadence. Mosquitto 2.1.2 answers every PINGREQ with no rate check (`handle_ping.c`). No row of "Leveled down", since no side is held below what it can do.                                                                                                                                                                                                                                                                                                   |
+| The platforms decide nothing here, and C# adopting a longer one would need a hook into MQTTnet's order of reads.                                                                                                                                                                                    | **Accepted.** Verified: MQTTnet works out the Server Keep Alive and then loops on `Options.KeepAlivePeriod` (MqttClient.cs:146-155, :1032); writing that option from `InspectPacketAsync` lands before the read, a hook a bump must re-read. Under the shorter rule no side needs one. The C# twin keeps the longer case, so it pins MQTTnet's loop and fails on a bump that applies the value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Under 0, and under a longer one, the half of the keep alive Bead's departure relies on is the broker's, which no client rule restores, and 15.30, `durations.json` and 0041 still state it holds.                                                                                                   | **Accepted.** Verified: [MQTT-3.1.2-22] binds a server only under a non-zero Keep Alive, and [MQTT-3.2.2-22] has it count by the Server Keep Alive where one is named. 15.26 names the two values apart: the Keep Alive in force, which the link runs, and the one its broker counts by, nothing under 0, its will then going on no silence and its peers finding it by their heartbeat. 15.30's row, `durations.json`'s name and 0041 say so too. Refusing a CONNACK of 0 is refused: the standard allows it, 65,535 does nearly the same, and the will is the heartbeat's hastener, never its guarantee.                                                                                                                                                                                                                                                                                                                     |
+| The severity sits on the wrong case: no broker the project runs names 0 or a longer value, but a shorter one is reachable, and with it the C# wait.                                                                                                                                                 | **In part.** Verified: the fixture sets no `max_keepalive`, and Mosquitto 2.1.2 names a Server Keep Alive only to lower a request or replace 0 (`handle_connect.c:256-263`); with `max_keepalive 10` it answered 30 with 10. The loss rule comes first, and neither 0 nor the longer case gets an interop case. Not taken: that only scripted peers will hold them. Bead takes any broker of MQTT 5.0, and the standard lets a server name any Server Keep Alive.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| "Its participant's own `keepAlive`" names the wrong value: every side runs and compares its CONNECT's Keep Alive, in whole seconds rounded up.                                                                                                                                                      | **Accepted.** Verified on all three: `Math.ceil(keepAlive / 1_000)`, `Math.Ceiling(…TotalSeconds)`, and Rust's `seconds_of`. The rule names its CONNECT's Keep Alive. The Rust test of a Keep Alive under a second gets its twins, the PINGRESP awaited half of the second it runs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| The round is two behaviours on three sides, a generated file and two records, more than a direct change.                                                                                                                                                                                            | **Accepted.** It goes through `bead-implement-both-sides`, the loss rule and the cadence in one amendment of this record. `durations.json`'s name changes with the spec, through its generator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

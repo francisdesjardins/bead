@@ -13,16 +13,20 @@
 import type { DescEnum, DescField, DescMessage, DescOneof } from '@bufbuild/protobuf';
 import { FieldDescriptorProto_Type } from '@bufbuild/protobuf/wkt';
 
+import { enumOfField, fieldOf } from '../../descriptors.ts';
 import type { FieldType, IFieldRulesEntry, ScalarName } from '../../model/blueprint.ts';
-import type {
-  IFieldPlan,
-  IJudgment,
-  IMessagePlan,
-  INumber,
-  IRuleSite,
-  IValuePlan,
+import {
+  hasWork,
+  type IFieldPlan,
+  type IJudgment,
+  type IMessagePlan,
+  type INumber,
+  type IRuleSite,
+  type IValuePlan,
+  scalarOf,
 } from '../../model/rules.ts';
 import { compilePattern } from '../../patterns/pattern.ts';
+import { INDENT, printerOf } from '../lines.ts';
 import { pascalOf } from '../names.ts';
 import { literalOf } from './templates.ts';
 
@@ -37,8 +41,6 @@ export interface ICSharpValidatorOptions {
 }
 
 // constants
-
-const INDENT = '    ';
 
 // the members a message's class declares or overrides, which protoc's C# generator takes a field's
 // property away from with a `_` (`GetPropertyName`)
@@ -98,14 +100,6 @@ const caseOf = (field: DescField): string => {
 
 const oneofPropertyOf = (oneof: DescOneof): string => {
   return pascalOf(oneof.name);
-};
-
-const scalarOf = (type: FieldType): ScalarName | undefined => {
-  if ('scalar' in type) {
-    return type.scalar;
-  }
-
-  return 'wrapper' in type ? type.wrapper : undefined;
 };
 
 // a needle of one UTF-16 code unit as a C# char literal, every unit outside printable ASCII as its
@@ -225,9 +219,7 @@ export const printCSharpValidators = (
     const fields: string[] = [];
     const body: string[] = [];
     const names = new Set<string>();
-    const print = (indent: number, line: string): void => {
-      body.push(line === '' ? '' : `${INDENT.repeat(indent)}${line}`);
-    };
+    const print = printerOf(body);
     const fieldNameOf = (name: string): string => {
       let unique = name;
 
@@ -290,24 +282,6 @@ export const printCSharpValidators = (
         type: 'global::System.Collections.Generic.HashSet<int>',
         value: [`[${numbers.join(', ')}]`],
       });
-    };
-    const fieldOf = (entry: IFieldRulesEntry): DescField => {
-      const field = message.fields.find((each) => {
-        return each.number === entry.fieldNumber;
-      });
-
-      if (field === undefined) {
-        throw new Error(`${plan.fullName} holds no field ${String(entry.fieldNumber)}`);
-      }
-
-      return field;
-    };
-    const enumOfField = (field: DescField): DescEnum | undefined => {
-      return field.fieldKind === 'enum' ||
-        (field.fieldKind === 'list' && field.listKind === 'enum') ||
-        (field.fieldKind === 'map' && field.mapKind === 'enum')
-        ? field.enum
-        : undefined;
     };
     // the test a value breaks a rule by, as a condition
     const brokenOf = (
@@ -520,9 +494,6 @@ export const printCSharpValidators = (
         print(0, '');
       }
     };
-    const hasWork = (value: IValuePlan | undefined): boolean => {
-      return value !== undefined && (value.judgments.length > 0 || value.message !== undefined);
-    };
     // the condition a field is set by, as `required` and a message's oneof read it
     const setOf = (entry: IFieldRulesEntry, field: DescField): string => {
       const access = `message.${propertyOf(field)}`;
@@ -548,7 +519,7 @@ export const printCSharpValidators = (
 
     const printField = (plan: IFieldPlan): void => {
       const { entry } = plan;
-      const field = fieldOf(entry);
+      const field = fieldOf(message, entry);
       const name = literalOf(entry.fieldName);
       const site = pascalOf(entry.fieldName);
       const enumOf = enumOfField(field);
@@ -785,7 +756,7 @@ export const printCSharpValidators = (
     plan.oneofRules.forEach((rule, at) => {
       const many = siteOf(rule.many, `Oneof${String(at)}`);
       const counted = rule.fields.map((entry) => {
-        return `(${setOf(entry, fieldOf(entry))} ? 1 : 0)`;
+        return `(${setOf(entry, fieldOf(message, entry))} ? 1 : 0)`;
       });
 
       print(2, `// (buf.validate.message).oneof ${String(at)}`);

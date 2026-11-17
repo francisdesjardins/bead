@@ -11,6 +11,9 @@ namespace Bead.Transcoding.Tests;
 /// </summary>
 internal sealed class TranscodingService : IAsyncDisposable
 {
+    // how long ticks waits for its notifications to leave before it ends its subscription, at most
+    private static readonly TimeSpan TicksPatience = TimeSpan.FromSeconds(5);
+
     private readonly Lock _gate = new();
     private readonly List<string> _refused = [];
     private int _hanging;
@@ -132,6 +135,7 @@ internal sealed class TranscodingService : IAsyncDisposable
         _transcoding = transcoding;
 
         var sent = new Dictionary<string, int>(StringComparer.Ordinal);
+        var cancelled = new HashSet<string>(StringComparer.Ordinal);
 
         Server.Router.Error += (_, _) =>
         {
@@ -141,8 +145,9 @@ internal sealed class TranscodingService : IAsyncDisposable
             }
         };
 
-        // * the notifications the server sent, by connection, which ticks waits on before it ends
-        // its subscription, so none is dropped behind its failure
+        // * the notifications the server sent, by connection, and the cancels it received, which
+        // ticks waits on before it ends its subscription, so none is dropped behind its failure
+        // (spec 11.7)
         Server.Router.Debug += (direction, envelope) =>
         {
             if (direction == DebugDirection.Tx && envelope.Header is NotificationHeader)
@@ -150,6 +155,14 @@ internal sealed class TranscodingService : IAsyncDisposable
                 lock (sent)
                 {
                     sent[envelope.ConnectionHandle] = sent.GetValueOrDefault(envelope.ConnectionHandle) + 1;
+                    Monitor.PulseAll(sent);
+                }
+            }
+            else if (direction == DebugDirection.Rx && envelope.Header is CancelHeader)
+            {
+                lock (sent)
+                {
+                    cancelled.Add(envelope.ConnectionHandle);
                     Monitor.PulseAll(sent);
                 }
             }
@@ -224,13 +237,17 @@ internal sealed class TranscodingService : IAsyncDisposable
                 });
             }
 
+            // until its notifications left, its client cancelled, or its patience ran: past it, it
+            // ends the subscription as it would have
             await Task.Run(() =>
             {
+                var until = DateTime.UtcNow + TicksPatience;
+
                 lock (sent)
                 {
-                    while (sent.GetValueOrDefault(connectionHandle) - before < from)
+                    while (sent.GetValueOrDefault(connectionHandle) - before < from && !cancelled.Contains(connectionHandle) && DateTime.UtcNow < until)
                     {
-                        Monitor.Wait(sent, TimeSpan.FromSeconds(1));
+                        Monitor.Wait(sent, TimeSpan.FromMilliseconds(100));
                     }
                 }
             });

@@ -774,15 +774,19 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task A_credential_resolving_a_transfer_s_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
     {
-        foreach (var (total, length) in new[] { (100, 8), (300, 20) })
+        foreach (var total in new[] { 100, 300 })
         {
             var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
             var resolver = server.Resolve();
             var (resolution, pending) = Waiting();
-            var opening = RequestOpeningOf(1, (PatternOf(total), length));
+
+            // as full as its sender places it, its credential counted in its header
+            var header = (RequestHeader)RequestOpeningOf(1, (PatternOf(total), 1)).Header with { Credential = Credential.Jwt("a.b.c") };
+            var length = OpeningBytesOf(header);
 
             server.Resolution = resolution;
-            await server.Deliver(new Envelope { Header = (RequestHeader)opening.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = opening.Payload });
+            await server.Deliver(new Envelope { Header = header, Payload = PatternOf(total).AsMemory(0, length) });
+
             await server.Advance(TimeSpan.FromSeconds(1));
             Assert.Empty(server.Sent);
             Assert.Equal(0, resolver.Admitted);

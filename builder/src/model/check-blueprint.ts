@@ -18,6 +18,7 @@ import {
   csharpNameOfFailure,
   RUNTIME_TYPES,
   TYPESCRIPT_PROCEDURE_NAMES,
+  upperFirst,
   xmlExcludedOf,
 } from '../targets/names.ts';
 import type { IBinding, IBlueprint, IRange, IServiceEntry } from './blueprint.ts';
@@ -36,10 +37,6 @@ const inRanges = (id: number, ranges: readonly IRange[]): boolean => {
   return ranges.some((range) => {
     return id >= range.first && id <= range.last;
   });
-};
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 };
 
 // a character as its code point, U+0001

@@ -5,7 +5,9 @@ const hello = new HelloServer({ admissions: { greeted } });
 hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
   const name =
     payload.name === ''
-      ? (await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })).name
+      ? (
+          await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })
+        ).name
       : payload.name;
 
   return response({ greeting: `Hello, ${name}!` });

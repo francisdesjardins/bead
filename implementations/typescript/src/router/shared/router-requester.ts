@@ -207,7 +207,7 @@ export const createRouterRequester = <Handle extends string>(
 ): IRouterRequester<Handle> => {
   const { failures, reportFailure: report } = port;
   const { deliver, sendReporting } = writer;
-  const { chunkEnvelopeOf, payloadLimitOf, tooLargeOf, transferOf } = placement;
+  const { chunkEnvelopeOf, openingBytesOf, payloadLimitOf, tooLargeOf, transferOf } = placement;
 
   // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
   // transfers it sends and receives
@@ -518,22 +518,38 @@ export const createRouterRequester = <Handle extends string>(
       return (port.activity('response', connectionHandle), undefined);
     }
 
-    // a transfer's opening is not its result: one refused — past its procedure's limit, say — ends
-    // the call, and the peer, which holds the result still, is told to cancel it; opened, the call
-    // waits on the rest, which one silent too long ends — its own timer, rather than the transfer's
+    // a transfer's opening is not its result: one refused, at once or once it waited for the budget
+    // too long, ends the call and cancels it; opened, its own timer, not the transfer's, governs
+    // it, set going again by the credit that admits one that waited
     const { maximumPayloadBytes } = pendingRequest;
+    const refuse = (failure: IFailure): void => {
+      const reason = new FailureError(failure, { destinationId, header, procedureAddress });
+
+      endPending(reason, { call, pendingRequest });
+    };
     const transfer =
       total > maximumPayloadBytes
         ? tooLargeOf(total, maximumPayloadBytes)
-        : receivings.open(envelope.payload, { call, total });
+        : receivings.open(envelope.payload, {
+            call,
+            onAdmitted: () => {
+              wait(limits.transferInactivityTimeout, { call, pendingRequest });
+            },
+            onRefused: refuse,
+            openingBytes: openingBytesOf({ ...envelope.header, total }),
+            total,
+          });
 
     if ('code' in transfer) {
-      const reason = new FailureError(transfer, { destinationId, header, procedureAddress });
-
-      return (endPending(reason, { call, pendingRequest }), undefined);
+      return (refuse(transfer), undefined);
     }
 
-    wait(limits.transferInactivityTimeout, { call, pendingRequest });
+    // * one that waits for the budget holds its call by its wait alone, and its admission sets the
+    // call's inactivity going (spec 12.8)
+    wait(receivings.isWaiting(transfer) ? undefined : limits.transferInactivityTimeout, {
+      call,
+      pendingRequest,
+    });
     // kept before its first credit goes, so a chunk that credit brings at once finds it
     pendingRequest.receiving = { header: envelope.header, transfer };
     receivings.grant(transfer);

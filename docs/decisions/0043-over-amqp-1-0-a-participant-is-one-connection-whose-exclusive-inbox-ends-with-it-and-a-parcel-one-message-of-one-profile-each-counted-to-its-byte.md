@@ -145,7 +145,8 @@ the id as its container-id, its virtual host as `vhost:<it>` and its `idleTimeou
 as its idle-time-out, the link lost once nothing came for twice that. It authenticates by SASL PLAIN,
 the id its user, its password given or asked of its provider anew at each link's start
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
-or by SASL EXTERNAL under a client certificate RabbitMQ maps to the id's user: never both, and never
+or by SASL EXTERNAL under a client certificate RabbitMQ maps to the id's user, its `tls` of
+[0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)'s type: never both, and never
 ANONYMOUS, which no adapter given neither falls to. Its inbox is an exclusive, classic, not
 durable queue of its name, declared through the management on that connection, 201 or 200, then
 bound to the root's exchange by its own name, 204: so it ends with the connection, and a start that
@@ -272,9 +273,9 @@ from every client each half of it. During it, the dead inbox still takes parcels
 "Differences" in [`docs/support.md`](../support.md).
 
 **A connect to a provisioned name with no member waits its time**, its OPEN held in the name's queue
-for its life, where over MQTT 5 0x10 fails it at once; `released` has two causes, an inbox its broker
-ended and a name no deployment provisioned, and never a provisioned name with no member. A row of
-"Differences".
+for its life, where over MQTT 5 at least once 0x10 fails it at once; `released` has two causes, an
+inbox its broker ended and a name no deployment provisioned, and never a provisioned name with no
+member. A row of "Differences".
 
 **A participant serves 60 names under RabbitMQ's default** of 64 sessions a connection, its inbox's,
 the two sending ones and the management's taking four; a deployment that needs more raises
@@ -311,7 +312,8 @@ runs in Node alone and refuses a page, naming why, a row of "Differences".
 
 **AMQP 1.0 over TLS is played, SASL EXTERNAL among it**: the fixture's RabbitMQ listens over TLS
 beside TCP, under a CA and client certificates drawn for the run, each certificate's common name its
-id's user, and each adapter's twin starts participants over `amqps` with SASL EXTERNAL, sends and
+id's user, each given to its adapter as its `tls`
+([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)), and each adapter's twin starts participants over `amqps` with SASL EXTERNAL, sends and
 receives a parcel and stops their links: `amqp-broker-adapter.test.ts`'s `starts participants over
 amqps with SASL EXTERNAL, sends and receives a parcel, and stops their links` and
 `AmqpBrokerAdapterTests`'

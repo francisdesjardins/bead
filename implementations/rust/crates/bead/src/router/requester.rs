@@ -18,12 +18,12 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::{Failure, ProcedureAddress};
 use crate::metrics::{CallEnding, ProcedureSeries};
 use crate::router::core::{
-    Answer, Deliver, Side, deliver, microseconds_of, receive_unplaced, reported, send_credits,
-    send_reporting,
+    Answer, Deliver, Side, admit, deliver, microseconds_of, receive_unplaced, reported,
+    send_credits, send_reporting,
 };
 use crate::router::parts::{
-    CallReply, OnSent, PendingRequest, Placed, Placement, Reservation, ResultReceiving, SendingFor,
-    cancel_timer,
+    CallReply, OnSent, OpeningOf, PendingRequest, Placed, Placement, Reservation, ResultReceiving,
+    SendingFor, budget_wait_of, cancel_timer,
 };
 use crate::router::transfer::{Chunk, ChunkOutcome, OutgoingTransfer};
 use crate::router::types::{
@@ -207,9 +207,9 @@ fn forget<S: Side>(
     cancel_timer(&mut request.timer);
 
     if let Some(receiving) = &request.receiving {
-        let credits = core.receivings.close(receiving.transfer);
+        let admitted = core.receivings.close(receiving.transfer);
 
-        send_credits(state, credits);
+        admit(state, admitted);
     }
 
     if request.sending {
@@ -263,8 +263,22 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
 
     let timer = match timer.transpose() {
         Ok(timer) => timer,
+        // ! a timer that cannot be armed before its request went ends the call with nothing sent,
+        // no cancel and no call id reserved, as the other sides' requesters throw before their
+        // delivery; once it went, the peer is told to cancel it
         Err(error) => {
-            end_pending(state, (CallError::Refused(error), call, id));
+            let is_sent = state
+                .core()
+                .pending
+                .get(call)
+                .is_some_and(|request| request.id == id && request.is_sent);
+
+            if is_sent {
+                end_pending(state, (CallError::Refused(error), call, id));
+            } else if let Some(mut request) = forget(state, (call, Some(id))) {
+                settle(&mut request, Err(CallError::Refused(error)));
+            }
+
             return;
         }
     };
@@ -273,6 +287,59 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
         request.timer = timer;
     } else if let Some(timer) = timer {
         timer.cancel();
+    }
+}
+
+// arms the wait of a result's opening the budget does not admit yet, in its call's timer: still
+// waiting once it passes, its call ends with the refusal, cancelled, as one past its limit does
+fn wait_for_budget<S: Side>(
+    state: &mut S,
+    ((call, id), (transfer, total)): ((&CallAddress, u64), (u64, u64)),
+) {
+    let core = state.core();
+
+    if !core.pending.is(call, id) {
+        return;
+    }
+
+    let wait = budget_wait_of(&core.limits);
+    let ended = call.clone();
+    let timer = core.after(wait, move |state: &mut S| {
+        let core = state.core();
+
+        if !core.receivings.is_waiting(transfer) {
+            return;
+        }
+
+        let Some(request) = core.pending.get(&ended).filter(|request| request.id == id) else {
+            return;
+        };
+        let Some(receiving) = &request.receiving else {
+            return;
+        };
+        let failure = core
+            .failure(ProtocolCode::CAPACITY_EXCEEDED)
+            .saying(format!(
+                "a total of {total} bytes waited {} milliseconds for the budget",
+                wait.as_millis()
+            ))
+            .of_call(Some(request.procedure), request.destination_id)
+            .about(&EnvelopeHeader::Result(receiving.header.clone()));
+
+        end_pending(state, (CallError::Failure(failure), &ended, id));
+    });
+
+    match timer {
+        Ok(timer) => {
+            if let Some(request) = state.core().pending.get_mut(call) {
+                cancel_timer(&mut request.timer);
+                request.timer = Some(timer);
+            } else {
+                timer.cancel();
+            }
+        }
+        // ! a timer that cannot be armed ends the call, as one its inactivity cannot wait on
+        Err(error) => end_pending(state, (CallError::Refused(error), call, id)),
     }
 }
 
@@ -568,6 +635,11 @@ pub(crate) fn request<S: Side>(
 
     wait(state, (Some(timeout), &call, id));
 
+    // ! a call its timer could not wait on is settled already: nothing of it goes out
+    if !state.core().pending.is(&call, id) {
+        return;
+    }
+
     let mut options = Deliver::to(&handle);
     let (handed, refused) = (call.clone(), call);
 
@@ -676,6 +748,11 @@ fn send_request<S: Side>(
     let total = outgoing.total();
 
     request_progress(state, (call, id));
+
+    // ! a call its timer could not wait on is settled already: nothing of it goes out
+    if !state.core().pending.is(call, id) {
+        return;
+    }
 
     // kept before its opening goes, so a credit that comes back as it goes finds it
     let core = state.core();
@@ -796,9 +873,9 @@ pub(crate) fn receive_result_chunk<S: Side>(
         Ok(ChunkOutcome::Complete) => {
             let core = state.core();
             let inactivity = core.limits.transfer_inactivity_timeout;
-            let (payload, credits) = core.receivings.complete(transfer);
+            let (payload, admitted) = core.receivings.complete(transfer);
 
-            send_credits(state, credits);
+            admit(state, admitted);
 
             // out before it settles; what its credit let the peer send may still come, and its call
             // id stays reserved, for it to be dropped in silence
@@ -927,10 +1004,21 @@ pub(crate) fn receive_answer<S: Side>(
             let opened = if total > maximum_payload_bytes {
                 Err(core.placement.too_large_of(total, maximum_payload_bytes))
             } else {
-                core.receivings.open(&payload, (&call, total))
+                let opening_bytes = core
+                    .placement
+                    .opening_bytes_of(&EnvelopeHeader::Result(result_header.clone()));
+
+                core.receivings.open(
+                    &payload,
+                    OpeningOf {
+                        call: &call,
+                        total,
+                        opening_bytes,
+                    },
+                )
             };
-            let transfer = match opened {
-                Ok(transfer) => transfer,
+            let (transfer, admitted) = match opened {
+                Ok(opened) => (opened.id, opened.admitted),
                 Err(failure) => {
                     let reason = CallError::Failure(
                         failure
@@ -942,15 +1030,22 @@ pub(crate) fn receive_answer<S: Side>(
                 }
             };
 
-            request_progress(state, (&call, id));
-
-            // kept before its first credit goes, so a chunk that credit brings at once finds it
+            // kept before its first credit goes, so a chunk that credit brings at once finds it;
+            // kept as well while it waits, so a cancel or a close ends it as it ends one admitted
             if let Some(request) = state.core().pending.get_mut(&call) {
                 request.receiving = Some(ResultReceiving {
                     header: result_header,
                     transfer,
                 });
             }
+
+            // * one that waits for the budget is held by its wait alone, in its call's timer, and
+            // granted nothing until admitted (spec 12.4, 12.8)
+            if !admitted {
+                return wait_for_budget(state, ((&call, id), (transfer, total)));
+            }
+
+            request_progress(state, (&call, id));
 
             let credits = state
                 .core()

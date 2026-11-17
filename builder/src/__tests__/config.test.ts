@@ -167,7 +167,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       '  - language: csharp\n    out: gen\n    namespace: Acme\n    messages: none\n',
       /generate or external/u,
     ],
-    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript or csharp/u],
+    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript, csharp or rust/u],
     [
       '  - language: typescript\n    out: gen\n    namespace: X\n',
       /outputs\[0\]\.namespace, a key/u,
@@ -361,6 +361,18 @@ test("reads http's prefix, openapi's out, title, security and problemTypes, an o
       'openapi.security is an OpenAPI Security Scheme Object',
     ],
     ['openapi:\n  problemTypes: problems/\n', 'openapi.problemTypes is an absolute URI'],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\x01q/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\uD800q/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
+    [
+      'openapi:\n  problemTypes: "https://e.com/p\\u00E9/"\n',
+      'openapi.problemTypes is an absolute URI',
+    ],
     ['openapi:\n  out: ../openapi.json\n', 'openapi.out: ../openapi.json is outside the folder'],
     [output('    gateway:\n      runtime: /runtime\n'), 'outputs[0].gateway.runtime is a package'],
     [

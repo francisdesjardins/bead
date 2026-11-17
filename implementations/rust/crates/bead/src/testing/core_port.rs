@@ -1,6 +1,7 @@
 //! A core's port, on an owner and a stepping clock: the callbacks a side supplies, its envelopes
 //! and reports, and sends a test settles in any order. Kept inside the crate: the core is private.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -39,6 +40,7 @@ pub(crate) type TokenHook =
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
 pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
 pub(crate) type TraceHook = Box<dyn FnMut(DebugDirection, &TracedEnvelope) + Send>;
+pub(crate) type DestinationHook = Box<dyn FnMut(u32) -> Option<Arc<Handler>> + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -55,6 +57,7 @@ pub(crate) struct State {
     pub(crate) on_trace: Option<TraceHook>,
     pub(crate) schemes: Vec<CredentialScheme>,
     pub(crate) destination: Option<Arc<Handler>>,
+    pub(crate) destination_of: Option<DestinationHook>,
     pub(crate) held: Vec<u32>,
     pub(crate) sent: Vec<(ConnectionHandle, Envelope)>,
     pub(crate) reports: Vec<(ConnectionHandle, RouterError)>,
@@ -64,6 +67,7 @@ pub(crate) struct State {
     pub(crate) notifications: Vec<(ConnectionHandle, NotificationHeader, Bytes)>,
     pub(crate) cancels: Vec<(u32, ConnectionHandle)>,
     pub(crate) credits: Vec<(ConnectionHandle, CreditHeader)>,
+    pub(crate) answers: Vec<(ConnectionHandle, EnvelopeHeader)>,
     pub(crate) unpaired: Vec<(ConnectionHandle, FailureHeader, FailureRecord)>,
     pub(crate) traces: Vec<(DebugDirection, TracedEnvelope)>,
     pub(crate) activity: Vec<(crate::router::types::RouterActivity, ConnectionHandle)>,
@@ -73,6 +77,7 @@ pub(crate) struct State {
     pub(crate) two_way: bool,
     pub(crate) one_way: Vec<ConnectionHandle>,
     pub(crate) two_way_asked: Mutex<Vec<ConnectionHandle>>,
+    pub(crate) closed: Vec<ConnectionHandle>,
 }
 
 impl core::fmt::Debug for State {
@@ -111,8 +116,11 @@ impl Side for State {
         )
     }
 
-    fn handler_of_destination(&mut self, _destination_id: u32) -> Option<Arc<Handler>> {
-        self.destination.clone()
+    fn handler_of_destination(&mut self, destination_id: u32) -> Option<Arc<Handler>> {
+        self.destination_of.as_mut().map_or_else(
+            || self.destination.clone(),
+            |handler| handler(destination_id),
+        )
     }
 
     fn is_call_id_in_use(&self, call_id: u32, _handle: &ConnectionHandle) -> bool {
@@ -157,6 +165,10 @@ impl Side for State {
         self.credits.push((Arc::clone(handle), header.clone()));
     }
 
+    fn on_answer_received(&mut self, header: &EnvelopeHeader, handle: &ConnectionHandle) {
+        self.answers.push((Arc::clone(handle), header.clone()));
+    }
+
     fn on_unpaired_failure(
         &mut self,
         (header, failure): (&FailureHeader, &FailureRecord),
@@ -199,6 +211,11 @@ impl Side for State {
         self.reports.push((Arc::clone(handle), error));
     }
 
+    // kept, as a test reads it
+    fn close(&mut self, handle: &ConnectionHandle) {
+        self.closed.push(Arc::clone(handle));
+    }
+
     fn transmit(
         &mut self,
         message: TransportMessage,
@@ -231,16 +248,19 @@ pub(crate) struct Peer {
     pub(crate) clock: Arc<SteppingClock>,
     pub(crate) owner: Owner<State>,
     armed: Arc<Mutex<Vec<Duration>>>,
+    monotonic_readings: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
 struct RecordedClock {
     clock: Arc<SteppingClock>,
     armed: Arc<Mutex<Vec<Duration>>>,
+    monotonic_readings: Arc<AtomicUsize>,
 }
 
 impl Clock for RecordedClock {
     fn monotonic(&self) -> Duration {
+        self.monotonic_readings.fetch_add(1, Ordering::Relaxed);
         self.clock.monotonic()
     }
 
@@ -293,9 +313,11 @@ impl Peer {
         )?;
         let clock = SteppingClock::new(instants::new_year());
         let armed = Arc::default();
+        let monotonic_readings = Arc::default();
         let shared: SharedClock = Arc::new(RecordedClock {
             clock: Arc::clone(&clock),
             armed: Arc::clone(&armed),
+            monotonic_readings: Arc::clone(&monotonic_readings),
         });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
@@ -313,6 +335,7 @@ impl Peer {
             on_trace: None,
             schemes: Vec::new(),
             destination: None,
+            destination_of: None,
             held: Vec::new(),
             sent: Vec::new(),
             reports: Vec::new(),
@@ -322,6 +345,7 @@ impl Peer {
             notifications: Vec::new(),
             credits: Vec::new(),
             cancels: Vec::new(),
+            answers: Vec::new(),
             unpaired: Vec::new(),
             traces: Vec::new(),
             activity: Vec::new(),
@@ -331,16 +355,22 @@ impl Peer {
             two_way: true,
             one_way: Vec::new(),
             two_way_asked: Mutex::new(Vec::new()),
+            closed: Vec::new(),
         });
         Ok(Self {
             clock,
             owner,
             armed,
+            monotonic_readings,
         })
     }
 
     pub(crate) fn armed(&self) -> Vec<Duration> {
         self.armed.lock().expect("timer history").clone()
+    }
+
+    pub(crate) fn monotonic_readings(&self) -> usize {
+        self.monotonic_readings.load(Ordering::Relaxed)
     }
 
     pub(crate) fn send(&self, (envelope, handle): (Envelope, ConnectionHandle)) -> Completion<()> {
@@ -370,6 +400,8 @@ impl Peer {
                 session: Mutex::new(None),
                 answered: Mutex::new(None),
                 origin: (None, None),
+                run: crate::router::parts::ResolverRun::default(),
+                is_failed_answered: std::sync::atomic::AtomicBool::new(false),
             });
             // * opened as a request dispatched opens it: a call abandoned on its call id forgotten
             state.core.answering.open(
@@ -377,6 +409,7 @@ impl Peer {
                 Answering {
                     dispatched: id,
                     signal: Signal::new(),
+                    run: crate::router::parts::ResolverRun::default(),
                     is_answered: false,
                     is_ended: false,
                     receiving: None,

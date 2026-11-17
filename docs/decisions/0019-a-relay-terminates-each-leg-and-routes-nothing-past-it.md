@@ -27,9 +27,9 @@ the requester's call id: a result as it came, a failure of the target's one rela
 **What the relay raises itself says how far the request went**, as every code does:
 `DESTINATION_UNREACHABLE` (17) while the relay's transport was never handed the request, or refused
 it, so nothing was tried, and `DESTINATION_LOST` (65) once that transport had it and the target was
-lost, the procedure run or not: HTTP's gateway 502 against its 504, and what gRPC's retry rules turn
-on. Those failures name no address behind the relay: why leg B failed is reported where the relay
-runs.
+lost, the procedure run or not: a gateway's 503 against its 502 (`spec/transcoding.md`'s table),
+and what gRPC's retry rules turn on. Those failures name no address behind the relay: why leg B
+failed is reported where the relay runs.
 
 **An answer leg A cannot carry is the relay's own `PROCEDURE_FAILED`, with no detail**, whatever
 refused it: the relay terminates leg A, so a result past leg A's limit is a result its side cannot
@@ -79,11 +79,10 @@ target in the session its own credential resolves to, which the target verifies
 **A client behind a relay subscribes to nothing**: what it would be notified of stops at the relay,
 and so does a paced subscription ([0002](0002-a-subscription-goes-at-its-clients-pace.md)).
 
-**A relay is played as a conversation across connections**, against each side's own relay, and a
-relay across languages in the interop, one side's relay in front of the other's destination, is
-ahead, in the twin tests' place: until the interop plays one, a relay's two legs' limits and the
-session its requesters share are held by each side's twin tests
-([0004](0004-one-behaviour-in-every-language.md)).
+**A relay is played as a conversation across connections**, against each side's own relay; each
+side's twin tests hold a relay's two legs' limits and the session its requesters share, and a relay
+across languages in the interop, one side's relay in front of the other's destination, is ahead, in
+their place ([0004](0004-one-behaviour-in-every-language.md)).
 
 **The rule is section 14 of [`spec/spec.md`](../../spec/spec.md)**, and `spec/conversations.json`
 plays it against every implementation's relay.

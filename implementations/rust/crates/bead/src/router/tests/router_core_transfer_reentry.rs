@@ -65,9 +65,7 @@ fn credit_each(state: &mut State, (deferred, depth): (bool, Depth)) {
     }));
 }
 
-#[tokio::test]
-async fn find_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_opening_goes_and_never_send_inside_a_send()
- {
+async fn returned_send_credit() {
     for deferred in [false, true] {
         let (peer, handed) = serving(false, &limits()).await;
         let depth = Depth::default();
@@ -141,4 +139,16 @@ async fn find_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_op
         assert_eq!(*locked(&depth), (0, if deferred { 1 } else { 2 }));
         assert_eq!(reports(&peer).await, []);
     }
+}
+
+#[tokio::test]
+async fn find_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_opening_goes_and_never_send_inside_a_send()
+ {
+    returned_send_credit().await;
+}
+
+#[tokio::test]
+async fn finds_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_opening_goes_and_never_sends_inside_a_send()
+ {
+    returned_send_credit().await;
 }

@@ -31,7 +31,11 @@ fn reads_an_envelope_and_writes_it_back() {
     for vector in entries {
         let bytes = vectors::bytes_of(&vector.bytes).expect("vector bytes");
         let expected = vectors::envelope_of(&vector.envelope).expect("vector envelope");
-        let read = read_envelope(&bytes, RouterSide::Server, &options())
+        let options = ReadEnvelopeOptions {
+            chunk_bytes: vector.chunk_bytes,
+            ..options()
+        };
+        let read = read_envelope(&bytes, RouterSide::Server, &options)
             .expect("an envelope reads")
             .expect("a known kind");
         assert_eq!(read, expected, "{}", vector.name);
@@ -52,6 +56,7 @@ fn refuses_an_envelope() {
     for vector in entries {
         let options = ReadEnvelopeOptions {
             maximum_envelope_bytes: vector.maximum_envelope_bytes.or(Some(64)),
+            chunk_bytes: vector.chunk_bytes,
             ..options()
         };
         let failure = read_envelope(
@@ -207,4 +212,44 @@ fn writes_no_destination_block_for_a_destination_left_undefined() {
         bytes,
         vectors::bytes_of("A1 10 00 03 00 00 00 01 00 02 00 01").expect("bytes")
     );
+}
+
+mod read_envelope {
+    #[test]
+    fn refuses_name() {
+        super::refuses_an_envelope();
+    }
+}
+
+mod read_failure {
+    #[test]
+    fn reads_name() {
+        super::reads_a_failure();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_failure();
+    }
+}
+
+mod read_prefix {
+    #[test]
+    fn reads_name() {
+        super::reads_the_prefix_of_any_layout();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_prefix();
+    }
+}
+
+mod read_header {
+    #[test]
+    fn reads_name() {
+        super::reads_what_a_writer_need_not_write();
+    }
+    #[test]
+    fn refuses_name() {
+        super::refuses_a_header();
+    }
 }

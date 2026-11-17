@@ -1,11 +1,12 @@
-// Before the first paint: the language, as the site chooses it, and the theme, as the site keeps it.
+// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// which the build inlines beside this script.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
     return value === 'en' || value === 'fr';
   };
-  // the address first, `?lng=`, then the visitor's choice the site's home stored, then the
-  // browser's languages, then English
+  // the address first, `?lng=`, then the visitor's choice this page stored under `language`, its
+  // origin's own, then the browser's languages, then English
   var language = null;
   try {
     var asked = new URLSearchParams(window.location.search).get('lng');
@@ -45,19 +46,4 @@
     root.setAttribute('data-swapping', '');
   }
   root.setAttribute('data-language', language);
-
-  // `theme-preference`, a JSON boolean, true for dark; else the system's preference
-  var dark = null;
-  try {
-    var saved = window.localStorage.getItem('theme-preference');
-    if (saved !== null) {
-      dark = Boolean(JSON.parse(saved));
-    }
-  } catch (error) {
-    dark = null;
-  }
-  if (dark === null) {
-    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }
-  root.setAttribute('data-color-scheme', dark ? 'dark' : 'light');
 })();

@@ -14,11 +14,8 @@ every body this reading takes or refuses, and reads back every body it writes: w
 it, the entry names the row of decision 0037's table that says why, and any other parting fails the
 generator. A backslash is chr(92), so that no escape this file builds is read before it is built."""
 import base64
-import calendar
-import hashlib
 import json
 import math
-import os
 import re
 import struct
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
@@ -28,12 +25,12 @@ from google.protobuf import any_pb2, descriptor_pb2, descriptor_pool, duration_p
 from google.protobuf import field_mask_pb2, json_format, message_factory, struct_pb2, timestamp_pb2  # noqa: F401
 from google.protobuf import wrappers_pb2  # noqa: F401
 
+import proto_text
 from bounds import DEFAULTS
-from details import canonical, es
-from transcoding_version import transcoding_version
-
-# the conformance files sit one folder up from their generators
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
+from conformance import CODES, hexadecimal, unit_order, write_json, write_text
+from details import canonical, es, number_text
+from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
+from spec_version import transcoding_version
 
 B = chr(92)
 PACKAGE = 'bead.transcoding.v1'
@@ -376,7 +373,7 @@ PROCEDURES = [
     Procedure(10, 'ticks', TICKS_REQUEST.full_name, TICKS_RESPONSE.full_name,
               'Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.', reads=True, notifies=TICK.full_name, failures=['TRANSCODING_FAILURE_COUNTED']),
     Procedure(11, 'watch', EMPTY, EMPTY, 'Answers nothing, then notifies nothing, and ends its subscription never.',
-              notifies=TICK.full_name),
+              rules=[Rule('get', '/v1/watch')], notifies=TICK.full_name),
     Procedure(12, 'raw', 'bead.Raw', 'bead.Raw', 'Answers its request.'),
     Procedure(13, 'text', 'bead.Text', 'bead.Text', 'Answers its request.'),
     Procedure(14, 'json', 'bead.Json', 'bead.Json', 'Answers its request.'),
@@ -455,41 +452,24 @@ def proto_type(field):
 
 
 def declaration(field, indent):
-    if field.label == 'map':
-        head = f'map<{field.key}, {proto_type(field)}> {field.name} = {field.number}'
-    else:
-        prefix = 'repeated ' if field.label == 'repeated' else 'optional ' if field.optional else ''
-        head = f'{prefix}{proto_type(field)} {field.name} = {field.number}'
-
     options = [*([f'json_name = "{field.json_name}"'] if field.custom_json else []),
                *([field.rules] if field.rules else []),
                *(['features.field_presence = LEGACY_REQUIRED'] if field.required else []),
                *(['features.message_encoding = DELIMITED'] if field.delimited else [])]
 
-    return indent + head + (f' [{", ".join(options)}]' if options else '') + ';'
+    return proto_text.field_text(field, indent, type_name=proto_type(field),
+                                 label='repeated ' if field.label == 'repeated' else 'optional ' if field.optional else '',
+                                 options=options)
 
 
-def message_text(each):
-    lines = [f'// {each.note}', f'message {each.name} {{']
-    written = set()
+def type_text_of(each):
+    """A message's text, or an enum's."""
+    if isinstance(each, Enum):
+        return proto_text.enum_text(each.name, each.note, each.values,
+                                    options=[*(['  option allow_alias = true;'] if each.alias else []),
+                                             *(['  option features.enum_type = CLOSED;'] if each.closed else [])])
 
-    for field in each.fields:
-        if field.oneof is None:
-            lines.append(declaration(field, '  '))
-        elif field.oneof not in written:
-            written.add(field.oneof)
-            lines.append(f'  oneof {field.oneof} {{')
-            lines.extend(declaration(member, '    ') for member in each.fields if member.oneof == field.oneof)
-            lines.append('  }')
-
-    lines.append('}')
-    return '\n'.join(lines)
-
-
-def enum_text(each):
-    return '\n'.join([f'// {each.note}', f'enum {each.name} {{', *(['  option allow_alias = true;'] if each.alias else []),
-                      *(['  option features.enum_type = CLOSED;'] if each.closed else []),
-                      *[f'  {value} = {number};' for value, number in each.values], '}'])
+    return proto_text.message_text(each, declaration)
 
 
 def type_text(name):
@@ -550,121 +530,44 @@ def own_types(required_file):
 def required_proto_file():
     """spec/transcoding-required.proto: the messages of fields protobuf requires, and a closed enum, which
     spec/transcoding.proto, proto3, imports."""
-    return '\n'.join([
+    comments = [
         '// The messages spec/transcoding.json plays a gateway against that a proto3 file cannot declare, written with',
         '// its entries by spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision',
         '// 0042).',
-        'edition = "2023";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "google/protobuf/field_mask.proto";',
-        '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own_types(True)),
+    ]
+
+    return '\n'.join([
+        *proto_text.head(comments, 'edition = "2023";', PACKAGE, ['google/protobuf/field_mask.proto']),
+        '\n\n'.join(type_text_of(each) for each in own_types(True)),
         '',
     ])
 
 
 def proto_file():
-    own = own_types(False)
-
-    return '\n'.join([
+    comments = [
         '// The messages and the service spec/transcoding.json plays a gateway against, written with its entries by',
         '// spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision 0037).',
-        'syntax = "proto3";',
-        '',
-        'package bead.transcoding.v1;',
-        '',
-        'import "bead/options.proto";',
-        'import "buf/validate/validate.proto";',
-        'import "google/api/annotations.proto";',
-        'import "google/protobuf/any.proto";',
-        'import "google/protobuf/duration.proto";',
-        'import "google/protobuf/empty.proto";',
-        'import "google/protobuf/field_mask.proto";',
-        'import "google/protobuf/struct.proto";',
-        'import "google/protobuf/timestamp.proto";',
-        'import "google/protobuf/wrappers.proto";',
-        'import "transcoding-required.proto";',
-        '',
-        'option (bead.file) = {',
-        '  admission: {',
-        '    none: {}',
-        '  }',
-        '};',
-        '',
-        "// What a gateway answers, each procedure by its default routes and its rules.",
-        'service TranscodingService {',
-        '  option (bead.service) = {',
-        '    id: 1',
-        '    revision: 1',
-        '    failures: "TranscodingFailure"',
-        '  };',
-        '',
+    ]
+    imports = ['bead/options.proto', 'buf/validate/validate.proto', 'google/api/annotations.proto',
+               'google/protobuf/any.proto', 'google/protobuf/duration.proto', 'google/protobuf/empty.proto',
+               'google/protobuf/field_mask.proto', 'google/protobuf/struct.proto', 'google/protobuf/timestamp.proto',
+               'google/protobuf/wrappers.proto', 'transcoding-required.proto']
+
+    return '\n'.join([
+        *proto_text.head(comments, 'syntax = "proto3";', PACKAGE, imports),
+        *proto_text.ADMISSION_NONE,
+        *proto_text.service_head('TranscodingService',
+                                 'What a gateway answers, each procedure by its default routes and its rules.',
+                                 ['id: 1', 'revision: 1', 'failures: "TranscodingFailure"']),
         '\n\n'.join(rpc_text(procedure) for procedure in PROCEDURES),
         '}',
         '',
-        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own),
+        '\n\n'.join(type_text_of(each) for each in own_types(False)),
         '',
     ])
 
 
 # ── The encoder, protobuf's Encoding guide ──────────────────────────────────────────────────────
-
-VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
-
-
-def varint(value):
-    value &= (1 << 64) - 1
-    out = bytearray()
-
-    while True:
-        byte = value & 0x7F
-        value >>= 7
-
-        if value:
-            out.append(byte | 0x80)
-        else:
-            out.append(byte)
-            return bytes(out)
-
-
-def tag(number, wire):
-    return varint(number << 3 | wire)
-
-
-def scalar_bytes(kind, value):
-    """A scalar's record's body, and its wire type."""
-    if kind in ('int32', 'int64', 'uint32', 'uint64') or kind.startswith('enum:'):
-        return varint(value), VARINT
-    if kind == 'bool':
-        return varint(int(value)), VARINT
-    if kind == 'sint32':
-        return varint((value << 1) ^ (value >> 31)), VARINT
-    if kind == 'sint64':
-        return varint((value << 1) ^ (value >> 63)), VARINT
-    if kind == 'fixed32':
-        return struct.pack('<I', value), I32
-    if kind == 'sfixed32':
-        return struct.pack('<i', value), I32
-    if kind == 'float':
-        return struct.pack('<f', value), I32
-    if kind == 'fixed64':
-        return struct.pack('<Q', value), I64
-    if kind == 'sfixed64':
-        return struct.pack('<q', value), I64
-    if kind == 'double':
-        return struct.pack('<d', value), I64
-    if kind == 'string':
-        data = value.encode('utf-8')
-        return varint(len(data)) + data, LEN
-    if kind == 'bytes':
-        return varint(len(value)) + value, LEN
-    raise ValueError(kind)
-
-
-def length_delimited(data):
-    return varint(len(data)) + data
 
 
 def on_the_wire(kind, value):
@@ -722,10 +625,6 @@ def encode(each, value):
             out += record(field.number, field.kind, given, delimited=field.delimited)
 
     return out
-
-
-def hexadecimal(data):
-    return ' '.join(f'{byte:02X}' for byte in data)
 
 
 # ── Reading a proto body, transcoding 5.2 to 5.4 ────────────────────────────────────────────────
@@ -894,11 +793,6 @@ def read_text(data):
         raise Refused('a number past a double', 1)
 
     return value
-
-
-def f32(value):
-    """The 32-bit float nearest a double, a tie to the even; OverflowError past the largest finite one."""
-    return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
 ARTICLE_AN = re.compile(r'[aeioAEIO]|sint|sfixed')
@@ -1414,26 +1308,6 @@ def read_body(each, data):
 
 
 # ── Writing a proto result, Bead's proto JSON form, transcoding 5.6 and 5.7 ─────────────────────
-
-
-def number_text(digits, exponent):
-    """Number::toString of a positive number of these digits, its value int(digits) * 10 ** exponent."""
-    digits = digits.lstrip('0')
-    stripped = digits.rstrip('0')
-    exponent += len(digits) - len(stripped)
-    digits = stripped
-    k, n = len(digits), exponent + len(digits)
-
-    if k <= n <= 21:
-        return digits + '0' * (n - k)
-
-    if 0 < n <= 21:
-        return digits[:n] + '.' + digits[n:]
-
-    if -6 < n <= 0:
-        return '0.' + '0' * -n + digits
-
-    return (digits if k == 1 else digits[0] + '.' + digits[1:]) + 'e' + ('+' if n - 1 >= 0 else '-') + str(abs(n - 1))
 
 
 def float_neighbours(value):
@@ -2280,12 +2154,6 @@ PHRASES = {400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not 
            500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable',
            504: 'Gateway Timeout'}
 
-CODES = {1: 'ENVELOPE_MALFORMED', 2: 'LAYOUT_UNSUPPORTED', 3: 'KIND_UNSUPPORTED', 4: 'ENVELOPE_TOO_LARGE',
-         16: 'DESTINATION_UNKNOWN', 17: 'DESTINATION_UNREACHABLE', 18: 'SERVICE_UNKNOWN', 19: 'PROCEDURE_UNKNOWN',
-         20: 'CALL_UNKNOWN', 21: 'SUBSCRIPTION_UNKNOWN', 22: 'SUBSCRIPTION_UNSUPPORTED', 32: 'SESSION_REQUIRED',
-         33: 'ACCESS_DENIED', 34: 'PAYLOAD_TOO_LARGE', 35: 'CAPACITY_EXCEEDED', 36: 'CREDENTIAL_UNSUPPORTED',
-         48: 'CHUNK_INVALID', 49: 'CREDIT_EXCEEDED', 50: 'PAYLOAD_UNDECODABLE', 51: 'TRANSFER_STALLED',
-         52: 'PAYLOAD_INVALID', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST'}
 NUMBERS = {name: code for code, name in CODES.items()}
 
 # where a failure arose (7.5): its server, of the request; its client, before the call went; its
@@ -2318,7 +2186,7 @@ ROWS = [
 # the rows past the protocol's codes: a code no name names, an application failure, then the gateway's own
 UNNAMED_ROW, APPLICATION_ROW = len(ROWS) + 1, len(ROWS) + 2
 OWN_ROWS = {'timeout': (len(ROWS) + 3, 504), 'closed': (len(ROWS) + 4, 502), 'unwritable': (len(ROWS) + 5, 500),
-            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 8, 500)}
+            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 9, 500)}
 
 
 def row_of(code, arose, encoding):
@@ -3693,6 +3561,16 @@ def refused_own(status, reason, words, *, fields=None, on='a'):
                        'body': problem(status, detail=words)}, 'on': on}
 
 
+def refused_own_head(status, reason, words, *, on='a'):
+    """A refusal of the gateway's own (7.7) to a HEAD: its GET's status and fields, the content-length of
+    its GET's problem among them, and no content (RFC 9110 §9.3.2)."""
+    length = str(len(problem(status, detail=words).encode('utf-8')))
+
+    return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': reason, 'content-length': length},
+                       'body': ''}, 'on': on}
+
+
 def own_failed(status, words, *, fields=None, on='a'):
     """A failure of the gateway's own (7.6): unmarked, about:blank, its detail its words."""
     return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
@@ -3707,8 +3585,9 @@ def call_failed(given, *, on='a', procedure=None, rule=None):
                                                     'bead-refusal': None, **fields}, 'body': text}, 'on': on}
 
 
-def exchange(name, clauses, steps, *, options=None, real_time=False):
-    """An exchange, which cites the row of 7.7's table of each refusal it meets."""
+def exchange(name, clauses, steps, *, options=None, real_time=False, differs=None):
+    """An exchange, which cites the row of 7.7's table of each refusal it meets, and names the rows of
+    docs/support.md that excuse a side from it, as a case of spec/transports.json does."""
     refusals = [REFUSAL_ROWS[step['expect']['fields']['bead-refusal']] for step in steps
                 if step.get('expect', {}).get('fields', {}).get('bead-refusal')]
     entry = {'name': name, 'clauses': [*clauses, *(['7.7'] if refusals else []), *refusals]}
@@ -3718,6 +3597,9 @@ def exchange(name, clauses, steps, *, options=None, real_time=False):
 
     if real_time:
         entry['realTime'] = True
+
+    if differs:
+        entry['differs'] = differs
 
     return {**entry, 'steps': steps}
 
@@ -3771,6 +3653,20 @@ EXCHANGES = [
                                                     'content-length': str(len(result('Book', {'name': '2', 'title': 'A tale'}))),
                                                     'bead-refusal': None},
                           'body': ''}, 'on': 'a'}]),
+    # a HEAD that would open a stream begins as its GET, then ends at its head, its subscription with it:
+    # watch never ends its own, so the GET after it on a second socket is answered only once the HEAD
+    # freed the one stream its address may hold (8.1, 10.3)
+    exchange('a HEAD that asks a stream is answered as its GET begins, and frees its place as it ends at its head',
+             ['3.4', '8.1', '8.6', '10.3'],
+             [send('HEAD', '/v1/watch', [EVENT_STREAM], on='a'),
+              {'expect': {'status': 200, 'fields': {**CALL_FIELDS, 'content-type': 'text/event-stream',
+                                                    'content-length': None, 'bead-refusal': None},
+                          'body': ''}, 'on': 'a'},
+              send('GET', '/v1/watch', [EVENT_STREAM], on='b'),
+              {'expect': {'status': 200, 'fields': {**CALL_FIELDS, 'content-type': 'text/event-stream',
+                                                    'bead-refusal': None},
+                          'stream': event_text('result', 1, '{}')}, 'on': 'b'}],
+             options={'maximumConnectionsPerAddress': 1}, real_time=True),
     exchange("a procedure marked NO_SIDE_EFFECTS answers GET at its default route", ['3.2'],
              [send('GET', '/api/Transcoding/getOperation?name=operations/x'),
               answered(result('Operation', {'name': 'operations/x', 'done': True}))]),
@@ -3963,6 +3859,21 @@ EXCHANGES = [
               {'expect': {'status': 200, 'fields': {'content-type': 'application/json', 'cache-control': 'no-cache',
                                                     'etag': {'shape': 'etag'}, 'x-content-type-options': 'nosniff',
                                                     'vary': 'Origin'}, 'body': DOCUMENT}, 'on': 'a'}]),
+    # web.dev's resource isolation policy takes a navigation as a GET alone, and none an object or an
+    # embed makes, which loads its resource as a subresource would
+    exchange("a HEAD navigation from another site is refused, to a marked read and to the document", ['10.1.5'],
+             [send('HEAD', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate'], on='a'),
+              refused_own_head(403, 'origin-refused', ORIGINLESS, on='a'),
+              send('HEAD', '/openapi.json', ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate'], on='b'),
+              refused_own_head(403, 'origin-refused', ORIGINLESS, on='b')]),
+    exchange("a navigation from another site that an object or an embed makes is refused", ['10.1.5'],
+             [send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate', 'sec-fetch-dest: object'], on='a'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='a'),
+              send('GET', '/openapi.json', ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate',
+                                            'sec-fetch-dest: embed'], on='b'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='b')]),
     exchange("a request of no sec-fetch-site is taken", ['10.1.5'],
              [send('GET', '/v1/shelves/s/books'),
               answered('[' + ','.join(result('Book', {'name': f'shelves/s/books/{name}', 'title': name.upper()})
@@ -4007,18 +3918,21 @@ EXCHANGES = [
               send('GET', '/v1/books/a"b', on='j'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'j'}]),
-    # ! an exchange of its own, so that a side that cannot see a # (hyper's Uri cuts a target there) is
-    # excused from this alone: no form of a request-target carries a fragment (spec 15.12, RFC 9112
-    # §3.2), so a # anywhere in a target makes its request-line invalid, judged before the path is
-    # matched; %23 is an octet the target encodes, decoded into its variable as any other
+    # ! two exchanges, the # apart from its %23, so that a side that cannot see a # (hyper's Uri cuts a
+    # target there, the row A # in a target) is excused by its differs from the first alone and plays the
+    # second: no form of a request-target carries a fragment (spec 15.12, RFC 9112 §3.2), so a # anywhere
+    # in a target makes its request-line invalid, judged before the path is matched; %23 is an octet the
+    # target encodes, decoded into its variable as any other
     exchange("a target holding a # is refused as HTTP refuses it, unmarked, its body empty, before its path is "
-             "matched; %23 is a path's",
+             "matched",
              ['3.6', '10.1', '10.1.1', 'spec:15.12'],
-             [send('GET', '/v1/books/a#b', on='a'),
+             [send('GET', '/v1/books/a#b'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'a'},
-              send('GET', '/v1/books/a%23b', on='b'),
-              answered(result('Book', {'name': 'a#b', 'title': 'A tale'}), on='b')]),
+               'on': 'a'}],
+             differs=[{'row': 'A # in a target', 'language': 'Rust'}]),
+    exchange("%23 in a target is a path's, decoded into its variable as any other octet it encodes",
+             ['3.6', 'spec:15.12'],
+             [send('GET', '/v1/books/a%23b'), answered(result('Book', {'name': 'a#b', 'title': 'A tale'}))]),
     exchange("a body past maximumBodyBytes as it comes, 413", ['9.3', '10.1', '10.1.10'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
@@ -4110,13 +4024,6 @@ SERVICE_TEXT = {
 }
 
 
-def unit_order(unit):
-    """A unit's place among an entry's: the companion's own in its order, then the spec's behind spec:."""
-    document, _, number = unit.rpartition(':')
-
-    return document, tuple(int(part) for part in number.split('.'))
-
-
 def ordered(entries, group):
     """A group's entries, each name once, each entry's units once and in the companion's order."""
     names = [entry['name'] for entry in entries]
@@ -4145,7 +4052,7 @@ DOCUMENT_JSON = {
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],
@@ -4162,18 +4069,11 @@ DOCUMENT_JSON = {
 }
 
 if __name__ == '__main__':
-    with open(ROOT + 'transcoding.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(proto_file())
-
-    with open(ROOT + 'transcoding-required.proto', 'w', encoding='utf-8', newline='\n') as file:
-        file.write(required_proto_file())
-
-    with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
-        # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor
-        # reads them as line ends
-        text = json.dumps(DOCUMENT_JSON, ensure_ascii=False, indent=2)
-        file.write(text.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
-        file.write('\n')
+    write_text('transcoding.proto', proto_file())
+    write_text('transcoding-required.proto', required_proto_file())
+    # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor reads
+    # them as line ends
+    write_json('transcoding.json', DOCUMENT_JSON, line_separators_escaped=True)
 
     print(', '.join(f'{len(DOCUMENT_JSON[group])} {group}' for group in
                     ('templates', 'readings', 'writings', 'bindings', 'failures', 'events', 'exchanges')) +

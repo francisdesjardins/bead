@@ -27,6 +27,8 @@
   // beadc's too, in its one form, which `generate --check` holds alike, and so is the demo's OpenAPI
   // document beside it.
   // `demo/samples.ts` is `demo/make-samples.ts`'s, which the demo's tests hold it to.
+  // `scripts/examples/generated/` is a run of `tools/check-examples.mjs`'s, which formats its
+  // modules itself.
   "ignorePatterns": [
     ".yarn/**",
     "**/*.min.js",
@@ -37,6 +39,7 @@
     "**/bead_served.ts",
     "**/*.blueprint.json",
     "demo/gen/openapi.json",
-    "demo/samples.ts"
+    "demo/samples.ts",
+    "scripts/examples/generated/**"
   ]
 }

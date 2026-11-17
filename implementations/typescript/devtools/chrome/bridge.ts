@@ -2,11 +2,12 @@
 
 // Between the hook, in the page's world, and the background, in the extension's: what the hook
 // posts on the window goes to the background's port, and what the background sends comes back on
-// the window. It runs in the extension's isolated world, which alone may open a runtime port.
+// the window. It runs in the extension's isolated world, which alone may open a runtime port. A page
+// put into the back/forward cache closes its port, as Chrome would, and opens another once shown.
 
 // dependencies
 
-import { chromeOf, type IPort } from './api';
+import { chromeOf, lastErrorOf, type IPort } from './api';
 import {
   CHANNEL,
   isWindowMessage,
@@ -23,12 +24,14 @@ const RECONNECT_MILLISECONDS = 1_000;
 // definition
 
 let port: IPort | undefined;
+// a page in the back/forward cache, which holds no port
+let isCached = false;
 
 const connect = (): void => {
   const { runtime } = chromeOf();
 
   // an extension reloaded or removed leaves this bridge behind, with nothing to reach
-  if (runtime.id === undefined) {
+  if (runtime.id === undefined || isCached || port !== undefined) {
     return;
   }
 
@@ -47,8 +50,11 @@ const connect = (): void => {
   });
   // a background that stopped, as a service worker does, is reached again
   opened.onDisconnect.addListener(() => {
+    lastErrorOf();
     port = undefined;
-    setTimeout(connect, RECONNECT_MILLISECONDS);
+    if (!isCached) {
+      setTimeout(connect, RECONNECT_MILLISECONDS);
+    }
   });
   port = opened;
 };
@@ -59,6 +65,21 @@ window.addEventListener('message', (event) => {
   }
 
   port?.postMessage((event.data as IWindowMessage).message);
+});
+
+window.addEventListener('pagehide', (event) => {
+  if (event.persisted) {
+    isCached = true;
+    port?.disconnect();
+    port = undefined;
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    isCached = false;
+    connect();
+  }
 });
 
 connect();

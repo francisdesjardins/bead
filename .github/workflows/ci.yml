@@ -104,7 +104,8 @@ jobs:
     name: TypeScript (Node ${{ matrix.node }})
     needs: playwright
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    # the WCAG 2.2 AA sweeps of the page, the demo and the panel take some five minutes of it
+    timeout-minutes: 20
     # the image of the Playwright the side pins, Chromium in it: no browser to install
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
@@ -150,14 +151,16 @@ jobs:
         run: >-
           node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
           --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
-      # the report to browse, c8's HTML and its lcov, kept with the run whether the floor held or not
-      - if: ${{ !cancelled() && matrix.node == '26' }}
+      # the report to browse, c8's HTML and its lcov, kept with the run where it failed, the floor
+      # among it: a green run's figures are its summary's
+      - if: ${{ failure() && matrix.node == '26' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-typescript
           path: implementations/typescript/coverage/
           retention-days: 14
-      # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
+      # The demo's static build, the folder beadproto.dev serves at /playground/: bundling it is the
+      # check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
       # loaded in Chromium against the static build above, the image's own browser.
@@ -168,6 +171,24 @@ jobs:
       # build above, in Chromium.
       - if: matrix.node == '26'
         run: $YARN test:demo
+      # The page, the privacy policy, the not-found page and every scene of the demo, as
+      # beadproto.dev serves them from out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its
+      # own tests, which fail here rather than skip.
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the check's own tests
+        working-directory: .
+        env:
+          BEAD_A11Y_REQUIRED: '1'
+        run: node --test tools/__tests__/check-a11y.test.mjs
+      - if: matrix.node == '26'
+        name: WCAG 2.2 AA, the page and the demo as served
+        working-directory: .
+        run: >-
+          node --input-type=module -e "(await import('./site/deploy.mjs')).assemble({ day: '1970-01-01' })"
+          && node tools/check-a11y.mjs --serve site/out / '/?lng=fr' /privacy/ '/privacy/?lng=fr'
+          /nowhere /playground/
+          '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
+          '/playground/#code' '/playground/#packages'
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
       # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
@@ -235,8 +256,9 @@ jobs:
         run: >-
           node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml
           --under implementations/dotnet/src --floor csharp --summary "$GITHUB_STEP_SUMMARY"
-      # each test project's cobertura report, kept with the run whether the floor held or not
-      - if: ${{ !cancelled() }}
+      # each test project's cobertura report, kept with the run where it failed, the floor among it: a
+      # green run's figures are its summary's
+      - if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-csharp
@@ -250,16 +272,17 @@ jobs:
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's library linted with no feature, with each socket transport's alone and with its MQTT 5
-  # binding's alone, the core's lints on the browser's WebAssembly target, its documentation, a
-  # build on the default features alone, where what the test kit alone reaches is left out, its
-  # dependencies' advisories, licences, bans and sources, then its tests, bead-house's holding each
-  # library crate's public surface to its list, and its conformance players under coverage, lines
-  # and regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and
-  # its fuzz targets built on the nightly pinned by its date, never run. On Linux too, the interop's
-  # server and its trials' test binary, built once and handed to the interop-rust job. On Windows,
-  # its tests alone, as the user's MSVC toolchain builds them. The registry and the target are
-  # cached by the lock and the toolchain; every build is `--locked`.
+  # core's library linted with no feature, with each socket transport's alone, with its MQTT 5
+  # binding's alone and with its gateway's two, and bead-protobuf's with its JSON mapping's alone,
+  # the core's lints on the browser's WebAssembly target, its transcoding among them, its
+  # documentation, a build on the default features alone, where what the test kit alone reaches is
+  # left out, its dependencies' advisories, licences, bans and sources, then its tests, bead-house's
+  # holding each library crate's public surface to its list, and its conformance players under
+  # coverage, lines and regions on the pinned stable, held to the side's floor in
+  # tools/coverage-floors.json; and its fuzz targets built on the nightly pinned by its date, never
+  # run. On Linux too, the interop's server and its trials' test binary, built once and handed to
+  # the interop-rust job. On Windows, its tests alone, as the user's MSVC toolchain builds them. The
+  # registry and the target are cached by the lock and the toolchain; every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -305,8 +328,10 @@ jobs:
       # each member on its default features too, where what a feature alone builds is left out
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --locked
-      # the core's library linted with no feature, then with each socket transport's alone and
-      # with its MQTT 5 binding's alone, so that each builds on its own (decisions 0049, 0050)
+      # the core's library linted with no feature, then with each socket transport's alone, with
+      # its MQTT 5 binding's alone, and with its gateway's routes alone, then its gateway whole, and
+      # bead-protobuf's with its JSON mapping alone, so that each builds on its own (decisions 0049,
+      # 0050, 0052)
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --locked
       - if: matrix.os == 'ubuntu-26.04'
@@ -315,12 +340,19 @@ jobs:
         run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
-      # by its features, no socket among them, which mio refuses there: what it links builds there,
-      # its spawning and its time through crate::platform and the clock alone; getrandom's backend
-      # for the target is .cargo/config.toml's
       - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+        run: cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
+      # by its features, its transcoding among them, no socket, which mio refuses there, nor its
+      # gateway, which listens on one: what it links builds there, its spawning and its time through
+      # crate::platform and the clock alone; getrandom's backend for the target is
+      # .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
@@ -351,19 +383,25 @@ jobs:
           retention-days: 1
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --locked check
-      # the two projects outside the workspace, held to its deny.toml, which cargo-deny finds above
-      # each: the fuzz targets and the conformance player
+      # the projects outside the workspace, each by its own lock, held to the workspace's deny.toml,
+      # cargo-deny's default, the one in the folder it runs from: the fuzz targets, the conformance
+      # player, the protovalidate differential's testee and hello's Rust half
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
-      # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
+      # the unit tests, a module's tests.rs and its tests/ folder, the test kit, the code beadc
+      # writes, under a generated/ folder, and the goldens' crate that compiles it left out; then
       # what they ran held to the Rust side's floor
       - if: matrix.os == 'ubuntu-26.04'
         run: >-
           cargo llvm-cov --workspace --all-features --locked --json --summary-only
-          --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$'
+          --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$'
           --output-path coverage/rust.json
       - if: matrix.os == 'ubuntu-26.04'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -385,8 +423,9 @@ jobs:
           node ../../tools/coverage-report.mjs coverage/rust.json
           --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src
           --floor rust --summary "$GITHUB_STEP_SUMMARY"
-      # the export, kept with the run whether the floor held or not
-      - if: ${{ !cancelled() && matrix.os == 'ubuntu-26.04' }}
+      # the export, kept with the run where it failed, the floor among it: a green run's figures are
+      # its summary's
+      - if: ${{ failure() && matrix.os == 'ubuntu-26.04' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-rust
@@ -406,15 +445,16 @@ jobs:
           CARGO_BUILD_WARNINGS: warn
 
   # ── Interop with the Rust side ───────────────────────────────────────────────
-  # The interop with the Rust side, both ways, over WebSocket and over HTTP (decision 0049): the
-  # Rust client's trials against each side's server, the TypeScript client and the C# one against
-  # the Rust server, then a page of another origin in Chromium against its HTTP server, what proves
-  # a browser reads its CORS answer. The Rust server and the trials' test binary are the Rust job's,
-  # built once on its Linux leg, so no Rust toolchain and no C compiler here; it needs both of that
-  # job's legs, the Windows one's tests among them. In the Playwright image the .NET job runs, Ubuntu
-  # 26.04 as the Rust job's runner, so the binaries find the glibc they were linked against; .NET and
-  # the TypeScript side installed as the .NET job has them, for the servers the trials start and for
-  # the clients against the Rust one, the C# server built first so that no trial waits on its build.
+  # The interop with the Rust side, both ways, over WebSocket, over HTTP and through each side's
+  # gateway (decisions 0049, 0052): the Rust client's trials against each side's server and its
+  # gateway, the TypeScript client and the C# one against the Rust server and its gateway, then a
+  # page of another origin in Chromium against its HTTP server, what proves a browser reads its CORS
+  # answer. The Rust server and the trials' test binary are the Rust job's, built once on its Linux
+  # leg, so no Rust toolchain and no C compiler here; it needs both of that job's legs, the Windows
+  # one's tests among them. In the Playwright image the .NET job runs, Ubuntu 26.04 as the Rust
+  # job's runner, so the binaries find the glibc they were linked against; .NET and the TypeScript
+  # side installed as the .NET job has them, for the servers the trials start and for the clients
+  # against the Rust one, the C# server built first so that no trial waits on its build.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails, and
   # `BEAD_INTEROP_RUST=1` asks for the Rust trials, which are ignored otherwise.
@@ -650,14 +690,16 @@ jobs:
   # environment, then once more from `builder/`, where each wrapper runs the image it built, over
   # the repository's projects and `examples/hello`; and the wrappers' lint, each linter at its pin.
   #
-  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
-  # skip could only be a fetch gone wrong.
+  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails, and
+  # `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1` one that would skip without protoc-gen-buffa: here a skip
+  # could only be a fetch gone wrong.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       BEADC_PROTOC_REQUIRED: 1
+      BEADC_PROTOC_GEN_BUFFA_REQUIRED: 1
       # a wrapper's test that would skip without bash, pwsh 7.6 or, on Windows, the right to make a
       # symbolic link fails: every runner has them
       BEADC_WRAPPERS_REQUIRED: 1
@@ -711,6 +753,16 @@ jobs:
         run: |
           protoc="$(node tools/fetch-protoc.mjs)"
           echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # protoc-gen-buffa's binary, by the pin it was checked against: the Rust target's messages,
+      # its goldens' and every Rust output's that generates them
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc-gen-buffa
+          key: protoc-gen-buffa-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc-gen-buffa.json') }}
+      - name: protoc-gen-buffa, by its pin's sha256
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: $YARN check
       # the image's test stage first, then the image, which reuses every stage but the last; the
@@ -783,14 +835,16 @@ jobs:
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
-  # Yarn portal and a ProjectReference. First what the examples copy or take from beadc, held to
-  # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
-  # writes the copy of Bead's options its external builds read; buf's lint and layout over its
-  # .proto; each half's gates and both its builds; then each client against each server, both
-  # modes of each half, sixteen pairs, each server's gateway asked after its client, every one
+  # Yarn portal, a ProjectReference and a Cargo path. First what the examples copy or take from
+  # beadc, held to their source; then examples/hello: beadc on Node from builder/ holds its
+  # generated files and writes the copy of Bead's options its external builds read; buf's lint and
+  # layout over its .proto; each half's gates and both its builds; then each client against each
+  # server, both modes of each half, each server's gateway asked after its client, every one
   # writing transcript.txt, every server ending clean.
-  # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
-  # run over it on the builder job's image legs, where the image is.
+  # On the current line and on the floor the TypeScript half's engines.node declares. The Rust half
+  # on the current line's leg alone, on the toolchain its rust-toolchain.toml pins, the Rust side's,
+  # its two binaries over one target folder: its pairs played there, Node's floor no part of it.
+  # The wrappers run over it on the builder job's image legs, where the image is.
   examples:
     name: Examples (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -799,6 +853,9 @@ jobs:
       fail-fast: false
       matrix:
         node: ['26', '24.9']
+        include:
+          - node: '26'
+            rust: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -834,6 +891,12 @@ jobs:
         run: |
           protoc="$(node tools/fetch-protoc.mjs)"
           echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # the Rust half's messages, beadc's through Buffa's plugin, held on every leg
+      - name: protoc-gen-buffa, by its pin's sha256
+        working-directory: builder
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
       - name: What each example copies, or takes from beadc's wrapper and init
         run: node tools/check-examples.mjs
       # held first, then written: generate writes the same files again, and the copy of Bead's
@@ -861,8 +924,40 @@ jobs:
         working-directory: examples/hello/dotnet
         env:
           CI: true
+      # 1.99.1, as examples/hello/rust/rust-toolchain.toml names it, the Rust side's pin
+      - if: matrix.rust
+        run: rustup toolchain install
+        working-directory: examples/hello/rust
+      # the registry and the Rust half's build, by its own lock and its toolchain
+      - if: matrix.rust
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            examples/hello/rust/target
+          key: examples-rust-${{ hashFiles('examples/hello/rust/Cargo.lock', 'examples/hello/rust/rust-toolchain.toml', 'implementations/rust/Cargo.lock') }}
+          restore-keys: examples-rust-
+      - if: matrix.rust
+        run: cargo fmt --check
+        working-directory: examples/hello/rust
+      # the feature external's build script builds its set with the TypeScript half's buf, the one
+      # the lint above ran
+      - if: matrix.rust
+        run: cargo clippy --all-targets --locked && cargo clippy --all-targets --features external --locked
+        working-directory: examples/hello/rust
+        env:
+          BUF: ${{ github.workspace }}/examples/hello/typescript/node_modules/.bin/buf
+      # both binaries over one target folder: hello, then hello-external with the feature external
+      - if: matrix.rust
+        run: cargo build --locked && cargo build --features external --locked
+        working-directory: examples/hello/rust
+        env:
+          BUF: ${{ github.workspace }}/examples/hello/typescript/node_modules/.bin/buf
       - name: Each client against each server
         run: node examples/hello/pairs.mjs
+        env:
+          # the Rust half's pairs where it is built; any other word leaves them out
+          HELLO_RUST: ${{ matrix.rust && 'built' || 'absent' }}
 
   # ── Protobuf conformance ─────────────────────────────────────────────────────
   # Protobuf's conformance suite through each side's generated `proto` codec, the check of a
@@ -873,8 +968,8 @@ jobs:
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
   # corpus of Probe through every side's testee, read alike, compared two by two, after the suite
   # step that built the Rust testee. A job of its own: it needs every side's runtime, beadc and
-  # protoc, which no other job has together; the Rust testee's JSON goes through Buffa's dynamic
-  # message until Rust's gateway brings Bead's mapping (decision 0044).
+  # protoc, which no other job has together; the Rust testee's JSON goes through Bead's own mapping,
+  # bead-protobuf's `JsonForm`, as the gateway reads and writes it (decision 0052).
   # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
   # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
@@ -955,7 +1050,8 @@ jobs:
   # byte of them is read; the violations compared as protovalidate's own conformance compares them,
   # sorted by rule id then path, a path by its elements, every word and forKey equal. The oracle over
   # the verdicts alone first, then each side's testee. A job of its own, beside the protobuf
-  # conformance: it needs both runtimes, beadc and protoc, which no other job has together.
+  # conformance: it needs every side's runtime, beadc, protoc and protoc-gen-buffa, which no other
+  # job has together.
   protovalidate-differential:
     name: protovalidate differential
     runs-on: ubuntu-26.04
@@ -1009,6 +1105,30 @@ jobs:
       - name: The C# testee's format
         working-directory: implementations/dotnet/tools/Bead.ProtovalidateDifferential
         run: dotnet format Bead.ProtovalidateDifferential.csproj --verify-no-changes --exclude Generated
+      # 1.99.1, as implementations/rust/rust-toolchain.toml names it
+      - run: rustup toolchain install
+        working-directory: implementations/rust
+      # the registry and the Rust testee's build, by its own lock and the toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/tools/protovalidate-differential/target
+          key: protovalidate-differential-rust-${{ hashFiles('implementations/rust/tools/protovalidate-differential/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: protovalidate-differential-rust-
+      # assigned first: a failed fetch fails the step
+      - name: protoc-gen-buffa, by its pin's sha256
+        working-directory: builder
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
+      - name: The corpus through the Rust side's validators
+        run: node tools/protovalidate-differential.mjs rust
+      # the Rust testee lies outside the side's workspace, so its format is held here, the code
+      # generated into it at run time aside: include!d and rustfmt::skip, rustfmt reads none of it
+      - name: The Rust testee's format
+        working-directory: implementations/rust/tools/protovalidate-differential
+        run: cargo fmt --check
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
@@ -1052,13 +1172,21 @@ jobs:
           node tools/check-commits.mjs "$@"
       - name: Check the links
         run: node tools/check-links.mjs
+      # Every test docs/support.md cites, by its file, its class or method, its function or its
+      # title, wherever it stands, is one a side's tests declare, an entry a harness names at run
+      # time, a case's label or a row, or a literal the tool lists with its reason (decision 0006).
+      - name: Check the cited tests
+        run: node tools/check-citations.mjs
       - name: Check the details
         run: node tools/check-details.mjs
-      # The page francisdesjardins.ca serves at /bead/ is what its build writes from site/, byte for
-      # byte, and each diagram's SVG its source's render, by the hash it records: no browser, nothing
-      # installed.
+      # The page beadproto.dev serves is what its build writes from site/, byte for byte, each
+      # diagram's SVG its source's render and each icon its mark's, by the hashes they record: no
+      # browser, nothing installed.
       - name: Check the page
         run: node site/check.mjs
+      # What the page's deploy ships and refuses, by its own tests, in Node's runner: no dependency.
+      - name: Test the page's deploy
+        run: node --test "site/__tests__/*.test.mjs"
       # Each side's public names, read from its committed surface list, are one on every side or a
       # row of tools/names.tsv says how they render, why one is a side's own, or which row of the
       # support matrix's Differences holds it; the names no reading placed only fall (decision 0047).
@@ -1100,7 +1228,10 @@ jobs:
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
       # job. ! The rules are the registry's, fetched at the run: a rule added there may fail a
-      # commit that changed nothing, which is read as a finding, never as a flake.
+      # commit that changed nothing, which is read as a finding, never as a flake. ! The eight
+      # private keys of the test PKI are left out by name, each one alone, never their folder: they
+      # are published test keys, and spec/check.py's TEST_PKI_KEYS holds each file to its own key,
+      # so a key added there or changed fails that gate rather than passing this one unseen.
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
@@ -1108,6 +1239,36 @@ jobs:
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
+          --exclude spec/pki/root.key --exclude spec/pki/intermediate.key --exclude spec/pki/client.key
+          --exclude spec/pki/server.key --exclude spec/pki/stranger-client.key
+          --exclude spec/pki/stranger-server.key --exclude spec/pki/named-server.key
+          --exclude spec/pki/addressed-server.key
+
+  # ── Site ─────────────────────────────────────────────────────────────────────
+  # The page beadproto.dev serves and its not-found page, as committed, laid out in Chromium by
+  # site/layout.mjs: the top bar on one line at every width, in both languages and both themes, no
+  # page wider than a phone, a finger's targets, the code's size, the menu and the theme. The image
+  # of the Playwright the TypeScript side pins holds the Chromium the site's own `playwright-core`,
+  # the same version, drives.
+  site:
+    name: Site
+    needs: playwright
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: $YARN install --immutable
+      - name: The page's layout
+        run: node layout.mjs
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,
@@ -1130,6 +1291,7 @@ jobs:
         protobuf-conformance,
         protovalidate-differential,
         commits,
+        site,
       ]
     runs-on: ubuntu-26.04
     timeout-minutes: 2

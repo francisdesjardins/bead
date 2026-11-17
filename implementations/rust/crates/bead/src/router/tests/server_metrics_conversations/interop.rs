@@ -22,7 +22,7 @@ pub(super) async fn play() {
         .await
         .expect("a connected pair");
     let _interop = bead_interop::offer_interop(&pair.server).expect("the interop offered");
-    let procedures = bead_interop::interop_procedures(None).expect("the interop descriptors");
+    let procedures = bead_interop::InteropProcedures::get().expect("the interop descriptors");
     pair.client
         .services()
         .get_command_resolver(

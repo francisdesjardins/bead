@@ -1,6 +1,6 @@
 //! Bead's setting of Buffa's generator on the Rust side (decision 0044), for a build script: the
-//! code of a `proto` file as `bead_protobuf`'s codec reads it, generated from the
-//! `FileDescriptorSet` protoc writes at its pin (`builder/protoc.json`), never by calling protoc.
+//! code of a `proto` file as `bead_protobuf`'s codec reads it, generated from a
+//! `FileDescriptorSet`, the one its application's build writes, never by calling protoc.
 //!
 //! - **Views**, which the reader decodes and walks for a field protobuf requires before it takes
 //!   the owned message (spec 17.9.7), since a view's presence is the wire's.

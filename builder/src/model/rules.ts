@@ -183,6 +183,20 @@ export const LENGTH_CEILING = 9_007_199_254_740_992n;
 
 // helpers
 
+/** The scalar a type is judged as: its own, or its wrapper's; none for a message or an enum. */
+export const scalarOf = (type: FieldType): ScalarName | undefined => {
+  if ('scalar' in type) {
+    return type.scalar;
+  }
+
+  return 'wrapper' in type ? type.wrapper : undefined;
+};
+
+/** Whether a value's plan judges anything: a judgment of its own, or the message it holds. */
+export const hasWork = (value: IValuePlan | undefined): boolean => {
+  return value !== undefined && (value.judgments.length > 0 || value.message !== undefined);
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };

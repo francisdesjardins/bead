@@ -15,9 +15,24 @@ public sealed record HttpTransportClientOptions
     /// <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s given,
     /// whose <c>AllowAutoRedirect</c> is true is refused as the client is built; an answer from
     /// another URL than the one asked fails the connect, and loses the connection of a send or a
-    /// listen. The tests' way, as the TypeScript side's give it a <c>fetch</c>.
+    /// listen. The tests' way, as the TypeScript side's give it a <c>fetch</c>, and the way to the
+    /// platform's own TLS: one given keeps its own, and a <see cref="Tls"/> beside it is refused as
+    /// the client is built.
     /// </summary>
     public HttpMessageHandler? Handler { get; init; }
+
+    /// <summary>
+    /// Its TLS (spec 15.39): the authorities it judges its server by, in place of the platform's
+    /// roots, and the certificate it presents with its key where its server asks for one at the
+    /// handshake. Held in the clear, and used on a connect over <c>https</c> alone. Refused as the
+    /// client is built, an <see cref="ArgumentException"/>, beside a <see cref="Handler"/>, which
+    /// keeps a TLS of its own, and as <see cref="TlsOptions"/> says. A handshake its server refuses
+    /// fails the connect, the platform's error its cause, under TLS 1.3 even once its <c>POST</c> was
+    /// written, and never as a connection drawn and then lost. Its exchanges ask HTTP/1.1, none
+    /// HTTP/2, over which its handler would present the certificate at the handshake alike. None
+    /// when none.
+    /// </summary>
+    public TlsOptions? Tls { get; init; }
 
     /// <summary>
     /// How long it goes on listening again, its listens lost, before it counts its connection lost: 5
@@ -154,6 +169,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     private HttpClient? _http;
 
+    // what the TLS of its own handler holds, its key among it, let go of with its HTTP client
+    private TlsCredentials? _httpTls;
+
     // the options of the last connect its guard let through, which a reconnection connects with
     private HttpTransportClientConnectOptions? _lastConnectOptions;
 
@@ -177,7 +195,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, or a wait or a pause
     /// neither zero nor in that range, is an <see cref="ArgumentOutOfRangeException"/>; a handler
     /// given that would follow a redirect, an <see cref="ArgumentException"/> naming
-    /// <c>AllowAutoRedirect</c>.
+    /// <c>AllowAutoRedirect</c>; a <see cref="HttpTransportClientOptions.Tls"/> beside a handler, or
+    /// one its rules refuse, an <see cref="ArgumentException"/> too (spec 15.39).
     /// </summary>
     public HttpTransportClient(HttpTransportClientOptions? options = null)
     {
@@ -185,10 +204,16 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         HttpRedirects.AssertHandler(given.Handler, nameof(options));
 
+        if (given.Handler is not null && Bead.Tls.IsGiven(given.Tls))
+        {
+            throw new ArgumentException("tls is refused beside a Handler, which keeps a TLS of its own", nameof(options));
+        }
+
         // zero is at once for a delay: a listen again at once, and a listen the server answers at
         // once, which polls
         _options = given with
         {
+            Tls = Bead.Tls.Assert(given.Tls, nameof(options)),
             InactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.InactivityTimeout), nameof(HttpTransportClientOptions.InactivityTimeout)), given.InactivityTimeout),
             ExchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.ExchangeTimeout), nameof(HttpTransportClientOptions.ExchangeTimeout)), given.ExchangeTimeout),
             Pause = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Pause), nameof(HttpTransportClientOptions.Pause)), given.Pause),
@@ -563,6 +588,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         CancellationTokenSource? connecting;
         Drawn? connection;
         HttpClient? http;
+        TlsCredentials? tls;
 
         lock (_gate)
         {
@@ -577,7 +603,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             }
 
             http = _readyState == ReadyState.Reconnecting ? null : _http;
+            tls = http is null ? null : _httpTls;
             _http = http is null ? _http : null;
+            _httpTls = http is null ? _httpTls : null;
         }
 
         if (connecting is not null)
@@ -592,6 +620,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
 
         http?.Dispose();
+        tls?.Dispose();
     }
 
     // * what this side closes a connection for of its own, as its Error tells it before its close
@@ -678,17 +707,36 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     {
         lock (_gate)
         {
-            return _http ??= NewHttp();
+            if (_http is null)
+            {
+                _http = NewHttp(out _httpTls);
+            }
+
+            return _http;
         }
     }
 
     // its own handler races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn
-    private HttpClient NewHttp()
+    // platform's tries each address in turn, and speaks its TLS, whose credentials `tls` hands back
+    // to be let go of with the HTTP client
+    private HttpClient NewHttp(out TlsCredentials? tls)
     {
-        return _options.Handler is { } handler
-            ? new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan }
-            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback }) { Timeout = Timeout.InfiniteTimeSpan };
+        tls = null;
+
+        if (_options.Handler is { } handler)
+        {
+            return new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
+        }
+
+        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback };
+
+        if (_options.Tls is { } given)
+        {
+            tls = Bead.Tls.CredentialsOf(given);
+            own.SslOptions = tls.SslOptions();
+        }
+
+        return new HttpClient(own) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     // a request carrying the connection's token, as each exchange after the connect does
@@ -710,12 +758,17 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // HTTP client, it goes through one of its own, let go of in turn, so none outlives the client
     private void Release(Drawn connection)
     {
-        HttpClient? own;
+        HttpClient? own = null;
+        TlsCredentials? ownTls = null;
         HttpClient http;
 
         lock (_gate)
         {
-            own = _http is null ? NewHttp() : null;
+            if (_http is null)
+            {
+                own = NewHttp(out ownTls);
+            }
+
             http = _http ?? own!;
         }
 
@@ -736,6 +789,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             finally
             {
                 own?.Dispose();
+                ownTls?.Dispose();
             }
         }
     }

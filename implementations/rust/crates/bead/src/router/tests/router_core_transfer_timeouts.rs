@@ -55,9 +55,7 @@ async fn last_failure(peer: &Peer, timeout: u64) {
     );
 }
 
-#[tokio::test]
-async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
- {
+async fn sending_inactivity() {
     use crate::constants::EnvelopeKind::{Cancel, Failure, Request, Result};
     for dotnet in [false, true] {
         let (peer, handed) = serving(
@@ -139,7 +137,6 @@ async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeo
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin keeps the combined, progressed and unbounded receiving scenarios together"
@@ -148,7 +145,7 @@ async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeo
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+async fn receiving_inactivity() {
     use super::router_core_requester::opening as result_opening;
     use super::router_core_transfer_edges::{chunk, opening};
     use crate::constants::EnvelopeKind::{Cancel, Credit, Failure, Request};
@@ -158,10 +155,10 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
             ..limits()
         };
         let (peer, handed) = serving(false, &options).await;
-        peer.receive((opening(1, (Bytes::from(vec![0; 40]), 200)), Arc::from("a")));
+        peer.receive((opening(1, (Bytes::from(vec![0; 44]), 200)), Arc::from("a")));
         let asking = peer.request((Bytes::new(), request_of("a")));
         peer.receive((
-            result_opening(2, (Bytes::from(vec![0; 32]), 200)),
+            result_opening(2, (Bytes::from(vec![0; 28]), 200)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -174,11 +171,11 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
         );
         assert_eq!(error.to_string(), "no answer came in 250 milliseconds");
         peer.receive((
-            chunk(1, (40, Bytes::from(vec![0; 48]), 200)),
+            chunk(1, (44, Bytes::from(vec![0; 48]), 200)),
             Arc::from("a"),
         ));
         peer.receive((
-            chunk(2, (32, Bytes::from(vec![0; 48]), 200)),
+            chunk(2, (28, Bytes::from(vec![0; 48]), 200)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -194,10 +191,10 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
         );
         let sent = peer.sent().await;
         assert!(
-            matches!(&sent[0].1, Envelope::Credit {header} if header.credit_end == 168 && !header.paced)
+            matches!(&sent[0].1, Envelope::Credit {header} if header.credit_end == 172 && !header.paced)
         );
         assert!(
-            matches!(&sent[2].1, Envelope::Credit {header} if header.credit_end == 160 && !header.paced)
+            matches!(&sent[2].1, Envelope::Credit {header} if header.credit_end == 156 && !header.paced)
         );
         assert!(
             matches!(&sent[3].1, Envelope::Failure {header, failure} if header.call_id == 1 && header.credential.is_none() && failure.code == ProtocolCode::TRANSFER_STALLED.get())
@@ -241,7 +238,7 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
         let mut options = request_of("a");
         options.options.timeout = Duration::MAX;
         let asking = client.request((Bytes::from_static(&[1]), options));
-        client.receive((result_opening(1, (bytes.slice(..32), 300)), Arc::from("a")));
+        client.receive((result_opening(1, (bytes.slice(..28), 300)), Arc::from("a")));
         client.settle().await;
         client.clock.advance(Duration::from_millis(2_000)).await;
         let error = completed(asking)
@@ -257,8 +254,30 @@ async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_wi
             [(Request, 1), (Credit, 1), (Cancel, 1)]
         );
         assert!(
-            matches!(&client.sent().await[1].1, Envelope::Credit {header} if header.credit_end == 160 && !header.paced)
+            matches!(&client.sent().await[1].1, Envelope::Credit {header} if header.credit_end == 156 && !header.paced)
         );
         quiet(&client).await;
     }
+}
+
+#[tokio::test]
+async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
+ {
+    sending_inactivity().await;
+}
+
+#[tokio::test]
+async fn ends_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
+ {
+    sending_inactivity().await;
+}
+
+#[tokio::test]
+async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+    receiving_inactivity().await;
+}
+
+#[tokio::test]
+async fn ends_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
+    receiving_inactivity().await;
 }

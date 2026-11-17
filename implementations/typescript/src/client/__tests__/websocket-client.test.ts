@@ -126,7 +126,7 @@ test('createWebSocketClient runs on the global WebSocket by default, not yet con
   expect(client.router.transport).toBe(client.transport);
 });
 
-test('createWebSocketClient builds its router with the limits given', async () => {
+test('builds its router with the limits given', async () => {
   const client = createWebSocketClient({ limits: { maximumPayloadBytes: 8 } });
 
   await expect(

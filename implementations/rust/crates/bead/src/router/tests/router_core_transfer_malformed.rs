@@ -69,9 +69,7 @@ fn invalid(outcome: Result<crate::RouterResult, CallError>, side: RouterSide) {
     assert_eq!(failure.side(), Some(side));
 }
 
-#[tokio::test]
-async fn end_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
- {
+async fn unreadable_transfer_chunks() {
     simultaneous().await;
     unreadable_result().await;
     whole_and_abandoned().await;
@@ -87,15 +85,15 @@ async fn simultaneous() {
     peer.owner
         .run(|state| {
             let payload = pattern((200, false));
-            receive(state, (opening(1, (payload.slice(..40), 200)), "a", None));
+            receive(state, (opening(1, (payload.slice(..44), 200)), "a", None));
             receive(
                 state,
-                (result_opening(2, (payload.slice(..32), 200)), "a", None),
+                (result_opening(2, (payload.slice(..28), 200)), "a", None),
             );
-            receive(state, (opening(3, (payload.slice(..40), 60)), "a", None));
+            receive(state, (opening(3, (payload.slice(..44), 60)), "a", None));
             receive(
                 state,
-                (chunk(3, (40, payload.slice(40..60), 60)), "a", None),
+                (chunk(3, (44, payload.slice(44..60), 60)), "a", None),
             );
             for call_id in [1, 1, 2, 2, 3, 5] {
                 raw(
@@ -132,8 +130,8 @@ async fn simultaneous() {
         traffic(&peer).await,
         [
             (EnvelopeKind::Request, 2, 0),
-            (EnvelopeKind::Credit, 1, 168),
-            (EnvelopeKind::Credit, 2, 160),
+            (EnvelopeKind::Credit, 1, 172),
+            (EnvelopeKind::Credit, 2, 156),
             (EnvelopeKind::Credit, 3, 60),
             (
                 EnvelopeKind::Failure,
@@ -173,7 +171,7 @@ async fn unreadable_result() {
             receive(
                 state,
                 (
-                    result_opening(1, (pattern((300, false)).slice(..32), 300)),
+                    result_opening(1, (pattern((300, false)).slice(..28), 300)),
                     "a",
                     None,
                 ),
@@ -187,7 +185,7 @@ async fn unreadable_result() {
         traffic(&peer).await,
         [
             (EnvelopeKind::Request, 1, 0),
-            (EnvelopeKind::Credit, 1, 160),
+            (EnvelopeKind::Credit, 1, 156),
             (EnvelopeKind::Cancel, 1, 0),
         ]
     );
@@ -258,4 +256,16 @@ async fn whole_and_abandoned() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].header.call_id, 1);
     assert_eq!(seen[0].payload, pattern((100, false)));
+}
+
+#[tokio::test]
+async fn end_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
+ {
+    unreadable_transfer_chunks().await;
+}
+
+#[tokio::test]
+async fn ends_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
+ {
+    unreadable_transfer_chunks().await;
 }

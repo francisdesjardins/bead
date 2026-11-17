@@ -5,15 +5,15 @@
 //! A payload is read in four steps, each the spec's:
 //!
 //! 1. its records checked against its message's schema before Buffa reads them (17.9.1 to 17.9.6,
-//!    [`check_records`]), which refuses what protobuf refuses where Buffa reads on: a tag of more
-//!    than 5 bytes, a map's entry with a field it does not declare, a message nested past the
+//!    [`check_proto_records`]), which refuses what protobuf refuses where Buffa reads on: a tag of
+//!    more than 5 bytes, a map's entry with a field it does not declare, a message nested past the
 //!    bound through a map's entries;
 //! 2. Buffa's view of it, decoded within the bound of 17.9.3, 100 messages below the top one; Bead
 //!    drops a singular closed enum's undeclared number before Buffa reads (17.9.8), its last
 //!    declared number kept, as every side does;
-//! 3. the walk of its fields protobuf requires over the view (17.9.7, [`check_required`]), whose
-//!    presence is the wire's: an owned message holds such a field bare, its value no witness of
-//!    whether it was given;
+//! 3. the walk of its fields protobuf requires over the view (17.9.7), whose presence is the
+//!    wire's: an owned message holds such a field bare, its value no witness of whether it was
+//!    given;
 //! 4. the owned message the view gives the application.
 //!
 //! A value is written in four steps too: refused where its known fields nest past the bound,
@@ -30,14 +30,27 @@
 //!
 //! [`DynamicMessage`]: buffa_descriptor::reflect::DynamicMessage
 
+#[cfg(feature = "transcoding")]
+mod binding;
 mod codec;
+#[cfg(feature = "transcoding")]
+mod json_form;
 mod records;
 mod refusal;
 mod required;
+mod validate;
 
+#[cfg(feature = "transcoding")]
+pub use binding::HttpBinding;
 pub use codec::{DynamicCodec, ENCODING, ProtoCodec};
-pub use records::{ProtoSchema, check_records};
-pub use required::check_required;
+#[cfg(feature = "transcoding")]
+pub use json_form::JsonForm;
+pub use records::{ProtoSchema, check_proto_records};
+pub use validate::{
+    MapEntry, MapKey, MessageRules, PatternTable, RuleItems, RuleValue, ViolationRule,
+    ViolationSink, bytes_contain, bytes_end_with, bytes_equal, bytes_start_with, code_point_length,
+    entries_by_key, is_unique, judge_rules, matches_pattern, utf8_length, validator_of,
+};
 
 #[cfg(feature = "testing")]
 #[doc(hidden)]

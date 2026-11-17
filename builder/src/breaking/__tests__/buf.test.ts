@@ -108,16 +108,8 @@ test("BUF_RULES is buf's list at its pin", () => {
 test('bead/options.proto and an import dropped are never compared', () => {
   test.setTimeout(60_000);
 
-  // ! each parallel case owns its fixture copies and the .beadc parent a compile removes
-  const pair = test.info().outputPath('pair');
-  const earlierRoot = join(pair, 'earlier');
-  const currentRoot = join(pair, 'current');
-
-  cpSync(EARLIER, earlierRoot, { recursive: true });
-  cpSync(CURRENT, currentRoot, { recursive: true });
-
-  const earlier = compile([earlierRoot], { image: true });
-  const current = fromBinary(FileDescriptorSetSchema, compile([currentRoot], { image: true }));
+  const earlier = compile([EARLIER], { image: true });
+  const current = fromBinary(FileDescriptorSetSchema, compile([CURRENT], { image: true }));
   const options = current.file.find((file) => {
     return file.name === OPTIONS_FILE;
   });
@@ -137,7 +129,7 @@ test('bead/options.proto and an import dropped are never compared', () => {
     const found = bufFindings(toBinary(FileDescriptorSetSchema, current), {
       earlier,
       category,
-      roots: [currentRoot],
+      roots: [CURRENT],
     });
 
     expect(found.length, category).toBeGreaterThan(0);
@@ -223,10 +215,12 @@ test("a buf: waiver waives under its file or its folder, as buf's ignore_only ma
 test("a file the current lost is placed at the earlier's path, which a buf: scope names", () => {
   test.setTimeout(60_000);
 
+  // * the case's own copy of the earlier, which it adds a file to
   const earlier = test.info().outputPath('earlier');
   const lost = join(earlier, 'parcel', 'v1', 'lost.proto');
 
   cpSync(EARLIER, earlier, { recursive: true });
+
   writeFileSync(
     lost,
     'syntax = "proto3";\n\npackage parcel.v1;\n\nmessage Lost {\n  string name = 1;\n}\n'

@@ -29,6 +29,10 @@ impl RouterClientTransport for Clockless<ScriptedClient> {
         self.0.pause();
     }
 
+    fn disconnect(&self) {
+        self.0.disconnect();
+    }
+
     fn resume(&self) {
         self.0.resume();
     }

@@ -178,12 +178,12 @@ const rawAddressOf = (terminus: unknown): string | undefined => {
  * 4's does unless told, 201 to a declaration, 204 to a binding and 200 to a deletion, offering SASL
  * PLAIN: over TCP, or
  * over TLS under `tls`'s certificate, `amqps://localhost`, asking a client certificate, verifying it
- * against that certificate as its CA, refusing one it does not sign, and offering SASL EXTERNAL to
- * one it signs; its OPEN of `channelMax` where given.
+ * against `tls`'s `ca`, or that certificate as its CA where none, refusing one it does not sign, and
+ * offering SASL EXTERNAL to one it signs; its OPEN of `channelMax` where given.
  */
 export const createAmqpScript = async (options?: {
   channelMax?: number | undefined;
-  tls?: { cert: string; key: string } | undefined;
+  tls?: { ca?: string | undefined; cert: string; key: string } | undefined;
 }): Promise<IAmqpScript> => {
   const links: IAmqpScriptedLink[] = [];
   const connections = new Set<Connection>();
@@ -590,7 +590,7 @@ export const createAmqpScript = async (options?: {
     ...(tls === undefined
       ? {}
       : {
-          ca: tls.cert,
+          ca: tls.ca ?? tls.cert,
           cert: tls.cert,
           enable_sasl_external: true,
           key: tls.key,

@@ -14,7 +14,7 @@ namespace Bead.Protobuf;
 /// among the unknown fields and Google.Protobuf would read as the field's (17.9.8), is dropped
 /// before the library reads, as every side drops it, through <see cref="ProtoCodecs"/>. It walks
 /// the payload once, by the message's own descriptor, and allocates nothing per record. Each
-/// message's shape holds what <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf
+/// message's shape holds what the required walk reads too (17.9.7): its fields protobuf
 /// requires, and those that hold a message reaching one; and how deep its known fields can nest,
 /// which a writer's depth pass takes (<see cref="ProtoDepth"/>, 17.9.3). A refusal is a
 /// <see cref="FormatException"/> of spec 17.2's reason, <c>nested past 100</c> for the depth and

@@ -2,9 +2,10 @@
 
 // The Packages tab's core: a blueprint cut into packages, each an output of `beadc.yaml`, by the
 // builder's own code (decision 0048). Each package's sides become the `ISides` of `selection.ts`;
-// `cutOf` gives what each of its classes holds and `selectionFindingsOf` what `generate` refuses of
-// it; its `outputs` are written by `yaml`, then read back by `parseConfig`, whose refusal is
-// beadc's own words. A folder and a transport's key are derived from what a package holds, never
+// `cutOf` gives what each of its classes holds, `selectionFindingsOf` what `generate` refuses of
+// it, and `rustGatewayRefusalsOf` what the Rust target refuses of its gateway; its `outputs` are
+// written by `yaml`, then read back by `parseConfig`, whose refusal is beadc's own words. Each
+// language's server is offered the transports its side has, as `docs/support.md` gives them. A folder and a transport's key are derived from what a package holds, never
 // from its place in the list, so removing one renames no other. What depends on the disk, `source`
 // and the `.proto` roots, stays `beadc generate`'s.
 
@@ -21,6 +22,7 @@ import type {
   IServiceEntry,
   ProcedureKind,
 } from '../../../builder/src/model/blueprint.ts';
+import { rustGatewayRefusalsOf } from '../../../builder/src/model/check-rust.ts';
 import { type IServedRoute, servedRoutesOf } from '../../../builder/src/model/routes.ts';
 import {
   cutOf,
@@ -37,7 +39,7 @@ import { posixPath } from './posix-path';
 // types
 
 /** A package's language, as `beadc.yaml`'s `language` names it. */
-export type Language = 'typescript' | 'csharp';
+export type Language = keyof typeof LANGUAGES;
 
 /** What a side holds: every procedure it can, its selections', or none. */
 export type HoldingMode = 'all' | 'pick' | 'none';
@@ -89,6 +91,11 @@ export interface IOutputPlan {
   readonly sides: ISides;
   readonly cut: ICut;
   readonly findings: readonly ISelectionFinding[];
+  /**
+   * What its target refuses of it, in beadc's words: a Rust gateway's procedure named as a method
+   * its HTTP client holds.
+   */
+  readonly refusals: readonly string[];
   /** Its gateway's routes, none without a gateway. */
   readonly routes?: readonly IServedRoute[];
 }
@@ -118,7 +125,26 @@ export const TRANSPORT_TYPES = Object.freeze({
 });
 
 /** The languages a package is written in, by `beadc.yaml`'s name, and their own. */
-export const LANGUAGES = Object.freeze({ typescript: 'TypeScript', csharp: 'C#' });
+export const LANGUAGES = Object.freeze({ typescript: 'TypeScript', csharp: 'C#', rust: 'Rust' });
+
+/**
+ * The transports each language's server is offered, in `TRANSPORT_TYPES`' order: those its side
+ * has, as the transports of `docs/support.md` give them. The Web Worker is the TypeScript side's
+ * alone, and AMQP 1.0 is ahead on the Rust side.
+ */
+export const TRANSPORTS_OF: Readonly<Record<Language, readonly TransportType[]>> = Object.freeze({
+  typescript: Object.freeze<TransportType[]>([
+    'webSocket',
+    'http',
+    'memory',
+    'worker',
+    'mqtt',
+    'amqp',
+    'broker',
+  ]),
+  csharp: Object.freeze<TransportType[]>(['webSocket', 'http', 'memory', 'mqtt', 'amqp', 'broker']),
+  rust: Object.freeze<TransportType[]>(['webSocket', 'http', 'memory', 'mqtt', 'broker']),
+});
 
 /** A procedure's kinds, in spec 16.11's order. */
 export const KINDS: readonly ProcedureKind[] = Object.freeze(['request', 'notifies', 'command']);
@@ -582,10 +608,30 @@ export const readBlueprint = (given: unknown): IBlueprint => {
   };
 };
 
+/** `planned` written in `language`: its server keeps the transports that language has, in order. */
+export const inLanguage = (planned: IPackage, language: Language): IPackage => {
+  const { server } = planned;
+
+  return {
+    ...planned,
+    language,
+    ...(server === undefined
+      ? {}
+      : {
+          server: {
+            ...server,
+            transports: server.transports.filter(({ type }) => {
+              return TRANSPORTS_OF[language].includes(type);
+            }),
+          },
+        }),
+  };
+};
+
 /**
  * Plans `packages` over `blueprint`: each an output, its folder, its transports' keys, its sides,
- * what each of its classes holds and what `generate` refuses of it; then `outputs` as `beadc.yaml`
- * writes them, and what `parseConfig` reads of it.
+ * what each of its classes holds and what `generate` and its target refuse of it; then `outputs`
+ * as `beadc.yaml` writes them, and what `parseConfig` reads of it.
  */
 export const planOf = (blueprint: IBlueprint, packages: readonly IPackage[]): IPlan => {
   const transportKeys = packages.map((planned) => {
@@ -606,6 +652,13 @@ export const planOf = (blueprint: IBlueprint, packages: readonly IPackage[]): IP
       sides,
       cut,
       findings: selectionFindingsOf(blueprint, { sides, key }),
+      // ! the Rust target's condition: an output with a gateway, judged on what its gateway selects
+      refusals:
+        planned.language === 'rust' && cut.gateway !== undefined
+          ? rustGatewayRefusalsOf(cut.gateway).map(({ message }) => {
+              return message;
+            })
+          : [],
       ...(cut.gateway === undefined ? {} : { routes: servedRoutesOf(cut.gateway) }),
     };
   });

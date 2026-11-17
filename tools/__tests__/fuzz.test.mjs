@@ -41,6 +41,7 @@ const SEEDS = seedsOf({
   codecs: specOf('codecs.json'),
   conversations: specOf('conversations.json'),
   debugFilters: specOf('debug-filters.json'),
+  transcoding: specOf('transcoding.json'),
   transports: specOf('transports.json'),
   vectors: specOf('vectors.json'),
 });
@@ -84,14 +85,20 @@ describe('the targets', () => {
       'ws-handshake',
       'broker-parcel',
       'proto-codecs',
+      'json-form',
     ]);
     assert.deepEqual(TARGETS.csharp, TWINS);
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
   });
 
-  test('knows the Rust side’s targets, every twin and its MQTT 5 client’s packet reader', () => {
-    assert.deepEqual(TARGETS.rust, [...TWINS, 'mqtt-packets']);
-    assert.deepEqual(EVERY_TARGET, [...TWINS, 'blueprint', 'mqtt-packets']);
+  test('knows the Rust side’s targets, every twin and its MQTT 5 client’s packet and frame readers', () => {
+    assert.deepEqual(TARGETS.rust, [...TWINS, 'mqtt-packets', 'mqtt-websocket-frames']);
+    assert.deepEqual(EVERY_TARGET, [
+      ...TWINS,
+      'blueprint',
+      'mqtt-packets',
+      'mqtt-websocket-frames',
+    ]);
     assert.match(SIDES.rust, /implementations[\\/]rust[\\/]fuzz$/u);
     assert.deepEqual(argumentsOf(['run', 'rust', 'jwt']), {
       command: 'run',
@@ -104,6 +111,9 @@ describe('the targets', () => {
     assert.equal(argumentsOf(['run', 'typescript', 'mqtt-packets']), undefined);
     assert.equal(argumentsOf(['run', 'csharp', 'mqtt-packets']), undefined);
     assert.equal(folderOf('rust', 'mqtt-packets'), SIDES.rust);
+    assert.equal(argumentsOf(['run', 'typescript', 'mqtt-websocket-frames']), undefined);
+    assert.equal(argumentsOf(['run', 'csharp', 'mqtt-websocket-frames']), undefined);
+    assert.equal(folderOf('rust', 'mqtt-websocket-frames'), SIDES.rust);
   });
 
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {
@@ -286,14 +296,28 @@ describe('the seeds', () => {
     }
   });
 
+  test("seed the frame target with the Rust side's frame mutation seeds, each unmasked, in their order and digest", () => {
+    // * the 5 frames of the Rust side's tests/mqtt_websocket_frames_fuzz.rs, a server's to a client
+    assert.equal(SEEDS['mqtt-websocket-frames'].length, 5);
+    assert.equal(
+      digestOf(inSeedOrder(SEEDS['mqtt-websocket-frames'])),
+      'ce9d8aa9e4f964ff50a345e9445a83b1609d25150cf0ae337bdcbe52ed63a2ab'
+    );
+
+    // each a server's: no mask bit on its first head (RFC 6455 §5.1)
+    for (const seed of SEEDS['mqtt-websocket-frames']) {
+      assert.equal(seed[1] & 0x80, 0, seed.toString('hex'));
+    }
+  });
+
   test("seed the envelope target with every side's envelope mutation seeds, in their order and digest", () => {
     const vectors = hexUnder(specOf('vectors.json'), ['bytes', 'record']);
 
     // * the count and the digest every side's envelope fuzz test asserts of its seeds
-    assert.equal(vectors.length, 264);
+    assert.equal(vectors.length, 273);
     assert.equal(
       digestOf(inSeedOrder(vectors)),
-      '4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48'
+      'da5504c90e2f128e857c8111daf89b83a499ba58178644a2136b429900b6d702'
     );
     assert.deepEqual(SEEDS.envelope.slice(0, vectors.length), vectors);
   });
@@ -330,6 +354,46 @@ describe('the seeds', () => {
       SEEDS['proto-codecs'].some((seed) => {
         return seed.subarray(3).equals(hexBytesOf(deepest.bytes));
       })
+    );
+  });
+
+  test("seed the JSON form target with transcoding.json's readings of Everything and Edges, each after its message's byte", () => {
+    const messages = ['bead.transcoding.v1.Everything', 'bead.transcoding.v1.Edges'];
+    const readings = specOf('transcoding.json').readings.filter((entry) => {
+      return messages.includes(entry.message);
+    });
+
+    // * the first byte picks the message, even `Everything` and odd `Edges`, the rest its body
+    assert.equal(SEEDS['json-form'].length, readings.length);
+    readings.forEach((entry, index) => {
+      const seed = SEEDS['json-form'][index];
+
+      assert.equal(seed[0], messages.indexOf(entry.message), entry.name);
+      assert.ok(
+        seed
+          .subarray(1)
+          .equals(
+            entry.bodyBytes === undefined
+              ? Buffer.from(entry.body, 'utf8')
+              : hexBytesOf(entry.bodyBytes)
+          ),
+        entry.name
+      );
+    });
+    assert.ok(
+      SEEDS['json-form'].some((seed) => {
+        return seed[0] === 0;
+      }) &&
+        SEEDS['json-form'].some((seed) => {
+          return seed[0] === 1;
+        }),
+      'both messages are seeded'
+    );
+    assert.ok(
+      SEEDS['json-form'].some((seed) => {
+        return seed.equals(Buffer.of(1, 0xff));
+      }),
+      'a body that is not UTF-8 is a seed'
     );
   });
 
@@ -371,6 +435,10 @@ describe('the command line', () => {
       ['rust', 'broker-parcel'],
       ['rust', 'proto-codecs'],
       ['rust', 'mqtt-packets'],
+      ['rust', 'mqtt-websocket-frames'],
+      ['typescript', 'json-form'],
+      ['csharp', 'json-form'],
+      ['rust', 'json-form'],
     ]) {
       assert.deepEqual(argumentsOf(['run', side, target]), {
         command: 'run',

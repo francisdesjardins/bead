@@ -25,7 +25,8 @@ import type {
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
-import { csharpNameOfFailure } from '../names.ts';
+import { INDENT, statementOf } from '../lines.ts';
+import { csharpNameOfFailure, upperFirst } from '../names.ts';
 import { DEPRECATION_ID, deprecationTextOf } from '../target.ts';
 
 // types
@@ -50,8 +51,6 @@ interface IMember {
 
 // constants
 
-const INDENT = '    ';
-
 // the type and the codec of each encoding that is no message's
 const NATIVE = Object.freeze({
   raw: ['global::System.ReadOnlyMemory<byte>', 'global::Bead.PayloadCodecs.Raw'],
@@ -67,10 +66,6 @@ const DICTIONARY = 'global::System.Collections.Generic.Dictionary';
 const READ_ONLY_DICTIONARY = 'global::System.Collections.Generic.IReadOnlyDictionary';
 
 // helpers
-
-const upperFirst = (name: string): string => {
-  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
-};
 
 const hexOf = (character: string): string => {
   return (character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0');
@@ -158,6 +153,20 @@ export const obsoleteOf = (deprecation: IDeprecation | undefined, indent: string
   return deprecation === undefined ? [] : [`${indent}${attributeOf(deprecation)}`];
 };
 
+/**
+ * The C# type of a binding, each message's the qualified type `messageOf` gives by its full name:
+ * its message's, or a native payload's.
+ */
+export const bindingTypeOf = (
+  messageOf: (fullName: string) => string
+): ((binding: IBinding) => string) => {
+  return (binding) => {
+    return binding.encoding === 'proto' && binding.message !== undefined
+      ? messageOf(binding.message)
+      : NATIVE[binding.encoding as keyof typeof NATIVE][0];
+  };
+};
+
 // ! a required member's accessors, its getter marked: C# refuses `[Obsolete]` on a required member
 // of a type that is not obsolete itself (CS9042), and every use but the file's own initializer reads
 // the getter
@@ -233,24 +242,6 @@ const initializerOf = (
       ];
 };
 
-// a statement, `head` then a value of several lines at `indent`, its last line ending it
-const statementOf = (
-  head: string,
-  details: { readonly value: readonly string[]; readonly indent: string }
-): string[] => {
-  const [first, ...rest] = details.value;
-
-  if (rest.length === 0) {
-    return [`${details.indent}${head}${String(first)};`];
-  }
-
-  return [
-    `${details.indent}${head}${String(first)}`,
-    ...rest.slice(0, -1),
-    `${String(rest.at(-1))};`,
-  ];
-};
-
 // definition
 
 /**
@@ -316,11 +307,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       })
     ),
   ].sort();
-  const typeOf = (binding: IBinding): string => {
-    return binding.encoding === 'proto' && binding.message !== undefined
-      ? options.messageOf(binding.message)
-      : NATIVE[binding.encoding as keyof typeof NATIVE][0];
-  };
+  const typeOf = bindingTypeOf(options.messageOf);
   const notifiedOf = (procedure: IProcedureEntry): string => {
     return typeOf(procedure.notification ?? procedure.result);
   };

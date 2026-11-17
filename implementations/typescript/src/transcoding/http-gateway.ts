@@ -396,6 +396,17 @@ const carriesContent = (request: IHTTPRequestLike): boolean => {
   );
 };
 
+/**
+ * Whether the server it is mounted on read a request's body before it, wholly or in part (10.1, step
+ * 10): a byte of it read, or its end reached where it carries content; one that ended and carries
+ * none is the empty body, and a request that tells neither, untouched.
+ */
+const isBodyTaken = (request: IHTTPRequestLike): boolean => {
+  return (
+    request.readableDidRead === true || (request.readableEnded === true && carriesContent(request))
+  );
+};
+
 /** Whether an `if-none-match` holds `etag`, weakly compared, or `*`, alone or among others (RFC 9110 §13.1.2). */
 const matchesTag = (request: IHTTPRequestLike, etag: string): boolean => {
   return linesOf(request, 'if-none-match')
@@ -655,12 +666,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   const writers = new WeakMap<IResponseLike, (bytes: Uint8Array) => Promise<boolean>>();
   const dropped = new WeakSet<IResponseLike>();
-  const dropWriter = (response: IResponseLike, detail: string): void => {
+  // * a response is dropped and reported once: by its bound, its pace or a write that throws
+  const dropWriter = (response: IResponseLike, reason: unknown): void => {
     if (dropped.has(response)) {
       return;
     }
     dropped.add(response);
-    report(new Error(detail));
+    report(reason);
     response.destroy();
   };
   const writerOf = (response: IResponseLike): ((bytes: Uint8Array) => Promise<boolean>) => {
@@ -683,7 +695,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         late: () => {
           dropWriter(
             response,
-            `the response is dropped: minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} after sendGracePeriod ${String(pace.sendGracePeriod)}ms`
+            new Error(
+              `the response is dropped: minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} after sendGracePeriod ${String(pace.sendGracePeriod)}ms`
+            )
           );
         },
       },
@@ -714,7 +728,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       if (unsent() + bytes.length > maximumUnsentBytes) {
         dropWriter(
           response,
-          `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+          new Error(
+            `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+          )
         );
         return Promise.resolve(false);
       }
@@ -722,17 +738,29 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         const own = { sequence: ++sequence, completed: false };
         waiting = resolve;
         held = bytes.length;
-        const taken =
-          response.write(bytes, (error) => {
-            own.completed = true;
-            if (own.sequence !== sequence) {
-              return;
-            }
-            if (error !== undefined && error !== null) {
-              gone = true;
-            }
-            drain();
-          }) !== false;
+        let taken: boolean;
+        try {
+          taken =
+            response.write(bytes, (error) => {
+              own.completed = true;
+              if (own.sequence !== sequence) {
+                return;
+              }
+              // its client went: nothing to report, and the response is let go
+              if (error !== undefined && error !== null) {
+                gone = true;
+                response.destroy();
+              }
+              drain();
+            }) !== false;
+        } catch (error) {
+          // ! a client gone fails a write by its callback, so a write that throws is its host's bug:
+          // it is reported, and it settles false, so that no write rejects
+          gone = true;
+          dropWriter(response, error);
+          drain();
+          return;
+        }
         if (gone || own.completed) {
           drain();
           return;
@@ -848,6 +876,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     const { request } = exchange;
 
     return new Promise((resolve) => {
+      // * a body that came empty and ended before it, whatever read it: its `end` came already
+      if (request.readableEnded === true) {
+        exchange.isBodyRead = true;
+        resolve(new Uint8Array(0));
+
+        return;
+      }
+
       const chunks: Uint8Array[] = [];
       let received = 0;
       let isSettled = false;
@@ -1222,7 +1258,24 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (answer(exchange, { status: 204 }), undefined);
     }
 
-    // 10: its body as it comes
+    // 10: its body as it comes, none of it read before by the server it is mounted on, judged
+    // before its first byte is awaited
+    if (takesBody && isBodyTaken(request)) {
+      // ! a failure of its own: its words reported, never in the problem; over HTTP/1, its
+      // connection closed, since what is left of the body is never read (RFC 9112 §9.3)
+      report(new Error('a body read before the gateway took its request'));
+
+      return (
+        answerProblem(exchange, {
+          problem: {
+            ...problemOfOwn('failed', ''),
+            fields: request.httpVersionMajor === 1 ? { connection: 'close' } : {},
+          },
+        }),
+        undefined
+      );
+    }
+
     const body = takesBody ? await readBody(exchange) : undefined;
 
     if (takesBody && body === undefined) {
@@ -1359,11 +1412,17 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (isStream) {
       const write = writerOf(response);
+      // * a HEAD is answered as its GET begins, and ends at its head, its subscription with it (8.1)
+      const isHead = request.method === 'HEAD';
       // the stream's end follows its last queued event
       let written = Promise.resolve(false);
       const opened = createEventStream(
         {
           answer: (problem) => {
+            if (isHead) {
+              release();
+            }
+
             answerProblem(exchange, { problem });
             close();
           },
@@ -1379,6 +1438,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
             });
+
+            if (isHead) {
+              // ! its place freed before its socket takes its head, where its caller may ask again,
+              // never left to its response's `close`
+              isGone = true;
+              release();
+              opened.close();
+              close();
+              response.end();
+            }
           },
           write: async (text) => {
             if (isGone) {
@@ -1623,7 +1692,26 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     return index === undefined ? undefined : ofMethod[index];
   };
 
-  const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
+  // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported once; a
+  // response whose head is unsent is answered 500, any other destroyed, as is one whose 500 throws
+  // too (transcoding 7.6)
+  const answerUnforeseen = (exchange: IExchange, error: unknown): void => {
+    report(error);
+
+    try {
+      if (!exchange.response.headersSent) {
+        answerProblem(exchange, { problem: problemOfOwn('failed', '') });
+
+        return;
+      }
+    } catch {
+      // its host failed the 500 as it failed the rest
+    }
+
+    exchange.response.destroy();
+  };
+
+  const route = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
     const target = requestTargetOf(request.url);
     const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
     const path = target === undefined ? undefined : rawPathOf(target.path);
@@ -1707,13 +1795,18 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       response.setHeader('access-control-expose-headers', '*');
     }
 
-    // 5: a request of no origin from another site, but a navigation to what reads alone
+    // 5: a request of no origin from another site, but a GET navigation no `object` or `embed`
+    // makes, to what reads alone (web.dev's resource isolation policy)
     const site = headerOf(request, 'sec-fetch-site');
 
     if (origin === undefined && (site === 'same-site' || site === 'cross-site')) {
-      const isNavigation = headerOf(request, 'sec-fetch-mode') === 'navigate';
-      const navigated =
-        path === undefined || request.method !== 'GET' ? undefined : chosenOf(path, 'GET');
+      const destination = headerOf(request, 'sec-fetch-dest');
+      const isNavigation =
+        headerOf(request, 'sec-fetch-mode') === 'navigate' &&
+        request.method === 'GET' &&
+        destination !== 'object' &&
+        destination !== 'embed';
+      const navigated = path === undefined || !isNavigation ? undefined : chosenOf(path, 'GET');
 
       if (!isNavigation || !(isDocument || navigated?.isNavigable === true)) {
         refuse(exchange, {
@@ -1762,14 +1855,25 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     serve(exchange, { chosen, path, query: target.query }).catch((error: unknown) => {
-      // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
-      report(error);
-      answerProblem(exchange, {
-        problem: problemOfOwn('failed', ''),
-      });
+      answerUnforeseen(exchange, error);
     });
 
     return true;
+  };
+
+  // * a throw of its host's within its own turn, a refusal's writeHead, say, ends its exchange and
+  // never reaches Node's `request` emit
+  const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
+    try {
+      return route(request, response);
+    } catch (error) {
+      answerUnforeseen(
+        { address: 'local', isBodyRead: false, port: undefined, request, response },
+        error
+      );
+
+      return true;
+    }
   };
 
   /** Serves the document (11.1): `GET` and `HEAD`, its tag, and a 304 to a request that holds it. */

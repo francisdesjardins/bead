@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-interop-server"
-description = "The Rust server of Bead's interop service, over WebSocket, over HTTP and over MQTT 5, which the other sides' clients call, and the Rust client's trials against each side's server."
+description = "The Rust server of Bead's interop service, over WebSocket, over HTTP and over MQTT 5, and its HTTP/JSON gateway, which the other sides' clients call, and the Rust client's trials against each side's server and gateway."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,21 +19,27 @@ name = "bead-interop-server"
 path = "src/main.rs"
 
 [dependencies]
-bead = { workspace = true, features = ["websocket", "http", "mqtt"] }
-bead-interop = { workspace = true }
+bead = { workspace = true, features = ["websocket", "http", "mqtt", "gateway"] }
+# the Transcoding service and its gateway, beadc's table of it (decision 0052)
+bead-interop = { workspace = true, features = ["transcoding"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
 
 [dev-dependencies]
-bead = { workspace = true, features = ["testing", "websocket", "http", "mqtt"] }
-tokio = { workspace = true, features = ["rt", "time", "net", "sync"] }
+bead = { workspace = true, features = ["testing", "websocket", "http", "mqtt", "gateway"] }
+tokio = { workspace = true, features = ["rt", "time", "net", "sync", "io-util"] }
 tokio-util = { workspace = true }
 bytes = { workspace = true }
 serde_json = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 libtest-mimic = { workspace = true }
+# the stream of a gateway's subscription, read event by event, and the request of a procedure that
+# takes none
+futures-util = { workspace = true }
+buffa-types = { workspace = true }
 
-# the Rust client against each side's interop server, a trial per case per transport per server
+# the Rust client against each side's interop server, a trial per case per transport per server, and
+# its HTTP caller against the other sides' gateways, a trial per case per gateway
 [[test]]
 name = "interop"
 harness = false

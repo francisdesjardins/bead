@@ -7,16 +7,23 @@
 //! Packet Size and its Keep Alive; its will the participant's GONE, `QoS` 1, RETAIN 0, a Will Delay
 //! Interval of 0. Nothing reconnects, subscribes again or holds a publication while it is down.
 //! Each subscription is of `QoS` 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
-//! group's its shared subscription, held once its SUBACK grants `QoS` 1; one let go once its
-//! UNSUBACK came of 0x00 or 0x11, any other code refusing it and none within its connect timeout
-//! failing it, its link and its filter kept. Each publication is of `QoS` 1, or 0 at most once,
+//! group's its shared subscription, held once its SUBACK grants `QoS` 1, refused on `QoS` 0 or 2
+//! granted, its filter kept, and on 0x80 or more; one let go once its UNSUBACK came of 0x00 or
+//! 0x11, a code of 0x80 or more refusing it and none within its connect timeout failing it, its
+//! link and its filter kept. Each publication is of `QoS` 1, or 0 at most once,
 //! taken once its PUBLISH is written, RETAIN 0, a life in whole seconds where asked and no other
 //! property, counted to its byte and refused past its CONNACK's Maximum Packet Size, held to its
 //! CONNACK's Receive Maximum, later ones waiting in their order, no other packet delayed for them;
-//! its PUBACK of 0x10 says no subscriber, of 0x80 or more refuses it. Its Keep Alive counts from
-//! the last packet written. Each message is handed on before its PUBACK, which goes once it is
-//! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
-//! network connection, no DISCONNECT, its link lost. A DISCONNECT of 0x8E tells its link taken
+//! its PUBACK of 0x00, or of none, takes it, of 0x10 says no subscriber, of 0x80 or more refuses
+//! it. A PUBACK's, a SUBACK's or an UNSUBACK's code of 0x80 or more refuses its request whether or
+//! not its packet's table names it; one under 0x80 its table does not name, or a SUBACK or an
+//! UNSUBACK whose count of codes is not one, is a packet its client cannot read, awaited or not, in
+//! every phase (spec 15.29). Its Keep Alive, the shorter of its own and its CONNACK's Server Keep
+//! Alive, a PINGREQ unanswered for half of it losing its link, counts from the last packet written.
+//! Each message is handed on before its PUBACK, which goes once it is
+//! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, or one its
+//! client cannot read, closes its network connection, no DISCONNECT, its link lost, its start
+//! failed before its CONNACK, its stop ended where it stopped, no down told, its will going. A DISCONNECT of 0x8E tells its link taken
 //! over; any other end, lost. Its stop takes no publication, sends what waits on the quota and
 //! awaits each PUBACK, fails what has not gone by then, sends an UNSUBSCRIBE for each filter its
 //! link asked or holds, one filter a packet, all at once, and awaits their UNSUBACKs, all within
@@ -37,7 +44,6 @@ use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future::{Either, select};
-use rustls::ClientConfig;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -50,7 +56,7 @@ use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{HoldWithinOptions, hold_finite, hold_within};
 use crate::errors::ProgrammerError;
 use crate::mqtt::link::{
-    Address, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
+    Address, Incoming, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
 };
 use crate::mqtt::packets::{
     Connect, LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE, MqttAcknowledgement, MqttConnack,
@@ -62,6 +68,7 @@ use crate::mqtt::packets::{
 use crate::mqtt::quota::{Queued, SendQuota};
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
 use crate::net::racing::RacingOptions;
+use crate::net::tls::{ClientTls, TlsOptions, read_tls};
 use crate::owner::{Owned, Owner, WeakOwner};
 use crate::platform::{self, Handle};
 use crate::router::types::BoxFuture;
@@ -74,7 +81,8 @@ use crate::transport::{Listeners, caught, caught_future};
 /// [`crate::CONNECT_TIMEOUT`] is the transport client's.
 pub const MQTT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30).
+/// Its Keep Alive, by default: 30 seconds, its will inside two heartbeats where its CONNACK names no
+/// Server Keep Alive (spec 15.26, 15.30).
 pub const KEEP_ALIVE: Duration = Duration::from_secs(30);
 
 /// The type an MQTT 5 adapter's handles begin with.
@@ -118,15 +126,17 @@ pub struct MqttBrokerAdapterOptions {
     /// connect timeout, or as a stop meets it, a later answer serving nothing; what it fails with
     /// fails its start, its cause; an answer that is no password fails it, refused.
     pub password_provider: Option<CredentialProvider>,
-    /// The TLS its `mqtts` or `wss` connection speaks, a client certificate its broker ties to its
-    /// id among it where it holds one: rustls's over aws-lc-rs, the platform's verifier judging its
-    /// broker, when none. Refused over `mqtt` and `ws`.
-    pub tls: Option<Arc<ClientConfig>>,
+    /// The authorities its `mqtts` or `wss` connection judges its broker by and the client
+    /// certificate it presents, which its broker ties to its id (spec 15.39), read as it is built:
+    /// rustls's over aws-lc-rs, the platform's verifier judging its broker, when none. Refused over
+    /// `mqtt` and `ws`.
+    pub tls: Option<TlsOptions>,
     /// Its CONNECT's Maximum Packet Size, the largest packet its broker sends it, from 1 to
     /// 268,435,460 (spec 15.30): [`MAXIMUM_PACKET_SIZE`] when none.
     pub maximum_packet_size: Option<u32>,
     /// Its CONNECT's Keep Alive, sent in whole seconds rounded up, from 1 to 65,535 seconds (spec
-    /// 15.30): [`KEEP_ALIVE`] when none.
+    /// 15.30): [`KEEP_ALIVE`] when none. It is the Keep Alive its link runs unless its CONNACK names
+    /// a shorter Server Keep Alive; a PINGREQ unanswered for half of it loses its link (spec 15.26).
     pub keep_alive: Option<Duration>,
     /// How long it waits: its start, for its password and its CONNACK; a subscription let go, for
     /// its UNSUBACK; its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT
@@ -198,7 +208,7 @@ struct Shared {
     address: Address,
     secret: Secret,
     has_certificate: bool,
-    tls: Option<Arc<ClientConfig>>,
+    tls: ClientTls,
     maximum_packet_size: u32,
     keep_alive: Duration,
     connect_timeout: Duration,
@@ -253,6 +263,26 @@ fn reason_of(code: u8) -> String {
     format!("{}, {}", code_of(code), reason_name_of(code))
 }
 
+// a SUBACK or an UNSUBACK of a count of Reason Codes other than one, as its loss names it: `a
+// SUBACK of 2 Reason Codes for one filter`; none for any other packet
+pub(super) fn count_of(packet: &MqttPacket) -> Option<String> {
+    let (name, acknowledgement) = match packet {
+        MqttPacket::Suback(acknowledgement) => ("a SUBACK", acknowledgement),
+        MqttPacket::Unsuback(acknowledgement) => ("an UNSUBACK", acknowledgement),
+        MqttPacket::Connack(_)
+        | MqttPacket::Publish(_)
+        | MqttPacket::Puback(_)
+        | MqttPacket::Pingresp
+        | MqttPacket::Disconnect(_) => return None,
+    };
+
+    match acknowledgement.reason_codes.len() {
+        1 => None,
+        0 => Some(format!("{name} of no Reason Code")),
+        count => Some(format!("{name} of {count} Reason Codes for one filter")),
+    }
+}
+
 // ── The adapter ──────────────────────────────────────────────────────────────────────────────
 
 /// An adapter over MQTT 5 (spec 15.25 to 15.31): a broker adapter as any, its acknowledgements
@@ -284,10 +314,10 @@ impl MqttBrokerAdapter {
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
-    /// IO driver; for an id that is no Client Identifier, a URL none of its four schemes names, TLS
-    /// over `mqtt` or `ws`, a password that is none, a password beside its provider or either beside
-    /// a client certificate, a Maximum Packet Size outside 1 to 268,435,460, or a Keep Alive or a
-    /// connect timeout spec 1.4 does not hold.
+    /// IO driver; for an id that is no Client Identifier, a URL none of its four schemes names, a
+    /// `tls` over `mqtt` or `ws`, or one that does not read (spec 15.39), a password that is none, a
+    /// password beside its provider or either beside a client certificate, a Maximum Packet Size
+    /// outside 1 to 268,435,460, or a Keep Alive or a connect timeout spec 1.4 does not hold.
     pub fn new(options: &MqttBrokerAdapterOptions) -> Result<Self, ProgrammerError> {
         // * in whole seconds rounded up, as its CONNECT announces it and its link runs it (spec
         // 15.26)
@@ -322,19 +352,17 @@ impl MqttBrokerAdapter {
                 "an MQTT 5 adapter's url is mqtt, mqtts, ws or wss, not {url}"
             ))
         })?;
-        let has_certificate = options
-            .tls
-            .as_ref()
-            .is_some_and(|tls| tls.client_auth_cert_resolver.has_certs());
+        // * one given none of its members is none
+        let tls = options.tls.as_ref().filter(|tls| !tls.is_empty());
 
-        if options.tls.is_some() && !address.scheme.is_tls() {
-            return Err(refused(if has_certificate {
-                format!("a TLS client certificate is carried over mqtts or wss, not {url}")
-            } else {
-                format!("TLS is spoken over mqtts or wss, not {url}")
-            }));
+        if tls.is_some() && !address.scheme.is_tls() {
+            return Err(refused(format!(
+                "a TLS client certificate is carried over mqtts or wss, not {url}"
+            )));
         }
 
+        let read = tls.map(read_tls).transpose()?.unwrap_or_default();
+        let has_certificate = tls.is_some_and(|tls| tls.certificate.is_some());
         let secret = secret_of((options, has_certificate))?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an MQTT 5 adapter")?;
         let platform_clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
@@ -360,7 +388,7 @@ impl MqttBrokerAdapter {
             address,
             secret,
             has_certificate,
-            tls: options.tls.clone(),
+            tls: ClientTls::Read(read),
             maximum_packet_size,
             keep_alive,
             connect_timeout,
@@ -555,6 +583,9 @@ enum Outgoing {
         packet: Vec<u8>,
         publication: Option<u64>,
     },
+    // over a WebSocket, the pong of a ping's payload, which dates no Keep Alive: MQTT 5.0
+    // §3.1.2.10 counts Control Packets
+    Pong(Bytes),
     // its side ended once what was written went, then told
     Close,
 }
@@ -589,9 +620,23 @@ async fn reading(mut reader: Reader, tasked: Tasked) {
     loop {
         match unless_ended(reader.next(), &ended).await {
             None => return,
-            Some(Ok(Some(bytes))) => owner.offer(Box::new(move |state: &mut State| {
-                state.read((serial, bytes));
-            })),
+            Some(Ok(Some(Incoming::Bytes(bytes)))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.read((serial, bytes));
+                }));
+            }
+            Some(Ok(Some(Incoming::Ping(payload)))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.pinged((serial, payload));
+                }));
+            }
+            Some(Ok(Some(Incoming::Close))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.closed_by_its_broker(serial);
+                }));
+
+                return;
+            }
             Some(Ok(None)) => {
                 owner.offer(Box::new(move |state: &mut State| {
                     state.lost((serial, "its broker ended its network connection".to_owned()));
@@ -640,6 +685,19 @@ async fn writing(
                 Some(Ok(())) => owner.offer(Box::new(move |state: &mut State| {
                     state.written((serial, publication));
                 })),
+                Some(Err(error)) => {
+                    let reason = error.to_string();
+
+                    owner.offer(Box::new(move |state: &mut State| {
+                        state.lost((serial, reason));
+                    }));
+
+                    return;
+                }
+            },
+            Outgoing::Pong(payload) => match unless_ended(writer.pong(payload), &aborted).await {
+                None => return,
+                Some(Ok(())) => {}
                 Some(Err(error)) => {
                     let reason = error.to_string();
 
@@ -1019,8 +1077,7 @@ async fn linking((shared, owner): (Arc<Shared>, WeakOwner<State>), linking: Link
         };
         let options = OpenOptions {
             racing: &shared.racing,
-            tls: shared.tls.as_ref(),
-            maximum_packet_size: shared.maximum_packet_size,
+            tls: &shared.tls,
         };
         let opened = raced(
             open(&shared.address, &options),
@@ -1384,8 +1441,10 @@ impl State {
         link.quota = SendQuota::new(connack.receive_maximum.unwrap_or(RECEIVE_MAXIMUM));
         link.is_shared_refused = connack.shared_subscription_available == Some(false);
 
-        if let Some(seconds) = connack.server_keep_alive {
-            link.keep_alive = Duration::from_secs(u64::from(seconds));
+        // * the shorter of its own and its Server Keep Alive, its own under 0 ([MQTT-3.2.2-21],
+        // MQTT 5.0 §3.1.2.10)
+        if let Some(seconds) = connack.server_keep_alive.filter(|&seconds| seconds > 0) {
+            link.keep_alive = link.keep_alive.min(Duration::from_secs(u64::from(seconds)));
         }
 
         shared
@@ -1409,9 +1468,7 @@ impl State {
             reply.settle(Ok(()));
         }
 
-        if !keep_alive.is_zero() {
-            self.arm_keep_alive((serial, keep_alive));
-        }
+        self.arm_keep_alive((serial, keep_alive));
     }
 
     // ── Its keep alive ───────────────────────────────────────────────────────────────────────
@@ -1424,8 +1481,8 @@ impl State {
         }
     }
 
-    // * a PINGREQ once nothing went for its Keep Alive; a PINGREQ left unanswered by the next one,
-    // its link lost (MQTT 5.0 §3.1.2.10)
+    // * a PINGREQ once nothing went for its Keep Alive in force; one whose PINGRESP has not come
+    // within half of it, its link lost (MQTT 5.0 §3.1.2.10)
     fn keep_alive(&mut self, serial: u64) {
         let now = self.now();
         let Some(link) = self.link_of(serial) else {
@@ -1434,7 +1491,7 @@ impl State {
 
         if link.is_pinged {
             let reason = BrokerError::failed(format!(
-                "the link of {} had no PINGRESP within its Keep Alive",
+                "the link of {} had no PINGRESP within half its Keep Alive",
                 self.shared.id
             ));
 
@@ -1454,7 +1511,7 @@ impl State {
             link.is_pinged = true;
             link.send(write_pingreq());
 
-            link.keep_alive
+            link.keep_alive.checked_div(2).unwrap_or(link.keep_alive)
         } else {
             link.keep_alive.saturating_sub(since)
         };
@@ -1505,28 +1562,41 @@ impl State {
                         link.buffer.clear();
                     }
 
+                    // ! one Reason Code per filter its SUBSCRIBE or UNSUBSCRIBE named, which was
+                    // one: any other count is a packet its client cannot read, judged before
+                    // anything looks for what awaits it ([MQTT-3.8.4-6], [MQTT-3.11.3-2])
+                    if let Some(count) = count_of(&packet) {
+                        self.unreadable((serial, count));
+
+                        return;
+                    }
+
                     self.on_packet((serial, packet));
                 }
-                // ! past its own bound, or malformed: its network connection closed, no
-                // DISCONNECT, its link lost (spec 15.29)
                 Err(refusal) => {
-                    let reason = BrokerError::failed(format!(
-                        "the link of {} went down: its broker sent {refusal}",
-                        self.shared.id
-                    ));
-
-                    self.retire((
-                        serial,
-                        End {
-                            reason,
-                            reset: true,
-                        },
-                    ));
+                    self.unreadable((serial, refusal.to_string()));
 
                     return;
                 }
             }
         }
+    }
+
+    // ! past its own bound, or a packet its client cannot read: its network connection closed, no
+    // DISCONNECT, in every phase, its link lost, its start failed or its stop ended (spec 15.29)
+    fn unreadable(&mut self, (serial, what): (u64, String)) {
+        let reason = BrokerError::failed(format!(
+            "the link of {} went down: its broker sent {what}",
+            self.shared.id
+        ));
+
+        self.retire((
+            serial,
+            End {
+                reason,
+                reset: true,
+            },
+        ));
     }
 
     fn on_packet(&mut self, (serial, packet): (u64, MqttPacket)) {
@@ -1843,6 +1913,8 @@ impl State {
         let Some(publication) = link.in_flight.remove(&acknowledgement.packet_identifier) else {
             return;
         };
+        // * 0x00, or none, takes it, 0x10 says no subscriber, and 0x80 or more, its table's or not,
+        // refuses it; its reader refused any other (spec 15.28)
         let code = acknowledgement.reason_code();
         let outcome = if code >= REFUSED {
             Err(BrokerError::failed(format!(
@@ -2039,8 +2111,8 @@ impl State {
             return;
         }
 
-        // ! kept where its broker may hold it, QoS 0 granted among it, which its stop lets go; a
-        // code of 0x80 or more installed nothing
+        // ! kept where its broker may hold it, QoS 0 or 2 granted, which its stop lets go; a code of
+        // 0x80 or more, its table's or not, installed nothing (spec 15.27)
         if code >= REFUSED {
             link.forget((&subscribing.key, subscribing.record));
         }
@@ -2176,8 +2248,8 @@ impl State {
             timer.cancel();
         }
 
-        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and any
-        // other refuses it, under 0x80 among them (spec 15.27)
+        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and one
+        // of 0x80 or more, its table's or not, refuses it; its reader refused any other (spec 15.27)
         let code = acknowledgement.reason_code();
         let outcome = if code != SUCCESS && code != NO_SUBSCRIPTION_EXISTED {
             Err(BrokerError::failed(format!(
@@ -2458,18 +2530,45 @@ impl State {
         ));
     }
 
-    // * its link lost: once, as its network connection ends; a stop's end once its DISCONNECT went
-    fn lost(&mut self, (serial, why): (u64, String)) {
+    // over a WebSocket, a ping answered with its pong
+    fn pinged(&mut self, (serial, payload): (u64, Bytes)) {
+        if let Some(link) = self.link_of(serial) {
+            link.outgoing.send(Outgoing::Pong(payload)).ok();
+        }
+    }
+
+    // * over a WebSocket, its broker's close: its link lost as `lost` words it, its down told once,
+    // and its close answered with its own once what was written went (RFC 6455 §5.5.1)
+    fn closed_by_its_broker(&mut self, serial: u64) {
+        let reason = self.lost_for("its broker closed its WebSocket");
+
+        self.retire((
+            serial,
+            End {
+                reason,
+                reset: false,
+            },
+        ));
+    }
+
+    // what a link lost for `why` fails what it awaits with
+    fn lost_for(&self, why: &str) -> BrokerError {
         let id = &self.shared.id;
         let is_connecting = self
             .link
             .as_ref()
             .is_some_and(|link| matches!(link.phase, Phase::Connecting { .. }));
-        let reason = BrokerError::failed(if is_connecting {
+
+        BrokerError::failed(if is_connecting {
             format!("the link of {id} ended before its CONNACK: {why}")
         } else {
             format!("the link of {id} went down: {why}")
-        });
+        })
+    }
+
+    // * its link lost: once, as its network connection ends; a stop's end once its DISCONNECT went
+    fn lost(&mut self, (serial, why): (u64, String)) {
+        let reason = self.lost_for(&why);
         // * its broker closing once it read its DISCONNECT is a clean end
         let is_disconnecting = self.link_of(serial).is_some_and(|link| {
             matches!(

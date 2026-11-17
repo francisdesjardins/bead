@@ -12,14 +12,14 @@
 // dependencies
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { bufDiagnosticOf, type IDiagnostic, InputError } from '../diagnostics.ts';
 import { BEADC_FILES, displayOf, pathOnDisk } from '../roots.ts';
 import { Category } from '../rules.ts';
+import { temporaryFolderOf } from '../work-area.ts';
 
 // types
 
@@ -295,7 +295,7 @@ export const isUnderScope = (path: string, scope: string): boolean => {
  * refuses.
  */
 export const bufFindings = (current: Uint8Array, options: IBufOptions): IBufFinding[] => {
-  const folder = mkdtempSync(join(tmpdir(), 'beadc-breaking-'));
+  const folder = temporaryFolderOf('breaking-');
 
   try {
     const currentFile = join(folder, 'current.binpb');

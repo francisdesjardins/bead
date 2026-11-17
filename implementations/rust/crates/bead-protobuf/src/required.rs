@@ -44,35 +44,34 @@ pub(crate) enum Presence {
     Held,
 }
 
-/// Refuses `message` where it leaves a required field unset, at any depth.
-///
-/// Its reason is spec 17.2's, `a required field unset`; its cause names the first field the walk
-/// finds by its full name, a field of the schema, never a key a peer sent, and its way there.
-/// `message` is of `schema`'s message, and tells whether a field was given: a view Buffa decoded,
-/// or a [`DynamicMessage`](buffa_descriptor::reflect::DynamicMessage); never an owned message,
-/// which holds a required scalar bare. A closed enum's number its enum does not declare is no value
-/// of a required field, which only an application sets, since a reading of 17.9.8 sets none. The
-/// walk goes 100 messages deep below the top one at most, as a reader reads (17.9.3).
-///
-/// # Errors
-///
-/// A [`CodecRefusal`] for a message that leaves a field of `LEGACY_REQUIRED` presence unset, or
-/// that nests a message reaching one more than 100 deep below the top one, `nested past 100`.
-pub fn check_required(
-    message: &dyn ReflectMessage,
-    schema: &ProtoSchema,
-) -> Result<(), CodecRefusal> {
-    checked(message, (schema, Presence::Given))
-}
-
 /// The first field of `LEGACY_REQUIRED` presence the walk finds unset in `message`, and its way
-/// there, as [`check_required`] walks it; none where it leaves none, or nests past the bound.
-#[cfg(test)]
+/// there, as [`checked`] walks it given [`Presence::Given`]; none where it leaves none, or nests
+/// past the bound.
+#[cfg(any(test, feature = "transcoding"))]
 pub(crate) fn unset_of(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Option<Unset> {
     unset_in(message, (schema, Presence::Given)).ok().flatten()
 }
 
-/// [`check_required`] of a message whose `has` witnesses as `presence` says.
+/// Refuses `message` where it leaves a required field unset, at any depth, its `has` witnessing as
+/// `presence` says: the walk each codec runs on a read and on a write.
+///
+/// Its reason is spec 17.2's, `a required field unset`; its cause names the first field the walk
+/// finds by its full name, a field of the schema, never a key a peer sent, and its way there.
+/// `message` is of `schema`'s message. Given [`Presence::Read`] or [`Presence::Given`], it tells
+/// whether a field was given: a view Buffa decoded, or a
+/// [`DynamicMessage`](buffa_descriptor::reflect::DynamicMessage). Given [`Presence::Held`], it is
+/// an owned message, which holds a required scalar bare, so the walk judges only the messages it
+/// holds. A closed enum's number its enum does not declare is no value of a required field, which
+/// only an application sets, since a reading of 17.9.8 sets none. Given [`Presence::Given`] or
+/// [`Presence::Held`], the walk goes 100 messages deep below the top one at most, as a reader
+/// reads (17.9.3); given [`Presence::Read`], it judges no depth, the records' check having held
+/// the wire's to the bound.
+///
+/// # Errors
+///
+/// A [`CodecRefusal`] for a message that leaves a field of `LEGACY_REQUIRED` presence unset, or,
+/// given [`Presence::Given`] or [`Presence::Held`], that nests a message reaching one more than
+/// 100 deep below the top one, `nested past 100`.
 pub(crate) fn checked(
     message: &dyn ReflectMessage,
     (schema, presence): (&ProtoSchema, Presence),
@@ -128,9 +127,17 @@ fn unset_in(
 }
 
 /// The first field of `LEGACY_REQUIRED` presence the walk found unset, and its way there from the
-/// top message: a refusal's cause, which names them.
+/// top message: a refusal's cause, which names the field as every side names it, and its way, which
+/// a gateway places a refusal by (transcoding 7.4).
 #[derive(Debug, Clone)]
 pub(crate) struct Unset {
+    #[cfg_attr(
+        not(any(test, feature = "transcoding")),
+        expect(
+            dead_code,
+            reason = "its way places a gateway's refusal, under transcoding alone"
+        )
+    )]
     steps: Vec<UnsetStep>,
     field: FieldDescriptor,
     holder: String,
@@ -139,14 +146,14 @@ pub(crate) struct Unset {
 impl Unset {
     /// Each step from the top message to the one that leaves it unset.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn steps(&self) -> &[UnsetStep] {
         &self.steps
     }
 
     /// The field left unset.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn field(&self) -> &FieldDescriptor {
         &self.field
     }
@@ -158,48 +165,29 @@ impl Unset {
     }
 }
 
-// its full name, then its way there: each field by its name, an item's index or an entry's key
+// its full name, as the other sides word it; its way there is its steps', which place it (7.4)
 impl fmt::Display for Unset {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "a proto message leaves {} unset",
             self.full_name()
-        )?;
-
-        for (at, step) in self.steps.iter().enumerate() {
-            formatter.write_str(if at == 0 { ", at " } else { "." })?;
-            formatter.write_str(step.field.name())?;
-
-            match &step.at {
-                Place::Field => {}
-                Place::Index(index) => write!(formatter, "[{index}]")?,
-                Place::Key(MapKey::String(key)) => write!(formatter, "[{key:?}]")?,
-                Place::Key(key) => write!(formatter, "[{}]", key_of(key))?,
-            }
-        }
-
-        Ok(())
+        )
     }
 }
 
 impl Error for Unset {}
 
-// a map's key that is no string, as protobuf's text format writes it
-fn key_of(key: &MapKey) -> String {
-    match key {
-        MapKey::Bool(key) => key.to_string(),
-        MapKey::I32(key) => key.to_string(),
-        MapKey::I64(key) => key.to_string(),
-        MapKey::U32(key) => key.to_string(),
-        MapKey::U64(key) => key.to_string(),
-        MapKey::String(key) => key.clone(),
-    }
-}
-
 /// A step of the walk's way to a field left unset: a field of a message, and the item's index of a
 /// repeated field, or the entry's key of a map.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    not(any(test, feature = "transcoding")),
+    expect(
+        dead_code,
+        reason = "its way places a gateway's refusal, under transcoding alone"
+    )
+)]
 pub(crate) struct UnsetStep {
     field: FieldDescriptor,
     at: Place,
@@ -208,14 +196,14 @@ pub(crate) struct UnsetStep {
 impl UnsetStep {
     /// The field the step takes.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn field(&self) -> &FieldDescriptor {
         &self.field
     }
 
     /// Where in its field it takes a message.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn place(&self) -> &Place {
         &self.at
     }
