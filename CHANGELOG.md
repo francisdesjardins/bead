@@ -33,6 +33,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
+  the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped
   with no lookup and no allocation, and a counted call allocates not a byte more than an uncounted
   one, which a gate counts through a counting allocator (debugging §3.3, §3.4).

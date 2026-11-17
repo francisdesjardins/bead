@@ -427,7 +427,9 @@ export const createWebSocketTransportClient = (
                     socket =
                       opened =
                       client.socket =
-                        new WebSocket(url, protocols, {
+                        // ! `?? []`: Chromium offers "undefined" for an `undefined` beside the
+                        // options, a subprotocol no server selects (spec 15.2)
+                        new WebSocket(url, protocols ?? [], {
                           closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
                           maxPayload,
                           // ! no permessage-deflate offer, as the C# client offers none: a third-party
