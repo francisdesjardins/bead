@@ -53,9 +53,9 @@
   <p class="gist">
     Bead is a binary protocol for calls between a client and a server. A request receives its
     result or its failure, a subscription its notifications, and the server can call its client
-    in turn. A large payload goes in chunks, and a call can be cancelled on the way. It all fits
-    in one small envelope, on any transport that delimits its messages. Here is a whole request,
-    byte by byte.
+    in turn. A large payload goes in chunks, and a call can be cancelled on the way. Every
+    envelope opens with the same 8-byte prefix and has no length of its own, so any transport
+    that delimits its messages can carry it. Here is a whole request, byte by byte.
   </p>
   {{bytes of="request" hero="true"}}
   <ul class="legend" aria-label="What each colour of bytes is">
@@ -114,19 +114,19 @@
     </li>
     <li>
       <strong>One credit paces a subscription as it paces a transfer</strong
-      ><span>A client takes notifications only as fast as it handles them, and what waits is kept by
-        key, so a state keeps its latest value.</span>
+      ><span>A client that asks for it takes notifications only as fast as it handles them. What
+        waits can be kept by key, so a state keeps its latest value.</span>
     </li>
     <li>
       <strong>The spec’s conformance files are its executable form</strong
-      ><span>Every unit of the spec is cited by a file or carries the reason none does, and each
-        side plays those files rather than its own copy, the Rust side the part it reaches.</span>
+      ><span>Every unit of the spec is cited by a file, or carries the reason none does. Each side
+        plays those files, not a copy of its own, and the Rust side plays the part it reaches.</span>
     </li>
   </ul>
   <p class="space">
     The architecture guide sets Bead
-    <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>,
-    each of their cells quoting that project’s own pages. Before choosing Bead, weigh what it
+    <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
+    The other projects’ cells quote or sum up their own pages. Before choosing Bead, weigh what it
     lacks: it is unpublished, it has no production use, it speaks three languages, and it has one
     maintainer.
   </p>
@@ -286,7 +286,7 @@
     <p>
       The gateway judges a request by the HTTP transport’s gates, in the same order, and adds a gate
       of Fetch Metadata after the origin’s: a request with no <code>origin</code> from another site
-      is refused 403, but a
+      is refused 403, unless it is a
       navigation to the document or to the <code>GET</code> of a procedure marked
       <code>NO_SIDE_EFFECTS</code>. A call waits 5 s for its answer by
       default, then receives 504, and no field of the request changes that timeout. A request
@@ -315,7 +315,7 @@
     <code>beadc breaking</code> holds a <code>.proto</code> to its last release and lists what
     breaks: a procedure deleted, a message switched, an admission tightened, a route shadowed. Under
     <code>WIRE</code>, a peer built from the earlier release must still talk with one built from the
-    current. Under <code>API</code>, the default, which holds every <code>WIRE</code> rule, code
+    current. Under <code>API</code>, the default, every <code>WIRE</code> rule holds, and code
     written against the earlier generated API must also still compile and mean the same.
   </p>
   <p>
@@ -349,7 +349,7 @@
     <li>
       <strong>The limits</strong
       ><span>Nothing announces them. What exceeds the other’s limit is refused, never
-        truncated, save a failure’s detail, cut at its bound on a character’s boundary.</span>
+        truncated. A failure’s detail alone is cut at its bound, on a character’s boundary.</span>
     </li>
     <li>
       <strong>Any other bit</strong
@@ -359,7 +359,8 @@
   <h3 id="versions-bead">Bead itself</h3>
   <p>
     Bead’s versions run on three axes, each moving alone: the layout, the first byte of every
-    envelope; the specification; and each implementation. Before 1.0.0 a minor may break, and
+    envelope; the specification; and the product, one version that the three implementations and
+    <code>beadc</code> share. Before 1.0.0 a minor may break, and
     <a href="{{blob path="CHANGELOG.md"}}">the changelog</a> says what each release changes.
   </p>
 </section>
@@ -394,10 +395,8 @@
   </p>
   {{implementations}}
   <p class="space">
-    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. Its WebSocket
-    and HTTP transports, its MQTT 5 binding and its gateway meet the other two sides in the
-    interop, both ways. The core also compiles for
-    <code>wasm32-unknown-unknown</code>.
+    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. The core also
+    compiles for <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     Parity holds down to the field. Where one platform cannot do what another can, the difference
@@ -419,9 +418,8 @@
   </p>
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
-    Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The three sides call each other in CI over WebSocket, HTTP and MQTT 5, and through
-    their gateways, and the TypeScript and C# sides over AMQP 1.0 too.
+    In CI, the three sides call each other over WebSocket, HTTP and MQTT 5, and through their
+    gateways, and the TypeScript and C# sides over AMQP 1.0 too.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -457,7 +455,8 @@
     <summary>The specification first</summary>
     <p>
       A behaviour is written in <a href="{{blob path="spec/spec.md"}}"><code>spec/spec.md</code></a>
-      before it is coded, its MUST and SHOULD in the sense of RFC 2119. The conformance files then
+      before it is coded, its MUST and SHOULD in the sense of BCP 14 (RFC 2119, RFC 8174). The
+      conformance files then
       play it, and every side reads them from <code>spec/</code>, with no copy of its own. Where no
       file can play it, each side that carries it has a twin test, named by one sentence in every
       language’s case: the TypeScript side’s
@@ -465,9 +464,7 @@
       is the C# side’s
       <code>Says_at_connect_that_it_listens_then_listens_a_batch_heard_in_order_acknowledged_by_the_next_listen</code>
       and the Rust side’s
-      <code>says_at_connect_that_it_listens_then_listens_a_batch_heard_in_order_acknowledged_by_the_next_listen</code>. Every difference between the sides
-      is a row of <a href="{{blob path="docs/support.md"}}"><code>docs/support.md</code></a>, with the
-      test that shows it.
+      <code>says_at_connect_that_it_listens_then_listens_a_batch_heard_in_order_acknowledged_by_the_next_listen</code>.
     </p>
   </details>
   <details class="more" id="methode-horloge">
@@ -563,7 +560,7 @@
     <summary>A failure, a notification, and a router’s envelopes</summary>
     <p>
       A failure arrives as <code>error</code>, a <code>FailureError</code> that says who raised it
-      and where. A notification has no outgoing step, no options and no duration.
+      and where. A notification heard is a single step in, with no options and no duration.
     </p>
     {{code of="debug-failure"}}
     <p>
@@ -683,8 +680,8 @@
         </tr>
         <tr>
           <td>The credential</td>
-          <td>A credential that does not hold</td>
-          <td><code>SESSION_REQUIRED</code> (32), like a 401</td>
+          <td>A scheme the server does not take, or a credential that does not hold</td>
+          <td><code>CREDENTIAL_UNSUPPORTED</code> (36) or <code>SESSION_REQUIRED</code> (32), like a 401</td>
         </tr>
         <tr>
           <td>The admission</td>
@@ -714,12 +711,12 @@
   <h3 id="securite-justificatif">A credential, a session</h3>
   <p>
     Over HTTP, one says who one is with a session cookie or an <code>Authorization: Bearer</code>
-    token. Bead has both, and a third way.
+    token. Bead has an equivalent of each, and a third way.
   </p>
   <ul>
     <li>
       <strong><code>OPAQUE</code></strong>: the token the server drew when a procedure opened the
-      session. It is Bead’s session cookie, tied to its connection.
+      session. It plays the part of a session cookie, tied to its connection.
     </li>
     <li>
       <strong><code>JWT</code></strong>: a signed access token, which each server verifies on the
@@ -764,8 +761,8 @@
   </p>
   <p>
     A client certificate authenticates its client to what terminates TLS, never a request: a call’s
-    credential is still read by the router alone. A server that takes its peer’s certificate as an
-    identity at its admission is ahead.
+    credential is still read by the router alone.
+    <a href="#suite">A server that takes its peer’s certificate as an identity at its admission is ahead.</a>
   </p>
 
   <h3 id="securite-limites">What to remember</h3>
@@ -970,7 +967,7 @@
         </tr>
         <tr>
           <th scope="row">The length</th>
-          <td>None in the header: the transport delimits the envelope</td>
+          <td>The envelope carries none of its own: its transport delimits it</td>
           <td>No ceiling set by a length field; a large payload goes as a transfer, up to 2<sup>53</sup> − 1 bytes</td>
         </tr>
         <tr>
@@ -1124,8 +1121,8 @@
     on the spot with <code>CAPACITY_EXCEEDED</code>.
   </p>
   <p>
-    By default, a peer has the other answer at most 64 calls at once on a connection,
-    <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
+    By default, at most 64 of a peer’s calls wait for their answer at once on a connection:
+    <code>maximumAnsweringCalls</code>. HTTP/2 bounds the streams a peer opens the same way. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
     refuses one more request with <code>CAPACITY_EXCEEDED</code> once its header reads, before it
     looks at its route, its credential or its payload (§9.2). A resolver that still runs once its
@@ -1169,8 +1166,8 @@
     <li><span class="fate fate-rejected">rejected</span>the call fails before it goes</li>
     <li><span class="fate fate-ended">ended</span>the requester ends its call with it, on an answer it cannot take</li>
     <li>
-      <span class="fate fate-gate">gate</span><span>as <a href="#porte">the gate</a> says: answered,
-      ended for an answer of the layout <code>0xA1</code>, reported otherwise</span>
+      <span class="fate fate-gate">gate</span><span>answered, ended, dropped in silence or
+      reported, by what <a href="#porte">the gate</a> finds</span>
     </li>
   </ul>
   {{failures}}
@@ -1615,7 +1612,7 @@
           <tr>
             <td><code>maximumAnsweringCalls</code></td>
             <td class="code-num">64</td>
-            <td>The calls a peer has the other answer at once on a connection</td>
+            <td>The calls of a peer that wait for their answer at once on a connection</td>
           </tr>
           <tr>
             <td><code>maximumUntakenEnvelopes</code>, <code>maximumUntakenBytes</code></td>
@@ -1651,7 +1648,7 @@
   <p>
     The relay forwards a bearer credential, and the destination verifies it. A destination is
     registered with the audience it verifies, as a resource is named for a token (RFC 8707), or
-    with none, and then takes no bearer credential. By
+    with none. One registered with none takes no bearer credential. By
     default, the relay’s admission, <code>requireCredential</code>, admits only a credential it can
     forward. A call with no credential, or with OPAQUE, receives <code>ACCESS_DENIED</code>.
     Otherwise all these requesters would share leg B’s session, and the relay would lend its own
@@ -1787,8 +1784,8 @@
       <code>hosts</code> and <code>origins</code>, under the same rules, and bounds its connections
       as an HTTP server does: 10,000 in all, 64 per address. A handshake without
       <code>Origin</code>, a client’s outside a browser, carries its <code>Authorization</code>
-      beside each envelope of its connection. A page’s carries none, since a browser adds to it what
-      it keeps on its own. A page therefore presents a JWT.
+      beside each envelope of its connection. A page’s carries none, since its browser adds its
+      user’s own authentication to it, as it adds cookies. A page therefore presents a JWT.
     </p>
   </details>
 </section>
@@ -1870,7 +1867,8 @@
       under each end’s maximum size. A participant’s will announces its departure to the peers.
       The TypeScript side goes through MQTT.js, and the C# side through MQTTnet. The Rust side goes
       through a client of its own, the feature <code>mqtt</code> of its core. A link runs over TCP,
-      TLS or a WebSocket, and all three sides are played against Mosquitto.
+      TLS or a WebSocket. All three sides are played against Mosquitto over TCP and over a
+      WebSocket, and under TLS against a scripted peer. Mosquitto under TLS is ahead.
     </p>
     <h3 id="courtier-amqp">Over AMQP 1.0</h3>
     <p>
@@ -1891,6 +1889,11 @@
 
 <section id="suite" data-toc="What is ahead" data-part="">
   <h2 id="suite-h">What is ahead</h2>
+  <p class="gist">
+    The first four come in this order, the others in no set order.
+    <a href="{{blob path="docs/decisions/README.md"}}#where-bead-goes">The decisions’ index</a>
+    lists the rest.
+  </p>
   <ul class="rules">
     <li>
       <strong>Rust’s AMQP 1.0</strong
@@ -1942,6 +1945,10 @@
     <li>
       <strong>A constrained C side</strong
       ><span>Debugging left out of its build by its switches.</span>
+    </li>
+    <li>
+      <strong>A peer’s certificate as its identity</strong
+      ><span>A server that takes its peer’s certificate as an identity at its admission.</span>
     </li>
     <li>
       <strong>Publication</strong

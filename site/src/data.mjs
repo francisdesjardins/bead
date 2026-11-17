@@ -295,9 +295,9 @@ export const HEADER = Object.freeze({
     [
       ['bytes 0-3', 'octets 0-3'],
       [
-        [['layout', 'layout'], 8],
-        [['kind', 'kind'], 8],
-        [['flags', 'flags'], 8],
+        [['layout', 'disposition'], 8],
+        [['kind', 'genre'], 8],
+        [['flags', 'drapeaux'], 8],
         [['length', 'longueur'], 8],
       ],
     ],
