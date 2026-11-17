@@ -39,6 +39,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   9.2's step 6 are a MUST, and every file's comment says a detail it gives is compared.
 - Spec 4.4 orders a `CREDENTIAL` block's checks, once the header's length holds the block (4.3):
   its scheme, its length, then its padding; 5.2 points to that order.
+- Spec 15.3: a side MUST ping its peer every `heartbeat` where its platform can send a ping; a
+  page's `WebSocket` sends none, and the server's pings stand for its own.
 - Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
   connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
   under `.localhost` on to its DNS server, an application names the loopback by its address.
