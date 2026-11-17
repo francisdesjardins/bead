@@ -5,9 +5,9 @@ use bytes::Bytes;
 
 use super::{
     ChunkHeader, Credential, CreditHeader, EnvelopeHeader, FailureHeader, FailureRecord,
-    RequestHeader, ResultHeader, header_bytes_of, write_failure, write_header,
+    RequestHeader, ResultHeader, header_bytes_of, read_header, write_failure, write_header,
 };
-use crate::constants::{CredentialScheme, FailureScope};
+use crate::constants::{CredentialScheme, FailureScope, RouterSide};
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
 
@@ -188,6 +188,31 @@ fn refuses_a_credential_its_kind_does_not_take_or_its_scheme_does_not_hold() {
         );
         assert!(written.is_empty(), "{name}: nothing written");
     }
+}
+
+// spec 4.4, 5.2: a block whose padding is not zero is refused for its scheme or its length first,
+// as the other sides refuse it
+#[test]
+fn refuses_a_credential_for_its_scheme_or_its_length_before_its_padding() {
+    let refusal_of = |text: &str| {
+        let bytes = hexadecimal::bytes_of(text).expect("a header in hexadecimal");
+
+        read_header(&bytes, RouterSide::Server)
+            .expect_err(text)
+            .detail()
+            .to_owned()
+    };
+
+    assert_eq!(
+        refusal_of("A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 01"),
+        "an answer announces OPAQUE or NONE, not JWT"
+    );
+    assert_eq!(
+        refusal_of(
+            "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  01"
+        ),
+        "an OPAQUE token is 16 bytes, not 15"
+    );
 }
 
 fn detail_of(detail: &str) -> String {

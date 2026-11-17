@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   citation or a word of its legend, "not tested", "not probed", "not available" or "no
   counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
   47; the legend defines the four words, and the 32 cells that said none of them say what holds.
+- `tools/check-twins.mjs`, in CI's Commits job, with `tools/twins.tsv`: every TypeScript and C# test
+  is played on the Rust side under its title's key, or a row gives its class and why, a folder's
+  row leaving out a program in one language no other side has; `--write` adds a `pending` row for
+  a new one, which fails until a reader classifies it.
 
 ### Changed
 

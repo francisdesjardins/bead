@@ -681,3 +681,49 @@ async fn loses_its_link_on_the_first_fragment_of_a_websocket_message_holding_a_p
     adapter.stop().await;
     patience(PATIENCE, peer).await.unwrap().unwrap();
 }
+
+// spec 15.39
+#[tokio::test]
+async fn links_over_wss_to_a_broker_under_the_authorities_it_is_given() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // * the test kit's TLS front, under a leaf of the PKI's root, before a WebSocket answered by hand
+    let front = tls::TlsFront::to(
+        port,
+        &tls::PkiServerOptions {
+            leaf: Some(tls::PkiLeaf::Named),
+            requires_certificate: Some(false),
+            ..tls::PkiServerOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut options =
+        MqttBrokerAdapterOptions::new(format!("wss://localhost:{}/mqtt", front.port()), ID);
+
+    options.password = Some(PASSWORD.to_owned());
+    options.tls = Some(TlsOptions {
+        authorities: Some(tls::pki("root.pem").unwrap()),
+        ..TlsOptions::default()
+    });
+
+    let adapter = adapter_of(&options);
+    let (offered, _offers) = mpsc::unbounded_channel();
+    let peer = spawn(async move {
+        let mut peer = accepted(&listener, offered).await;
+
+        assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+        peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+            .await
+            .unwrap();
+
+        while let Some(Ok(_)) = peer.next().await {}
+    });
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    assert!(adapter.is_linked(), "linked");
+    assert!(adapter.is_secure(), "secure");
+    adapter.stop().await;
+    front.dispose();
+    patience(PATIENCE, peer).await.unwrap().unwrap();
+}
