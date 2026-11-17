@@ -232,8 +232,9 @@ decision of its own.
   revocation mode `NoCheck`. The broker adapters take the same `TlsOptions`, and build the
   collection MQTTnet and AMQP.Net Lite take from it. Under the authorities given, each judges its
   broker by one check of `TlsCredentials`, its library's validation callback: the platform's name
-  check, then a chain to the authorities alone, no revocation checked. MQTTnet calls it over TCP
-  and over a WebSocket, whose channel reads no trust chain.
+  check, then a chain to the authorities alone through the intermediates its broker presents, no
+  revocation checked. MQTTnet calls it over TCP and over a WebSocket, whose channel reads no trust
+  chain.
 - **Rust**: Bead builds a client's `ClientConfig` from `tls`, on the platform's verifier where no
   `authorities` are given and on webpki over them where they are, the certificate by
   `with_client_auth_cert`, so a certificate with the platform's roots works; an application's own

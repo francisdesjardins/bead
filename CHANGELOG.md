@@ -355,7 +355,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side's MQTT 5 adapter judges its broker by the authorities it is given over `wss` as over
   `mqtts`, by the same check as its AMQP 1.0 adapter's: MQTTnet's WebSocket channel read none of
   them, and refused a broker they certify. Under them it checks no revocation, as every other side
-  and path does, where it checked it over `mqtts` (decision 0053).
+  and path does, where it checked it over `mqtts`. Both adapters chain their broker's certificate
+  through the intermediates it presents, where the AMQP 1.0 adapter refused a broker whose
+  intermediate no store of the platform held (decision 0053).
 - The TypeScript side's AMQP 1.0 adapter links over `amqps` to an IP address: rhea named the
   address as the TLS server name, which Node refuses, so the link never opened.
 
