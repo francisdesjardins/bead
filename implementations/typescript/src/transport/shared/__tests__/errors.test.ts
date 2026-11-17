@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  byteCountOf,
   CancelError,
   ConnectError,
   GenericError,
@@ -96,5 +97,14 @@ test.describe('toError', () => {
     expect(toError(error)).toBe(error);
     expect(toError('s')).toBeInstanceOf(GenericError);
     expect(toError('s').cause).toBe('s');
+  });
+});
+test.describe('byteCountOf', () => {
+  test('writes a count of 1 as 1 byte, and any other count as bytes', () => {
+    expect(
+      [0, 1, 2, 1024].map((count) => {
+        return byteCountOf(count);
+      })
+    ).toStrictEqual(['0 bytes', '1 byte', '2 bytes', '1024 bytes']);
   });
 });

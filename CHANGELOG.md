@@ -84,6 +84,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A detail that counts 1 byte says "1 byte", not "1 bytes", on every side: a credit's or a
   cancel's byte after its header, an opening that holds its whole total, and a payload that goes as
   a transfer.
+- A report or an error that counts 1 byte says "1 byte" too, on every side: a message too short
+  to be a parcel, what would pass `maximumUnsentBytes` at a broker, a socket or a gateway's
+  response, and a message past an AMQP sender's `max-message-size`, which the Rust side has no
+  binding for.
 - The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
   so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
 - The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a

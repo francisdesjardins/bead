@@ -22,7 +22,7 @@ import {
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { toError, tooBigOf } from '../shared/errors';
+import { byteCountOf, toError, tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { createHold, type IHold } from '../shared/hold';
@@ -948,7 +948,7 @@ export const createWebSocketTransportServer = (
             if ((socket.bufferedAmount ?? 0) + bytes > maximumUnsentBytes) {
               drop(
                 connection,
-                `what waits for its socket would pass maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`
+                `what waits for its socket would pass maximumUnsentBytes, ${byteCountOf(maximumUnsentBytes)}`
               );
 
               return (resolve(), undefined);

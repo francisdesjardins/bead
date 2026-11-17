@@ -209,7 +209,7 @@ internal sealed class WebSocketConnection
 
             if (isPast)
             {
-                _dropped = string.Create(CultureInfo.InvariantCulture, $"what waits for its socket would pass maximumUnsentBytes, {pace.MaximumUnsentBytes} bytes");
+                _dropped = string.Create(CultureInfo.InvariantCulture, $"what waits for its socket would pass maximumUnsentBytes, {FailureException.ByteCountOf(pace.MaximumUnsentBytes)}");
             }
             else
             {

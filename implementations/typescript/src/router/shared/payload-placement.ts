@@ -3,7 +3,7 @@
 // dependencies
 
 import { EnvelopeKind, SESSION_TOKEN_BYTES } from './constants';
-import { byteCountOf } from './errors';
+import { byteCountOf } from '../../transport/shared/errors';
 import { headerBytesOf, MAXIMUM_HEADER_BYTES, unboundedHeaderBytesOf } from './header';
 import {
   chunkPayloadBytes,

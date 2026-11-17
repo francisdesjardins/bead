@@ -188,7 +188,7 @@ internal static class BrokerParcels
 
         if (bytes.Length < PrefixBytes)
         {
-            return new BrokerParcelReading(ParcelVerdict.NoParcel, null, string.Create(CultureInfo.InvariantCulture, $"{bytes.Length} bytes, under a parcel's {PrefixBytes}"));
+            return new BrokerParcelReading(ParcelVerdict.NoParcel, null, string.Create(CultureInfo.InvariantCulture, $"{FailureException.ByteCountOf(bytes.Length)}, under a parcel's {PrefixBytes}"));
         }
 
         if (!IsLayout(bytes[0]))

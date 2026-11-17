@@ -1494,7 +1494,7 @@ public sealed class HttpGateway : IAsyncDisposable
         var pending = writer.CanGetUnflushedBytes ? writer.UnflushedBytes : 0;
         if (bytes.Length > _options.MaximumUnsentBytes - pending)
         {
-            var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {_options.MaximumUnsentBytes} bytes");
+            var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {FailureException.ByteCountOf(_options.MaximumUnsentBytes)}");
             DropWriter(context, (drop, detail));
             throw new IOException(detail);
         }

@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { ProgrammerError } from './errors';
+import { byteCountOf, ProgrammerError } from './errors';
 import { isFieldValue } from '../client/transport-client';
 
 // interfaces
@@ -484,7 +484,7 @@ export const readParcel = (bytes: Uint8Array): ParcelRead => {
   const layout = bytes[0];
 
   if (bytes.length < PARCEL_PREFIX_BYTES) {
-    return { reason: `${String(bytes.length)} bytes, under a parcel's 28`, refused: 'no-parcel' };
+    return { reason: `${byteCountOf(bytes.length)}, under a parcel's 28`, refused: 'no-parcel' };
   }
 
   if (layout === undefined || layout < PARCEL_LAYOUT || layout > LAST_PARCEL_LAYOUT) {

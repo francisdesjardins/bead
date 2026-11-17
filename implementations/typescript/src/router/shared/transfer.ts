@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { byteCountOf } from './errors';
+import { byteCountOf } from '../../transport/shared/errors';
 import type { IProtocolFailure, IRouterFailures, IRouterLimits } from './types';
 
 // interfaces

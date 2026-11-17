@@ -2439,7 +2439,7 @@ public sealed class HttpGatewayTests
         Assert.Empty(received);
         Assert.Equal(1, requests);
         Assert.Equal(5, frames);
-        Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
+        Assert.Equal(["the response is dropped: maximumUnsentBytes 1 byte"], reported);
     }
 
     [Fact]
@@ -3031,7 +3031,7 @@ public sealed class HttpGatewayTests
             Assert.Equal(1, lifetime.Aborts);
             Assert.Equal(kind == "problem" ? 404 : 200, context.Response.StatusCode);
             Assert.Empty(body.ToArray());
-            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
+            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 byte"], reported);
         }
     }
 
@@ -3425,7 +3425,7 @@ public sealed class HttpGatewayTests
             Assert.Equal(1, lifetime.Aborts);
             Assert.Empty(body.ToArray());
         }
-        Assert.Equal(Enumerable.Repeat("the response is dropped: maximumUnsentBytes 1 bytes", 2), reported);
+        Assert.Equal(Enumerable.Repeat("the response is dropped: maximumUnsentBytes 1 byte", 2), reported);
     }
 
     private static DefaultHttpContext PaceContext(string kind, CancellationToken token)
@@ -3559,7 +3559,7 @@ public sealed class HttpGatewayTests
             var dropped = await Received(bounded.Port, OctetsOf(bounded.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
 
             Assert.Empty(dropped);
-            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
+            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 byte"], reported);
         }
         finally
         {

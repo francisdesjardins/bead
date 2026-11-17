@@ -720,7 +720,7 @@ async fn drops_a_response_past_maximum_unsent_bytes_before_its_head_reported() {
     assert!(socket.reader.head().is_none(), "nothing written");
     assert_eq!(
         fixture.reported(),
-        ["the response is dropped: maximumUnsentBytes 1 bytes"],
+        ["the response is dropped: maximumUnsentBytes 1 byte"],
         "its bound named"
     );
     fixture.stop().await;

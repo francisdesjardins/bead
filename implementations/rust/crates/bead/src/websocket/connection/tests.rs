@@ -214,10 +214,15 @@ async fn discards_more_data_after_a_message_passes_its_bound_before_the_peer_ans
 
 #[tokio::test]
 async fn settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_twice() {
-    let (connection, commands, mut peer) = opened(bounds_of(Some(paced()), NEVER), 1_024).await;
+    // * a bound of 1, which its drop names as 1 byte
+    let pacing = Pacing {
+        maximum_unsent_bytes: 1,
+        ..paced()
+    };
+    let (connection, commands, mut peer) = opened(bounds_of(Some(pacing), NEVER), 1_024).await;
     let running = spawn(connection.run(hooks_of(&Delivered::default())));
 
-    commands.send(Bytes::from(vec![0; 65]));
+    commands.send(Bytes::from(vec![0; 2]));
     commands.send(Bytes::from_static(&[1]));
 
     let ended = patience(PATIENCE, running).await.unwrap().unwrap();
@@ -228,7 +233,7 @@ async fn settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_
     assert_eq!(
         ended.failure,
         Some(Failed::Dropped(
-            "what waits for its socket would pass maximumUnsentBytes, 64 bytes".to_owned()
+            "what waits for its socket would pass maximumUnsentBytes, 1 byte".to_owned()
         )),
         "dropped, once"
     );

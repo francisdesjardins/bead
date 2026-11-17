@@ -30,6 +30,7 @@ use tungstenite::protocol::{Message, Role, WebSocketConfig};
 
 use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::NEVER;
+use crate::failure::byte_count_of;
 use crate::net::bounds::{SendPace, SendPaceHooks, SendPaceOptions};
 
 #[cfg(test)]
@@ -221,8 +222,8 @@ impl Commands {
             // its bound drops the connection
             if !self.shared.hold((length, pacing.maximum_unsent_bytes)) {
                 self.drop_behind(format!(
-                    "what waits for its socket would pass maximumUnsentBytes, {} bytes",
-                    pacing.maximum_unsent_bytes
+                    "what waits for its socket would pass maximumUnsentBytes, {}",
+                    byte_count_of(pacing.maximum_unsent_bytes)
                 ));
 
                 return;
@@ -582,7 +583,8 @@ impl<S: Wire> Connection<S> {
 
                 self.failure.get_or_insert_with(|| {
                     Failed::Dropped(format!(
-                        "what waits for its socket passed maximumUnsentBytes, {held} bytes, its peer reading none of its pongs"
+                        "what waits for its socket passed maximumUnsentBytes, {}, its peer reading none of its pongs",
+                        byte_count_of(held)
                     ))
                 });
                 self.is_ended_here = true;

@@ -688,7 +688,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     for (const topic of [INBOX, NAME]) {
       expect(adapter.maximumPayloadBytes(topic)).toBe(0);
       await expect(adapter.publish({ payload: new Uint8Array(), topic })).rejects.toThrow(
-        "past its sender's max-message-size, 1 bytes"
+        "past its sender's max-message-size, 1 byte"
       );
     }
 

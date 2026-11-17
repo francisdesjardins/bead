@@ -4459,7 +4459,7 @@ async fn writes_a_comment_on_a_quiet_stream_each_heartbeat_on_its_clock_and_drop
     until(|| !locked(&reported).is_empty()).await;
     assert_eq!(
         *locked(&reported),
-        ["the response is dropped: maximumUnsentBytes 1 bytes"]
+        ["the response is dropped: maximumUnsentBytes 1 byte"]
     );
 
     bounded.dispose().await.expect("disposed");
@@ -4487,7 +4487,7 @@ async fn counts_pending_bytes_with_the_write_at_the_maximum_unsent_bytes_edge() 
             until(|| !locked(&reported).is_empty()).await;
             assert_eq!(
                 *locked(&reported),
-                ["the response is dropped: maximumUnsentBytes 1 bytes"]
+                ["the response is dropped: maximumUnsentBytes 1 byte"]
             );
         } else {
             assert!(received > 0, "written");
@@ -4898,7 +4898,7 @@ async fn reports_one_send_bound_drop_when_consecutive_stream_frames_exceed_the_b
     assert_eq!(scripted.requests(), 1, "one call");
     assert_eq!(
         scripted.reported(),
-        ["the response is dropped: maximumUnsentBytes 1 bytes"],
+        ["the response is dropped: maximumUnsentBytes 1 byte"],
         "one drop, reported once"
     );
 
@@ -5261,7 +5261,7 @@ async fn bounds_every_response_body_by_maximum_unsent_bytes_before_writing() {
         until(|| !locked(&reported).is_empty()).await;
         assert_eq!(
             *locked(&reported),
-            ["the response is dropped: maximumUnsentBytes 1 bytes"],
+            ["the response is dropped: maximumUnsentBytes 1 byte"],
             "{kind}"
         );
 
