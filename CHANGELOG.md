@@ -24,6 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
+  connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
+  under `.localhost` on to its DNS server, an application names the loopback by its address.
 - A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers, and a
   client that offered subprotocols fails an upgrade whose 101 names none of them (spec 15.2, RFC
   6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
