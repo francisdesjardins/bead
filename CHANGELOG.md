@@ -39,6 +39,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.16.0 (`spec-v0.16.0`), its companion, `spec/debugging.md`, to 0.11.0
+  (`debugging-v0.11.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.6.0
+  (`transcoding-v0.6.0`).
 - Spec 7.6 states what binds a failure's detail: the words the spec gives, which every side MUST
   write, and elsewhere the words the conformance files give. The details of 2.3, 9.2's step 5 and
   9.2's step 6 are a MUST, and the comments of `spec/vectors.json` and `spec/conversations.json`
