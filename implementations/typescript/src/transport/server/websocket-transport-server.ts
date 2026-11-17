@@ -782,6 +782,12 @@ export const createWebSocketTransportServer = (
                 // `Infinity`, the longest a timer holds, which Node would take for 1 ms
                 instance: new WebSocketServer({
                   closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
+                  // ! no subprotocol selected, whatever an upgrade offers (spec 15.2): `ws` would
+                  // echo the first, claiming a protocol Bead does not speak, and write back a
+                  // bearer a page passes as a subprotocol
+                  handleProtocols: () => {
+                    return false;
+                  },
                   maxPayload,
                   server: http,
                 }),

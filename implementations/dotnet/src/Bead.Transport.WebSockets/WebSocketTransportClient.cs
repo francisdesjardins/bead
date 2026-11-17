@@ -969,6 +969,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names an extension never offered (RFC 6455 §4.1)");
             }
 
+            // ! ClientWebSocket opens on a 101 that names none of the subprotocols it offered: the
+            // client fails the connection (spec 15.2; WHATWG WebSockets §2.2), as a page's does
+            if (options.Protocols is { Count: > 0 } && socket.SubProtocol is null)
+            {
+                throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names none of the subprotocols offered (WHATWG WebSockets §2.2)");
+            }
+
             lock (_gate)
             {
                 // a dispose as it opened took its socket: there is nothing to keep

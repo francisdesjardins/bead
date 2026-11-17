@@ -594,6 +594,53 @@ Sec-WebSocket-Extensions: permessage-deflate
     held.stop.cancel();
 }
 
+// spec 15.2; WHATWG WebSockets §2.2: the twin of `WebSocketTransportClientTests`' own
+#[tokio::test]
+async fn fails_its_connect_on_a_101_that_names_none_of_the_subprotocols_it_offered() {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+        protocols: Some(vec!["chat".to_owned(), "bead".to_owned()]),
+        ..to(held.port)
+    });
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let field = |wanted: &str| {
+        asked.lines().find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case(wanted))
+                .map(|(_, value)| value.trim().to_owned())
+        })
+    };
+    let accept =
+        tungstenite::handshake::derive_accept_key(field("sec-websocket-key").unwrap().as_bytes());
+
+    assert_eq!(
+        field("sec-websocket-protocol"),
+        Some("chat, bead".to_owned()),
+        "offered"
+    );
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let refused = settled(connecting).await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(_))),
+        "{refused:?}"
+    );
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+    assert!(ends(&mut socket).await, "its socket let go");
+    held.stop.cancel();
+}
+
 // ! tungstenite matches `Connection` whole against `Upgrade`, where RFC 6455 §4.1 and RFC 9110 §7.6.1
 // read a list of tokens: a 101 that lists another is refused, as .NET's client and the global
 // WebSocket refuse it and `ws` opens on it, a row of docs/support.md

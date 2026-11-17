@@ -1342,7 +1342,13 @@ scheme.
 each binary message one envelope. A text message is no envelope: its transport hands it on, and its
 router reports it as `ENVELOPE_MALFORMED`, as section 9.0 reports an error, and answers nothing; it
 counts as a message its router has not taken by the bytes it came as (section 15.12). No
-subprotocol is required. A WebSocket upgrade that carries no `Origin` carries one credential,
+subprotocol is required. A server selects none: its 101 names no `Sec-WebSocket-Protocol` and no
+`Sec-WebSocket-Extensions`, whatever its upgrade offers
+([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)). A client offers the
+subprotocols it is given, none otherwise, and fails an upgrade whose 101 names none of them
+([WHATWG WebSockets §2.2](https://websockets.spec.whatwg.org/#websocket-opening-handshake)) or one
+it did not offer ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)). A WebSocket
+upgrade that carries no `Origin` carries one credential,
 toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its

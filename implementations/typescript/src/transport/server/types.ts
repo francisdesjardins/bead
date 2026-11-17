@@ -495,10 +495,12 @@ export interface IWebSocketServerConstructor {
   /**
    * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
    * closes; `closeTimeout`, the transport's, which `ws` waits on a close within, its own 1009's
-   * among them, from ws 8.22.
+   * among them, from ws 8.22; `handleProtocols`, the transport's, which selects no subprotocol
+   * (spec 15.2).
    */
   new (options: {
     closeTimeout?: number | undefined;
+    handleProtocols: () => false;
     maxPayload?: number | undefined;
     server: Server;
   }): IWebSocketServerLike;

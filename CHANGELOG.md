@@ -14,6 +14,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
   nothing, and `--dry-run` makes every check and changes nothing.
 
+### Changed
+
+- A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers, and a
+  client that offered subprotocols fails an upgrade whose 101 names none of them (spec 15.2, RFC
+  6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
+  and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
+  `spec/transports.json` plays it.
+
 ### Removed
 
 - `spec/transports.json`'s `brokers.mqtt.sharedSubscriptions`, which no tool read: the Mosquitto

@@ -9876,6 +9876,49 @@
       ]
     },
     {
+      "name": "an upgrade offering subprotocols is taken 101, naming none, and served",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-protocol: chat, bead\r\nsec-websocket-extensions: permessage-deflate\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+              "sec-websocket-protocol": null,
+              "sec-websocket-extensions": null
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
       "name": "an upgrade's host and origin are compared in any ASCII case",
       "clauses": [
         "15.2",

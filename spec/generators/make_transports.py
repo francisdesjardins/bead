@@ -1118,6 +1118,12 @@ websocket = [
         expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
                                       'access-control-allow-origin': None, 'vary': None}),
         message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    # 15.2: a server selects no subprotocol and no extension, whatever its upgrade offers (RFC 6455 §4.2.2)
+    ('an upgrade offering subprotocols is taken 101, naming none, and served', ['15.2'], {}, [
+        handshake('socket', {'sec-websocket-protocol': 'chat, bead', 'sec-websocket-extensions': 'permessage-deflate'}),
+        expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
+                                      'sec-websocket-protocol': None, 'sec-websocket-extensions': None}),
+        message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.2.2', '15.2.7', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
         heard('socket', envelope=result(1, '"x"'))]),

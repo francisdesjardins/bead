@@ -1274,6 +1274,39 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.2; WHATWG WebSockets §2.2
+    [Fact]
+    public async Task Fails_its_connect_on_a_101_that_names_none_of_the_subprotocols_it_offered()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = ["chat", "bead"], CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            Assert.Contains("\r\nSec-WebSocket-Protocol: chat, bead\r\n", Encoding.ASCII.GetString(head), StringComparison.OrdinalIgnoreCase);
+            await Listener.Upgrade(peer, (head, ""));
+
+            var refused = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Contains("names none of the subprotocols", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            // its socket let go: the listener's read meets its end
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
+    }
+
     // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens, which .NET's client
     // matches whole against `Upgrade`, as tungstenite does and `ws` does not; a row of docs/support.md
     [Fact]
