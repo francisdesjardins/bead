@@ -1168,9 +1168,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         if (isTls)
         {
-            factory.SSL.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
+            factory.SSL.RemoteCertificateValidationCallback = (_, certificate, chain, errors) =>
             {
-                return _tls is null ? errors == SslPolicyErrors.None : _tls.IsTrusted(certificate, errors);
+                return _tls is null ? errors == SslPolicyErrors.None : _tls.IsTrusted((certificate, chain), errors);
             };
 
             // ! a collection, which the platform presents as its leaf alone, or none, where it builds

@@ -4255,8 +4255,8 @@ public sealed class HttpTransportClientTests
         await using var started = await Started.Start();
         var trusting = NotListening with { Tls = new TlsOptions { Authorities = Pki.Read("root.pem") } };
 
-        // ! TLS 1.3 first: on Windows a client that resumes a TLS 1.2 session to a host offers TLS 1.2
-        // alone, which a front of TLS 1.3 alone refuses
+        // ! TLS 1.3 first: on Windows, after TLS 1.2 to a host, a client given authorities alone is
+        // refused by a front of TLS 1.3 alone at that host, its alert ProtocolVersion
         foreach (var protocol in new[] { SslProtocols.Tls13, SslProtocols.Tls12 })
         {
             // * each leaf names one host alone, which takes it, and the other host of the same front refuses it

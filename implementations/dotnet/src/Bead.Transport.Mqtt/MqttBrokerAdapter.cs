@@ -1039,7 +1039,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     tls.WithCertificateValidationHandler((presented) =>
                     {
-                        return trusting.IsTrusted(presented.Certificate, presented.SslPolicyErrors);
+                        return trusting.IsTrusted((presented.Certificate, presented.Chain), presented.SslPolicyErrors);
                     }).WithRevocationMode(X509RevocationMode.NoCheck);
                 }
             });
