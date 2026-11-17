@@ -31,6 +31,7 @@ import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
+import { PKI } from './tls-front';
 
 // constants
 
@@ -576,6 +577,39 @@ test.describe('createMqttBrokerAdapter', () => {
       await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
     } finally {
       await secured[Symbol.asyncDispose]();
+    }
+  });
+
+  // spec 15.39
+  test('links over TLS by a host its broker’s certificate names, and fails its start by one it does not', async () => {
+    // * each leaf names one host alone, which takes it, and the other host of the same script
+    // refuses it
+    for (const [cert, key, named, other] of [
+      [PKI.namedServer, PKI.namedServerKey, 'localhost', '127.0.0.1'],
+      [PKI.addressedServer, PKI.addressedServerKey, '127.0.0.1', 'localhost'],
+    ] as const) {
+      await using secured = await createMqttScript({ tls: { cert, key } });
+      const { port } = new URL(secured.url);
+      const taken = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: PKI.root },
+        url: `mqtts://${named}:${port}`,
+      });
+
+      await linkUp({ adapter: taken, script: secured });
+      await taken.stop();
+
+      const refused = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: PKI.root },
+        url: `mqtts://${other}:${port}`,
+      });
+
+      await expect(refused.start()).rejects.toThrow('the link of ada ended before its CONNACK');
+      // * no CONNECT went: its broker's certificate was refused before it
+      await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
     }
   });
 

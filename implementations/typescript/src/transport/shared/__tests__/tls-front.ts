@@ -17,8 +17,11 @@ export interface ITlsFrontOptions {
   maxVersion?: 'TLSv1.2' | 'TLSv1.3' | undefined;
   /** Whether it requires a client certificate under the root, refusing the handshake without one. */
   requiresCertificate?: boolean | undefined;
-  /** `stranger` serves a certificate under the stranger's root, which no test trusts. */
-  serves?: 'server' | 'stranger' | undefined;
+  /**
+   * `stranger` serves a certificate under the stranger's root, which no test trusts; `named` and
+   * `addressed` one under the root that names `localhost` alone and 127.0.0.1 alone.
+   */
+  serves?: 'addressed' | 'named' | 'server' | 'stranger' | undefined;
 }
 
 // helpers
@@ -32,9 +35,13 @@ const pemOf = (file: string): string => {
 
 /** The test PKI's files: published test keys, which guard nothing. */
 export const PKI = Object.freeze({
+  addressedServer: pemOf('addressed-server.pem'),
+  addressedServerKey: pemOf('addressed-server.key'),
   client: pemOf('client.pem'),
   clientChain: pemOf('client-chain.pem'),
   clientKey: pemOf('client.key'),
+  namedServer: pemOf('named-server.pem'),
+  namedServerKey: pemOf('named-server.key'),
   root: pemOf('root.pem'),
   server: pemOf('server.pem'),
   serverKey: pemOf('server.key'),
@@ -46,6 +53,14 @@ export const PKI = Object.freeze({
 
 /** The TLS twins' versions, each a run of its own. */
 export const TLS_VERSIONS = ['TLSv1.2', 'TLSv1.3'] as const;
+
+/** What each `serves` serves: its certificate and its key. */
+const SERVED = Object.freeze({
+  addressed: { cert: PKI.addressedServer, key: PKI.addressedServerKey },
+  named: { cert: PKI.namedServer, key: PKI.namedServerKey },
+  server: { cert: PKI.server, key: PKI.serverKey },
+  stranger: { cert: PKI.strangerServer, key: PKI.strangerServerKey },
+});
 
 // definition
 
@@ -59,8 +74,7 @@ export const createTlsFront = async (port: number, options?: ITlsFrontOptions) =
   const sockets = new Set<Socket>();
   const front = createTlsServer(
     {
-      cert: serves === 'server' ? PKI.server : PKI.strangerServer,
-      key: serves === 'server' ? PKI.serverKey : PKI.strangerServerKey,
+      ...SERVED[serves],
       maxVersion,
       ...(requiresCertificate ? { ca: PKI.root, rejectUnauthorized: true, requestCert: true } : {}),
     },

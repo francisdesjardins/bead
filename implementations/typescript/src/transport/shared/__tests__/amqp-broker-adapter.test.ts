@@ -36,6 +36,7 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
+import { PKI } from './tls-front';
 
 // constants
 
@@ -366,6 +367,37 @@ test.describe('createAmqpBrokerAdapter', () => {
       expect(String(failure)).not.toContain(PASSWORD);
       expect([adapter.isLinked, downs]).toEqual([false, []]);
       await adapter.stop();
+    }
+  });
+
+  // spec 15.39
+  test('links over TLS by a host its broker’s certificate names, and fails its start by one it does not', async () => {
+    // * each leaf names one host alone, which takes it, and the other host of the same script
+    // refuses it
+    for (const [cert, key, named, other] of [
+      [PKI.namedServer, PKI.namedServerKey, 'localhost', '127.0.0.1'],
+      [PKI.addressedServer, PKI.addressedServerKey, '127.0.0.1', 'localhost'],
+    ] as const) {
+      // * the script asks a certificate under the fixture's: its broker judged by the PKI's root, the
+      // adapter presents the fixture's
+      await using secured = await createAmqpScript({ tls: { ca: TLS_FIXTURE.cert, cert, key } });
+      const { port } = new URL(secured.url);
+      const tls = { ...CERTIFIED, authorities: PKI.root };
+      const taken = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${named}:${port}` });
+
+      await linkUp({ adapter: taken, script: secured });
+      expect(taken.isSecure).toBe(true);
+      await taken.stop();
+
+      const refused = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${other}:${port}` });
+      const failure = await settledOf(refused.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      expect(String(failure)).toContain('does not match certificate');
+      expect(refused.isLinked).toBe(false);
+      // * no OPEN came: its broker's certificate was refused before it
+      await expect(secured.link({ within: 200 })).rejects.toThrow('no link came');
+      await refused.stop();
     }
   });
 
