@@ -430,6 +430,41 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // RFC 6750 §2.1: `"Bearer" 1*SP b64token`
+    [Fact]
+    public async Task Answers_401_to_a_tab_after_Bearer_its_separator_one_or_more_spaces()
+    {
+        var jwt = await Started((options) =>
+        {
+            return options with { Authorization = GatewayAuthorization.BearerJwt };
+        });
+
+        static HttpRequestMessage WhoAmI(string authorization)
+        {
+            var request = Json("/api/Transcoding/whoAmI", "{}");
+
+            request.Headers.TryAddWithoutValidation("authorization", authorization);
+
+            return request;
+        }
+
+        try
+        {
+            using var tab = await jwt.Client.SendAsync(WhoAmI("Bearer\ta.b.c"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.Unauthorized, "Bearer error=\"invalid_request\""), (tab.StatusCode, tab.Headers.WwwAuthenticate.ToString()));
+
+            // two spaces present the token, which a server with no JWT verifier refuses
+            using var spaces = await jwt.Client.SendAsync(WhoAmI("Bearer  a.b.c"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, spaces.StatusCode);
+        }
+        finally
+        {
+            await Stopped(jwt);
+        }
+    }
+
     [Fact]
     public async Task Refuses_a_request_with_no_Origin_from_a_page_of_another_site_and_a_navigation_to_an_unmarked_get_rule()
     {

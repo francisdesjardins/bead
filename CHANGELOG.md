@@ -22,6 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side's `WebSocketTransportClientConnectOptions`, `HttpCallerOptions` and `HttpCallOptions`,
   and the Rust side's `HttpCallerOptions` and `HttpCallOptions`, print whether a credential is set,
   never the credential.
+- Under `bearer-jwt`, the TypeScript and Rust gateways take one or more spaces after `Bearer` and
+  nothing else, as RFC 6750 §2.1 writes it and the C# side holds: a tab there is answered 401
+  `invalid_request`, where it presented its token.
 
 ## [0.14.0] - 2026-11-16
 
