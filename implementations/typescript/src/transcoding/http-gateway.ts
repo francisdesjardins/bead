@@ -61,6 +61,7 @@ import {
   authorityNamedBy,
   closingOf,
   headerOf,
+  joinedOf,
   linesOf,
   preflightOf,
   HTTP_REFUSALS,
@@ -354,7 +355,7 @@ const asksStream = (request: IHTTPRequestLike): boolean => {
  * none or `identity`.
  */
 const isTakenType = (request: IHTTPRequestLike, encoding: Encoding): boolean => {
-  const encoded = headerOf(request, 'content-encoding')?.trim().toLowerCase();
+  const encoded = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
 
   if (encoded !== undefined && encoded !== 'identity') {
     return false;
@@ -1779,7 +1780,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     // 4: its origin
-    const origin = headerOf(request, 'origin');
+    const origin = joinedOf(request, 'origin');
 
     if (!isTakenOrigin(origin, { host: ownAuthorityOf(named.authority, hosts), origins })) {
       refuse(exchange, {
@@ -1798,12 +1799,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     // 5: a request of no origin from another site, but a GET navigation no `object` or `embed`
     // makes, to what reads alone (web.dev's resource isolation policy)
-    const site = headerOf(request, 'sec-fetch-site');
+    // * each read with its lines joined, so two lines are none of its tokens, as if absent
+    const site = joinedOf(request, 'sec-fetch-site');
 
     if (origin === undefined && (site === 'same-site' || site === 'cross-site')) {
-      const destination = headerOf(request, 'sec-fetch-dest');
+      const destination = joinedOf(request, 'sec-fetch-dest');
       const isNavigation =
-        headerOf(request, 'sec-fetch-mode') === 'navigate' &&
+        joinedOf(request, 'sec-fetch-mode') === 'navigate' &&
         request.method === 'GET' &&
         destination !== 'object' &&
         destination !== 'embed';

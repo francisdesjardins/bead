@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-citations.mjs` holds each language cell of the support matrix's differences to a
   citation or a word of its legend, "not tested", "not probed", "not available" or "no
   counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
-  47; the legend defines the four words, and the 32 cells that said none of them say what holds.
+  44; the legend defines the four words, and the 32 cells that said none of them say what holds.
 - `tools/check-twins.mjs`, in CI's Commits job, with `tools/twins.tsv`: every TypeScript and C# test
   is played on the Rust side under its title's key, or a row gives its class and why, a folder's
   row leaving out a program in one language no other side has; `--write` adds a `pending` row for
@@ -32,6 +32,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
   and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
   `spec/transports.json` plays it.
+- A field sent in more than one field line is read with its lines joined by ", " (spec 15.12, RFC
+  9110 §5.3): an `Origin`, a `bead-connection-token` and a `Content-Encoding` at the HTTP transport,
+  and a gateway's `origin`, `content-encoding` and three `Sec-Fetch-*` fields (transcoding 5.1,
+  10.1). Every side's HTTP transport refuses a `Content-Type` in more than one field line, 415
+  `type-refused`, as its gateway does. Cases of `spec/transports.json` and `spec/transcoding.json`
+  play them.
 
 ### Removed
 
@@ -54,6 +60,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Under `bearer-jwt`, the TypeScript and Rust gateways take one or more spaces after `Bearer` and
   nothing else, as RFC 6750 §2.1 writes it and the C# side holds: a tab there is answered 401
   `invalid_request`, where it presented its token.
+- The Rust side reads those six fields with their lines joined, where it read their first line
+  alone: two `Origin` lines, its own first, are refused 403, a connection token in two lines 400,
+  and a `Content-Encoding` of `identity` in two lines 415.
+- The TypeScript side reads those fields from a request's raw lines over HTTP/2 as over HTTP/1.1,
+  where Node kept the first line alone of a `Content-Encoding` over HTTP/2.
 
 ## [0.14.0] - 2026-11-16
 
