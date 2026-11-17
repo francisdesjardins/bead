@@ -14,6 +14,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
   nothing, and `--dry-run` makes every check and changes nothing.
 
+### Fixed
+
+- The C# side judges a `CREDENTIAL` block's scheme and length before its padding, as section 4.4
+  lists them and the other sides do: a block that breaks both is refused in the words of its scheme
+  or its length.
+
 ## [0.14.0] - 2026-11-16
 
 ### Added
