@@ -12,6 +12,7 @@
 //   node tools/check-twins.mjs           the declarations against tools/twins.tsv
 //   node tools/check-twins.mjs --write   adds a `pending` row for each declaration with no twin and
 //                                        no row, and drops each row whose declaration is twinned
+//                                        or under a folder's row
 //
 // ! --write classifies nothing: a `pending` row fails the check until a reader gives it its class
 // and its reason
@@ -33,13 +34,19 @@
 //   native     native to its platform or its tool, which the Rust side has no part of
 //   pending    a declaration --write added, which no reader has classified yet
 //
+// A folder's row leaves out every test under it: `folder`, its path, ending with `/`, and its
+// reason, a program in one language that no other side has a counterpart of, as the builder, the
+// root's tools, the DevTools extension and the demo are. The folders' rows come first, sorted by
+// path; a test's row under one of them is dropped by --write.
+//
 // What it does not reach: a Rust test with no twin on the other sides, and a twin the TypeScript
 // and C# sides owe each other; a twin a row names, which review holds, not the tool; a title a
 // TypeScript test builds from a variable or an expression, which declares nothing it can read.
 //
 // Exit 1 on a declaration with no twin and no row; on a `pending` row; on a row whose declaration
-// is twinned or gone; on a row with the wrong number of cells, an unknown side or class, no reason,
-// a duplicate, or out of order. Exit 2 on an argument it does not know.
+// is twinned, gone or under a folder's row; on a folder's row no TypeScript or C# test stands
+// under; on a row with the wrong number of cells, an unknown side or class, no reason, a duplicate,
+// or out of order. Exit 2 on an argument it does not know.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -55,6 +62,9 @@ export const CLASSES = Object.freeze(['retitled', 'held', 'ahead', 'native', 'pe
 
 // what a `pending` row's reason holds until a reader writes one
 const UNREAD = '-';
+
+// the first cell of a folder's row
+const FOLDER = 'folder';
 
 // ── Keys ───────────────────────────────────────────────────────────────────────
 
@@ -517,6 +527,13 @@ const identityOf = ({ side, file, title }) => {
   return `${side}\t${file}\t${title}`;
 };
 
+// the folder a file stands under, of those the file lists, or none
+const folderOf = (file, folders) => {
+  return folders.find(({ path }) => {
+    return file.startsWith(path);
+  });
+};
+
 // rows in order: by side, as SIDES lists them, then by file and title, by code point
 const compareRows = (a, b) => {
   const bySide = SIDES.indexOf(a.side) - SIDES.indexOf(b.side);
@@ -529,12 +546,44 @@ const compareRows = (a, b) => {
   return byFile !== 0 ? byFile : a.title < b.title ? -1 : a.title > b.title ? 1 : 0;
 };
 
+// a folder's row read, and the problems of its shape
+const folderRowOf = (cells, { at, folders, rows, line }) => {
+  const problems = [];
+
+  if (cells.length !== 3) {
+    return { problems: [`${at}: ${cells.length} cells, not 3: folder, path, reason`] };
+  }
+  const [, path, reason] = cells;
+
+  if (!path.endsWith('/')) {
+    problems.push(`${at}: folder \`${path}\` does not end with /`);
+  }
+  if (reason.trim() === '' || reason === UNREAD) {
+    problems.push(`${at}: folder \`${path}\` with no reason`);
+  }
+  if (
+    folders.some((folder) => {
+      return folder.path === path;
+    })
+  ) {
+    problems.push(`${at}: a second row for folder \`${path}\``);
+  }
+  if (rows.length > 0) {
+    problems.push(`${at}: folder \`${path}\` after a test's row: --write puts the folders first`);
+  } else if (folders.length > 0 && folders.at(-1).path > path) {
+    problems.push(`${at}: out of order, by path: --write sorts the folders`);
+  }
+
+  return { folder: { path, reason, line }, problems };
+};
+
 /**
- * A twins file read: its comment lines, kept as they are, its rows, each with its line, and the
- * problems of their shape.
+ * A twins file read: its comment lines, kept as they are, its folders' rows and its tests' rows,
+ * each with its line, and the problems of their shape.
  */
 export const rowsOf = (text) => {
   const comments = [];
+  const folders = [];
   const rows = [];
   const problems = [];
   const seen = new Set();
@@ -551,6 +600,15 @@ export const rowsOf = (text) => {
     }
     const cells = line.split('\t');
 
+    if (cells[0] === FOLDER) {
+      const read = folderRowOf(cells, { at, folders, rows, line: index + 1 });
+
+      problems.push(...read.problems);
+      if (read.folder !== undefined) {
+        folders.push(read.folder);
+      }
+      continue;
+    }
     if (cells.length !== 5) {
       problems.push(`${at}: ${cells.length} cells, not 5: side, file, title, class, reason`);
       continue;
@@ -577,7 +635,7 @@ export const rowsOf = (text) => {
     rows.push(row);
   }
 
-  return { comments, rows, problems };
+  return { comments, folders, rows, problems };
 };
 
 // a row as its line
@@ -585,20 +643,33 @@ const lineOf = (row) => {
   return [row.side, row.file, row.title, row.kind, row.reason].join('\t');
 };
 
+// a folder's row as its line
+const folderLineOf = ({ path, reason }) => {
+  return [FOLDER, path, reason].join('\t');
+};
+
 /**
- * The file's text from its comments and its rows, the rows sorted.
+ * The file's text from its comments, its folders' rows and its tests' rows, each sorted.
  */
-export const textOf = (comments, rows) => {
-  return `${[...comments, ...[...rows].sort(compareRows).map(lineOf)].join('\n')}\n`;
+export const textOf = (comments, folders, rows) => {
+  const byPath = (a, b) => {
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  };
+
+  return `${[
+    ...comments,
+    ...[...folders].sort(byPath).map(folderLineOf),
+    ...[...rows].sort(compareRows).map(lineOf),
+  ].join('\n')}\n`;
 };
 
 // ── Check ──────────────────────────────────────────────────────────────────────
 
 /**
- * The TypeScript and C# declarations with no Rust twin, one a side, file and title, each with the
- * first line it stands on.
+ * The TypeScript and C# declarations with no Rust twin, outside the folders given, one a side, file
+ * and title, each with the first line it stands on.
  */
-export const unmatchedOf = (declarations) => {
+export const unmatchedOf = (declarations, folders = []) => {
   const twins = new Set(
     declarations.rust.map(({ key }) => {
       return key;
@@ -610,7 +681,11 @@ export const unmatchedOf = (declarations) => {
     for (const declaration of declarations[side]) {
       const identity = identityOf({ side, ...declaration });
 
-      if (!twins.has(declaration.key) && !unmatched.has(identity)) {
+      if (
+        !twins.has(declaration.key) &&
+        !unmatched.has(identity) &&
+        folderOf(declaration.file, folders) === undefined
+      ) {
         unmatched.set(identity, { side, ...declaration });
       }
     }
@@ -620,13 +695,14 @@ export const unmatchedOf = (declarations) => {
 };
 
 /**
- * The problems of the rows against the declarations, and what `--write` makes of them: the rows
- * kept, a `pending` one added for each declaration with no twin and no row, a row whose
- * declaration is twinned dropped, a row whose declaration is gone kept for its reader.
+ * The problems of the rows against the declarations, and what `--write` makes of them: the folders
+ * and the rows kept, a `pending` row added for each declaration with no twin and no row, a row
+ * whose declaration is twinned or stands under a folder dropped, a row whose declaration is gone
+ * kept for its reader.
  */
 export const checkOf = (declarations, text) => {
-  const { comments, rows, problems } = rowsOf(text);
-  const unmatched = unmatchedOf(declarations);
+  const { comments, folders, rows, problems } = rowsOf(text);
+  const unmatched = unmatchedOf(declarations, folders);
   const declared = new Set(
     SIDES.flatMap((side) => {
       return declarations[side].map((declaration) => {
@@ -639,12 +715,29 @@ export const checkOf = (declarations, text) => {
   const dropped = [];
   const rowed = new Set();
 
+  for (const { path, line } of folders) {
+    const holds = SIDES.some((side) => {
+      return declarations[side].some(({ file }) => {
+        return file.startsWith(path);
+      });
+    });
+
+    if (!holds) {
+      problems.push(`${TWINS}:${line}: no TypeScript or C# test stands under folder \`${path}\``);
+    }
+  }
   for (const row of rows) {
     const identity = identityOf(row);
     const at = `${TWINS}:${row.line}`;
+    const folder = folderOf(row.file, folders);
 
     rowed.add(identity);
-    if (unmatched.has(identity)) {
+    if (folder !== undefined) {
+      problems.push(
+        `${at}: \`${row.title}\` in ${row.file} stands under folder \`${folder.path}\`: drop the row`
+      );
+      dropped.push(row);
+    } else if (unmatched.has(identity)) {
       if (row.kind === 'pending') {
         problems.push(`${at}: pending: \`${row.title}\` in ${row.file} awaits its class`);
       }
@@ -675,20 +768,30 @@ export const checkOf = (declarations, text) => {
 
   return {
     problems,
+    folders,
     rows,
     unmatched,
-    written: textOf(comments, [...kept, ...added]),
+    written: textOf(comments, folders, [...kept, ...added]),
     added,
     dropped,
   };
 };
 
 /**
- * The counts a run tells: the declarations of each side, those twinned, and the rows by class.
+ * The counts a run tells: the declarations of each side, those its folders leave out, those
+ * twinned, and the rows by class.
  */
-export const countsOf = (declarations, rows, unmatched) => {
-  const twinned = SIDES.reduce((sum, side) => {
+export const countsOf = (declarations, { folders, rows, unmatched }) => {
+  const total = SIDES.reduce((sum, side) => {
     return sum + declarations[side].length;
+  }, 0);
+  const leftOut = SIDES.reduce((sum, side) => {
+    return (
+      sum +
+      declarations[side].filter(({ file }) => {
+        return folderOf(file, folders) !== undefined;
+      }).length
+    );
   }, 0);
   const classes = Object.fromEntries(
     CLASSES.map((kind) => {
@@ -715,7 +818,8 @@ export const countsOf = (declarations, rows, unmatched) => {
         return [side, list.length];
       })
     ),
-    twinned: twinned - unmatchedCount,
+    leftOut,
+    twinned: total - leftOut - unmatchedCount,
     classes,
   };
 };
@@ -760,22 +864,23 @@ if (import.meta.main) {
     process.exit(2);
   }
   const write = given.includes('--write');
-  const { problems, declarations, rows, unmatched, added, dropped } = runOf(ROOT, { write });
-  const { declarations: sides, twinned, classes } = countsOf(declarations, rows, unmatched);
+  const run = runOf(ROOT, { write });
+  const { declarations: sides, leftOut, twinned, classes } = countsOf(run.declarations, run);
 
   if (write) {
     console.log(
-      `${TWINS}: ${added.length} pending row(s) added, ${dropped.length} twinned row(s) dropped`
+      `${TWINS}: ${run.added.length} pending row(s) added, ${run.dropped.length} row(s) dropped`
     );
   }
-  for (const problem of problems) {
+  for (const problem of run.problems) {
     console.error(problem);
   }
   console.log(
     `declarations: typescript ${sides.typescript}, csharp ${sides.csharp}, rust ${sides.rust}; ` +
-      `twinned on the Rust side ${twinned}; rows: ${CLASSES.map((kind) => {
+      `left out by ${run.folders.length} folder(s) ${leftOut}; twinned on the Rust side ${twinned}; ` +
+      `rows: ${CLASSES.map((kind) => {
         return `${kind} ${classes[kind]}`;
       }).join(', ')}`
   );
-  process.exit(problems.length > 0 ? 1 : 0);
+  process.exit(run.problems.length > 0 ? 1 : 0);
 }

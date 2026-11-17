@@ -14,8 +14,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
   nothing, and `--dry-run` makes every check and changes nothing.
 - `tools/check-twins.mjs`, in CI's Commits job, with `tools/twins.tsv`: every TypeScript and C# test
-  is played on the Rust side under its title's key, or a row gives its class and why; `--write`
-  adds a `pending` row for a new one, which fails until a reader classifies it.
+  is played on the Rust side under its title's key, or a row gives its class and why, a folder's
+  row leaving out a program in one language no other side has; `--write` adds a `pending` row for
+  a new one, which fails until a reader classifies it.
 
 ### Fixed
 

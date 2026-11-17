@@ -53,6 +53,10 @@ const twinsOf = (...rows) => {
   return `${[...HEADER, ...rows.map((cells) => cells.join('\t'))].join('\n')}\n`;
 };
 
+// a test of the root's tools, which a folder's row leaves out
+const TOOL_FILE = 'tools/__tests__/t.test.mjs';
+const TOOL_SOURCE = "test('checks a tool', () => {});";
+
 // a TypeScript test, a C# test and a Rust test, the C# one alone twinned
 const FILES = Object.freeze({
   [TS_FILE]: sourceOf("test('reads a frame', () => {});", "test('reads a frame', () => {});"),
@@ -386,18 +390,74 @@ describe('checkOf', () => {
     assert.equal(written, twins);
   });
 
-  test('counts the declarations, those twinned and the rows by class', () => {
-    const declarations = declarationsWith(FILES);
-    const { rows, unmatched } = checkOf(
+  test('counts the declarations, those its folders leave out, those twinned and the rows by class', () => {
+    const declarations = declarationsWith({ ...FILES, [TOOL_FILE]: TOOL_SOURCE });
+    const check = checkOf(
       declarations,
-      twinsOf(['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.'])
+      twinsOf(
+        ['folder', 'tools/', 'A Node program.'],
+        ['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.']
+      )
     );
 
-    assert.deepEqual(countsOf(declarations, rows, unmatched), {
-      declarations: { typescript: 2, csharp: 1, rust: 1 },
+    assert.deepEqual(countsOf(declarations, check), {
+      declarations: { typescript: 3, csharp: 1, rust: 1 },
+      leftOut: 1,
       twinned: 1,
       classes: { retitled: 0, held: 0, ahead: 0, native: 1, pending: 0 },
     });
+  });
+});
+
+describe('folders', () => {
+  test('leave out every test under them, and --write drops a test’s row there', () => {
+    const { problems, written, dropped } = checkOf(
+      declarationsWith({ ...FILES, [TOOL_FILE]: TOOL_SOURCE }),
+      twinsOf(
+        ['folder', 'tools/', 'A Node program.'],
+        ['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.'],
+        ['typescript', TOOL_FILE, 'checks a tool', 'native', 'A Node program.']
+      )
+    );
+
+    assert.deepEqual(problems, [
+      `${TWINS}:4: \`checks a tool\` in ${TOOL_FILE} stands under folder \`tools/\`: drop the row`,
+    ]);
+    assert.equal(dropped.length, 1);
+    assert.equal(
+      written,
+      twinsOf(
+        ['folder', 'tools/', 'A Node program.'],
+        ['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.']
+      )
+    );
+  });
+
+  test('fail a folder no test stands under, of the wrong shape, with no reason, twice or out of order', () => {
+    const { problems } = checkOf(
+      declarationsWith(FILES),
+      twinsOf(
+        ['folder', 'tools'],
+        ['folder', 'tools', '-'],
+        ['folder', 'site/', 'A page.'],
+        ['folder', 'site/', 'A page.'],
+        ['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.'],
+        ['folder', 'builder/', 'A TypeScript program.']
+      )
+    );
+
+    assert.deepEqual(problems, [
+      `${TWINS}:2: 2 cells, not 3: folder, path, reason`,
+      `${TWINS}:3: folder \`tools\` does not end with /`,
+      `${TWINS}:3: folder \`tools\` with no reason`,
+      `${TWINS}:4: out of order, by path: --write sorts the folders`,
+      `${TWINS}:5: a second row for folder \`site/\``,
+      `${TWINS}:7: folder \`builder/\` after a test's row: --write puts the folders first`,
+      `${TWINS}:3: no TypeScript or C# test stands under folder \`tools\``,
+      `${TWINS}:4: no TypeScript or C# test stands under folder \`site/\``,
+      `${TWINS}:5: no TypeScript or C# test stands under folder \`site/\``,
+      `${TWINS}:7: no TypeScript or C# test stands under folder \`builder/\``,
+    ]);
   });
 });
 
