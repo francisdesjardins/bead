@@ -17,6 +17,6 @@
     <!-- MQTT 5's client beneath Bead.Transport.Mqtt, its automation turned off by its adapter (0041) -->
     <PackageVersion Include="MQTTnet" Version="5.2.0.1603" />
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
-    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
   </ItemGroup>
 </Project>
