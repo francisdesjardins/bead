@@ -3,7 +3,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { FLOORS, LITERALS, poolsOf, problemsOf, shapeOf, spansOf } from '../check-citations.mjs';
+import {
+  FLOORS,
+  LITERALS,
+  MARKERS,
+  UNTESTED_OPEN,
+  cellsOf,
+  poolsOf,
+  problemsOf,
+  shapeOf,
+  spansOf,
+} from '../check-citations.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const SUPPORT = 'docs/support.md';
@@ -374,5 +384,89 @@ describe('problemsOf', () => {
       })
     );
     assert.deepEqual(problemsAlone('`a.test.ts`', pools), []);
+  });
+});
+
+// ── cellsOf ────────────────────────────────────────────────────────────────────
+
+// a matrix of the differences alone, its rows given, under a section a cell may send the reader to
+const differencesWith = (rows) => {
+  return [
+    '## Sections',
+    '',
+    '## Differences',
+    '',
+    '| Difference | Kind | TypeScript | C# | Rust | What closing it takes |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...rows,
+    '',
+    '## After',
+  ].join('\n');
+};
+
+// the pools a fixture's cells place by: a test file, and a tool's script
+const CELL_POOLS = poolsWith({ paths: new Set(['a.test.ts', 'tools/run.mjs']) });
+
+describe('cellsOf', () => {
+  test('fails a language cell of the differences that places no citation and says no word of the legend, none among them', () => {
+    const text = differencesWith([
+      '| Placed | open | held: `a.test.ts` | a run: `tools/run.mjs csharp` | the same (see Sections) | x |',
+      '| Marked | platform | Not tested | not available: no such part | no counterpart: none such | x |',
+      '| Silent | platform | none | `held-nowhere.test.ts` | the same (see Nowhere) | x |',
+    ]);
+    const silent = problemsOf(text, CELL_POOLS)
+      .filter((problem) => {
+        return problem.includes('places no citation');
+      })
+      .map((problem) => {
+        return problem.match(/the (\S+) cell of the row (\S+) /).slice(1);
+      });
+
+    assert.deepEqual(silent, [
+      ['TypeScript', 'Silent'],
+      ['C#', 'Silent'],
+      ['Rust', 'Silent'],
+    ]);
+    assert.deepEqual(MARKERS, ['not tested', 'not probed', 'not available', 'no counterpart']);
+  });
+
+  test('counts a cell of an open row that places no citation or says it holds by no test, a Rust cell ahead left out', () => {
+    const text = differencesWith([
+      '| Open | open | held: `a.test.ts` | held: `a.test.ts`, by reading | ahead, not available | x |',
+      '| Bare | open | kept | not probed | held: `a.test.ts`; by a probe outside the suite | x |',
+      '| Platform | platform | not tested | kept | by reading | x |',
+    ]);
+    const untested = cellsOf(text, CELL_POOLS)
+      .filter((cell) => {
+        return cell.isUntested;
+      })
+      .map((cell) => {
+        return [cell.row, cell.language];
+      });
+
+    assert.deepEqual(untested, [
+      ['Open', 'C#'],
+      ['Bare', 'TypeScript'],
+      ['Bare', 'C#'],
+      ['Bare', 'Rust'],
+    ]);
+  });
+
+  test('fails over its ceiling of untested cells in open rows, and holds at it', () => {
+    const rowsOf = (count) => {
+      return Array.from({ length: count }, (_, index) => {
+        return `| Row ${index} | open | not tested | held: \`a.test.ts\` | held: \`a.test.ts\` | x |`;
+      });
+    };
+    const ceiling = (count) => {
+      return problemsOf(differencesWith(rowsOf(count)), CELL_POOLS).filter((problem) => {
+        return problem.includes('UNTESTED_OPEN');
+      });
+    };
+
+    assert.deepEqual(ceiling(UNTESTED_OPEN), []);
+    assert.deepEqual(ceiling(UNTESTED_OPEN + 1), [
+      `${SUPPORT}: ${UNTESTED_OPEN + 1} cells of open rows hold by no test, over UNTESTED_OPEN, ${UNTESTED_OPEN}`,
+    ]);
   });
 });

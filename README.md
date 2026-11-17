@@ -1030,8 +1030,10 @@ against each server.
 - `node tools/check-citations.mjs`: every test `docs/support.md` cites, wherever it stands — a
   file, a C# class or method, a Rust function or trial, a title — is one its side's tests declare,
   an entry of a conformance file a harness names at run time, a case's label or a row of the
-  matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason.
-  Given files, those alone.
+  matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason;
+  each language cell of the matrix's differences places a citation or says a word of its legend,
+  and the cells of open rows that hold by no test number at most its `UNTESTED_OPEN`. Given files,
+  those alone.
 - `node tools/check-details.mjs`: on every side, no exception's message goes into a failure's detail
   but at a site that reports alone (spec 9.0) or whose words are the side's own, a built-in codec's
   reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
