@@ -306,6 +306,16 @@ cases = [
         send('none', 'POST', fields={'content-type': BEAD}, body=ECHO), refused('none', 400, 'malformed'),
         send('bad', 'POST', fields={'bead-connection-token': 'x', 'content-type': BEAD}, body=ECHO),
         refused('bad', 400, 'malformed')]),
+    # 15.12: a token in two lines is read with its lines joined (RFC 9110 §5.3), a token of another form
+    ('a cancel or a DELETE whose bead-connection-token comes in two lines, its connection\'s first, is refused 400, marked; one line ends its connection',
+     ['15.6.4', '15.12'], None, [
+         *drawn(),
+         send('cancel', 'POST', fields=[('bead-connection-token', '{token}'), ('bead-connection-token', '{token}'),
+                                        ('content-type', BEAD)], body=cancel(5)),
+         refused('cancel', 400, 'malformed'),
+         send('twice', 'DELETE', fields=[('bead-connection-token', '{token}'), ('bead-connection-token', 'x')]),
+         refused('twice', 400, 'malformed'),
+         send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body='')]),
     ('an exchange of a connection the server does not hold is refused 404, connection-unknown', ['15.6.6'], None, [
         send('gone', 'POST', fields={'bead-connection-token': 'AAAAAAAAAAAAAAAAAAAAAA', 'content-type': BEAD},
              body=ECHO), refused('gone', 404, 'connection-unknown')]),
@@ -332,6 +342,23 @@ cases = [
         send('plain', 'POST', fields={'bead-connection-token': '{token}', 'content-type': 'text/plain'}, body=ECHO),
         refused('plain', 415, 'type-refused'),
         post('encoded', ECHO, fields={'content-encoding': 'gzip'}), refused('encoded', 415, 'type-refused')]),
+    # 15.12: Content-Encoding is a list, read with its lines joined, identity in two lines no identity
+    ('a connect whose Content-Encoding is identity in two lines, identity then gzip, or identity twice in one line is refused 415, marked',
+     ['15.6.11', '15.12'], None, [
+         send('twice', 'POST', fields=[('content-type', BEAD), ('content-encoding', 'identity'),
+                                       ('content-encoding', 'identity')]),
+         refused('twice', 415, 'type-refused'),
+         send('gzip', 'POST', fields=[('content-type', BEAD), ('content-encoding', 'identity'),
+                                      ('content-encoding', 'gzip')]),
+         refused('gzip', 415, 'type-refused'),
+         connect('joined', fields={'content-encoding': 'identity, identity'}), refused('joined', 415, 'type-refused')]),
+    # 15.12: Content-Type is a singleton field (RFC 9110 §8.3), refused in two lines
+    ('a connect, or a POST on a connection, whose Content-Type comes in two lines, Bead\'s first, is refused 415, marked',
+     ['15.6.11', '15.12'], None, [
+         send('connect', 'POST', fields=[('content-type', BEAD), ('content-type', 'text/html')]),
+         refused('connect', 415, 'type-refused'),
+         *drawn('drawn'), post('post', ECHO, fields=[('content-type', BEAD)]), refused('post', 415, 'type-refused'),
+         post('echo', ECHO), answered('echo', result(1, '"x"'))]),
     ('a body past its bound is refused 413, marked', ['15.6.10', '15.12.5'], {'maximumBodyBytes': 64}, [
         *drawn(), post('large', request(1, 'echo', '"' + 'x' * 60 + '"')), refused('large', 413, 'too-large')]),
     # 15.6: a request at the path that holds two faults, answered by the first in 15.6's order
@@ -501,6 +528,13 @@ cases = [
          send('mixed', 'POST', 'hTtP://{host}/bead', fields={'content-type': BEAD}), expect('mixed', 201)]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
+    # 15.12: two Origin lines are read joined, no serialized origin (RFC 6454 §7.3), whichever comes first
+    ('an exchange whose Origin comes in two lines, its own first, or in one line of two origins, is refused 403, marked',
+     ['15.6.5', '15.12'], None, [
+         send('lines', 'POST', fields=[('content-type', BEAD), ('origin', 'http://{host}'),
+                                       ('origin', 'https://elsewhere.test')]),
+         refused('lines', 403, 'origin-refused'),
+         connect('joined', fields={'origin': 'http://{host}, http://{host}'}), refused('joined', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
         connect(fields={'origin': 'https://bead.test'}), expect('connect', 201)]),
     ('a host and an origin are compared in any ASCII case', ['15.12'], {'hosts': ['bead.test']}, [
@@ -1112,6 +1146,9 @@ websocket = [
          refused('elsewhere', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('own', {'origin': 'http://{host}'}), message('own', binary=ECHO), heard('own', envelope=result(1, '"x"')),
          *upgrade('none'), message('none', binary=ECHO), heard('none', envelope=result(1, '"x"'))]),
+    ('an upgrade whose Origin comes in two lines, its own first, is refused 403, marked', ['15.2', '15.2.7', '15.12'], {}, [
+        handshake('lines', [('origin', 'http://{host}'), ('origin', 'https://elsewhere.test')]),
+        refused('lines', 403, 'origin-refused', UPGRADE_REFUSED)]),
     # a WebSocket answers no CORS, which no browser asks of an upgrade (spec 15.12)
     ('an upgrade from an origin the server takes is served', ['15.12'], {'options': {'origins': ['https://bead.test']}}, [
         handshake('socket', {'origin': 'https://bead.test'}),

@@ -281,10 +281,11 @@ _Transcoding: `spec/transcoding.json`._
 A gateway MUST refuse, 415 `type-refused`, a request to a route that takes a body, whether a body
 comes or none, whose `content-type` is absent or in two fields, or whose type, compared
 case-insensitively, is not its route's, or which carries a parameter but `charset`, or a `charset`
-but `utf-8` in any case, a token or a quoted string, or whose `content-encoding` is not `identity`,
-as section 15.6 of `spec.md` refuses a `POST` of no type. A `json`, `text` or `raw` request has no
-field: its route's body is `*`, and no variable or query binds it. `bead.Json`, `bead.Text` and
-`bead.Raw` are those encodings, never messages that section 5.6 writes.
+but `utf-8` in any case, a token or a quoted string, or whose `content-encoding`, its lines joined
+as section 15.12 of `spec.md` reads it, is not `identity`, as section 15.6 of `spec.md` refuses a
+`POST` of no type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no
+variable or query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never
+messages that section 5.6 writes.
 
 5.2. A gateway MUST read a `proto` request's body as section 4 binds it, and refuse it, 400
 `PAYLOAD_UNDECODABLE`, at the first refusal it meets, in this order:
@@ -667,7 +668,8 @@ _Transcoding: `spec/transcoding.json`._
    whenever it comes;
 2. a host it does not take, 403 `host-refused` (`hosts`);
 3. a path no route matches, 404 `path-unknown` (section 3.10);
-4. an `origin` neither its own nor one `origins` names, 403 `origin-refused`;
+4. an `origin` neither its own nor one `origins` names, its lines joined as section 15.12 of
+   `spec.md` reads it, 403 `origin-refused`;
 5. a request with no `origin` whose `sec-fetch-site` is `same-site` or `cross-site`, 403
    `origin-refused`, unless its `sec-fetch-mode` is `navigate`, its method `GET` and its
    `sec-fetch-dest` neither `object` nor `embed`, and it asks `/openapi.json`, a default route's
@@ -676,7 +678,11 @@ _Transcoding: `spec/transcoding.json`._
    ([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)), so what comes from one without it
    is a subresource or a navigation, which web.dev's
    [resource isolation policy](https://web.dev/articles/fetch-metadata) refuses but a `GET`
-   navigation no `object` or `embed` makes; a request with no `sec-fetch-site` is taken;
+   navigation no `object` or `embed` makes; a request with no `sec-fetch-site` is taken; each of the
+   three fields read with its lines joined as section 15.12 reads one, and one whose value is none
+   of its tokens, two lines of it among them, read as absent, as
+   [Fetch Metadata](https://w3c.github.io/webappsec-fetch-metadata/#sec-fetch-site-header) asks a
+   server to ignore an invalid value;
 6. a preflight, an `OPTIONS` that carries `access-control-request-method`, from an origin `origins`
    names: 204, its `access-control-allow-methods` the methods its path's routes take in section
    3.10's order, and its `access-control-allow-headers` and `access-control-max-age` as section

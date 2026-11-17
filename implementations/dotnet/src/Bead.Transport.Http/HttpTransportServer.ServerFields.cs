@@ -20,11 +20,13 @@ public sealed partial class HttpTransportServer
             return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
         }
 
-        // a body of Bead's media type, parameters aside, sent as it is
+        // a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
+        // Content-Encoding, or one whose lines joined are identity (spec 15.12)
         internal static bool IsBeadBody(HttpRequest request)
         {
+            // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
             var types = request.Headers.ContentType;
-            var type = (types.Count == 0 ? null : types[0])?.Split(';')[0].Trim().ToLowerInvariant();
+            var type = (types.Count == 1 ? types[0] : null)?.Split(';')[0].Trim().ToLowerInvariant();
             var encoding = HeaderOf(request, HeaderNames.ContentEncoding)?.Trim().ToLowerInvariant();
 
             return type == HttpTransport.MediaType && encoding is null or "identity";
@@ -60,12 +62,14 @@ public sealed partial class HttpTransportServer
             };
         }
 
-        // a header as the request gives it, given twice as one; none when absent, which is not empty
+        // a header as the request gives it, its lines joined in their order by ", " (RFC 9110 §5.3,
+        // spec 15.12); none when absent, which is not empty
+        // ! joined here, as the other sides join them: StringValues.ToString() joins by ","
         internal static string? HeaderOf(HttpRequest request, string name)
         {
             var values = request.Headers[name];
 
-            return values.Count == 0 ? null : values.ToString();
+            return values.Count == 0 ? null : string.Join(", ", values.AsEnumerable());
         }
 
         // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or

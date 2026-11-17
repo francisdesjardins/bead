@@ -1715,6 +1715,43 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(connections).toHaveLength(before);
   });
 
+  // spec 15.12: each field read as over HTTP/1.1, its lines joined, a type in one line alone
+  test('refuses over HTTP/2 a connect whose Origin or Content-Encoding comes in two lines, 403 and 415', async () => {
+    await using started = await startSecure();
+    const own = `https://${host}:${String(started.port)}`;
+
+    expect(
+      await Promise.all([
+        answerOverHTTP2(started.session, { origin: [own, 'https://elsewhere.test'] }),
+        answerOverHTTP2(started.session, { origin: own, 'content-encoding': 'identity' }),
+      ])
+    ).toEqual([
+      [403, HTTP_REFUSALS.ORIGIN],
+      [201, undefined],
+    ]);
+
+    // ! Node's client sends no field it holds to one value in two lines, Content-Encoding among
+    // them: the request as Node's server hands it over, `headers` keeping its first line
+    const { fake } = await startScripted();
+    const encodedOf = (encodings: string[]) => {
+      const { response } = fake.exchange({
+        headers: {
+          ':authority': 'bead.localhost',
+          'content-encoding': encodings,
+          'content-type': BEAD_MEDIA_TYPE,
+        },
+        httpVersionMajor: 2,
+      });
+
+      return [response.status, response.headers?.[REFUSAL_HEADER]];
+    };
+
+    expect([encodedOf(['identity', 'identity']), encodedOf(['identity', 'gzip'])]).toEqual([
+      [415, HTTP_REFUSALS.TYPE],
+      [415, HTTP_REFUSALS.TYPE],
+    ]);
+  });
+
   test('resets over HTTP/2 the stream of a request whose :authority is no host, PROTOCOL_ERROR, nothing written', async () => {
     await using started = await startSecure({ hosts: ['*'] });
     const { server, session } = started;

@@ -1525,7 +1525,7 @@ the request ran: the client counts the exchange lost.
 | 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed (section 15.12)                                                                                                                                                                       |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
-| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                       |
+| 415    | `type-refused`                        | not `application/prs.bead` in one field line, or encoded                                                                                                                                                                                                                     |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                          |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way; `Retry-After` 1                                                                                                                                                                                         |
 | 503    | `busy`                                | too many connections — all, or one address's —, over HTTP or at a WebSocket's address; bytes of body being read; or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                           |
@@ -1547,17 +1547,17 @@ naming the three — never the 501 §9.1 suggests for a method a server does not
 ([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), since what a server
 recognizes beyond the path's methods is its HTTP parser's, which no two platforms share, and
 `Allow` tells a client what to send where 501 tells nothing; a WebSocket's address compares alike
-(section 15.2, step 3). A `POST` that presents no token connects: no type, or another than
-`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began, or
-past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged by its
-token: none, or one of another form, 400; once the server's stop began, the 404 marked
-`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
-then ends its connection. A listen is refused 409 when its client did not say it listens, then 400
-for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its encoding, then
-400 for two `Authorization` fields, 413 for a length it declares past `maximumBodyBytes`, and 429
-past what its connection has under way, each before its body is read; what its body brings is judged
-as it comes (section 15.5): past `maximumBodyBytes` 413, past the budget 503, slower than its rate
-408 (section 15.12).
+(section 15.2, step 3). A `POST` that presents no token connects: no type, a type in more than one
+field line or another than `application/prs.bead`, or a body encoded, 415; the connect's own 400;
+then, once its stop began, or past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any
+other request is judged by its token: none, or one of another form, 400; once the server's stop
+began, the 404 marked `connection-unknown`, the token not looked up; a token it does not hold, the
+same 404. A `DELETE` then ends its connection. A listen is refused 409 when its client did not say
+it listens, then 400 for a body or its counts (section 15.9). A `POST` is refused 415 for its type
+or its encoding, then 400 for two `Authorization` fields, 413 for a length it declares past
+`maximumBodyBytes`, and 429 past what its connection has under way, each before its body is read;
+what its body brings is judged as it comes (section 15.5): past `maximumBodyBytes` 413, past the
+budget 503, slower than its rate 408 (section 15.12).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. A
 server waits 40 ms from a request's hand-off for its answer: one that comes within them goes whole,
@@ -1815,6 +1815,21 @@ policy; and any other scheme, an extension's or a `blob:` URL's among them. A se
 `null`: it is what every page that has no origin of its own sends, a sandboxed frame of any site
 among them, so no `origins` names it. A request without an `Origin` comes from no page, and is
 taken.
+
+A field in more than one field line is read with its lines joined in their order by `, `, as
+[RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient combine them,
+so that two lines are judged as the one line a proxy may make of them. So are read an `Origin`, on
+an exchange and on an upgrade alike (section 15.2, step 7), a `bead-connection-token` and a
+`Content-Encoding`. An `Origin` so joined is no serialized origin, since a browser sends one at most
+([RFC 6454 §7.3](https://www.rfc-editor.org/rfc/rfc6454#section-7.3)): it is none of the server's
+own, and none `origins` lists, refused 403 `origin-refused`. A token so joined is one of another
+form, refused 400 `malformed`. `Content-Encoding` is a list
+([RFC 9110 §8.4](https://www.rfc-editor.org/rfc/rfc9110#section-8.4)): a body is sent as it is when
+the field is absent or its lines joined are `identity`, in any case, and is encoded otherwise,
+`identity` in two lines among it. A `Content-Type`, a singleton field
+([RFC 9110 §8.3](https://www.rfc-editor.org/rfc/rfc9110#section-8.3)), is refused 415 `type-refused`
+in more than one field line wherever a type is judged. An `Authorization` is refused in more than
+one as section 15.5 says, and a `Host` as HTTP refuses it.
 
 An HTTP server answers the CORS protocol
 ([Fetch Standard §3.3](https://fetch.spec.whatwg.org/#http-cors-protocol)) to the origins `origins`
