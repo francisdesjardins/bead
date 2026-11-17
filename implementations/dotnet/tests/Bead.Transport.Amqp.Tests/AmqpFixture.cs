@@ -129,9 +129,3 @@ internal static class AmqpFixture
             : throw new InvalidOperationException($"BEAD_AMQP_REQUIRED=1 asks for a broker, and {name} is not set (node tools/amqp-broker.mjs start)");
     }
 }
-
-/// <summary>The classes that play against the run's broker, one at a time.</summary>
-[CollectionDefinition(AmqpFixture.Collection, DisableParallelization = true)]
-public sealed class AmqpBrokerRun
-{
-}

@@ -62,9 +62,3 @@ internal static class MqttFixture
             : throw new InvalidOperationException($"BEAD_MQTT_REQUIRED=1 asks for a broker, and {name} is not set (node tools/mqtt-broker.mjs start)");
     }
 }
-
-/// <summary>The classes that play against the run's broker, one at a time.</summary>
-[CollectionDefinition(MqttFixture.Collection, DisableParallelization = true)]
-public sealed class MqttBrokerRun
-{
-}
