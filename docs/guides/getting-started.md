@@ -537,7 +537,7 @@ sources, so the project compiles them under its own options and bundles them wit
     "start": "node dist/main.mjs"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.16.0",
+    "@bufbuild/protobuf": "2.17.0",
     "@francisdesjardins/bead": "file:../../bead-pinned/implementations/typescript"
   },
   "devDependencies": {

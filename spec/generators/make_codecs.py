@@ -49,10 +49,6 @@ PROTO_DEPTH = 100
 # the row of docs/support.md a value crosses that a side's type cannot hold
 NOT_HELD = "A value a side's type cannot hold"
 
-# the row of docs/support.md a proto string's leading U+FEFF crosses, which a stock library strips
-LEADING_FEFF = "A string's leading U+FEFF in a proto payload"
-
-
 class Undefined:
     """What a language holds that JSON has no value for: JavaScript's undefined, a C# JsonElement of kind
     Undefined."""
@@ -1028,9 +1024,7 @@ PAYLOADS = [
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
 # languages they excuse
-PROTO_DIFFERS = {
-    "a string's leading U+FEFF": [(LEADING_FEFF, 'TypeScript')],
-}
+PROTO_DIFFERS = {}
 
 
 def payload_outcome(encoding, data):
