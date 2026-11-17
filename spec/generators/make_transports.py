@@ -6,7 +6,7 @@ from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
-from conformance import advance, armed, hexadecimal, text, word, write_json
+from conformance import advance, armed, citing_no_detail, detail_by_default, hexadecimal, text, word, write_json
 from interop import PROCEDURES, SERVICE_ID
 from jws import signed, unbase64url
 from mqtt_packets import largest_payload, receive_bound
@@ -62,6 +62,7 @@ def result(call_id, value, credential=None):
 
 
 def failure(call_id, code, scope=PROTOCOL, credential=None, detail=None):
+    detail = detail_by_default(code, scope, detail)
     return {'kind': FAILURE, 'callId': call_id,
             'failure': {'code': code, 'scope': scope, 'relays': 0, **({'detail': detail} if detail is not None else {})},
             **({'credential': credential} if credential else {})}
@@ -2718,15 +2719,15 @@ document = {
         for name, pieces, status, fields, body in responses
     ],
     'cases': [
-        {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}),
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': 'http', **({'options': options} if options else {}),
          **({'realTime': True} if name in HTTP_REAL_TIME else {}),
          **({'differs': HTTP_DIFFERS[name]} if name in HTTP_DIFFERS else {}), 'steps': steps}
         for name, clauses, options, steps in cases
     ] + [
-        {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': 'websocket', **fields, 'steps': steps}
         for name, clauses, fields, steps in websocket
     ] + [
-        {'name': name, 'clauses': clauses, 'transport': transport, **fields, 'steps': steps}
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': transport, **fields, 'steps': steps}
         for transport in (IN_MEMORY, MQTT, AMQP) for name, clauses, fields, steps in played[transport]
     ],
     'brokers': {MQTT: mqtt_broker(), AMQP: amqp_broker()},

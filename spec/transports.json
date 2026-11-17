@@ -7051,6 +7051,7 @@
     {
       "name": "to a client that does not listen, a request of the server's own fails before it goes",
       "clauses": [
+        "9.0",
         "15.8"
       ],
       "transport": "http",
@@ -7093,7 +7094,8 @@
               "failure": {
                 "code": 64,
                 "scope": 0,
-                "relays": 0
+                "relays": 0,
+                "detail": ""
               }
             }
           },

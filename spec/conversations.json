@@ -860,6 +860,7 @@
     {
       "name": "a command the client fails fails the call that asked it, which is reported",
       "clauses": [
+        "9.0",
         "9.1"
       ],
       "steps": [
@@ -886,7 +887,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -898,6 +900,7 @@
     {
       "name": "an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence",
       "clauses": [
+        "9.0",
         "9.6",
         "9.6.3",
         "9.6.5"
@@ -932,7 +935,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -947,6 +951,7 @@
     {
       "name": "a command past its time is cancelled and its call id reserved as long: an answer within is dropped in silence, one after is reported CALL_UNKNOWN",
       "clauses": [
+        "9.0",
         "9.7",
         "9.9",
         "10.1",
@@ -987,7 +992,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -3132,6 +3138,7 @@
     {
       "name": "a key set's ask that never settles fails at its deadline, a minute after it went, for the calls that wait on it, and the next ask goes",
       "clauses": [
+        "9.0",
         "9.2.6",
         "10.2",
         "13.9",
@@ -3171,7 +3178,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -3196,7 +3204,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -4228,6 +4237,7 @@
     {
       "name": "an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED",
       "clauses": [
+        "9.0",
         "9.2.6",
         "13.11"
       ],
@@ -4243,7 +4253,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -5054,6 +5065,7 @@
     {
       "name": "the server's commands past the calls its client answers at once fail before they go, and go once one is answered",
       "clauses": [
+        "9.0",
         "9.1",
         "12.2.10"
       ],
@@ -5100,7 +5112,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -6738,6 +6751,7 @@
     {
       "name": "a result's opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it",
       "clauses": [
+        "9.0",
         "12.3",
         "12.3.3",
         "12.7"
@@ -6776,7 +6790,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -6788,6 +6803,7 @@
     {
       "name": "a result's chunk that does not read ends the command CHUNK_INVALID, and cancels it",
       "clauses": [
+        "9.0",
         "9.6",
         "9.6.4"
       ],
@@ -6836,7 +6852,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -6848,6 +6865,7 @@
     {
       "name": "a result past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it, where one of chunkBytes is taken",
       "clauses": [
+        "9.0",
         "9.6.3",
         "12.2"
       ],
@@ -6921,7 +6939,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -6933,6 +6952,7 @@
     {
       "name": "a result's opening past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it",
       "clauses": [
+        "9.0",
         "9.6.3",
         "12.2",
         "12.3"
@@ -6971,7 +6991,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -7458,6 +7479,7 @@
       "name": "a result's opening that waits for the budget past half its call's inactivity ends the command CAPACITY_EXCEEDED, and cancels it",
       "clauses": [
         "8.2",
+        "9.0",
         "12.4"
       ],
       "limits": {
@@ -7515,7 +7537,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -7530,6 +7553,7 @@
     {
       "name": "a result's opening that waits for the budget is credited once it frees, the credit setting its call's inactivity going again",
       "clauses": [
+        "9.0",
         "12.4",
         "12.8"
       ],
@@ -7618,7 +7642,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -7752,6 +7777,7 @@
     {
       "name": "a command whose result comes as a transfer waits on the transfer's inactivity, not its own time; gone silent it ends as timed out, its call id reserved as long",
       "clauses": [
+        "9.0",
         "9.9",
         "10.3",
         "12.7",
@@ -7822,7 +7848,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -10652,6 +10679,7 @@
     {
       "name": "a relay that verifies asks its verifier for an ELSEWHERE its transport carried before its destination is looked up: a verifier that fails is answered PROCEDURE_FAILED and reported, one that does not hold SESSION_REQUIRED, and one that holds crosses as it came",
       "clauses": [
+        "9.0",
         "14.2.3",
         "14.3.1"
       ],
@@ -10689,7 +10717,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           },
           "on": "client"

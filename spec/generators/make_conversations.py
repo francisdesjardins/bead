@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime
 
-from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
+from conformance import ROOT, advance, armed, citing_no_detail, detail_by_default, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
 from interop import API, PROCEDURES, SERVICE_ID
 from jws import compact, signed, unbase64url
@@ -67,6 +67,7 @@ def result(call_id, value, credential=None):
 
 
 def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0, detail=None):
+    detail = detail_by_default(code, scope, detail)
     return {'expect': {'kind': FAILURE, 'callId': call_id,
                        'failure': {'code': code, 'scope': scope, 'relays': relays,
                                    **({'detail': detail} if detail is not None else {})},
@@ -1846,7 +1847,7 @@ document = {
     'specVersion': spec_version(),
     'wallClock': WALL_CLOCK,
     'conversations': [
-        {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
+        {'name': name, 'clauses': citing_no_detail(clauses, rest[-1]), **({'limits': limits} if limits else {}),
          **({'pacing': rest[0]} if len(rest) > 1 else {}), **({'relay': RELAY_OPTIONS[name]} if name in RELAY_OPTIONS else {}),
          **({'listener': LISTENERS[name]} if name in LISTENERS else {}),
          'steps': rest[-1]}

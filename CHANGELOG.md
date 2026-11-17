@@ -27,6 +27,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Two vectors of `spec/vectors.json`'s `headerRefusals` pin 4.4's order on a `CREDENTIAL` block
   that breaks two of its checks: an `OPAQUE` of 15 bytes whose padding is not zero, refused for its
   length, and a `NONE` of 1 byte on a request whose padding is not zero, refused for its scheme.
+- `spec/check.py` refuses a `PROCEDURE_FAILED` of the protocol's that a conversation, a transports'
+  case or an exit expects with a detail other than the empty one (spec 9.0). The generators give
+  that empty detail by default, and the 23 expectations that gave none, in
+  `spec/conversations.json`, `spec/transports.json` and `spec/metrics.json`, now pin it.
 
 ### Changed
 
