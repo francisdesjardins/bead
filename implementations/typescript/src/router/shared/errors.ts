@@ -85,6 +85,11 @@ export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
   };
 };
 
+/** A count of bytes as a failure's detail writes it: `1 byte`, or `0 bytes`, `2 bytes`. */
+export const byteCountOf = (count: number): string => {
+  return `${String(count)} ${count === 1 ? 'byte' : 'bytes'}`;
+};
+
 // definition
 
 /**

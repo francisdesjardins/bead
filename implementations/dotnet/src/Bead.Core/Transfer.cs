@@ -204,7 +204,7 @@ internal sealed class IncomingTransfer
 
         if (opening.Length >= options.Total)
         {
-            return (null, Invalid($"an opening of {opening.Length} bytes holds its whole total of {options.Total}"));
+            return (null, Invalid($"an opening of {FailureException.ByteCountOf(opening.Length)} holds its whole total of {options.Total}"));
         }
 
         return (new IncomingTransfer(opening, options), null);

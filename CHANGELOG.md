@@ -64,6 +64,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A detail that counts 1 byte says "1 byte", not "1 bytes", on every side: a credit's or a
+  cancel's byte after its header, an opening that holds its whole total, and a payload that goes as
+  a transfer.
 - The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
   so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
 - The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a

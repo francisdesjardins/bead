@@ -16,7 +16,7 @@ use crate::envelope::{
     unbounded_header_bytes_of,
 };
 use crate::errors::ProgrammerError;
-use crate::failure::{Failure, ProcedureAddress};
+use crate::failure::{Failure, ProcedureAddress, byte_count_of};
 use crate::metrics::{CallEnding, ProcedureSeries};
 use crate::router::core::microseconds_of;
 use crate::router::transfer::{
@@ -168,7 +168,8 @@ impl Placement {
 
         if self.limits.maximum_transfers == 0 {
             return Err(too_large(format!(
-                "a payload of {length} bytes goes as a transfer, which this side sends none of"
+                "a payload of {} goes as a transfer, which this side sends none of",
+                byte_count_of(length)
             )));
         }
 
@@ -181,13 +182,15 @@ impl Placement {
         // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
         if opening_header_bytes > count_of(MAXIMUM_HEADER_BYTES) {
             return Err(too_large(format!(
-                "a payload of {length} bytes goes as a transfer, whose opening's header of {opening_header_bytes} bytes passes {MAXIMUM_HEADER_BYTES}"
+                "a payload of {} goes as a transfer, whose opening's header of {opening_header_bytes} bytes passes {MAXIMUM_HEADER_BYTES}",
+                byte_count_of(length)
             )));
         }
 
         if opening_bytes < 1 {
             return Err(too_large(format!(
-                "a payload of {length} bytes goes as a transfer, whose opening's header of {opening_header_bytes} bytes leaves it no byte within {}",
+                "a payload of {} goes as a transfer, whose opening's header of {opening_header_bytes} bytes leaves it no byte within {}",
+                byte_count_of(length),
                 self.whole_bytes
             )));
         }

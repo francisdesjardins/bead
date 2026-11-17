@@ -348,11 +348,11 @@ envelopes = [
 
 envelope_refusals = [
     ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, None, MALFORMED,
-     'a cancel carries no payload, not 1 bytes'),
+     'a cancel carries no payload, not 1 byte'),
     ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, None, MALFORMED,
      'a chunk carries one byte at least'),
     ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, None, MALFORMED,
-     'a credit carries no payload, not 1 bytes'),
+     'a credit carries no payload, not 1 byte'),
     # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
     # vector that fails two checks cites 5.1's order
     ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,

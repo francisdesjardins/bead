@@ -1,8 +1,9 @@
-//! A failure's scope, code and known side, its message and its redacted context.
+//! A failure's scope, code and known side, its message, its redacted context, and a count of bytes
+//! as its detail writes it.
 
 use core::num::NonZeroU16;
 
-use super::{Failure, FailureOrigin, ProcedureAddress};
+use super::{Failure, FailureOrigin, ProcedureAddress, byte_count_of};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, EnvelopeHeader, FailureHeader, FailureRecord};
 
@@ -379,5 +380,13 @@ fn names_no_protocol_code_for_an_application_failure() {
         )
         .to_string(),
         "client application failure 21"
+    );
+}
+
+#[test]
+fn writes_a_count_of_1_as_1_byte_and_any_other_count_as_bytes() {
+    assert_eq!(
+        [0_u64, 1, 2, 1024].map(byte_count_of),
+        ["0 bytes", "1 byte", "2 bytes", "1024 bytes"]
     );
 }

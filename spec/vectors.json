@@ -1769,7 +1769,7 @@
       ],
       "bytes": "A1 16 00 02  00 00 00 05 | 00",
       "code": 1,
-      "detail": "a cancel carries no payload, not 1 bytes"
+      "detail": "a cancel carries no payload, not 1 byte"
     },
     {
       "name": "a chunk without a byte",
@@ -1787,7 +1787,7 @@
       ],
       "bytes": "A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01",
       "code": 1,
-      "detail": "a credit carries no payload, not 1 bytes"
+      "detail": "a credit carries no payload, not 1 byte"
     },
     {
       "name": "an envelope past its bound",
