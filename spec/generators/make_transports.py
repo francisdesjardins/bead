@@ -536,6 +536,13 @@ cases = [
                                        ('origin', 'https://elsewhere.test')]),
          refused('lines', 403, 'origin-refused'),
          connect('joined', fields={'origin': 'http://{host}, http://{host}'}), refused('joined', 403, 'origin-refused')]),
+    # 15.12: an empty line is a line, joined with the others, so the Origin is none of the server's own
+    ('an exchange whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked',
+     ['15.6.5', '15.12'], None, [
+         send('last', 'POST', fields=[('content-type', BEAD), ('origin', 'http://{host}'), ('origin', '')]),
+         refused('last', 403, 'origin-refused'),
+         send('first', 'POST', fields=[('content-type', BEAD), ('origin', ''), ('origin', 'http://{host}')]),
+         refused('first', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
         connect(fields={'origin': 'https://bead.test'}), expect('connect', 201)]),
     ('a host and an origin are compared in any ASCII case', ['15.12'], {'hosts': ['bead.test']}, [
@@ -628,6 +635,20 @@ cases = [
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
          refused('second', 503, 'busy', BUSY),
          connect('other', fields={'x-forwarded-for': '192.0.2.2'}), expect('other', 201)]),
+    # 15.12: X-Forwarded-For's lines joined by ", ", an empty one among them, whose empty entry ends
+    # the walk where it stands
+    ('behind proxies it names, X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a refusal tells the address where it ended',
+     ['15.6.5', '15.12', '15.12.2'], {'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}, [
+         send('last', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', '')]),
+         refused('last', 403, 'host-refused'),
+         send('first', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', ''), ('x-forwarded-for', '198.51.100.7')]),
+         refused('first', 403, 'host-refused'),
+         send('between', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', ''),
+                      ('x-forwarded-for', '10.0.0.5')]),
+         refused('between', 403, 'host-refused')]),
     # 15.12: the client's address, walked from the right past each proxy a server names, every
     # runner's socket on 127.0.0.1
     ('an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503',
@@ -1150,6 +1171,13 @@ websocket = [
     ('an upgrade whose Origin comes in two lines, its own first, is refused 403, marked', ['15.2', '15.2.7', '15.12'], {}, [
         handshake('lines', [('origin', 'http://{host}'), ('origin', 'https://elsewhere.test')]),
         refused('lines', 403, 'origin-refused', UPGRADE_REFUSED)]),
+    # 15.12: an empty line is a line, joined with the others, so the Origin is none of the server's own
+    ('an upgrade whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked',
+     ['15.2', '15.2.7', '15.12'], {}, [
+        handshake('last', [('origin', 'http://{host}'), ('origin', '')]),
+        refused('last', 403, 'origin-refused', UPGRADE_REFUSED),
+        handshake('first', [('origin', ''), ('origin', 'http://{host}')]),
+        refused('first', 403, 'origin-refused', UPGRADE_REFUSED)]),
     # a WebSocket answers no CORS, which no browser asks of an upgrade (spec 15.12)
     ('an upgrade from an origin the server takes is served', ['15.12'], {'options': {'origins': ['https://bead.test']}}, [
         handshake('socket', {'origin': 'https://bead.test'}),
@@ -1235,6 +1263,17 @@ websocket = [
          refused('unknown', 403, 'host-refused', UPGRADE_REFUSED),
          *upgrade('taken', {'x-forwarded-for': '203.0.113.9'}), message('taken', binary=ECHO),
          heard('taken', envelope=result(1, '"x"'))]),
+    # 15.12: X-Forwarded-For's lines joined by ", ", an empty one among them, whose empty entry ends
+    # the walk where it stands
+    ('behind proxies it names, an upgrade\'s X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a WebSocket server\'s refusal tells the address where it ended',
+     ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}}, [
+         handshake('last', [('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', '')], host='rebind.example'),
+         refused('last', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('first', [('x-forwarded-for', ''), ('x-forwarded-for', '198.51.100.7')], host='rebind.example'),
+         refused('first', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('between', [('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', ''),
+                               ('x-forwarded-for', '10.0.0.5')], host='rebind.example'),
+         refused('between', 403, 'host-refused', UPGRADE_REFUSED)]),
     ('an upgrade\'s X-Forwarded-For from a socket no trustedProxies entry holds is not read: a WebSocket server\'s refusal tells the socket\'s address',
      ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'trustedProxies': ['192.0.2.0/24']}}, [
          handshake('rebound', {'x-forwarded-for': '192.0.2.1'}, host='rebind.example'),

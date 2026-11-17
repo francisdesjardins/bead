@@ -3853,6 +3853,64 @@
       ]
     },
     {
+      "name": "an exchange whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: http://{host}\r\norigin: \r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "last"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://{host}, ",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "last"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: \r\norigin: http://{host}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": ", http://{host}",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "first"
+        }
+      ]
+    },
+    {
       "name": "an exchange from an origin the server takes is served",
       "clauses": [
         "15.12"
@@ -4883,6 +4941,95 @@
             "status": 201
           },
           "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "behind proxies it names, X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a refusal tells the address where it ended",
+      "clauses": [
+        "15.6.5",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "trustedProxies": [
+          "127.0.0.0/8",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "last"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "last"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: \r\nx-forwarded-for: 198.51.100.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\nx-forwarded-for: 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "between"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "10.0.0.5",
+              "port": "{port}"
+            }
+          },
+          "on": "between"
         }
       ]
     },
@@ -10197,6 +10344,69 @@
       ]
     },
     {
+      "name": "an upgrade whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked",
+      "clauses": [
+        "15.2",
+        "15.2.7",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://{host}\r\norigin: \r\n\r\n"
+          },
+          "on": "last"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://{host}, ",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "last"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: \r\norigin: http://{host}\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": ", http://{host}",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "first"
+        }
+      ]
+    },
+    {
       "name": "an upgrade from an origin the server takes is served",
       "clauses": [
         "15.12"
@@ -11354,6 +11564,102 @@
             }
           },
           "on": "taken"
+        }
+      ]
+    },
+    {
+      "name": "behind proxies it names, an upgrade's X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a WebSocket server's refusal tells the address where it ended",
+      "clauses": [
+        "15.2",
+        "15.2.2",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "trustedProxies": [
+          "127.0.0.0/8",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\n\r\n"
+          },
+          "on": "last"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "last"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: \r\nx-forwarded-for: 198.51.100.7\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\nx-forwarded-for: 10.0.0.5\r\n\r\n"
+          },
+          "on": "between"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "10.0.0.5",
+              "port": "{port}"
+            }
+          },
+          "on": "between"
         }
       ]
     },
