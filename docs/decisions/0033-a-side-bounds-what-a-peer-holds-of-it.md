@@ -41,8 +41,7 @@ failed at 6 s by Kestrel's `MinRequestBodyDataRate`, an abort that names no boun
 **The heartbeat already drops a reader that stops and sends nothing**: its ping waits behind the
 backlog and goes unanswered. Paused 75 s and silent, the client is closed by both servers before it
 resumes, within two beats on the TypeScript side, by `KeepAliveTimeout` on the C# side. What it
-leaves unbounded is the bytes held within a beat, a reader that stops but sends on, and everything
-where the heartbeat is never.
+leaves unbounded is the bytes held within a beat, and everything where the heartbeat is never.
 
 **A byte bound judged at once drops an honest reader.** 100 results of 1 MiB, the answers to calls a
 peer may hold, fill `bufferedAmount` with 102,761,428 bytes in one turn and are read whole in 97 ms;

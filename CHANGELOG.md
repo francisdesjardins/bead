@@ -57,8 +57,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Sec-WebSocket-Protocol` stands in exactly one field line, equal byte for byte to an offer, and
   one that offered none only without the field, an empty one included (spec 15.2; RFC 6455 §4.1,
   §11.3.4; WHATWG WebSockets §2.2): the C# client reads the 101's own lines, the Rust client
-  refuses two, and the TypeScript client fails a socket whose `protocol` is none it offered, which
-  Firefox's `WebSocket` opens in a page. Firefox's also goes on over a 101 that names a
+  refuses two, and the TypeScript client fails a socket whose `protocol` is none it offered, read
+  from an optional `protocol` of `IWebSocketLike`, which Firefox's `WebSocket` opens in a page. Firefox's also goes on over a 101 that names a
   subprotocol when it offered none, a platform row of the support matrix.
 - `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
   side builds, and decision 0013 says the same.
