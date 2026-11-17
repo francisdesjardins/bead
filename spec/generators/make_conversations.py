@@ -975,6 +975,14 @@ conversations = [
         *undecodable(1, 'echo', text('[' * 65 + ']' * 65))]),
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
         *undecodable(1, 'echo', text('1E400'))]),
+    # 17.5's order on the wire: of two faults past the grammar, the one the text meets first; and the
+    # depth counted from the text's start, free to fall below 0
+    ('a payload that names a member twice, the first holding a number past a double, is answered PAYLOAD_UNDECODABLE for the number',
+     ['17.2.1', '17.5', '17.5.4', '17.5.6'], None, [
+         *undecodable(1, 'echo', text('{"a":1e400,"a":2}'))]),
+    ('a payload that closes an array before any opens, then opens 65, is answered PAYLOAD_UNDECODABLE as not JSON',
+     ['17.2.1', '17.5', '17.5.3', '17.5.7'], None, [
+         *undecodable(1, 'echo', text(']' + '[' * 65))]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.6'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),

@@ -66,6 +66,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10.1). Every side's HTTP transport refuses a `Content-Type` in more than one field line, 415
   `type-refused`, as its gateway does. Cases of `spec/transports.json` and `spec/transcoding.json`
   play them.
+- Spec 17.5 states the order of a `json` payload's refusals: the bytes, `not UTF-8` then `a byte
+  order mark`; the depth, counted over the whole text before any of it is read, the count free to
+  fall below 0; the grammar, of the whole text; then, of `a name twice`, `a surrogate alone` and
+  `a number past a double`, the one the text meets first. Every side's reader refuses a payload of
+  two faults with the same reason, which 23 payloads of `spec/codecs.json` and two conversations of
+  `spec/conversations.json` play. The support matrix's open row on it gives way to one on a
+  gateway's body of two faults, whose three readers refuse with the first fault they meet.
 
 ### Removed
 
