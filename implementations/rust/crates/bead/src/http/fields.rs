@@ -1,8 +1,8 @@
 //! What an HTTP transport server reads of a request's fields and writes of its own (spec 15.6,
 //! 15.9, 15.12), as the other sides' `http-server-fields.ts` and `HttpTransportServer.ServerFields`
-//! read and write them: a field by its first line or all of them, a count and a listen as RFC
-//! 9651's Items, a body's length and coding, a request's authority and target, a preflight's
-//! answer, and the end of an exchange the transport writes itself.
+//! read and write them: a field by its first line, all of them or them joined, a count and a listen
+//! as RFC 9651's Items, a body's length, type and coding, a request's authority and target, a
+//! preflight's answer, and the end of an exchange the transport writes itself.
 
 use ::http::header::HeaderMap;
 use ::http::uri::Uri;
@@ -180,8 +180,9 @@ pub(crate) struct Request<'a> {
 
 impl Request<'_> {
     /// The value of the first line of the field `name`, when it carries one; none for one that is
-    /// not visible ASCII, which the transport refused before.
-    pub(crate) fn header_of(&self, name: &str) -> Option<&str> {
+    /// not visible ASCII, which the transport refused before. Read for a field's presence and for
+    /// what HTTP holds to one line, never for a field spec 15.12 joins.
+    pub(crate) fn first_line_of(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|value| value.to_str().ok())
     }
 
@@ -192,6 +193,14 @@ impl Request<'_> {
             .iter()
             .filter_map(|value| value.to_str().ok())
             .collect()
+    }
+
+    /// The field `name` with its lines joined in their order by `, `, as RFC 9110 §5.3 lets a
+    /// recipient combine them and spec 15.12 reads them; none when it carries no line.
+    pub(crate) fn joined_of(&self, name: &str) -> Option<String> {
+        let lines = self.lines_of(name);
+
+        (!lines.is_empty()).then(|| lines.join(", "))
     }
 
     /// Its fields, each name then its value, as `has_visible_fields` reads them; none when a value
@@ -230,38 +239,35 @@ impl Request<'_> {
     /// Whether it says it has a body: a length above 0, as RFC 9110 §8.6 reads its digits, or a
     /// transfer coding.
     pub(crate) fn has_body(&self) -> bool {
-        self.header_of("content-length")
+        self.first_line_of("content-length")
             .is_some_and(|length| length.trim().parse::<u64>().map_or(true, |count| count > 0))
             || self.headers.contains_key("transfer-encoding")
     }
 
     /// The length its `Content-Length` declares, when it declares one.
     pub(crate) fn declared_length(&self) -> Option<u64> {
-        self.header_of("content-length")
+        self.first_line_of("content-length")
             .and_then(|length| length.trim().parse::<u64>().ok())
     }
 
-    /// Whether its body is of Bead's media type, parameters aside, sent as it is.
+    /// Whether its body is of Bead's media type, parameters aside, in one field line, and sent as
+    /// it is: no `Content-Encoding`, or one whose lines joined are `identity` (spec 15.12).
     pub(crate) fn is_bead_body(&self) -> bool {
-        let media_type = self
-            .header_of("content-type")
-            .map(|value| {
-                value
-                    .split(';')
-                    .next()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_ascii_lowercase()
-            })
-            .unwrap_or_default();
-        let encoding = self
-            .header_of("content-encoding")
-            .map(|value| value.trim().to_ascii_lowercase());
+        // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
+        let [line] = self.lines_of("content-type")[..] else {
+            return false;
+        };
+        let media_type = line
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
 
         media_type == BEAD_MEDIA_TYPE
-            && encoding
-                .as_deref()
-                .is_none_or(|coding| coding == "identity")
+            && self
+                .joined_of("content-encoding")
+                .is_none_or(|coding| coding.trim().eq_ignore_ascii_case("identity"))
     }
 
     /// Its authority (spec 15.12): over HTTP/1, as `authority_of` reads its `Host` and `target`;
@@ -274,7 +280,7 @@ impl Request<'_> {
                 .uri
                 .authority()
                 .map(::http::uri::Authority::as_str)
-                .or_else(|| self.header_of("host"))
+                .or_else(|| self.first_line_of("host"))
                 .filter(|authority| is_authority(authority))
                 .map(|authority| Authority {
                     authority: Some(authority),

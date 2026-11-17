@@ -200,7 +200,7 @@ async fn checks_every_request_field_for_visible_bytes_and_edge_whitespace_before
     reason = "each of its targets written whole, as the other sides' twins write them"
 )]
 #[tokio::test]
-async fn reads_any_target_without_throwing_a_header_given_twice_by_its_first_and_http_2_s_authority_as_the_host()
+async fn reads_any_target_without_throwing_a_content_type_given_twice_as_no_type_and_http_2_s_authority_as_the_host()
  {
     let started = started(&HttpTransportServerOptions {
         hosts: Some(vec!["bead.example".to_owned()]),
@@ -232,7 +232,7 @@ async fn reads_any_target_without_throwing_a_header_given_twice_by_its_first_and
                 &["bead.example"],
                 format!("Content-Type: {BEAD_MEDIA_TYPE}\r\nContent-Type: text/plain\r\n"),
             ),
-            (201, None),
+            refused(415, HTTP_REFUSALS.type_refused),
         ),
         (
             "//:99999/bead",
@@ -889,7 +889,7 @@ fn reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_rfc_96
     let twice = request_of(&[("Authorization", BEARER), ("authorization", "Basic")]);
 
     assert_eq!(
-        read_of(&twice).header_of("authorization"),
+        read_of(&twice).first_line_of("authorization"),
         Some(BEARER),
         "its first"
     );
@@ -897,6 +897,14 @@ fn reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_rfc_96
         read_of(&twice).lines_of("authorization"),
         vec![BEARER, "Basic"],
         "all of them"
+    );
+    assert_eq!(
+        [
+            read_of(&twice).joined_of("authorization"),
+            read_of(&request_of(&[])).joined_of("authorization")
+        ],
+        [Some(format!("{BEARER}, Basic")), None],
+        "them joined, and none of a field absent"
     );
     assert_eq!(
         [
@@ -934,6 +942,26 @@ fn reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_rfc_96
         .map(|fields| read_of(&request_of(&fields)).has_body()),
         [false, true, true, false],
         "bodies"
+    );
+    // a type in one line alone, and an encoding by its lines joined (spec 15.12)
+    let bead = ("Content-Type", BEAD_MEDIA_TYPE);
+
+    assert_eq!(
+        [
+            vec![bead],
+            vec![bead, ("Content-Encoding", "IDENTITY")],
+            vec![bead, ("Content-Type", BEAD_MEDIA_TYPE)],
+            vec![bead, ("Content-Type", "text/html")],
+            vec![
+                bead,
+                ("Content-Encoding", "identity"),
+                ("Content-Encoding", "identity")
+            ],
+            vec![bead, ("Content-Encoding", "identity, gzip")],
+        ]
+        .map(|fields| read_of(&request_of(&fields)).is_bead_body()),
+        [true, true, false, false, false, false],
+        "Bead's bodies"
     );
 }
 
