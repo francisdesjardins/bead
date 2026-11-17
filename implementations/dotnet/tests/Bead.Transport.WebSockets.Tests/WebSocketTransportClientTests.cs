@@ -441,6 +441,24 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Prints_no_credential_nor_its_provider()
+    {
+        var given = new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = 8080, Credential = "Bearer good" };
+        var asked = given with
+        {
+            Credential = null,
+            CredentialProvider = (_) =>
+            {
+                return ValueTask.FromResult("Bearer good");
+            },
+        };
+
+        Assert.DoesNotContain("good", given.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith("WebSocketTransportClientConnectOptions { Host = 127.0.0.1, Port = 8080, Secured = False, Pathname = /, Protocols = , Timeout = 00:00:30, Credential = set, CredentialProvider = none, CancellationToken = ", given.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Credential = none, CredentialProvider = set", asked.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
     {
         var options = new WebSocketTransportClientOptions();
