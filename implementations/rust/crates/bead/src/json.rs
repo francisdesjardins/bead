@@ -4,8 +4,10 @@
 //! Bead's own, since `serde_json` reads a surrogate alone as an error, keeps the last of a name
 //! given twice, and writes a double that is not finite as `null`.
 //!
-//! The reader holds a text to RFC 8259 and 17.5's checks, in the order the TypeScript reader
-//! checks them; the writer writes RFC 8785's canonical form, each number as ECMAScript's
+//! The reader holds a text to RFC 8259 and 17.5's checks: it counts the depth over the whole text,
+//! then reads it in one pass and refuses with the first fault it meets, a name given twice once
+//! its object closes, an order of its own (`docs/support.md`, the row of a payload that breaks two
+//! of 17.5's rules); the writer writes RFC 8785's canonical form, each number as ECMAScript's
 //! `Number::toString` spells it, each object's names sorted by their UTF-16 code units.
 
 use core::fmt;
