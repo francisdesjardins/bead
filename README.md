@@ -825,11 +825,10 @@ codec, `codec.roundTrip`, as the other sides' do, and the interop service's echo
 over its in-memory transport, locally alone: calls, `call.p50`, `call.p95`, `call.p99` and
 `call.throughput`, on one connection kept, and exchanges, `exchange.p50` to `exchange.throughput`,
 each a client and its connection drawn, called once and closed, at 0 B, 1 KiB and 64 KiB, each
-measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, since an
-allocator that counts takes unsafe code, which the side forbids, and no notification, large echo or
-interop; and protobuf's JSON, `transcoding.read.bead`, `transcoding.read.stock`,
-`transcoding.write.bead` and `transcoding.write.stock`, Bead's mapping beside Buffa's own JSON. Its
-layers on the loopback, as the other sides measure theirs, are ahead.
+measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, and no
+notification, large echo or interop; and protobuf's JSON, `transcoding.read.bead`,
+`transcoding.read.stock`, `transcoding.write.bead` and `transcoding.write.stock`, Bead's mapping
+beside Buffa's own JSON. Its layers on the loopback, as the other sides measure theirs, are ahead.
 `node tools/bench-release.mjs rust` builds it once in release and runs it in fresh processes as it
 runs the others; its report names `rust` for its side and `rustc` for its runtime, and
 `tools/bench-compare.mjs` compares two of them. A release keeps its report, as it keeps the others'
