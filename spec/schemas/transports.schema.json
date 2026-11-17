@@ -112,21 +112,14 @@
       }
     },
     "mqttBroker": {
-      "description": "The Mosquitto the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run (spec 15.31): its Maximum Packet Size, whether it takes retained messages, whether it offers shared subscriptions, and the users every case names, each authenticated by the run's password, its Client Identifier tied to its user.",
+      "description": "The Mosquitto the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run (spec 15.31): its Maximum Packet Size, whether it takes retained messages, and the users every case names, each authenticated by the run's password, its Client Identifier tied to its user.",
       "type": "object",
-      "required": [
-        "$comment",
-        "maximumPacketSize",
-        "retainAvailable",
-        "sharedSubscriptions",
-        "users"
-      ],
+      "required": ["$comment", "maximumPacketSize", "retainAvailable", "users"],
       "additionalProperties": false,
       "properties": {
         "$comment": { "$ref": "common.schema.json#/$defs/comment" },
         "maximumPacketSize": { "type": "integer", "minimum": 1024, "maximum": 268435460 },
         "retainAvailable": { "type": "boolean" },
-        "sharedSubscriptions": { "type": "boolean" },
         "users": {
           "type": "array",
           "minItems": 1,

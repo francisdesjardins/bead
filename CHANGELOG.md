@@ -14,6 +14,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
   nothing, and `--dry-run` makes every check and changes nothing.
 
+### Removed
+
+- `spec/transports.json`'s `brokers.mqtt.sharedSubscriptions`, which no tool read: the Mosquitto
+  the cases play against offers shared subscriptions, with no setting to turn them off.
+
 ### Fixed
 
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped
