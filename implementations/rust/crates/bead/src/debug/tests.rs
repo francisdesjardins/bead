@@ -9,7 +9,10 @@ use bytes::Bytes;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::{CallAsked, DebugDirection, DebugFilterSource, DebugType, FilterKeeper, GivenFilter};
+use super::{
+    CallAsked, DebugDirection, DebugFilterSource, DebugType, FilterKeeper, GivenFilter,
+    parse_debug_filter,
+};
 use crate::NotificationResolverDependencies;
 use crate::clock::{Clock, Schedule};
 use crate::constants::{ProcedureKind, SERVER_CONNECTION_HANDLE};
@@ -1233,8 +1236,52 @@ fn matches_a_whole_name_and_takes_every_other_character_literally() {
 }
 
 // a platform's shape: a filter given whole holds its directions, types and kinds as the enums the
-// grammar names, which hold no other; one given as words naming another is refused as it is made
+// grammar names, which hold no other, so one holding another does not compile, whichever listener
+// it would be given to
 // debugging 6.8
+#[test]
+fn a_filter_given_whole_holding_a_value_its_grammar_names_none_of_does_not_compile_on_the_rust_side()
+ {
+    let consumer = crate::testing::surface::Consumer::new();
+
+    for list in [
+        "f.kinds = vec![0x99];",
+        "f.types = vec![\"publisher\"];",
+        "f.directions = vec![\"up\"];",
+    ] {
+        consumer.refuses(
+            &format!("pub fn check(f: &mut bead::DebugFilter) {{ {list} }}"),
+            ("E0308", "mismatched types"),
+        );
+    }
+}
+
+// a platform's shape: a str is UTF-8, which holds no surrogate alone, so no word holds one: the
+// three bytes U+D800 would take are no str, and a pair, one code point, is a pattern as any other
+// debugging 6.7.5
+#[test]
+fn a_word_holding_a_surrogate_alone_is_no_str_on_the_rust_side() {
+    let word = b"get"
+        .iter()
+        .copied()
+        .chain([0xED, 0xA0, 0x80])
+        .collect::<Vec<_>>();
+
+    assert!(
+        core::str::from_utf8(&word).is_err(),
+        "U+D800's three bytes are no str"
+    );
+    assert_eq!(
+        parse_debug_filter("get\u{1F600}")
+            .expect("a pair is a pattern")
+            .include,
+        vec!["get\u{1F600}".to_owned()],
+        "a pair a pattern"
+    );
+}
+
+// one given as words naming a value of none of the grammar's is refused as it is made
+// debugging 6.7.3
 #[test]
 fn refuses_a_filter_given_as_words_naming_another_in_the_grammar_s_names_as_it_is_made() {
     let refusal_of = |spec: &str| {

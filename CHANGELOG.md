@@ -34,6 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/debugging.md` 4.1 states how a trace's duration is read: the difference taken in
   nanoseconds, rounded to a whole one, then its fraction of a millisecond dropped, as 11.1 reads
   one; the companion's next version is a minor.
+- `spec/debugging.md` 6.7 names `holds a surrogate alone`, a word holding a surrogate alone, and
+  6.8 refuses a filter given whole in the grammar's names whichever listener it is given to.
 
 ### Removed
 
@@ -44,6 +46,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
   so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
+- The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a
+  kind its grammar names none of, whichever listener it is given to, and a filter's word holding a
+  surrogate alone (debugging §6.7, §6.8).
 - The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
   the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped

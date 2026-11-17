@@ -224,20 +224,22 @@ and its exclusions, as they were written, an exclusion without its `-`.
 selector. A side MUST refuse a filter whose words do not all hold, naming the first that does not,
 in the order of its words and of a selector's values, by its reason:
 
-| Reason                | A word refused                                                  | Named     |
-| --------------------- | --------------------------------------------------------------- | --------- |
-| `selector empty`      | a selector with nothing within its parentheses: `d()`           | the word  |
-| `value empty`         | a selector with a value left empty: `d(rx\|)`                   | the word  |
-| `names nothing`       | a value that names none of its letter's: `d(UP)`, `d(rx)(tx)`   | the value |
-| `holds a parenthesis` | any other word holding `(` or `)`: `d(rx,tx)` is two such words | the word  |
+| Reason                    | A word refused                                                  | Named     |
+| ------------------------- | --------------------------------------------------------------- | --------- |
+| `selector empty`          | a selector with nothing within its parentheses: `d()`           | the word  |
+| `value empty`             | a selector with a value left empty: `d(rx\|)`                   | the word  |
+| `names nothing`           | a value that names none of its letter's: `d(UP)`, `d(rx)(tx)`   | the value |
+| `holds a parenthesis`     | any other word holding `(` or `)`: `d(rx,tx)` is two such words | the word  |
+| `holds a surrogate alone` | any other word holding a surrogate alone: `get` then U+D800     | the word  |
 
 A refusal names the value or the word as it was written, quoted as JSON writes a string
 ([RFC 8259](https://www.rfc-editor.org/rfc/rfc8259)):
 `a debug filter takes a direction among rx, tx, not "UP"`. The sentence is each side's own, and a C
 side reports a code.
 
-6.8. A filter given whole, not as a string, is refused in this grammar's names: its directions, its
-types and its kinds.
+6.8. A filter given whole, not as a string, is refused in this grammar's names, whichever listener it
+is given to: its directions, its types and its kinds, each value held to those this grammar names.
+Its patterns and its exclusions are taken as they are given.
 
 6.9. A filter given as a function is asked as its listener is made, and again at each event. The
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function

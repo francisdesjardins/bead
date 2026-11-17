@@ -120,6 +120,17 @@ test.describe('parseDebugFilter', () => {
       }, spec).toThrow(new ProgrammerError(sentence));
     }
   });
+
+  // debugging 6.7.5
+  test('refuses a word holding a surrogate alone, naming it, and takes a pair as a pattern', () => {
+    expect(() => {
+      return parseDebugFilter('ping get\ud800');
+    }).toThrow(new ProgrammerError('a debug filter holds no surrogate alone, not "get\\ud800"'));
+    expect(() => {
+      return parseDebugFilter('-\udc00x');
+    }).toThrow(new ProgrammerError('a debug filter holds no surrogate alone, not "-\\udc00x"'));
+    expect(parseDebugFilter('get😀').include).toEqual(['get😀']);
+  });
 });
 
 test.describe('filterDebug', () => {
@@ -197,6 +208,22 @@ test.describe('filterDebug', () => {
     }).toThrow(
       new ProgrammerError(
         'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "153"'
+      )
+    );
+
+    // each listener holds every list to the grammar, those it does not ask among them
+    expect(() => {
+      return filterDebug(none, { kinds: [0x99 as EnvelopeKind] });
+    }).toThrow(
+      new ProgrammerError(
+        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "153"'
+      )
+    );
+    expect(() => {
+      return filterEnvelopeDebug(none, { types: ['publisher' as DebugType] });
+    }).toThrow(
+      new ProgrammerError(
+        'a debug filter takes a type among request, command, notification, not "publisher"'
       )
     );
   });
