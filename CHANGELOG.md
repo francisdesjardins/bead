@@ -87,6 +87,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gateway's body of two faults, whose three readers refuse with the first fault they meet.
 - The documents are brought to 0.15.0: the records and the READMEs state what holds and where Bead
   goes, the twins' gate, `tools/flow.mjs finish` and the Rust side's counted call among what holds.
+- The guides for teams are brought to 0.15.0, their code built and run again: the C# resolver
+  catches a command's `TimeoutException`, the page's call waits on its operator past its 5 s
+  default, a client given `protocols` fails its connect by spec 15.2, and the Rust side's gateway
+  is among its parts.
 
 ### Removed
 
