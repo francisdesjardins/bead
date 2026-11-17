@@ -12,7 +12,7 @@ use crate::constants::{
     RouterSide, SESSION_TOKEN_BYTES,
 };
 use crate::errors::ProgrammerError;
-use crate::failure::Failure;
+use crate::failure::{Failure, byte_count_of};
 use crate::session_token::SessionToken;
 
 #[cfg(test)]
@@ -1046,7 +1046,10 @@ pub fn read_envelope(
         } else {
             Err(malformed(
                 side,
-                format!("a {what} carries no payload, not {} bytes", body.len()),
+                format!(
+                    "a {what} carries no payload, not {}",
+                    byte_count_of(body.len())
+                ),
             ))
         }
     };

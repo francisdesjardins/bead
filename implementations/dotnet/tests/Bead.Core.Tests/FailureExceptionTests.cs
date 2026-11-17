@@ -1,9 +1,9 @@
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="FailureException"/>: what it says of itself, as the TypeScript FailureError does, and a
-/// header redacted, as its <c>redactHeader</c> does; the twins of the TypeScript side's
-/// <c>errors.test.ts</c>.
+/// <see cref="FailureException"/>: what it says of itself, as the TypeScript FailureError does, a
+/// header redacted, as its <c>redactHeader</c> does, and a count of bytes as a detail writes it; the
+/// twins of the TypeScript side's <c>errors.test.ts</c>.
 /// </summary>
 public sealed class FailureExceptionTests
 {
@@ -207,5 +207,13 @@ public sealed class FailureExceptionTests
         Assert.Equal(
             request with { Credential = Credential.SchemeOf((CredentialScheme)7) },
             RouterCore.Redact(request with { Credential = Credential.Of((CredentialScheme)7, [1, 2]) }));
+    }
+
+    [Fact]
+    public void Writes_a_count_of_1_as_1_byte_and_any_other_count_as_bytes()
+    {
+        Assert.Equal(
+            ["0 bytes", "1 byte", "2 bytes", "1024 bytes"],
+            new long[] { 0, 1, 2, 1024 }.Select(FailureException.ByteCountOf));
     }
 }

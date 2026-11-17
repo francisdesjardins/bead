@@ -3,7 +3,7 @@
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { Data } from '../../transport/shared/types';
 import { EnvelopeKind, FailureScope, LIMIT_DEFAULTS } from './constants';
-import { FailureError } from './errors';
+import { byteCountOf, FailureError } from './errors';
 import { headerBytesOf, readHeader, readPrefix, writeHeader } from './header';
 import type {
   Envelope,
@@ -70,7 +70,7 @@ const assertNothingAfter = (
   if (body.length > 0) {
     throw new FailureError({
       ...failures.envelopeMalformed,
-      detail: `a ${what} carries no payload, not ${String(body.length)} bytes`,
+      detail: `a ${what} carries no payload, not ${byteCountOf(body.length)}`,
     });
   }
 };

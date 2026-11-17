@@ -86,10 +86,10 @@ fn reads_or_refuses_with_a_failure_every_mutation_of_a_vector(seed: u32) -> Resu
 fn finds_the_vectors_bytes() -> Result<(), String> {
     let seeds = seeds()?;
 
-    assert_eq!(seeds.len(), 273, "the vectors' bytes");
+    assert_eq!(seeds.len(), 275, "the vectors' bytes");
     assert_eq!(
         digest_of(seeds),
-        "da5504c90e2f128e857c8111daf89b83a499ba58178644a2136b429900b6d702",
+        "107796c1b11a3cdb2a3a74f3c67472a51ec8771eac0ff3c5952f40dfeb1bc430",
         "the seeds in their order, as every side holds them"
     );
 
@@ -107,7 +107,7 @@ fn draws_what_the_other_sides_draw_for_a_seed() -> Result<(), String> {
     );
     assert_eq!(
         digest_of(&first_inputs(seeds()?, (1, 8))),
-        "a9fdb025bb9eb61a4cd1b1ddb9523fb1edc4d518f9386bfc55ada17b68cb28b8",
+        "b475a2244d28b1d3c7b57b630f84c239ab24cce7b529d08ffbbfee862db2177f",
         "the first eight inputs of a seed of 1, as every side draws them"
     );
 

@@ -684,7 +684,7 @@ export const isPlayedInMemory = (conversation: IConversation): boolean => {
 
 /**
  * The envelope sent, as `expected` writes it: its failure's detail only where `expected` gives one,
- * informative elsewhere.
+ * not compared elsewhere.
  */
 const actualOf = (bytes: Uint8Array | undefined, expected: IExpected): IExpected | undefined => {
   const actual = bytes === undefined ? undefined : expectedOf(bytes);

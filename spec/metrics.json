@@ -9340,7 +9340,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -12989,7 +12990,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -13125,7 +13127,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -13320,7 +13323,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -13391,7 +13395,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -13539,7 +13544,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -13662,7 +13668,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },

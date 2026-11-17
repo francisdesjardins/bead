@@ -476,7 +476,7 @@
           "$ref": "common.schema.json#/$defs/u32"
         },
         "failure": {
-          "description": "Its code, its scope, and the relays it crossed; its detail, where given, which is informative elsewhere.",
+          "description": "Its code, its scope, and the relays it crossed; its detail, where given, the detail every side writes, compared (spec 7.6), and not compared elsewhere.",
           "type": "object",
           "required": ["code", "scope", "relays"],
           "additionalProperties": false,
@@ -491,7 +491,7 @@
               "$ref": "common.schema.json#/$defs/u8"
             },
             "detail": {
-              "description": "The detail the spec states for this failure, as its UTF-8 reads.",
+              "description": "The detail every side writes for this failure (spec 7.6), as its UTF-8 reads.",
               "type": "string"
             }
           }

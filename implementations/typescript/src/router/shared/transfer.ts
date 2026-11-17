@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { byteCountOf } from './errors';
 import type { IProtocolFailure, IRouterFailures, IRouterLimits } from './types';
 
 // interfaces
@@ -178,7 +179,7 @@ export const createIncomingTransfer = (
   // an opening that holds the whole payload opens no transfer
   if (opening.length >= total) {
     return invalid(
-      `an opening of ${String(opening.length)} bytes holds its whole total of ${String(total)}`
+      `an opening of ${byteCountOf(opening.length)} holds its whole total of ${String(total)}`
     );
   }
 

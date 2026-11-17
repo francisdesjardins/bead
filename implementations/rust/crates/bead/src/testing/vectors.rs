@@ -139,7 +139,7 @@ pub struct RefusalVector {
     pub bytes: String,
     /// The protocol code a reader answers with.
     pub code: u16,
-    /// The TypeScript side's words, informative.
+    /// The words every side writes, compared (spec 7.6).
     pub detail: Option<String>,
     /// The bound a whole envelope is read with, where the vector is about it.
     pub maximum_envelope_bytes: Option<usize>,

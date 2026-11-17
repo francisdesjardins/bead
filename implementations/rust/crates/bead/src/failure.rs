@@ -343,3 +343,12 @@ impl Error for Failure {
         })
     }
 }
+
+/// A count of bytes as a failure's detail writes it: `1 byte`, or `0 bytes`, `2 bytes`.
+pub(crate) fn byte_count_of<T: Copy + fmt::Display + PartialEq + From<u8>>(count: T) -> String {
+    if count == T::from(1) {
+        format!("{count} byte")
+    } else {
+        format!("{count} bytes")
+    }
+}

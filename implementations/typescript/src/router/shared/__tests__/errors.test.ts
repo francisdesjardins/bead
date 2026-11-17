@@ -7,7 +7,13 @@ import {
   ProtocolCode,
   SERVER_FAILURES,
 } from '../constants';
-import { DisconnectError, FailureError, failureErrorOf, redactHeader } from '../errors';
+import {
+  byteCountOf,
+  DisconnectError,
+  FailureError,
+  failureErrorOf,
+  redactHeader,
+} from '../errors';
 import { toSessionToken } from '../identifiers';
 import type { IFailureHeader, IResultHeader } from '../types';
 
@@ -303,5 +309,14 @@ test.describe('redactHeader', () => {
     expect(
       redactHeader({ ...request, credential: { bytes: new Uint8Array([1, 2]), scheme: 7 } })
     ).toStrictEqual({ ...request, credentialScheme: 7 });
+  });
+});
+test.describe('byteCountOf', () => {
+  test('writes a count of 1 as 1 byte, and any other count as bytes', () => {
+    expect(
+      [0, 1, 2, 1024].map((count) => {
+        return byteCountOf(count);
+      })
+    ).toStrictEqual(['0 bytes', '1 byte', '2 bytes', '1024 bytes']);
   });
 });

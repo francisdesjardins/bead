@@ -24,12 +24,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
   `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
   9.4.10, 9.6.8).
+- Two vectors of `spec/vectors.json`'s `headerRefusals` pin 4.4's order on a `CREDENTIAL` block
+  that breaks two of its checks: an `OPAQUE` of 15 bytes whose padding is not zero, refused for its
+  length, and a `NONE` of 1 byte on a request whose padding is not zero, refused for its scheme.
+- `spec/check.py` refuses a `PROCEDURE_FAILED` of the protocol's that a conversation, a transports'
+  case or an exit expects with a detail other than the empty one (spec 9.0). The generators give
+  that empty detail by default, and the 23 expectations that gave none, in
+  `spec/conversations.json`, `spec/transports.json` and `spec/metrics.json`, now pin it.
 - `docs/maintaining.md`, the maintainer's guide: each gate with its command and its CI job, the
   order to run them before a push, each workflow of `.claude/workflows/` and the procedure that
   does the same by hand, the everyday chores and the release step by step.
 
 ### Changed
 
+- Spec 7.6 states what binds a failure's detail: the words the spec gives, which every side MUST
+  write, and elsewhere the words the conformance files give. The details of 2.3, 9.2's step 5 and
+  9.2's step 6 are a MUST, and the comments of `spec/vectors.json` and `spec/conversations.json`
+  say a detail they give is compared.
+- Spec 4.4 orders a `CREDENTIAL` block's checks, once the header's length holds the block (4.3):
+  its scheme, its length, then its padding; 5.2 points to that order.
+- Spec 15.3: a side MUST ping its peer every `heartbeat` where its platform can send a ping; a
+  page's `WebSocket` sends none, and the server's pings stand for its own.
 - Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
   connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
   under `.localhost` on to its DNS server, an application names the loopback by its address.
@@ -59,6 +74,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A detail that counts 1 byte says "1 byte", not "1 bytes", on every side: a credit's or a
+  cancel's byte after its header, an opening that holds its whole total, and a payload that goes as
+  a transfer.
 - The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
   so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
 - The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a

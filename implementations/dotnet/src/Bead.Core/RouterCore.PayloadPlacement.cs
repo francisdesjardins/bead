@@ -85,7 +85,7 @@ internal sealed partial class RouterCore
             {
                 return (null, ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a payload of {payload.Length} bytes goes as a transfer, which this side sends none of"));
+                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, which this side sends none of"));
             }
 
             // only a request and a result open a transfer
@@ -101,14 +101,14 @@ internal sealed partial class RouterCore
             {
                 return (null, ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes passes {EnvelopeCodec.MaximumHeaderBytes}"));
+                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {openingHeaderBytes} bytes passes {EnvelopeCodec.MaximumHeaderBytes}"));
             }
 
             if (openingBytes < 1)
             {
                 return (null, ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes leaves it no byte within {WholeBytes}"));
+                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {openingHeaderBytes} bytes leaves it no byte within {WholeBytes}"));
             }
 
             return (new OutgoingTransfer(payload, (openingBytes, PayloadBytesPerChunk)), null);

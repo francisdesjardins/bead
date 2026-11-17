@@ -1,6 +1,6 @@
 """What the generators share: the folder the conformance files sit in and the writer of each file, bytes
 as the files write them, the steps of a case on the server's clock, the order of an entry's units, the
-spec's codes, and the small searches and values more than one generator draws on."""
+spec's codes, a failure's detail, and the small searches and values more than one generator draws on."""
 import json
 import os
 
@@ -45,6 +45,38 @@ def armed(milliseconds):
 
 def advance(milliseconds):
     return {'advance': milliseconds}
+
+
+# ── A failure's detail ──────────────────────────────────────────────────────────────────────────
+
+
+def detail_by_default(code, scope, detail):
+    """The detail an expected failure gives: its own, or, for a PROCEDURE_FAILED of the protocol's
+    that gives none, the empty one, since 9.0 has a side answer an error of its own with no detail."""
+    return '' if detail is None and code == 64 and scope == 0 else detail
+
+
+def pins_no_detail(value):
+    """Whether a case's steps expect a PROCEDURE_FAILED of the protocol's with its empty detail."""
+    if isinstance(value, dict):
+        failure = value.get('failure')
+
+        if isinstance(failure, dict) and failure.get('code') == 64 and failure.get('scope') == 0                 and failure.get('detail') == '':
+            return True
+
+        return any(pins_no_detail(member) for member in value.values())
+
+    return isinstance(value, list) and any(pins_no_detail(item) for item in value)
+
+
+def citing_no_detail(clauses, steps):
+    """A case's units, with 9.0 before the first that follows it where its steps pin a
+    PROCEDURE_FAILED's empty detail."""
+    if '9.0' in clauses or not pins_no_detail(steps):
+        return clauses
+
+    at = next((index for index, unit in enumerate(clauses) if unit_order(unit) > unit_order('9.0')), len(clauses))
+    return [*clauses[:at], '9.0', *clauses[at:]]
 
 
 # ── Searches and values ─────────────────────────────────────────────────────────────────────────
