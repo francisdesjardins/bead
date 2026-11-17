@@ -508,6 +508,25 @@ test.describe('readHeader', () => {
     });
   }
 
+  // spec 4.4, 5.2: a block whose padding is not zero is refused for its scheme or its length
+  // first, as the other sides refuse it
+  test('refuses a credential for its scheme or its length before its padding', () => {
+    const refusalOf = (hexadecimal: string): string => {
+      return failureOf(() => {
+        return readHeader(fromHexadecimal(hexadecimal), SERVER_FAILURES);
+      }).detail;
+    };
+
+    expect(refusalOf('A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 01')).toBe(
+      'an answer announces OPAQUE or NONE, not JWT'
+    );
+    expect(
+      refusalOf(
+        'A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  01'
+      )
+    ).toBe('an OPAQUE token is 16 bytes, not 15');
+  });
+
   test('raises its failures as the side of the table it is given', () => {
     const failure = failureOf(() => {
       return readHeader(fromHexadecimal('A1 11 00 02  00 00 00 00'), CLIENT_FAILURES);
