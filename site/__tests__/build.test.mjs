@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
-import { buildPrivacy, policyRefusals } from '../build.mjs';
+import { TRANSPORTS, TRANSPORTS_OFF } from '../src/data.mjs';
+import {
+  buildPrivacy,
+  contentsOf,
+  policyRefusals,
+  transportsRefusals,
+  typeset,
+} from '../build.mjs';
 
 const MANIFEST = new URL(
   '../../implementations/typescript/devtools/chrome/manifest.json',
@@ -42,5 +49,70 @@ describe('the DevTools privacy policy', () => {
     assert.match(page, /<div id="page" data-lang="en">/u);
     assert.match(page, /<template id="page-other" data-lang="fr">/u);
     assert.match(page, /<a class="brand" href="\/"/u);
+  });
+});
+
+// ── The contents ──────────────────────────────────────────────────────────────
+
+describe('the contents', () => {
+  test('lists each section in the page’s order, in the part its data-part opens', () => {
+    const { items, content } = contentsOf(
+      [
+        '<section id="a" class="status" data-toc="A">',
+        '<section id="b" data-toc="B" data-part="Questions">',
+        '<section id="c" data-toc="C">',
+        '<section id="d" data-toc="D" data-part="">',
+      ].join('')
+    );
+    assert.equal(
+      items,
+      '<li><a href="#a">A</a></li><li class="toc-part"><p class="toc-part-title">Questions</p><ol><li><a href="#b">B</a></li><li><a href="#c">C</a></li></ol></li><li><a href="#d">D</a></li>'
+    );
+    assert.equal(
+      content,
+      '<section id="a" class="status"><section id="b"><section id="c"><section id="d">'
+    );
+  });
+
+  test('refuses a data-toc it cannot take, so no section drops out unseen', () => {
+    assert.throws(() => {
+      return contentsOf('<section data-toc="A" id="a">');
+    }, /data-toc or a data-part the contents did not take/u);
+  });
+});
+
+// ── The table of the transports ───────────────────────────────────────────────
+
+describe('the table of the transports', () => {
+  test('holds the support matrix’s Transports', () => {
+    assert.deepEqual(transportsRefusals(), []);
+  });
+
+  test('refuses a side the matrix does not give a transport, and a row in no list', () => {
+    const transports = TRANSPORTS.map((transport) => {
+      return transport.name[0] === 'AMQP 1.0'
+        ? { ...transport, sides: ['TypeScript', 'C#', 'Rust'] }
+        : transport;
+    });
+    const refusals = transportsRefusals({ transports, off: TRANSPORTS_OFF.slice(1) });
+    assert.equal(refusals.length, 2);
+    assert.match(refusals[0], /is in no list of src\/data\.mjs/u);
+    assert.match(
+      refusals[1],
+      /“AMQP 1\.0”: the matrix says TypeScript, C#; the page says TypeScript, C#, Rust/u
+    );
+  });
+});
+
+// ── French typography ─────────────────────────────────────────────────────────
+
+describe('French typography', () => {
+  test('keeps a number whole and with its unit, and a mark with its word, never inside code', () => {
+    const narrow = String.fromCodePoint(0x20_2f);
+    const noBreak = String.fromCodePoint(0xa0);
+    assert.equal(
+      typeset('<p>16 778 240 octets, 30 s : « oui » ?</p><code>a : b</code>'),
+      `<p>16${narrow}778${narrow}240${noBreak}octets, 30${noBreak}s${narrow}: «${narrow}oui${narrow}»${narrow}?</p><code>a : b</code>`
+    );
   });
 });

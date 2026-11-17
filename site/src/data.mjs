@@ -864,3 +864,79 @@ export const OFF_THE_PAGE = Object.freeze([
   "The HTTP transport's and a gateway's policy: one object of hosts, origins, proxies and bounds, built and checked once and frozen, which either takes, a member given in it and beside it refused, its three durations held as 1.4 states, a way of their places",
   "Each side's public surface, pinned to its list with its members: what an application and generated code call, the envelope's codec and a router's core internal; an options object required exactly when a member of it is, at most two members required; no tuple taken or given, a parameter list and a map's entries aside; every public name mapped term for term, each with its kind ([0047](decisions/0047-every-side-shows-one-public-surface.md)). `tools/check-names.mjs` holds the three sides' lists to `tools/names.tsv`, its cases in `tools/__tests__/check-names.test.mjs`",
 ]);
+
+// ── The transports, each held to the support matrix's Transports ─────────────
+
+// ! every row of docs/support.md's Transports is in exactly one list, a transport's `rows` or
+// TRANSPORTS_OFF, by its title; a transport's `sides` are those that carry every row it stands for,
+// which the build holds to the matrix; `detail`, where a section of the page says more, is that
+// section, which the transport's name then leads to
+export const TRANSPORT_HEADINGS = Object.freeze([
+  ['Where the call runs', 'Où passe l’appel'],
+  ['Transport', 'Transport'],
+  ['Sides', 'Côtés'],
+]);
+
+export const TRANSPORTS = Object.freeze([
+  {
+    where: ['A page or a service', 'Une page ou un service'],
+    name: ['WebSocket', 'WebSocket'],
+    rows: ['WebSocket', 'WebSocket over TLS (`wss`)'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#http',
+  },
+  {
+    where: ['Where WebSocket cannot pass', 'Là où WebSocket ne passe pas'],
+    name: [
+      'HTTP, a long poll for what the server sends',
+      'HTTP, une longue écoute pour ce qu’envoie le serveur',
+    ],
+    rows: ['HTTP/1.1'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#http-ecoute',
+  },
+  {
+    where: ['A page and its Web Worker', 'Une page et son Web Worker'],
+    name: ['Web Worker', 'Web Worker'],
+    rows: ['Web Worker'],
+    sides: ['TypeScript'],
+  },
+  {
+    where: ['Two routers of one process', 'Deux routeurs d’un même processus'],
+    name: ['In memory', 'En mémoire'],
+    rows: ['In memory'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#memoire',
+  },
+  {
+    where: ['One server, several of these', 'Un serveur, plusieurs de ceux-ci'],
+    name: ['Joined', 'Joints'],
+    rows: ["Joined, a server's transports through one"],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#memoire',
+  },
+  {
+    where: ['Devices and services', 'Des appareils et des services'],
+    name: ['MQTT 5', 'MQTT 5'],
+    rows: ['MQTT 5', 'MQTT 5 over TLS (`mqtts`, `wss`), a client certificate among it'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#courtier',
+  },
+  {
+    where: ['Services behind RabbitMQ\u00A04', 'Des services derrière RabbitMQ\u00A04'],
+    name: ['AMQP 1.0', 'AMQP 1.0'],
+    rows: ['AMQP 1.0 on RabbitMQ 4', 'AMQP 1.0 over TLS (`amqps`), SASL EXTERNAL among it'],
+    sides: ['TypeScript', 'C#'],
+    detail: '#courtier',
+  },
+]);
+
+// the rows of the matrix's Transports the table stands for none of: a client's certificate, HTTP/2
+// beside HTTP/1.1, and the broker in memory each side's tests play
+export const TRANSPORTS_OFF = Object.freeze([
+  'A client certificate and the authorities trusted over WebSocket (`tls`)',
+  'A client certificate and the authorities trusted over HTTP (`tls`)',
+  'HTTP/2 over TLS, beside HTTP/1.1 by ALPN',
+  'HTTP/2 in clear',
+  'Broker, in memory (the core)',
+]);

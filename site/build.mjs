@@ -4,18 +4,22 @@
 // content is `src/content.<language>.html`, its placeholders filled from the repository: the
 // versions and the conformance files' counts, the byte examples and tables of `src/data.mjs`, the
 // snippets of `src/snippets/`, excerpts of the sources, and each diagram's SVG, which must be its
-// source's render. The table of the three implementations is drawn from `src/data.mjs` and held to
-// `docs/support.md`: each row of its Features and Transports in one part of the table or in
-// OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the union of what its
-// rows' cells say for its sides by the token `ahead: <stage>`, a row of the differences of kind
-// open. It writes the not-found page too, `dist/404.html`, its styles over the same skin. Node
-// alone, nothing installed, and the same bytes on every machine.
+// source's render. Its contents are drawn from each section's `data-toc`, in parts where a
+// section's `data-part` opens one. The table of the three implementations is drawn from
+// `src/data.mjs` and held to `docs/support.md`: each row of its Features and Transports in one part
+// of the table or in OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the
+// union of what its rows' cells say for its sides by the token `ahead: <stage>`, a row of the
+// differences of kind open. The table of the transports is drawn from it too, and held to the
+// matrix's Transports: each of its rows in one transport or in TRANSPORTS_OFF, and each transport's
+// sides those that carry its rows. It writes the not-found page too, `dist/404.html`, its styles
+// over the same skin. Node alone, nothing installed, and the same bytes on every machine.
 //
 //   node build.mjs   writes dist/index.html and dist/404.html
 //
-// Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, or a table the
-// matrix does not hold: a row in no list or in two, a title the matrix lacks, "ahead" in a cell's
-// own words or naming no open difference, or a cell that says otherwise than its rows.
+// Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, a section the
+// contents cannot take, or a table the matrix does not hold: a row in no list or in two, a title
+// the matrix lacks, "ahead" in a cell's own words or naming no open difference, a cell that says
+// otherwise than its rows, or a transport's sides other than those that carry it.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -35,6 +39,9 @@ import {
   STAGES,
   STATUSES,
   STATUS_HEADINGS,
+  TRANSPORTS,
+  TRANSPORTS_OFF,
+  TRANSPORT_HEADINGS,
   WIRE,
 } from './src/data.mjs';
 import { tokensOf } from '../implementations/typescript/demo/highlight.ts';
@@ -157,15 +164,21 @@ const fill = (template, fillers) => {
   return filled;
 };
 
-// a number as each language groups its digits: a comma, or a no-break space
+// French typography's two spaces that never break a line: the narrow one, U+202F, and the one of
+// a word's width, U+00A0
+const NARROW = String.fromCodePoint(0x20_2f);
+const NO_BREAK = String.fromCodePoint(0xa0);
+
+// a number as each language groups its digits: a comma, or a narrow no-break space
 const grouped = (value, language) => {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/gu, language === 'fr' ? ' ' : ',');
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/gu, language === 'fr' ? NARROW : ',');
 };
 
 // French typography over the text of a page, never inside a tag, a code span or a block of code: a
-// no-break space before a colon, a semicolon, a question or an exclamation mark and inside
-// guillemets, and between the groups of a number
-const typeset = (html) => {
+// narrow no-break space before a colon, a semicolon, a question or an exclamation mark, inside
+// guillemets and between the groups of a number, and a no-break space where a number meets the
+// word it counts, its unit among them
+export const typeset = (html) => {
   const parts = html.split(
     /(<code\b[\s\S]*?<\/code>|<pre\b[\s\S]*?<\/pre>|<svg\b[\s\S]*?<\/svg>|<[^>]+>)/u
   );
@@ -175,9 +188,10 @@ const typeset = (html) => {
         return part;
       }
       return part
-        .replace(/ ([:;?!»])/gu, ' $1')
-        .replace(/« /gu, '« ')
-        .replace(/(\d) (?=\d{3}(?!\d))/gu, '$1 ');
+        .replace(/[ \xA0]([:;?!»])/gu, `${NARROW}$1`)
+        .replace(/«[ \xA0]/gu, `«${NARROW}`)
+        .replace(/(\d)[ \xA0](?=\d{3}(?!\d))/gu, `$1${NARROW}`)
+        .replace(/(\d) (?=\p{L})/gu, `$1${NO_BREAK}`);
     })
     .join('');
 };
@@ -385,9 +399,10 @@ const aheadIn = (cell) => {
   };
 };
 
-// each row of the matrix's Features and Transports, by its title, with what each side has ahead in
-// it: the stages its cells name, and whether every cell of the side is ahead whole; a side's cells
-// are the columns its name heads, `Rust` or `Rust client` and `Rust server`
+// each row of the matrix's Features and Transports, by its title, with its heading and what each
+// side has ahead in it: the stages its cells name, whether every cell of the side is ahead whole,
+// and whether the side carries the row at all; a side's cells are the columns its name heads,
+// `Rust` or `Rust client` and `Rust server`
 const matrixOf = (refusals) => {
   const lines = read(join(ROOT, MATRIX)).split('\n');
   const differences = tableOf(lines, '## Differences');
@@ -423,6 +438,15 @@ const matrixOf = (refusals) => {
         if (states.length === 0) {
           throw new Error(`build: ${MATRIX}'s ${heading} has no column for ${side}`);
         }
+        // * a side carries the row where one of its cells is neither ahead whole, nor "not
+        // available" or "not tested", nor empty
+        const carried = header.some((name, index) => {
+          if (name !== side && !name.startsWith(`${side} `)) {
+            return false;
+          }
+          const cell = (cells[index] ?? '').trim();
+          return cell !== '' && !aheadIn(cell).whole && !/^not\b/iu.test(cell);
+        });
         for (const state of states) {
           if (state.bare) {
             refusals.push(
@@ -446,9 +470,10 @@ const matrixOf = (refusals) => {
           whole: states.every((state) => {
             return state.whole;
           }),
+          carried,
         };
       }
-      rows.set(title, sides);
+      rows.set(title, { heading, sides });
     }
   }
   return rows;
@@ -509,7 +534,7 @@ const tableRefusals = () => {
         return rows.has(title);
       })
       .map((title) => {
-        return rows.get(title);
+        return rows.get(title).sides;
       });
     for (const cell of part.cells) {
       for (const side of cell.sides) {
@@ -539,7 +564,100 @@ const tableRefusals = () => {
       }
     }
   }
+  return [...refusals, ...transportRefusals(rows)];
+};
+
+// ! the table of the transports holds the matrix's Transports: each of its rows in exactly one
+// transport's `rows` or in TRANSPORTS_OFF, and each transport's sides those that carry every row it
+// stands for, a side carrying a row where one of its cells is neither ahead whole nor "not …"
+const transportRefusals = (rows, { transports = TRANSPORTS, off = TRANSPORTS_OFF } = {}) => {
+  const refusals = [];
+  const listed = new Map();
+  const lists = [
+    ...transports.map((transport) => {
+      return [`the transport “${transport.name[0]}”`, transport.rows];
+    }),
+    ['TRANSPORTS_OFF', off],
+  ];
+  for (const [list, titles] of lists) {
+    for (const title of titles) {
+      if (rows.get(title)?.heading !== '## Transports') {
+        refusals.push(`${list} names “${title}”, which ${MATRIX}'s Transports has no row of`);
+      } else if (listed.has(title)) {
+        refusals.push(`“${title}” is in ${listed.get(title)} and in ${list}`);
+      } else {
+        listed.set(title, list);
+      }
+    }
+  }
+  for (const [title, { heading }] of rows) {
+    if (heading === '## Transports' && !listed.has(title)) {
+      refusals.push(
+        `${MATRIX}'s transport “${title}” is in no list of src/data.mjs: a transport's rows, or TRANSPORTS_OFF`
+      );
+    }
+  }
+  for (const transport of transports) {
+    const held = transport.rows
+      .filter((title) => {
+        return rows.has(title);
+      })
+      .map((title) => {
+        return rows.get(title).sides;
+      });
+    const carried = SIDES.map(([side]) => {
+      return side;
+    }).filter((side) => {
+      return (
+        held.length > 0 &&
+        held.every((sides) => {
+          return sides[side].carried;
+        })
+      );
+    });
+    if (carried.join() !== transport.sides.join()) {
+      refusals.push(
+        `the transport “${transport.name[0]}”: the matrix says ${carried.join(', ') || 'no side'}; the page says ${transport.sides.join(', ') || 'no side'}`
+      );
+    }
+  }
   return refusals;
+};
+
+// what the table of the transports says otherwise than the matrix, its lists `transports` and
+// `off`, TRANSPORTS and TRANSPORTS_OFF by default
+export const transportsRefusals = (options) => {
+  const refusals = [];
+  const rows = matrixOf(refusals);
+  return [...refusals, ...transportRefusals(rows, options)];
+};
+
+// the sides of a transport in words: all three, one, or two joined
+const sidesText = (sides, language) => {
+  if (sides.length === SIDES.length) {
+    return pick(['all three', 'les trois'], language);
+  }
+  return sides.join(pick([' and ', ' et '], language));
+};
+
+// the table of the transports: where a call runs, its transport, which leads to the section that
+// says more where there is one, and the sides that carry it
+const transportsOf = (language, ids) => {
+  const head = TRANSPORT_HEADINGS.map((heading) => {
+    return `<th scope="col">${escape(pick(heading, language))}</th>`;
+  }).join('');
+  const body = TRANSPORTS.map((transport) => {
+    const name = escape(pick(transport.name, language));
+    if (transport.detail !== undefined && !ids.has(transport.detail.slice(1))) {
+      throw new Error(
+        `build: the transport “${transport.name[0]}” leads to ${transport.detail}, no id`
+      );
+    }
+    const linked =
+      transport.detail === undefined ? name : `<a href="${transport.detail}">${name}</a>`;
+    return `<tr><td>${escape(pick(transport.where, language))}</td><td>${linked}</td><td>${escape(sidesText(transport.sides, language))}</td></tr>`;
+  }).join('');
+  return `<div class="table-wrap" tabindex="0"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 const implementationsOf = (language) => {
@@ -699,8 +817,9 @@ const diagramOf = (name, language) => {
 
 // ── Content ───────────────────────────────────────────────────────────────────
 
-// the fillers of the main page's content in `language`, its facts those read from the repository
-const contentFillers = (language, known) => {
+// the fillers of the main page's content in `language`, its facts those read from the repository,
+// `ids` those its template holds
+const contentFillers = (language, { known, ids }) => {
   return {
     bytes: raw((attributes) => {
       return bytesOf(attributes.of, language, attributes.hero === 'true');
@@ -719,6 +838,9 @@ const contentFillers = (language, known) => {
     }),
     implementations: raw(() => {
       return implementationsOf(language);
+    }),
+    transports: raw(() => {
+      return transportsOf(language, ids);
     }),
     diagram: raw((attributes) => {
       return diagramOf(attributes.of, language);
@@ -754,15 +876,44 @@ const contentFillers = (language, known) => {
   };
 };
 
-// the table of contents, from each section's id and its `data-toc`, which it then drops
-const contentsOf = (content) => {
-  const entries = [...content.matchAll(/<section id="([\w-]+)" data-toc="([^"]+)">/gu)];
-  const items = entries
-    .map(([, id, label]) => {
-      return `<li><a href="#${id}">${label}</a></li>`;
-    })
-    .join('');
-  return { items, content: content.replace(/(<section id="[\w-]+") data-toc="[^"]+">/gu, '$1>') };
+// a section the contents name: `<section id="…" class="…" data-toc="…" data-part="…">`, its class
+// and its part optional
+const ENTRY =
+  /<section id="([\w-]+)"((?: class="[^"]*")?) data-toc="([^"]+)"(?: data-part="([^"]*)")?>/gu;
+
+// ! the table of contents, from each section's id and its `data-toc`, which it then drops: a link
+// each, in the page's order, and a part, which a section's `data-part` opens under its name, its
+// links listed under that name until a section opens another, or `data-part=""` closes it. A
+// `data-toc` or a `data-part` the contents did not take is refused, so no section drops out of them
+// unseen.
+export const contentsOf = (content) => {
+  let items = '';
+  let open = false;
+  for (const [, id, , label, part] of content.matchAll(ENTRY)) {
+    if (part !== undefined) {
+      if (open) {
+        items += '</ol></li>';
+      }
+      open = part !== '';
+      if (open) {
+        items += `<li class="toc-part"><p class="toc-part-title">${part}</p><ol>`;
+      }
+    }
+    items += `<li><a href="#${id}">${label}</a></li>`;
+  }
+  if (open) {
+    items += '</ol></li>';
+  }
+  const stripped = content.replace(ENTRY, (_entry, id, classes) => {
+    return `<section id="${id}"${classes}>`;
+  });
+  const left = stripped.match(/\sdata-(?:toc|part)=/u);
+  if (left !== null) {
+    throw new Error(
+      'build: a data-toc or a data-part the contents did not take: write <section id="…" class="…" data-toc="…" data-part="…">, its class and its part optional'
+    );
+  }
+  return { items, content: stripped };
 };
 
 // the strings of the page outside its content, in each language
@@ -875,11 +1026,19 @@ export const buildNotFound = () => {
 // the main page's content in `language`, its placeholders filled from the repository
 const mainContentOf = (language, known) => {
   const template = read(join(SRC, `content.${language}.html`));
-  // ! the table of the three implementations is drawn from data alone, where the build holds it
-  if (template.split('{{implementations}}').length !== 2) {
-    throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
+  // ! the tables of the three implementations and of the transports are drawn from data alone,
+  // where the build holds them
+  for (const table of ['{{implementations}}', '{{transports}}']) {
+    if (template.split(table).length !== 2) {
+      throw new Error(`build: content.${language}.html holds ${table} other than once`);
+    }
   }
-  return fill(template, contentFillers(language, known));
+  const ids = new Set(
+    [...template.matchAll(/\sid="([\w-]+)"/gu)].map(([, id]) => {
+      return id;
+    })
+  );
+  return fill(template, contentFillers(language, { known, ids }));
 };
 
 // one document of both languages in the shell: English in the page, French in a template the page

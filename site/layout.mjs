@@ -6,7 +6,9 @@
 // finger reaches 44 px on a coarse pointer; every block of code at 13 px; no name of code in a table,
 // which scrolls sideways, split inside its word on a phone; the keyboard's focus shown
 // on the bar's tools and the menu's links; the menu opened, closed by Escape and the focus given
-// back; and the theme the page keeps, set before the first paint.
+// back; the page's contents in their two parts, each part's name above its links, every link
+// landing on a section in the page's order; and the theme the page keeps, set before the first
+// paint.
 //
 //   node layout.mjs                       every check, in Playwright's own Chromium
 //   node layout.mjs --chromium <path>     the Chromium to drive
@@ -356,6 +358,63 @@ const holdFocus = async ({ browser, address, language, faults }) => {
   }
 };
 
+// the contents in their parts: the questions, then the protocol in detail, each part's name shown
+// above its links beside the page and in the menu, and every link of the contents landing on a
+// section of the page, in the page's order
+const PARTS = 2;
+
+const contentsFaultsOf = (page) => {
+  return page.evaluate((parts) => {
+    const faults = [];
+    const titles = [...document.querySelectorAll('.toc .toc-part-title')];
+    if (titles.length !== parts) {
+      faults.push(`${titles.length} parts, not ${parts}`);
+    }
+    for (const title of titles) {
+      const box = title.getBoundingClientRect();
+      const links = title.parentElement.querySelectorAll('a');
+      if (box.height === 0 || links.length === 0) {
+        faults.push(`the part "${title.textContent}" shown with no link, or not shown`);
+      } else if (links[0].getBoundingClientRect().top < box.bottom - 0.5) {
+        faults.push(`the part "${title.textContent}" not above its links`);
+      }
+    }
+    const sections = [...document.querySelectorAll('main section[id]')];
+    let last = -1;
+    for (const link of document.querySelectorAll('.toc a')) {
+      const at = sections.findIndex((section) => {
+        return `#${section.id}` === link.getAttribute('href');
+      });
+      if (at === -1) {
+        faults.push(`${link.getAttribute('href')} lands on no section`);
+      } else if (at < last) {
+        faults.push(`${link.getAttribute('href')} out of the page's order`);
+      } else {
+        last = at;
+      }
+    }
+    return faults;
+  }, PARTS);
+};
+
+const holdContents = async ({ browser, address, language, faults }) => {
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${address}?lng=${language}`);
+    for (const fault of await contentsFaultsOf(page)) {
+      faults.push(`the page's contents, ${language}, 1200 px: ${fault}`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-action="menu"]').click();
+    for (const fault of await contentsFaultsOf(page)) {
+      faults.push(`the page's menu, ${language}, 390 px: ${fault}`);
+    }
+  } finally {
+    await context.close();
+  }
+};
+
 // the theme the page keeps, on the root once the document is parsed, and the one chosen kept
 const holdTheme = async ({ browser, address, faults }) => {
   const context = await browser.newContext({ colorScheme: 'light' });
@@ -442,6 +501,7 @@ const main = async () => {
         await holdMenu({ browser, address, language, surface, faults });
       }
       await holdFocus({ browser, address, language, faults });
+      await holdContents({ browser, address, language, faults });
     }
     await holdTheme({ browser, address, faults });
   } finally {
@@ -455,7 +515,7 @@ const main = async () => {
     return 1;
   }
   console.log(
-    `layout: the page, the privacy policy and the not-found page hold, at ${WIDTHS.join(', ')} px, in both languages and both themes`
+    `layout: the page, the privacy policy and the not-found page hold, at ${WIDTHS.join(', ')} px, in both languages and both themes, the page's contents in their ${PARTS} parts`
   );
   return 0;
 };

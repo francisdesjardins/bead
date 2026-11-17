@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The page beadproto.dev serves, in English and in French, answers a team's questions in order: one
+  contract for every team, the teams that do not speak Bead, evolving without breaking, the
+  transports, the same behaviour on every side, debugging and observing, and security. Where Bead
+  stands opens it, under a new lede, and the protocol in detail follows, its sections unchanged. Its
+  contents come in those two parts; the table of the transports is drawn from `site/src/data.mjs`
+  and held to the support matrix's Transports, as the implementations' is; the French page keeps a
+  number whole and with its unit by no-break spaces. How Bead is made moves to
+  francisdesjardins.ca, and README's "Why Bead" drops the two paragraphs the page dropped.
+
 ## [0.15.0] - 2026-11-17
 
 ### Added

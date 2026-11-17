@@ -862,6 +862,24 @@ main:focus {
   text-transform: uppercase;
 }
 
+/* a part of the contents: its name, then its links, set in under it */
+.toc-part {
+  margin-top: var(--app-space-4);
+}
+
+.toc-part + li {
+  margin-top: var(--app-space-4);
+}
+
+.toc-part-title {
+  margin: 0 0 var(--app-space-1);
+  padding-left: var(--app-space-3);
+  color: var(--app-text-tertiary);
+  font: 500 var(--app-text-xs) / 1.3 var(--app-font-mono);
+  letter-spacing: var(--app-tracking-label);
+  text-transform: uppercase;
+}
+
 @media (min-width: 960px) {
   .layout {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -1024,6 +1042,53 @@ h3 code,
   font-size: clamp(var(--app-text-lg), 3.2vw, var(--app-text-xl));
   line-height: 1.3;
   letter-spacing: var(--app-tracking-snug);
+}
+
+.hero .intro {
+  margin: 0;
+  color: var(--app-text-secondary);
+}
+
+/* the opening screen: the title, where Bead stands, then the ways in, closer than sections are */
+.opening {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-6);
+}
+
+/* where Bead stands: a note set apart, quiet beside the invitation */
+.status {
+  padding: var(--app-space-5) var(--app-space-6);
+  border: 1px solid var(--app-divider);
+  border-left: 3px solid var(--app-primary);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-paper);
+}
+
+.status h2 {
+  margin: 0 0 var(--app-space-2);
+  font-size: var(--app-text-lg);
+  line-height: var(--app-lh-snug);
+}
+
+.status p {
+  max-width: none;
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+}
+
+.status p:last-child {
+  margin-bottom: 0;
+}
+
+/* the opening's invitation: its ways in first, the demo's sentence under them */
+.invite.invite-open {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.invite.invite-open p {
+  max-width: none;
 }
 
 .invite {
@@ -1660,6 +1725,9 @@ footer {
   .invite {
     padding: var(--app-space-4);
   }
+  .status {
+    padding: var(--app-space-4);
+  }
   .bytes-hero {
     padding: var(--app-space-3);
   }
@@ -1883,20 +1951,20 @@ footer {
     n’est ouvert sur l’onglet, le crochet ne transmet rien d’autre que l’annonce d’un client et son
     genre.
   </p>
-  <p>Pendant qu’un panneau Bead est ouvert sur l’onglet, le crochet et le panneau lisent :</p>
+  <p>Pendant qu’un panneau Bead est ouvert sur l’onglet, le crochet et le panneau lisent :</p>
   <ul>
     <li>
-      chaque appel que font ou que servent les clients Bead de la page : sa procédure, ses temps,
-      son statut, et ses charges en texte et en arbre ;
+      chaque appel que font ou que servent les clients Bead de la page : sa procédure, ses temps,
+      son statut, et ses charges en texte et en arbre ;
     </li>
-    <li>chaque enveloppe que ces clients envoient et reçoivent, et les métriques de chacun ;</li>
+    <li>chaque enveloppe que ces clients envoient et reçoivent, et les métriques de chacun ;</li>
     <li>
       les parcelles, les changements de lien et les rapports de chaque participant d’un courtier que
-      la page construit ;
+      la page construit ;
     </li>
     <li>
       la pile du code qui a fait chaque appel, les adresses et les lignes de ses scripts, pour que
-      le panneau puisse l’ouvrir dans Sources ;
+      le panneau puisse l’ouvrir dans Sources ;
     </li>
     <li>
       dans l’onglet Réseau, seulement les échanges dont le type de contenu est celui de Bead,
@@ -1919,11 +1987,11 @@ footer {
     disque.
   </p>
   <p>
-    Le panneau garde deux de vos choix dans le stockage propre à l’extension, sur votre appareil :
+    Le panneau garde deux de vos choix dans le stockage propre à l’extension, sur votre appareil :
     où il place le détail d’un appel, et la part de la séparation entre la liste et le détail. Il
     n’y garde rien d’autre.
   </p>
-  <p>Trois actions écrivent ou lisent un fichier, chacune seulement à votre demande :</p>
+  <p>Trois actions écrivent ou lisent un fichier, chacune seulement à votre demande :</p>
   <ul>
     <li>
       Export enregistre les enregistrements que tient le panneau dans un fichier JSON, là où votre
@@ -1945,7 +2013,7 @@ footer {
     paquet que distribue le Chrome Web Store, et elle ne charge aucun code distant.
   </p>
   <p>
-    Les enregistrements ne voyagent que dans le navigateur : du crochet, dans la page, au pont de
+    Les enregistrements ne voyagent que dans le navigateur : du crochet, dans la page, au pont de
     l’extension, puis à son service worker, puis au panneau du même onglet, par la messagerie de
     Chrome.
   </p>
@@ -1959,16 +2027,16 @@ footer {
   <h2>Ses permissions</h2>
   <p>
     Le manifeste de l’extension ne nomme aucune permission et aucune permission d’hôte. Il déclare
-    quatre parties :
+    quatre parties :
   </p>
   <ul>
     <li>
       deux scripts de contenu sur toute adresse, <code>&lt;all_urls&gt;</code>, à
-      <code>document_start</code> : le crochet, dans le monde propre de la page, qui doit être en
-      place avant que le client Bead de la page ne se charge ; et le pont, dans le monde isolé de
-      l’extension, qui porte les enregistrements du crochet jusqu’au panneau ;
+      <code>document_start</code> : le crochet, dans le monde propre de la page, qui doit être en
+      place avant que le client Bead de la page ne se charge ; et le pont, dans le monde isolé de
+      l’extension, qui porte les enregistrements du crochet jusqu’au panneau ;
     </li>
-    <li>une page DevTools, qui ajoute le panneau Bead aux DevTools ;</li>
+    <li>une page DevTools, qui ajoute le panneau Bead aux DevTools ;</li>
     <li>un service worker, qui associe chaque onglet au panneau ouvert sur lui.</li>
   </ul>
   <p>
