@@ -3223,6 +3223,7 @@ src/transport/client/types.ts IWebSocketConstructor
 src/transport/client/types.ts IWebSocketLike
   interface IWebSocketLike
     binaryType: string
+    readonly protocol?: string
     readonly readyState: number
     onclose: Handler<ICloseEventLike> | null
     onerror: Handler<unknown> | null
