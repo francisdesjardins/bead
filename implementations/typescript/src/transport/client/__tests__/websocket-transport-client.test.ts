@@ -404,6 +404,13 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
       // spec 15.2: a client that offered none takes no field, an empty one included
       test('fails its connect on a 101 that carries a subprotocol field, an empty one, when it offered none', async () => {
+        // ! Node 24's global WebSocket throws inside its own handshake on this 101, reading the
+        // offers it did not send, and leaves the connect waiting; Node 26's fails it: a row of
+        // docs/support.md
+        test.skip(
+          label !== 'ws' && Number(process.versions.node.split('.')[0]) < 26,
+          "Node 24's global WebSocket throws inside its handshake"
+        );
         await using answering = await answeringUpgrade(
           'Connection: Upgrade\r\nSec-WebSocket-Protocol: \r\n'
         );
