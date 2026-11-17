@@ -6,7 +6,7 @@ flowchart TD
   rd -- no --> gate{"REQUEST of the<br/>peer’s parity,<br/>callId free?"}
   gate -- yes --> ans["FAILURE<br/>on that callId"]
   gate -- no --> set{"RESULT, FAILURE<br/>or CHUNK 0xA1<br/>of a pending call<br/>or of a transfer<br/>received?"}
-  set -- yes --> loc["the call or the transfer ends:<br/>local rejection and CANCEL,<br/>or FAILURE CHUNK_INVALID"]
-  set -- no --> late{"on a reserved callId<br/>or a call given up?"}
+  set -- yes --> loc["the call or the transfer ends:<br/>the call ended, and a CANCEL,<br/>the transfer with CHUNK_INVALID"]
+  set -- no --> late{"on a reserved callId<br/>or a transfer already ended?"}
   late -- yes --> quiet["arrived late:<br/>dropped in silence"]
   late -- no --> rep2["reported,<br/>never answered"]

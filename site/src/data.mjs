@@ -297,7 +297,7 @@ export const HEADER = Object.freeze({
         [['layout', 'layout'], 8],
         [['kind', 'kind'], 8],
         [['flags', 'flags'], 8],
-        [['headerWords', 'headerWords'], 8],
+        [['length', 'longueur'], 8],
       ],
     ],
     [['bytes 4-7', 'octets 4-7'], [[['callId', 'callId'], 32]]],
@@ -396,8 +396,8 @@ export const FAILURES = Object.freeze([
     17,
     ['answered', 'rejected'],
     [
-      'The request could not leave for its destination: nothing was tried.',
-      'La requête n’a pas pu partir vers sa destination : rien n’a été tenté.',
+      'The request could not leave, so nothing was tried: its destination gone, for one, or a credential its transport cannot carry.',
+      'La requête n’a pas pu partir, donc rien n’a été tenté : sa destination partie, par exemple, ou un justificatif que son transport ne peut porter.',
     ],
   ],
   [
@@ -496,7 +496,7 @@ export const FAILURES = Object.freeze([
   [
     'CREDIT_EXCEEDED',
     49,
-    ['answered', 'ended'],
+    ['answered', 'reported', 'ended'],
     ['A chunk past the credit granted.', 'Un morceau dépasse le crédit accordé.'],
   ],
   [
