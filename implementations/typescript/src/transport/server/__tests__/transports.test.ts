@@ -517,7 +517,7 @@ const canonicalOf = (text: string): string => {
 
 /**
  * A body's one envelope, as a case expects it — a failure's detail where `expected` gives one,
- * informative elsewhere — or its bytes when they are none.
+ * not compared elsewhere — or its bytes when they are none.
  */
 const envelopeOf = (bytes: Uint8Array, expected?: IExpected | string): IExpected | string => {
   let actual: IExpected | string;

@@ -155,8 +155,8 @@ the call id (bytes 4 to 7).
 A reader MUST refuse it with `ENVELOPE_MALFORMED`.
 
 2.3. This document describes layout 0xA1. 0xA2 to 0xAF are the layouts to come: a reader MUST refuse
-one with `LAYOUT_UNSUPPORTED`, and SHOULD give the layouts it reads as the failure's detail —
-`0xA1`.
+one with `LAYOUT_UNSUPPORTED`, and MUST give the layouts it reads as the failure's detail, each `0x`
+and its two upper-case hexadecimal digits, ascending, a comma and a space between: `0xA1`.
 
 2.4. A reader MUST read the prefix of a layout to come — its kind and its call id — since whether a
 refusal is answered depends on them (section 9).
@@ -237,9 +237,10 @@ connection's session (section 13.3):
 A `JWT`'s bytes are its token's characters, base64url and periods, as JWS Compact Serialization
 writes them ([RFC 7515 §7.1](https://www.rfc-editor.org/rfc/rfc7515#section-7.1)). What the header
 leaves a credential is its 1,020 bytes less all that comes before: 1,004 bytes on a request with no
-other block, 992 on one with a destination and a total. A reader MUST refuse with
-`ENVELOPE_MALFORMED` a scheme on a kind that does not take it, a length that is not its scheme's, an
-`OPAQUE` of 16 zero bytes, padding that is not zero, and a block that runs past the header's length.
+other block, 992 on one with a destination and a total. Once the header's length holds the block
+(section 4.3), a reader MUST refuse with `ENVELOPE_MALFORMED`, in this order, a scheme on a kind
+that does not take it; a length that is not its scheme's, or an `OPAQUE` of 16 zero bytes; padding
+that is not zero.
 
 4.5. `DESTINATION`: what the request is for behind the peer that takes it, never 0. A reader MUST
 refuse 0 with `ENVELOPE_MALFORMED`. An answer names its call alone, and carries none.
@@ -276,8 +277,8 @@ _Vectors: `headerRefusals`, `envelopeRefusals`, `reads`._
 7. Everything else, the header's length among it, which its kind, its flags and its `CREDENTIAL`
    block's own length give; else `ENVELOPE_MALFORMED`.
 
-5.2. Within step 7 the order is not observable, since every check refuses with the same code. The
-failure's detail SHOULD say which check failed, and is informative.
+5.2. Within step 7 every check refuses with the same code. Its detail says which check failed
+(section 7.6), and section 4.4 orders a `CREDENTIAL` block's checks.
 
 ## 6. What follows the header
 
@@ -317,6 +318,11 @@ lone surrogate as U+FFFD.
 
 7.5. A relay that passes a failure on writes one relay more than it received. The side that raised
 a failure is deduced, never sent: a failure received with no relay is the peer's.
+
+7.6. A failure's detail is for a person: its requester acts on its code alone
+([RFC 9457 §3.1.4](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.4)). Where this document gives
+a detail's words, a side MUST write them as given. Where it gives none, the words are the side's
+own, and every side writes those its conformance files give.
 
 ## 8. The protocol's codes
 
@@ -421,12 +427,12 @@ first that applies:
    `DESTINATION_UNKNOWN`.
 5. No resolver for its service among those its connection's transport takes (section 9.11):
    `SERVICE_UNKNOWN`; for its procedure in a service known there: `PROCEDURE_UNKNOWN`. Its
-   detail SHOULD be `no service <service id>`, or `no procedure <procedure id> in service
+   detail MUST be `no service <service id>`, or `no procedure <procedure id> in service
    <service id>`, each id in decimal: `no service 9`, `no procedure 99 in service 1`.
 6. Its credential, then its admission, in this order, which read its header, never its payload,
    each refusal told as section 13.12 says:
    1. a credential scheme the receiver takes none of — one to come, or one it has no verifier for:
-      answered with `CREDENTIAL_UNSUPPORTED`, whose detail SHOULD name the schemes it takes, as a
+      answered with `CREDENTIAL_UNSUPPORTED`, whose detail MUST name the schemes it takes, as a
       401 names its own in `WWW-Authenticate`
       ([RFC 9110 §11.6.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.1)), so its requester
       presents another: their names, in the order of their numbers, a comma and a space between —
@@ -437,7 +443,7 @@ first that applies:
       once it verifies (section 13.8); `ELSEWHERE`, to the session the receiver's verifier makes of
       what its transport carried. A credential that does not resolve, or an `ELSEWHERE` whose
       transport carried nothing, is answered with `SESSION_REQUIRED`, whatever the procedure
-      requires; its detail SHOULD say whether no credential came or one came and did not hold:
+      requires; its detail MUST say whether no credential came or one came and did not hold:
       `no credential came`, or `the credential does not hold`. A verifier that fails — it throws
       or rejects, its key set's ask fails, unreached or unsettled as its deadline is reached
       (section 13.9) — is answered with `PROCEDURE_FAILED`, and reported, never with

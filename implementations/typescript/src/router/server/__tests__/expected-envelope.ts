@@ -27,7 +27,7 @@ export interface IExpected {
    * vectors write a header's.
    */
   credential?: 'NONE' | 'OPAQUE' | IVectorCredential;
-  /** Its detail only where a conversation gives one: informative elsewhere. */
+  /** Its detail only where a conversation gives one: not compared elsewhere. */
   failure?: { code: number; detail?: string | undefined; relays: number; scope: number };
   flags?: number | undefined;
   kind: number;

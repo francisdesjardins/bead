@@ -24,9 +24,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
   `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
   9.4.10, 9.6.8).
+- Two vectors of `spec/vectors.json`'s `headerRefusals` pin 4.4's order on a `CREDENTIAL` block
+  that breaks two of its checks: an `OPAQUE` of 15 bytes whose padding is not zero, refused for its
+  length, and a `NONE` of 1 byte on a request whose padding is not zero, refused for its scheme.
 
 ### Changed
 
+- Spec 7.6 states what binds a failure's detail: the words the spec gives, which every side MUST
+  write, and elsewhere the words the conformance files give. The details of 2.3, 9.2's step 5 and
+  9.2's step 6 are a MUST, and every file's comment says a detail it gives is compared.
+- Spec 4.4 orders a `CREDENTIAL` block's checks, once the header's length holds the block (4.3):
+  its scheme, its length, then its padding; 5.2 points to that order.
 - Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
   connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
   under `.localhost` on to its DNS server, an application names the loopback by its address.
