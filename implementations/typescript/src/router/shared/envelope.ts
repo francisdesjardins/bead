@@ -3,7 +3,8 @@
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { Data } from '../../transport/shared/types';
 import { EnvelopeKind, FailureScope, LIMIT_DEFAULTS } from './constants';
-import { byteCountOf, FailureError } from './errors';
+import { byteCountOf } from '../../transport/shared/errors';
+import { FailureError } from './errors';
 import { headerBytesOf, readHeader, readPrefix, writeHeader } from './header';
 import type {
   Envelope,

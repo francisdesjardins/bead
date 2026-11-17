@@ -5,6 +5,11 @@ import { thrownMessage } from './thrown-message';
 
 // helpers
 
+/** A count of bytes as a failure's detail writes it: `1 byte`, or `0 bytes`, `2 bytes`. */
+export const byteCountOf = (count: number): string => {
+  return `${String(count)} ${count === 1 ? 'byte' : 'bytes'}`;
+};
+
 /** What a thrown value is called: an `Error`'s message, or {@link thrownMessage} for anything else. */
 export const reasonMessage = (reason: unknown): string => {
   return reason instanceof Error ? reason.message : thrownMessage(reason);

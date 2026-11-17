@@ -512,7 +512,7 @@ test.describe('createBrokerTransportServer', () => {
     expect(heard).toEqual([[ParcelKind.CLOSE, 1, 4000]]);
     expect(told).toEqual([
       [
-        'a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 bytes',
+        'a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 byte',
         '',
       ],
     ]);

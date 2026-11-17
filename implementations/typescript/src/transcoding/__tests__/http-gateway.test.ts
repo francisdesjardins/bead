@@ -2622,7 +2622,7 @@ test('reports one send-bound drop when consecutive stream frames exceed the boun
   expect(received).toBe(0);
   expect(requests).toBe(1);
   expect(frames).toBe(5);
-  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
 });
 
 test('writes native JSON results and notifications in stream order', async () => {
@@ -3317,7 +3317,7 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   await using bounded = await startTranscoding({ maximumUnsentBytes: 1 });
   const reported = reportedBy(bounded.gateway);
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
-  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
 });
 
 // transcoding 10.2
@@ -3491,7 +3491,7 @@ test('bounds every response body by maximumUnsentBytes before writing', async ()
       return fixture.memory.clients.length === 0;
     });
     await fixture.watched(2);
-    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
   }
 });
 

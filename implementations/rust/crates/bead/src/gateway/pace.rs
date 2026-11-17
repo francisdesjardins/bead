@@ -15,6 +15,7 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use crate::clock::SharedClock;
+use crate::failure::byte_count_of;
 use crate::http::wire::Flow;
 use crate::net::bounds::{SendPace, SendPaceHooks, SendPaceOptions};
 use crate::router::types::{BoxFuture, RouterError};
@@ -294,7 +295,8 @@ impl Outlet {
             if self.unsent_of(&state).saturating_add(length) > maximum {
                 drop(state);
                 self.cut(Some(format!(
-                    "the response is dropped: maximumUnsentBytes {maximum} bytes"
+                    "the response is dropped: maximumUnsentBytes {}",
+                    byte_count_of(maximum)
                 )));
 
                 return Box::pin(async { false });

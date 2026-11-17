@@ -394,8 +394,9 @@ make a `JsonElement` is written there as U+FFFD, before the codec sees it: the p
 
 **Two JSON readers on each side.** A token's parts keep spec 13.8's reading, which sets no depth and
 lets a claim's string hold a surrogate alone that "names nothing"; a payload is read by section 17.
-The two share the strict decoder and the scan for names given twice; making 13.8 read as 17 does is
-a decision of its own.
+The two share the strict decoder; a payload's reader meets a name given twice where its text gives
+it, in the order 17.5 states, and a token's refuses one wherever it is. Making 13.8 read as 17 does
+is a decision of its own.
 
 **The Rust side, and each language after it, pays for two algorithms**: the shortest digits of a
 double, laid out as ECMAScript lays them out — Ryū, or Grisu with a fallback, as RFC 8785 §3.2.2.3
@@ -409,8 +410,9 @@ Rust's own `str::parse`, and its names compared by their UTF-16 code units.
 **The Rust side reads, holds and writes a `json` payload by its own parts**
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): **its reader
 is Bead's own**, a strict RFC 8259 tokenizer that counts the depth over the whole text, then reads
-it in one pass and refuses with the first of 17.5's faults it meets, a name given twice once its
-object closes; it is Bead's own since `serde_json` refuses a surrogate alone outright, keeps the
+it in one pass, refusing a fault of the grammar wherever it comes, and otherwise the first of
+17.5's other faults it meets, a name given twice at the name that repeats, the order 17.5 states;
+it is Bead's own since `serde_json` refuses a surrogate alone outright, keeps the
 last of a name given twice and caps its depth at 128; a number whose value is a whole number within
 64 bits is read as an integer, any other as the nearest double, `-0` as the double `-0.0`, both
 written back through the double; **its value is `serde_json::Value`**, the ecosystem's, re-sorted by

@@ -565,6 +565,260 @@
       "refused": "not JSON"
     },
     {
+      "name": "a byte order mark, then a byte not UTF-8",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.1",
+        "17.5.2"
+      ],
+      "bytes": "EF BB BF FF",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a letter, then 65 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "78 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "nested past 64"
+    },
+    {
+      "name": "an array closed before any opens, then 65 opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "5D 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a number past a double and a comma, then 70 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.6",
+        "17.5.7"
+      ],
+      "bytes": "5B 31 65 34 30 30 2C 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "nested past 64"
+    },
+    {
+      "name": "an object cut short after a name holding a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 5C 75 44 43 30 30 22",
+      "refused": "not JSON"
+    },
+    {
+      "name": "an array cut short after a number past a double",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.6"
+      ],
+      "bytes": "5B 31 31 45 34 30 30",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a name twice, then a trailing comma",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.4"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 61 22 3A 32 2C 7D",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a name twice, the first holding a number past a double",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.6"
+      ],
+      "bytes": "7B 22 61 22 3A 31 65 34 30 30 2C 22 61 22 3A 32 7D",
+      "refused": "a number past a double"
+    },
+    {
+      "name": "a name twice, the second holding a number past a double",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.6"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 61 22 3A 31 65 34 30 30 7D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice, the first holding a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 61 22 3A 22 5C 75 64 38 30 30 22 2C 22 61 22 3A 31 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a name twice, the second holding a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 61 22 3A 22 5C 75 64 38 30 30 22 7D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice in an object, then a string holding a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "5B 7B 22 61 22 3A 31 2C 22 61 22 3A 32 7D 2C 22 5C 75 64 38 30 30 22 5D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a string holding a surrogate alone, then a name twice in an object",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "5B 22 5C 75 64 38 30 30 22 2C 7B 22 61 22 3A 31 2C 22 61 22 3A 32 7D 5D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a name holding a surrogate alone, given twice",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 5C 75 64 38 30 30 22 3A 31 2C 22 5C 75 64 38 30 30 22 3A 32 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a name twice, then a name holding a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 61 22 3A 32 2C 22 5C 75 64 38 30 30 22 3A 33 7D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice in an object, then a name holding a surrogate alone in the next",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "5B 7B 22 61 22 3A 31 2C 22 61 22 3A 32 7D 2C 7B 22 5C 75 64 38 30 30 22 3A 31 7D 5D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice, the first holding a name with a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.4",
+        "17.5.5"
+      ],
+      "bytes": "7B 22 61 22 3A 7B 22 5C 75 64 38 30 30 22 3A 31 7D 2C 22 61 22 3A 32 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a surrogate alone nested, then a number past a double nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "5B 5B 22 5C 75 64 38 30 30 22 5D 2C 5B 31 65 34 30 30 5D 5D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a number past a double nested, then a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "5B 5B 31 65 34 30 30 5D 2C 22 5C 75 64 38 30 30 22 5D",
+      "refused": "a number past a double"
+    },
+    {
+      "name": "a surrogate alone nested, then a number past a double",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "5B 5B 22 5C 75 64 38 30 30 22 5D 2C 31 65 34 30 30 5D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a surrogate alone, then a number past a double, in members not sorted",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "7B 22 62 22 3A 22 5C 75 64 38 30 30 22 2C 22 61 22 3A 31 65 34 30 30 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a name holding a surrogate alone nested, then a number past a double",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "7B 22 61 22 3A 7B 22 5C 75 64 38 30 30 22 3A 31 7D 2C 22 62 22 3A 31 65 34 30 30 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a number past a double, then a surrogate alone in a member named as an array index",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.5",
+        "17.5.6"
+      ],
+      "bytes": "7B 22 62 22 3A 31 65 34 30 30 2C 22 31 22 3A 22 5C 75 64 38 30 30 22 7D",
+      "refused": "a number past a double"
+    },
+    {
       "name": "a string outside ASCII",
       "encoding": "text",
       "clauses": [

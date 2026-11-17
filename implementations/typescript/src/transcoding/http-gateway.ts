@@ -29,6 +29,7 @@ import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from '../tran
 import { REFUSAL_HEADER } from '../transport/shared/constants';
 import { createEmitter, tellError } from '../transport/shared/emitter';
 import {
+  byteCountOf,
   CancelError,
   ConnectError,
   ProgrammerError,
@@ -731,7 +732,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         dropWriter(
           response,
           new Error(
-            `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+            `the response is dropped: maximumUnsentBytes ${byteCountOf(maximumUnsentBytes)}`
           )
         );
         return Promise.resolve(false);

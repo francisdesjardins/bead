@@ -51,6 +51,7 @@ use crate::debug::DebugDirection;
 use crate::debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
+use crate::failure::byte_count_of;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
@@ -1256,8 +1257,8 @@ impl ParticipantState {
         // with no gap before it
         if !is_close && unsent.saturating_add(length) > connection.maximum_unsent {
             let why = format!(
-                "what waits for its broker would pass maximumUnsentBytes, {} bytes",
-                connection.maximum_unsent
+                "what waits for its broker would pass maximumUnsentBytes, {}",
+                byte_count_of(connection.maximum_unsent)
             );
 
             self.lose(pair, (codes::LOST, why));

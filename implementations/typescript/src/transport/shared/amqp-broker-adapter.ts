@@ -33,7 +33,7 @@ import {
 import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
-import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
+import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
 import { isSecureUrl } from './secure';
 import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
@@ -1681,7 +1681,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         // ! counted before it goes: its broker ends the sending session on one past its bound
         return counted > bound
           ? new GenericError(
-              `a message of ${String(counted)} bytes to ${address}, past its sender's max-message-size, ${String(bound)} bytes`
+              `a message of ${byteCountOf(counted)} to ${address}, past its sender's max-message-size, ${byteCountOf(bound)}`
             )
           : undefined;
       };

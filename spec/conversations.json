@@ -659,6 +659,58 @@
       ]
     },
     {
+      "name": "a payload that names a member twice, the first holding a number past a double, is answered PAYLOAD_UNDECODABLE for the number",
+      "clauses": [
+        "17.2.1",
+        "17.5",
+        "17.5.4",
+        "17.5.6"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 22 61 22 3A 31 65 34 30 30 2C 22 61 22 3A 32 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0,
+              "detail": "a number past a double"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload that closes an array before any opens, then opens 65, is answered PAYLOAD_UNDECODABLE as not JSON",
+      "clauses": [
+        "17.2.1",
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 5D 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0,
+              "detail": "not JSON"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable",
       "clauses": [
         "9.2.6"

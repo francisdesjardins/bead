@@ -3,17 +3,17 @@ of them or why it refuses them; and what a writer writes of a value, or why it r
 0016 and 0031).
 
 Each outcome is section 17 played here a third time, beside the two sides, never written by hand: a
-reader that refuses as 17.5 says, in the order the TypeScript reader checks, the depth counted over the
-text before it is parsed; and a writer of RFC 8785's canonical form, ECMAScript's Number::toString from
-repr's shortest digits, its strings as JSON.stringify writes a well-formed one, its names sorted by their
-UTF-16 code units. A proto payload is read by a reader of Probe, spec/codecs.proto, written from
-protobuf's Encoding guide and 17.9.2 to 17.9.8, its packed records, its map's entries and its group
-among them, its required fields judged once the whole is read and a closed enum's undeclared number
-setting nothing, and a proto value written one field at a time or as a chain nested that deep,
-refused where it nests past 17.9.3's bound, then where it leaves a required field unset. A row that
-would be refused for two
-reasons fails here, as does a written form that does not read back to itself. A backslash is chr(92),
-so that no escape this file builds is read before it is built."""
+reader that refuses as 17.5 says, with the first reason of the order it states after its item 7, the
+depth counted over the whole text before it is parsed; and a writer of RFC 8785's canonical form,
+ECMAScript's Number::toString from repr's shortest digits, its strings as JSON.stringify writes a
+well-formed one, its names sorted by their UTF-16 code units. A proto payload is read by a reader of
+Probe, spec/codecs.proto, written from protobuf's Encoding guide and 17.9.2 to 17.9.8, its packed
+records, its map's entries and its group among them, its required fields judged once the whole is read
+and a closed enum's undeclared number setting nothing, and a proto value written one field at a time or
+as a chain nested that deep, refused where it nests past 17.9.3's bound, then where it leaves a required
+field unset. A value a writer would refuse for two reasons fails here, as does a written form that does
+not read back to itself. A backslash is chr(92), so that no escape this file builds is read before it is
+built."""
 import json
 import math
 import re
@@ -114,8 +114,9 @@ def write_reasons(value, depth=0):
 
 
 def depth_of(text):
-    """How deep the text nests, its strings skipped, counted before it is parsed: a string never closed
-    ends the count, and the parse then refuses it."""
+    """How deep the text nests, counted over the whole text before it is parsed, as 17.5's paragraph
+    after item 7 counts it: its strings skipped, a backslash escaping the character after it, a string
+    never closed ending the count, and the count free to fall below 0."""
     deepest = depth = index = 0
 
     while index < len(text):
@@ -141,31 +142,39 @@ def refuse_constant(_):
     raise NotJSON()
 
 
-def read_walk(value, reasons):
-    """The reasons a value parsed holds: a surrogate alone and a number past a double as one walk meets
-    them, then a name twice, as the TypeScript reader scans for it after its walk."""
-    pending = [value]
-    twice = False
+def first_fault(value):
+    """Of 17.5's items 4, 5 and 6, the one a value parsed meets first, read in its text's order: a name
+    or a string holding a surrogate alone at that name or string, a name its object gave before at that
+    name, a number past a double at that number; None where it holds none."""
+    if isinstance(value, str):
+        return A_SURROGATE_ALONE if has_surrogate(value) else None
 
-    while pending:
-        item = pending.pop()
+    if isinstance(value, float):
+        return None if math.isfinite(value) else PAST_A_DOUBLE
 
-        if isinstance(item, str):
-            if has_surrogate(item) and A_SURROGATE_ALONE not in reasons:
-                reasons.append(A_SURROGATE_ALONE)
-        elif isinstance(item, float):
-            if not math.isfinite(item) and PAST_A_DOUBLE not in reasons:
-                reasons.append(PAST_A_DOUBLE)
-        elif isinstance(item, Members):
-            names = [name for name, _ in item]
-            twice = twice or len(set(names)) != len(names)
-            pending.extend(names)
-            pending.extend(member for _, member in item)
-        elif isinstance(item, list):
-            pending.extend(item)
+    if isinstance(value, Members):
+        names = set()
 
-    if twice:
-        reasons.append(A_NAME_TWICE)
+        for name, item in value:
+            if has_surrogate(name):
+                return A_SURROGATE_ALONE
+
+            if name in names:
+                return A_NAME_TWICE
+
+            names.add(name)
+
+            if fault := first_fault(item):
+                return fault
+
+        return None
+
+    if isinstance(value, list):
+        for item in value:
+            if fault := first_fault(item):
+                return fault
+
+    return None
 
 
 def plain(value):
@@ -180,31 +189,30 @@ def plain(value):
 
 
 def json_read(data):
-    """Every reason 17.5 refuses the bytes for, in the order the TypeScript reader checks them, each
-    check on what the ones before it leave; and the value read, a number a double, where none applies."""
-    reasons = []
-
-    if data.startswith(BYTE_ORDER_MARK):
-        reasons.append(A_BYTE_ORDER_MARK)
-        data = data[len(BYTE_ORDER_MARK):]
-
+    """The reason 17.5 refuses the bytes for, the first in the order it states after its item 7, as a
+    list of one; and the value read, a number a double, where none applies: the bytes, item 1 then item
+    2; the depth, item 7, counted over the whole text before it is parsed; the grammar, item 3, of the
+    whole text; then the first fault of items 4, 5 and 6 the text meets."""
     try:
         text = data.decode('utf-8')
     except UnicodeDecodeError:
-        return [*reasons, NOT_UTF8], None
+        return [NOT_UTF8], None
+
+    if text.startswith(chr(0xFEFF)):
+        return [A_BYTE_ORDER_MARK], None
 
     if depth_of(text) > DEPTH:
-        reasons.append(NESTED_PAST)
+        return [NESTED_PAST], None
 
     try:
         # ! an integer is a double too (17.6), and NaN and Infinity, which Python's reader takes, are no JSON
         value = json.loads(text, object_pairs_hook=Members, parse_float=float, parse_int=float,
                            parse_constant=refuse_constant)
     except (ValueError, RecursionError, NotJSON):
-        return [*reasons, NOT_JSON], None
+        return [NOT_JSON], None
 
-    read_walk(value, reasons)
-    return reasons, None if reasons else plain(value)
+    fault = first_fault(value)
+    return ([fault], None) if fault else ([], plain(value))
 
 
 def text_read(data):
@@ -874,6 +882,50 @@ PAYLOADS = [
     ('two values', 'json', ['17.5.3'], b'1 2'),
     ('a no-break space', 'json', ['17.5.3'], bytes([0xC2, 0xA0]) + b'1'),
     ('cut short', 'json', ['17.5.3'], b'[1'),
+    # 17.5's order: a payload that breaks two of its items, refused with the first its paragraph after
+    # item 7 states, the bytes, the depth, the grammar, then the fault the text meets first
+    ('a byte order mark, then a byte not UTF-8', 'json', ['17.5', '17.5.1', '17.5.2'], BYTE_ORDER_MARK + bytes([0xFF])),
+    ('a letter, then 65 arrays opened', 'json', ['17.5', '17.5.3', '17.5.7'], b'x' + b'[' * (DEPTH + 1)),
+    ('an array closed before any opens, then 65 opened', 'json', ['17.5', '17.5.3', '17.5.7'],
+     b']' + b'[' * (DEPTH + 1)),
+    ('a number past a double and a comma, then 70 arrays opened', 'json', ['17.5', '17.5.3', '17.5.6', '17.5.7'],
+     b'[1e400,' + b'[' * 70),
+    ('an object cut short after a name holding a surrogate alone', 'json', ['17.5', '17.5.3', '17.5.5'],
+     utf8('{"' + escaped('DC00') + '"')),
+    ('an array cut short after a number past a double', 'json', ['17.5', '17.5.3', '17.5.6'], b'[11E400'),
+    ('a name twice, then a trailing comma', 'json', ['17.5', '17.5.3', '17.5.4'], b'{"a":1,"a":2,}'),
+    ('a name twice, the first holding a number past a double', 'json', ['17.5', '17.5.4', '17.5.6'],
+     b'{"a":1e400,"a":2}'),
+    ('a name twice, the second holding a number past a double', 'json', ['17.5', '17.5.4', '17.5.6'],
+     b'{"a":1,"a":1e400}'),
+    ('a name twice, the first holding a surrogate alone', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('{"a":"' + escaped('d800') + '","a":1}')),
+    ('a name twice, the second holding a surrogate alone', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('{"a":1,"a":"' + escaped('d800') + '"}')),
+    ('a name twice in an object, then a string holding a surrogate alone', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('[{"a":1,"a":2},"' + escaped('d800') + '"]')),
+    ('a string holding a surrogate alone, then a name twice in an object', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('["' + escaped('d800') + '",{"a":1,"a":2}]')),
+    ('a name holding a surrogate alone, given twice', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('{"' + escaped('d800') + '":1,"' + escaped('d800') + '":2}')),
+    ('a name twice, then a name holding a surrogate alone', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('{"a":1,"a":2,"' + escaped('d800') + '":3}')),
+    ('a name twice in an object, then a name holding a surrogate alone in the next', 'json',
+     ['17.5', '17.5.4', '17.5.5'], utf8('[{"a":1,"a":2},{"' + escaped('d800') + '":1}]')),
+    ('a name twice, the first holding a name with a surrogate alone', 'json', ['17.5', '17.5.4', '17.5.5'],
+     utf8('{"a":{"' + escaped('d800') + '":1},"a":2}')),
+    ('a surrogate alone nested, then a number past a double nested', 'json', ['17.5', '17.5.5', '17.5.6'],
+     utf8('[["' + escaped('d800') + '"],[1e400]]')),
+    ('a number past a double nested, then a surrogate alone', 'json', ['17.5', '17.5.5', '17.5.6'],
+     utf8('[[1e400],"' + escaped('d800') + '"]')),
+    ('a surrogate alone nested, then a number past a double', 'json', ['17.5', '17.5.5', '17.5.6'],
+     utf8('[["' + escaped('d800') + '"],1e400]')),
+    ('a surrogate alone, then a number past a double, in members not sorted', 'json', ['17.5', '17.5.5', '17.5.6'],
+     utf8('{"b":"' + escaped('d800') + '","a":1e400}')),
+    ('a name holding a surrogate alone nested, then a number past a double', 'json', ['17.5', '17.5.5', '17.5.6'],
+     utf8('{"a":{"' + escaped('d800') + '":1},"b":1e400}')),
+    ('a number past a double, then a surrogate alone in a member named as an array index', 'json',
+     ['17.5', '17.5.5', '17.5.6'], utf8('{"b":1e400,"1":"' + escaped('d800') + '"}')),
     ('a string outside ASCII', 'text', ['17.4'], utf8('Jos' + chr(0xE9))),
     ('an empty string', 'text', ['17.4'], b''),
     ('a leading U+FEFF, kept', 'text', ['17.4.2'], BYTE_ORDER_MARK + b'1'),
@@ -1028,8 +1080,8 @@ PROTO_DIFFERS = {}
 
 
 def payload_outcome(encoding, data):
-    """The bytes written back of what was read, or for proto what was read, or the one reason it is
-    refused for."""
+    """The bytes written back of what was read, or for proto what was read, or the reason it is refused
+    for, the first in 17.5's order."""
     if encoding == 'raw':
         return {'written': hexadecimal(data)}
 
@@ -1038,7 +1090,6 @@ def payload_outcome(encoding, data):
         return {'refused': reasons[0]} if reasons else {'read': read}
 
     reasons, value = (json_read if encoding == 'json' else text_read)(data)
-    assert len(reasons) <= 1, (data, reasons)
 
     if reasons:
         return {'refused': reasons[0]}
@@ -1254,7 +1305,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 159 and len(values) == 54
+assert len(payloads) == 182 and len(values) == 54
 
 
 

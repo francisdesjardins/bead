@@ -1139,7 +1139,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_and_
     assert!(!participant.is_linked(), "down");
     assert_eq!(
         *locked(&reported),
-        ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
+        ["a message to the inbox of ada is no parcel: 1 byte, under a parcel's 28"],
         "heard once"
     );
 
@@ -2300,7 +2300,7 @@ async fn reports_what_reaches_a_name_but_a_parcel_and_an_open_that_does_not_read
     }
 
     let reports = [
-        "a message to the name interop is no parcel: 1 bytes, under a parcel's 28",
+        "a message to the name interop is no parcel: 1 byte, under a parcel's 28",
         "an OPEN to the name interop does not read, dropped: an OPEN whose id runs past its bytes",
         "an OPEN to the name interop does not read, dropped: a kept byte that is not 0",
     ];
@@ -3446,7 +3446,7 @@ async fn drops_what_an_error_listener_throws_the_next_error_listener_told_and_th
     assert_eq!(client.ready_state(), ReadyState::Open, "open");
     assert_eq!(
         *locked(&reported),
-        ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
+        ["a message to the inbox of ada is no parcel: 1 byte, under a parcel's 28"],
         "the report alone, once"
     );
     participant.stop().await;

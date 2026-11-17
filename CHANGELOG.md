@@ -66,6 +66,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10.1). Every side's HTTP transport refuses a `Content-Type` in more than one field line, 415
   `type-refused`, as its gateway does. Cases of `spec/transports.json` and `spec/transcoding.json`
   play them.
+- Spec 17.5 states the order of a `json` payload's refusals: the bytes, `not UTF-8` then `a byte
+  order mark`; the depth, counted over the whole text before any of it is read, the count free to
+  fall below 0; the grammar, of the whole text; then, of `a name twice`, `a surrogate alone` and
+  `a number past a double`, the one the text meets first. Every side's reader refuses a payload of
+  two faults with the same reason, which 23 payloads of `spec/codecs.json` and two conversations of
+  `spec/conversations.json` play. The support matrix's open row on it gives way to one on a
+  gateway's body of two faults, whose three readers refuse with the first fault they meet.
 
 ### Removed
 
@@ -77,6 +84,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A detail that counts 1 byte says "1 byte", not "1 bytes", on every side: a credit's or a
   cancel's byte after its header, an opening that holds its whole total, and a payload that goes as
   a transfer.
+- A report or an error that counts 1 byte says "1 byte" too, on every side: a message too short
+  to be a parcel, what would pass `maximumUnsentBytes` at a broker, a socket or a gateway's
+  response, and a message past an AMQP sender's `max-message-size`, which the Rust side has no
+  binding for.
 - The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
   so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
 - The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a
@@ -104,6 +115,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it
   and the other sides do, on protobuf-es 2.17.0, which its peer range now asks for: `spec/codecs.json`
   excuses it no longer, and the `proto` differential takes the entry as a seed.
+- The TypeScript side refuses a `json` payload of two faults past the grammar with the one its text
+  meets first, where it checked a name twice last and the leaves in the order its walk popped them.
+- The C# side counts a `json` payload's depth before it parses, so `x` then 65 `[` is `nested
+  past 64`, and meets a fault past the grammar in its text's order, where it met one as its
+  canonical form was written, its names sorted.
+- The Rust side reads a `json` payload's grammar whole before any fault past it, so `[11E400` is
+  `not JSON`; counts its depth below 0, so `]` then 65 `[` is `not JSON`; and meets a name twice
+  at the name that repeats, where it met one as its object closed.
 
 ## [0.14.0] - 2026-11-16
 

@@ -515,7 +515,7 @@ internal sealed class BrokerConnection
         // no gap before it
         if (parcel.Kind != BrokerParcelKinds.Close && _unsent + bytes.Length > _setup.MaximumUnsentBytes)
         {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {_setup.MaximumUnsentBytes} bytes")));
+            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {FailureException.ByteCountOf(_setup.MaximumUnsentBytes)}")));
 
             return null;
         }

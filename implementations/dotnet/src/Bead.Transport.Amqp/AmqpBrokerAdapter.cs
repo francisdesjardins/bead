@@ -773,7 +773,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // every publication on it with it
             if (bytes > sending.Bound)
             {
-                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a message of {bytes} bytes to {address}, past its sender's max-message-size, {sending.Bound} bytes"), nameof(publication));
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a message of {FailureException.ByteCountOf(bytes)} to {address}, past its sender's max-message-size, {FailureException.ByteCountOf(sending.Bound)}"), nameof(publication));
             }
 
             message = AmqpMessages.MessageOf((address, publication.Payload), ttl);

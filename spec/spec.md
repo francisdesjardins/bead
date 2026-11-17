@@ -2753,6 +2753,15 @@ literal. A reader MUST refuse:
 7. an array or an object nested deeper than 64, the outermost at depth 1, as RFC 8259 §9 lets a
    parser bound it. A reader MUST refuse it before it builds anything deeper.
 
+A reader that finds more than one of these refuses with the first in this order: item 1; item 2;
+item 7, counted over the whole text before anything of it is read, each `[` and `{` outside a
+string one level in and each `]` and `}` one level out, the count free to fall below 0, a string
+running from its quotation mark to the next one that no backslash escapes, a backslash escaping
+the character after it, or to the text's end; item 3, of the whole text, as an I-JSON message is
+a JSON text first (RFC 7493 §2); then, of items 4, 5 and 6, the one the text meets first,
+reading from its start: a name or a string holding a surrogate alone at that name or string, a
+name its object gave before at that name, a number past a double at that number.
+
 17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
 `JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 might not stay exact,
 and a number whose magnitude is 2⁻¹⁰⁷⁵ or less, half the smallest positive double, 2⁻¹⁰⁷⁴,
