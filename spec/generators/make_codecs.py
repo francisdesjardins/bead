@@ -1080,8 +1080,8 @@ PROTO_DIFFERS = {}
 
 
 def payload_outcome(encoding, data):
-    """The bytes written back of what was read, or for proto what was read, or the one reason it is
-    refused for."""
+    """The bytes written back of what was read, or for proto what was read, or the reason it is refused
+    for, the first in 17.5's order."""
     if encoding == 'raw':
         return {'written': hexadecimal(data)}
 
@@ -1090,7 +1090,6 @@ def payload_outcome(encoding, data):
         return {'refused': reasons[0]} if reasons else {'read': read}
 
     reasons, value = (json_read if encoding == 'json' else text_read)(data)
-    assert len(reasons) <= 1, (data, reasons)
 
     if reasons:
         return {'refused': reasons[0]}
