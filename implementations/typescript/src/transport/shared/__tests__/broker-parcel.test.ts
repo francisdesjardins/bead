@@ -62,7 +62,12 @@ test.describe('broker parcel', () => {
           : { carried: hexadecimalOf(fromHexadecimal(parcel.carried)) }),
       });
 
-      if (written !== false) {
+      // * written back byte for byte, but what a side reads and no writer writes
+      if (written === false) {
+        expect(() => {
+          return writeParcel(parcelOf(parcel));
+        }, name).toThrow(ProgrammerError);
+      } else {
         expect(hexadecimalOf(writeParcel(parcelOf(parcel))), name).toBe(
           hexadecimalOf(fromHexadecimal(bytes))
         );
