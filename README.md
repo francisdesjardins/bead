@@ -1052,6 +1052,13 @@ against each server.
 - `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.
+- `node tools/check-twins.mjs`: every TypeScript and C# test — a title, a `[Fact]` or `[Theory]`
+  method — is played on the Rust side under its title's key, a `#[test]` `fn` or a trial, or a row
+  of `tools/twins.tsv` gives its class, a twin under another sentence, ahead for the Rust side or
+  native to its platform, and why; a folder's row leaves out every test of a program in one
+  language no other side has, the builder, the root's tools, the demo, the DevTools extension and
+  the browser page. `--write` adds a `pending` row for each new one, which fails until a reader
+  classifies it, and drops each row whose test is twinned or under a folder's row.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, the Rust workspace's and its lock's members, and each conformance file's
