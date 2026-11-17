@@ -111,6 +111,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it
   and the other sides do, on protobuf-es 2.17.0, which its peer range now asks for: `spec/codecs.json`
   excuses it no longer, and the `proto` differential takes the entry as a seed.
+- The TypeScript side refuses a `json` payload of two faults past the grammar with the one its text
+  meets first, where it checked a name twice last and the leaves in the order its walk popped them.
 
 ## [0.14.0] - 2026-11-16
 
