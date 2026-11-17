@@ -32,25 +32,26 @@ const BATCHES = ARGS.batches || [
   {
     key: 'a',
     sections:
-      'the eyebrow and title above the first section, essentiel, pourquoi, enveloppe, callid, echecs, porte',
+      'the eyebrow, the title and the paragraph above the first section, statut, essentiel, pourquoi, contrat, transcodage',
+    extra: 'their diagrams and snippets, and src/data.mjs where they draw from it',
+  },
+  {
+    key: 'b',
+    sections: 'versions, transports, implantations, debogage, securite',
+    extra:
+      'src/data.mjs where they draw their tables, the transports and the implementations, held to docs/support.md; their diagrams, snippets and excerpts, each against the source file it shows; and the words around the facts build.mjs reads (versions, conformance counts)',
+  },
+  {
+    key: 'c',
+    sections: 'protocole, enveloppe, callid, echecs, porte, regles, annulation, abonnements',
     extra:
       'src/data.mjs where these sections draw their byte examples and tables, and their diagrams',
   },
   {
-    key: 'b',
-    sections: 'regles, annulation, abonnements, sessions, transferts, relais',
-    extra: 'their diagrams, and src/data.mjs where they draw from it',
-  },
-  {
-    key: 'c',
-    sections: 'http, memoire, courtier, transcodage, securite, debogage',
-    extra: 'their diagrams, and src/data.mjs where they draw from it',
-  },
-  {
     key: 'd',
-    sections: 'versions, implantations, methode, suite, code',
+    sections: 'sessions, transferts, relais, http, memoire, courtier, suite, code',
     extra:
-      'src/snippets/, each excerpt against the source file it shows; their diagrams; and the words around the facts build.mjs reads (versions, conformance counts)',
+      'their diagrams, src/data.mjs where they draw from it, and each excerpt against the source file it shows',
   },
 ];
 

@@ -49,7 +49,8 @@ This repository holds the protocol and its implementations, side by side:
   each other side's generated HTTP client calls.
 
 **Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
-build on a commit, pinned. Publication is ahead.
+build on a commit, pinned. Publication is ahead. Bead has not run in production, and before 1.0.0 a
+minor may break.
 
 ## At a glance
 
@@ -135,18 +136,6 @@ and AMQP 1.0 on RabbitMQ 4 its second
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
   Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
   MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
-
-Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
-reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec whose
-conformance files every language plays; a builder that writes each language's typed sides from one
-`.proto`; a DevTools panel that reads a page's calls; a dissenter bound to argue against every
-change the others agree on. Each can be taken into another project, and each has the record that
-says why it is so, in [`docs/decisions/`](docs/decisions/README.md).
-
-Bead is built to production standards: a spec every side plays, the three sides calling each other
-in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold a side,
-and its pages held to WCAG 2.2 AA. It is not proven in production, and before 1.0.0 a minor may
-break.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
@@ -446,7 +435,9 @@ chooses, `?lng=`, then the choice it stored, then the browser's; its way back le
 site, francisdesjardins.ca. Its content is `src/content.en.html` and `src/content.fr.html`, its byte
 examples and tables `src/data.mjs`, its snippets `src/snippets/`; the versions, the conformance
 files' counts and the excerpts of the sources it shows are read from the repository as it builds.
-Each diagram is a Mermaid source per language under `diagrams/`, rendered at build time into an SVG
+Its contents are drawn from each section's `data-toc`, in two parts: the questions a team asks,
+then the protocol in detail, each opened by a section's `data-part`. Each diagram is a Mermaid
+source per language under `diagrams/`, rendered at build time into an SVG
 that follows both themes: drawn with sentinel colours, each replaced by a token of the page. Every
 SVG records the sha256 of its source.
 
@@ -477,7 +468,8 @@ holds the page, the privacy policy and the not-found page to their layout: the b
 one line from 320 to 1440 px, in both languages and both themes, no page wider than a phone, every
 control a finger reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in
 a table split inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with
-the focus given back, and the theme set before the first paint:
+the focus given back, the contents in their two parts with every link landing on a section in the
+page's order, and the theme set before the first paint:
 
 ```sh
 cd site
@@ -541,7 +533,10 @@ each part lists the rows of `docs/support.md`'s Features and Transports it stand
 listed as not on the page, and each cell declares the stages it says are ahead. A side's cell of the
 matrix says a part ahead by the token `` ahead: `<stage>` ``, the title of a row of its differences
 of kind open; the build fails on a row in no list or in two, on "ahead" said in a cell's own words,
-and on a cell of the page that says otherwise than its rows.
+and on a cell of the page that says otherwise than its rows. The table of the transports is drawn
+from it the same way and held to the matrix's Transports: each of its rows in one transport or
+listed as not on the page, and each transport's sides those whose cells carry every row it stands
+for, a cell ahead whole or "not available" or "not tested" carrying none.
 
 ## Interop, both ways
 
