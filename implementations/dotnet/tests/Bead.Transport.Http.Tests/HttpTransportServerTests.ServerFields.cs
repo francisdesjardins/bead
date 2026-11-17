@@ -102,7 +102,7 @@ public sealed partial class HttpTransportServerTests
     }
 
     [Fact]
-    public async Task Reads_any_target_without_throwing_a_header_given_twice_by_its_first_and_HTTP_2_s_authority_as_the_host()
+    public async Task Reads_any_target_without_throwing_a_Content_Type_given_twice_as_no_type_and_HTTP_2_s_authority_as_the_host()
     {
         var options = new HttpTransportServerOptions { Hosts = ["bead.example"] };
 
@@ -174,7 +174,7 @@ public sealed partial class HttpTransportServerTests
 
         Assert.Equal(
             [
-                (201, null),
+                (415, HttpRefusals.Type),
                 (404, HttpRefusals.Path),
                 (404, HttpRefusals.Path),
                 (201, null),

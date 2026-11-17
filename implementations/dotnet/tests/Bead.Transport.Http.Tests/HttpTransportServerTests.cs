@@ -1984,6 +1984,30 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             ]);
     }
 
+    // spec 15.12: each field read as over HTTP/1.1, its lines joined, a type in one line alone
+    [Fact]
+    public async Task Refuses_over_HTTP_2_a_connect_whose_Origin_or_Content_Encoding_comes_in_two_lines_403_and_415()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = $"{Host}:{_port}";
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        Assert.Equal(
+            [
+                new TlsAnswer(403, HttpRefusals.Origin, null),
+                new TlsAnswer(415, HttpRefusals.Type, null),
+                new TlsAnswer(415, HttpRefusals.Type, null),
+                new TlsAnswer(201, null, null),
+            ],
+            [
+                await Http2Of((":authority", own), bead, ("origin", $"https://{own}"), ("origin", "https://elsewhere.test")),
+                await Http2Of((":authority", own), bead, ("content-encoding", "identity"), ("content-encoding", "identity")),
+                await Http2Of((":authority", own), bead, ("content-encoding", "identity"), ("content-encoding", "gzip")),
+                await Http2Of((":authority", own), bead, ("origin", $"https://{own}"), ("content-encoding", "identity")),
+            ]);
+    }
+
     [Fact]
     public async Task Answers_a_preflight_over_HTTP_2_as_over_HTTP_1_1()
     {
