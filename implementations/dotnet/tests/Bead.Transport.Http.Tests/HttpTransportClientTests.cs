@@ -4250,6 +4250,42 @@ public sealed class HttpTransportClientTests
 
     // spec 15.39
     [Fact]
+    public async Task Connects_to_a_server_by_a_host_its_certificate_names_and_fails_its_connect_by_one_it_does_not()
+    {
+        await using var started = await Started.Start();
+        var trusting = NotListening with { Tls = new TlsOptions { Authorities = Pki.Read("root.pem") } };
+
+        // ! TLS 1.3 first: on Windows a client that resumes a TLS 1.2 session to a host offers TLS 1.2
+        // alone, which a front of TLS 1.3 alone refuses
+        foreach (var protocol in new[] { SslProtocols.Tls13, SslProtocols.Tls12 })
+        {
+            // * each leaf names one host alone, which takes it, and the other host of the same front refuses it
+            foreach (var (serving, named, other) in new[] { ("named-server", "localhost", "127.0.0.1"), ("addressed-server", "127.0.0.1", "localhost") })
+            {
+                await using var front = TlsFront.Start(started.Port, new TlsFrontOptions { IsRequiring = false, Protocol = protocol, Serving = serving });
+                await using var taken = new HttpTransportClient(trusting);
+
+                await taken.Connect(new HttpTransportClientConnectOptions { Host = named, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                Assert.True(taken.IsSecure);
+                await Next(started.Connections);
+                await taken.CloseConnection().WaitAsync(Patience, Cancelled);
+
+                await using var refused = new HttpTransportClient(trusting);
+
+                await Assert.ThrowsAnyAsync<Exception>(() =>
+                {
+                    return refused.Connect(new HttpTransportClientConnectOptions { Host = other, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+                Assert.Equal(ReadyState.Closed, refused.ReadyState);
+
+                // * no connection drawn, then lost: none reached its server
+                Assert.False(started.Connections.Reader.TryRead(out _));
+            }
+        }
+    }
+
+    // spec 15.39
+    [Fact]
     public async Task Connects_in_the_clear_with_tls_given_which_a_secured_connect_alone_uses()
     {
         await using var started = await Started.Start();

@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net.Security;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Amqp;
 using Amqp.Framing;
@@ -1171,7 +1170,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             factory.SSL.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
             {
-                return IsTrusted((certificate, errors));
+                return _tls is null ? errors == SslPolicyErrors.None : _tls.IsTrusted(certificate, errors);
             };
 
             // ! a collection, which the platform presents as its leaf alone, or none, where it builds
@@ -1227,31 +1226,6 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             throw;
         }
-    }
-
-    // a broker's certificate: the system's judgement, or a chain to the authorities its options trust
-    private bool IsTrusted((X509Certificate? Certificate, SslPolicyErrors Errors) presented)
-    {
-        var (certificate, errors) = presented;
-
-        if (_tls?.Authorities is not { } trusted)
-        {
-            return errors == SslPolicyErrors.None;
-        }
-
-        if (certificate is null || (errors & (SslPolicyErrors.RemoteCertificateNotAvailable | SslPolicyErrors.RemoteCertificateNameMismatch)) != 0)
-        {
-            return false;
-        }
-
-        using var chain = new X509Chain();
-        using var leaf = X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
-
-        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        chain.ChainPolicy.CustomTrustStore.AddRange(trusted);
-
-        return chain.Build(leaf);
     }
 
     // its connection's end it did not ask: its link lost

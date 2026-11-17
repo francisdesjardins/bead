@@ -125,7 +125,11 @@ internal sealed class TlsStore : IDisposable
 /// <summary>How a <see cref="TlsFront"/> takes TLS.</summary>
 internal sealed record TlsFrontOptions
 {
-    /// <summary>The certificate it serves, of the PKI: <c>server</c> unless told, or <c>stranger-server</c>.</summary>
+    /// <summary>
+    /// The certificate it serves, of the PKI: <c>server</c> unless told, <c>stranger-server</c>, or
+    /// <c>named-server</c> or <c>addressed-server</c>, which name <c>localhost</c> alone and
+    /// <c>127.0.0.1</c> alone.
+    /// </summary>
     public string Serving { get; init; } = "server";
 
     /// <summary>Whether it requires a client certificate under the PKI's root, or asks for none.</summary>

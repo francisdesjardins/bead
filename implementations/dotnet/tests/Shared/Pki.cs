@@ -4,8 +4,9 @@ namespace Bead.Tests;
 
 /// <summary>
 /// The test PKI every side's TLS tests read, <c>spec/pki/</c>, by path as the conformance players
-/// read <c>spec/</c> (spec 15.39): a root, an intermediate under it, a client under the intermediate
-/// and a server under the root, and a stranger root's client and server, which no test trusts.
+/// read <c>spec/</c> (spec 15.39): a root, an intermediate under it, a client under the intermediate,
+/// a server under the root and two that each name one host alone, and a stranger root's client and
+/// server, which no test trusts.
 /// </summary>
 internal static class Pki
 {

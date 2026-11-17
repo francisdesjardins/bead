@@ -42,4 +42,10 @@
     <!-- the relay a case's lose cuts, as MQTT 5's cases take it -->
     <Compile Include="../Shared/LinkRelay.cs" Link="LinkRelay.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the test PKI every side's TLS tests read (spec 15.39) -->
+    <Content Include="../../../../spec/pki/*.pem;../../../../spec/pki/*.key" LinkBase="pki" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../Shared/Pki.cs" Link="Pki.cs" />
+  </ItemGroup>
 </Project>
