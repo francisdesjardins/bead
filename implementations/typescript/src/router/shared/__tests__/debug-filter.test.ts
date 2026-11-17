@@ -129,6 +129,9 @@ test.describe('parseDebugFilter', () => {
     expect(() => {
       return parseDebugFilter('-\udc00x');
     }).toThrow(new ProgrammerError('a debug filter holds no surrogate alone, not "-\\udc00x"'));
+    expect(() => {
+      return parseDebugFilter('get\ud800x');
+    }).toThrow(new ProgrammerError('a debug filter holds no surrogate alone, not "get\\ud800x"'));
     expect(parseDebugFilter('get😀').include).toEqual(['get😀']);
   });
 });

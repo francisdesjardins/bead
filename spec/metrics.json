@@ -10696,6 +10696,11 @@
           "advance": 5000
         },
         {
+          "counted": [
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 2"
+          ]
+        },
+        {
           "send": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 38 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
         },
         {
@@ -10705,6 +10710,19 @@
         },
         {
           "advance": 5000
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"echo\",type=\"request\"} 10",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 3"
+          ]
         },
         {
           "expect": {
@@ -10726,17 +10744,7 @@
           }
         },
         {
-          "counted": [
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
-            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"echo\",type=\"request\"} 10",
-            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
-            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 3"
-          ]
+          "counted": []
         },
         {
           "send": "A1 16 00 02  00 00 00 01"
@@ -13282,6 +13290,24 @@
           "advance": 15000
         },
         {
+          "counted": [
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"20.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"50.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"100.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"+Inf\"} 1",
+            "bead_client_call_duration_seconds_sum{service=\"1\",procedure=\"clock\",type=\"command\"} 15",
+            "bead_client_call_duration_seconds_count{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
+            "bead_client_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"ask\",type=\"request\"} 15",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"ask\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"ask\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1"
+          ]
+        },
+        {
           "expect": {
             "kind": 22,
             "callId": 2
@@ -13299,22 +13325,7 @@
           }
         },
         {
-          "counted": [
-            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"20.0\"} 1",
-            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"50.0\"} 1",
-            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"100.0\"} 1",
-            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"+Inf\"} 1",
-            "bead_client_call_duration_seconds_sum{service=\"1\",procedure=\"clock\",type=\"command\"} 15",
-            "bead_client_call_duration_seconds_count{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
-            "bead_client_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"20.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"50.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"100.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"+Inf\"} 1",
-            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"ask\",type=\"request\"} 15",
-            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"ask\",type=\"request\"} 1",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"ask\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1"
-          ]
+          "counted": []
         },
         {
           "report": 35

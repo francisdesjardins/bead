@@ -209,6 +209,7 @@ public sealed class DebugFilterTests
 
         Assert.Equal("a debug filter holds no surrogate alone, not \"get\\ud800\"", RefusalOf("ping get\ud800"));
         Assert.Equal("a debug filter holds no surrogate alone, not \"-\\udc00x\"", RefusalOf("-\udc00x"));
+        Assert.Equal("a debug filter holds no surrogate alone, not \"get\\ud800x\"", RefusalOf("get\ud800x"));
         Assert.Equal(["get😀"], DebugFilter.Parse("get😀").Include);
     }
 
