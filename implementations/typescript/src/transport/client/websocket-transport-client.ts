@@ -489,6 +489,23 @@ export const createWebSocketTransportClient = (
                       return;
                     }
 
+                    // ! a page's WebSocket, in Firefox, opens on a 101 that names none of the
+                    // subprotocols it offered: the connect fails a socket whose protocol is none
+                    // of them, compared byte for byte (spec 15.2), its socket closed as it fails
+                    if (
+                      protocols !== undefined &&
+                      protocols.length > 0 &&
+                      socket.protocol !== undefined &&
+                      !protocols.includes(socket.protocol)
+                    ) {
+                      reject(
+                        new ConnectError(
+                          "the server's upgrade names none of the subprotocols offered (spec 15.2)"
+                        )
+                      );
+                      return;
+                    }
+
                     // * what this side fails the connection for of its own, `ws`'s alone: a protocol
                     // error, or a message past `maxPayload`, told by the bound and its value; a drop
                     // emits none, and the global `WebSocket`'s bare `error` cannot be told from one

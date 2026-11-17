@@ -1224,12 +1224,13 @@ jobs:
           fi
       # Every dependency of every lockfile, the six yarn.lock, the C# side's packages.lock.json,
       # the Rust side's Cargo.lock and the spec's requirements.txt, against the advisories OSV
-      # knows, the scanner at its digest. A known vulnerability fails the job.
+      # knows, the scanner at its digest. A known vulnerability fails the job, but one
+      # osv-scanner.toml leaves out with its reason, until the date it is read again.
       - name: The dependencies, against the known advisories
         run: >-
           docker run --rm -v "$PWD:/src:ro"
           ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
-          scan source --recursive /src
+          scan source --config /src/osv-scanner.toml --recursive /src
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
       # job. ! The rules are the registry's, fetched at the run: a rule added there may fail a

@@ -1355,9 +1355,15 @@ counts as a message its router has not taken by the bytes it came as (section 15
 subprotocol is required. A server selects none: its 101 names no `Sec-WebSocket-Protocol` and no
 `Sec-WebSocket-Extensions`, whatever its upgrade offers
 ([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)). A client offers the
-subprotocols it is given, none otherwise, and fails an upgrade whose 101 names none of them
-([WHATWG WebSockets §2.2](https://websockets.spec.whatwg.org/#websocket-opening-handshake)) or one
-it did not offer ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)). A WebSocket
+subprotocols it is given, none otherwise. One that offered some fails an upgrade whose 101 does
+not carry `Sec-WebSocket-Protocol` in exactly one field line, its value one it offered, compared
+byte for byte ([WHATWG WebSockets §2.2](https://websockets.spec.whatwg.org/#websocket-opening-handshake);
+[RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1),
+[§4.3](https://www.rfc-editor.org/rfc/rfc6455#section-4.3),
+[§11.3.4](https://www.rfc-editor.org/rfc/rfc6455#section-11.3.4)); one that offered none fails a
+101 that carries the field at all, an empty one included. A page's `WebSocket` judges the 101 as
+its browser does, and a client over it fails besides a socket whose `protocol` is none it offered
+([`docs/support.md`](../docs/support.md), "Differences"). A WebSocket
 upgrade that carries no `Origin` carries one credential,
 toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
@@ -1448,14 +1454,18 @@ unclean whatever code the peer answers with; a side reports it, naming the bound
 5 seconds by default, bounds each closing handshake it begins, its 1009 among them: a peer that
 has not answered by then is dropped, and a server tells its
 close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
-close as its platform does. A side MUST ping its peer every `heartbeat` — 30 seconds by default, or
-never — where its platform can send a ping, and close a connection that left one unanswered, so a
-peer gone without a word ends in a close; a ping waits behind what was sent before it, so a peer
-that stops reading leaves it unanswered too. A page's `WebSocket` sends none, and the server's
-pings, which it answers, stand for its own. What waits for a server's socket is held besides as
-section 15.12 says. A side that closes says 1000; a server that stops, 1001, to each connection it
-holds, one whose opening handshake completes as its stop begins among them. A close with 1000 is the
-clean one.
+close as its platform does. A side MUST, where its platform can send a ping, ping a connection once
+nothing has come of it for `heartbeat` — 30 seconds by default, or never — and drop the connection
+once that ping has gone unanswered for `heartbeat`, its close unclean (section 15.1), so a peer
+gone without a word is dropped; each comes at that time or within a further `heartbeat`, as its
+platform's timer runs. Whether it pings besides while frames come, and drops a connection that
+leaves such a ping unanswered, and whether any pong answers its ping or only the one that echoes
+its data ([RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.3)), are its
+platform's ([`docs/support.md`](../docs/support.md), "Differences"). A page's `WebSocket` sends
+none, and the server's pings, which it answers, stand for its own. What waits for a server's socket
+is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+each connection it holds, one whose opening handshake completes as its stop begins among them. A
+close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1724,7 +1734,8 @@ answer — so a paused connection resumes with nothing more of it read
 its own — a timer, a resolution, its dispose, a turn it defers — is no envelope handed, and waits
 for no bound. A side that ends resumes each connection it paused. A pause is a reader that stops:
 its peer loses the connection past its own bounds — a server's send pace and
-`maximumUnsentBytes`, an outbox's bound (section 15.9), the heartbeat — as it loses any reader
+`maximumUnsentBytes`, an outbox's bound (section 15.9), and, while nothing comes of it, the
+heartbeat — as it loses any reader
 that stops. So, beyond one read of its socket or one batch, no connection's envelope waits behind
 more than these bounds of another's on a transport that hands many in one step, and a peer over a
 socket is paced by its transport's own window

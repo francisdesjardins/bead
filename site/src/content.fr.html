@@ -886,9 +886,9 @@
   </p>
   <p>
     WebSocket fait tout ce que Bead demande à un transport : il délimite les messages, porte les
-    deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, y envoie un PING
-    toutes les 30 s et coupe une connexion restée sans réponse : un pair parti sans un mot finit en
-    fermeture, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
+    deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, envoie un PING
+    sur une connexion restée silencieuse 30 s et la coupe si aucune réponse ne vient : un pair
+    parti sans un mot est coupé, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455).
   </p>

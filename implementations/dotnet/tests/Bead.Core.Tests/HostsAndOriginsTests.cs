@@ -678,8 +678,8 @@ public sealed class HostsAndOriginsTests
     public void Tells_a_request_s_Origin_as_it_came_its_field_lines_joined_by_a_comma_and_a_space_and_none_when_it_sends_none()
     {
         Assert.Equal(
-            [null, "null", "https://a.test, null"],
-            [HostsAndOrigins.OriginOf([]), HostsAndOrigins.OriginOf(["null"]), HostsAndOrigins.OriginOf(["https://a.test", "null"])]);
+            [null, "null", "https://a.test, null", "https://a.test, ", ", https://a.test"],
+            [HostsAndOrigins.OriginOf([]), HostsAndOrigins.OriginOf(["null"]), HostsAndOrigins.OriginOf(["https://a.test", "null"]), HostsAndOrigins.OriginOf(["https://a.test", ""]), HostsAndOrigins.OriginOf(["", "https://a.test"])]);
     }
 
     [Fact]

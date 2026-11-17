@@ -1,0 +1,9 @@
+# Advisories CI's scan leaves out, each with its reason and the date it is read again.
+
+# picomatch's ReDoS on a single-branch repeated extglob, no release fixing it yet: picomatch comes in
+# only through tinyglobby, in the page's build and the two fuzzing tools, and matches globs those
+# tools write themselves, never one a request carries.
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17T00:00:00Z
+reason = "picomatch matches only globs the build and fuzzing tools write; no fixed release yet"

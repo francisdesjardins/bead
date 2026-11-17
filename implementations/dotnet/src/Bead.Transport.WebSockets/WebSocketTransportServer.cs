@@ -27,8 +27,8 @@ public sealed record WebSocketTransportServerOptions
     public int? MaximumMessageBytes { get; init; }
 
     /// <summary>
-    /// How often each connection is pinged, and how long its pong may take: a peer gone without a
-    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// How long each connection may stay silent before it is pinged, and how long its pong may
+    /// take: a peer gone without a word ends in a close rather than never (spec 15.3). From 1 to 2³¹ − 1 milliseconds, rounded to the
     /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
     /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
     /// The platform's, on the real clock.
@@ -197,7 +197,7 @@ public sealed record WebSocketTransportServerOptions
 /// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its client's address, read past the
 /// proxies it trusts (<see cref="WebSocketTransportServerOptions.TrustedProxies"/>), its peer's port
 /// and the rank it was taken at, from 1, never reset, so no handle is given twice (spec 15.1); a
-/// client over IPv4 to a dual-stack listener named by its IPv4 address; each pinged every <see
+/// client over IPv4 to a dual-stack listener named by its IPv4 address; each pinged once silent for <see
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
@@ -786,7 +786,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (FieldLines.JoinedOf(forwarded), _proxyTrust));
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the

@@ -9338,6 +9338,114 @@
       ]
     },
     {
+      "name": "calls held per address behind a proxy it names, its X-Forwarded-For's lines joined, an empty one ending the walk",
+      "clauses": [
+        "7.7",
+        "7.7.9",
+        "10.3"
+      ],
+      "options": {
+        "maximumExchangesPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.0/8",
+          "10.0.0.0/8"
+        ]
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/hang HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "until": {
+            "hanging": 1
+          }
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "busy",
+              "retry-after": "1"
+            },
+            "body": "{\"detail\":\"the calls of its address hold maximumExchangesPerAddress\",\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/hang HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nx-forwarded-for: 198.51.100.7\r\nx-forwarded-for: \r\nx-forwarded-for: 10.0.0.5\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "until": {
+            "hanging": 2
+          }
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nx-forwarded-for: 10.0.0.5\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "busy",
+              "retry-after": "1"
+            },
+            "body": "{\"detail\":\"the calls of its address hold maximumExchangesPerAddress\",\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
+          },
+          "on": "d"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nx-forwarded-for: 198.51.100.7\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "e"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "e"
+        }
+      ]
+    },
+    {
       "name": "streams held per address, apart from calls",
       "clauses": [
         "7.7",

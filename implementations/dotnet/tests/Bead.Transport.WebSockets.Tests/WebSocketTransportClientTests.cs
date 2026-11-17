@@ -263,6 +263,35 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
     }
 
+    // a connect offering the subprotocols given, answered 101 with the fields given beside its
+    // accept: it fails, the client closed, and its socket let go
+    private async Task AssertRefusedOver101(string fields, IReadOnlyList<string>? offered)
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = offered, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, (head, fields));
+
+            await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
+    }
+
     /// <summary>
     /// A listener of the tests' own: it takes each connection's first bytes, a request's head or a
     /// TLS hello, and answers the handshake, or refuses it, only when told to.
@@ -1323,6 +1352,23 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             }
             while (read > 0);
         }
+    }
+
+    // spec 15.2; RFC 6455 §4.1, §4.3, §11.3.4: one field line, equal to an offer byte for byte
+    [Theory]
+    [InlineData("Sec-WebSocket-Protocol: BEAD\r\n")]
+    [InlineData("Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: bead\r\n")]
+    [InlineData("Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: chat\r\n")]
+    public async Task Fails_its_connect_on_a_101_whose_subprotocol_is_not_one_line_equal_to_an_offer_BEAD_bead_twice_or_bead_then_chat(string fields)
+    {
+        await AssertRefusedOver101(fields, ["bead"]);
+    }
+
+    // spec 15.2: a client that offered none takes no field, an empty one included
+    [Fact]
+    public async Task Fails_its_connect_on_a_101_that_carries_a_subprotocol_field_an_empty_one_when_it_offered_none()
+    {
+        await AssertRefusedOver101("Sec-WebSocket-Protocol: \r\n", null);
     }
 
     // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens, which .NET's client

@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-citations.mjs` holds each language cell of the support matrix's differences to a
   citation or a word of its legend, "not tested", "not probed", "not available" or "no
   counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
-  44; the legend defines the four words, and the 32 cells that said none of them say what holds.
+  47; the legend defines the four words, and the 32 cells that said none of them say what holds.
 - `tools/check-twins.mjs`, in CI's Commits job, with `tools/twins.tsv`: every TypeScript and C# test
   is played on the Rust side under its title's key, or a row gives its class and why, a folder's
   row leaving out a program in one language no other side has; `--write` adds a `pending` row for
@@ -43,16 +43,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   say a detail they give is compared.
 - Spec 4.4 orders a `CREDENTIAL` block's checks, once the header's length holds the block (4.3):
   its scheme, its length, then its padding; 5.2 points to that order.
-- Spec 15.3: a side MUST ping its peer every `heartbeat` where its platform can send a ping; a
-  page's `WebSocket` sends none, and the server's pings stand for its own.
+- Spec 15.3: a side MUST ping a connection silent for `heartbeat`, where its platform can send a
+  ping, and drop it once that ping goes unanswered for `heartbeat`. Whether it pings amid traffic,
+  and which pong answers, are its platform's: the TypeScript and Rust sides ping every beat and
+  take any pong, the C# side pings on silence and takes the one that echoes its data, an open row
+  of the support matrix. A page's `WebSocket` sends none, and the server's pings stand for its own.
 - Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
   connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
   under `.localhost` on to its DNS server, an application names the loopback by its address.
-- A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers, and a
-  client that offered subprotocols fails an upgrade whose 101 names none of them (spec 15.2, RFC
-  6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
-  and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
-  `spec/transports.json` plays it.
+- A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers (spec
+  15.2, RFC 6455 §4.2.2): the TypeScript server no longer echoes the first offer; a case of
+  `spec/transports.json` plays it. A client that offered subprotocols takes a 101 only when its
+  `Sec-WebSocket-Protocol` stands in exactly one field line, equal byte for byte to an offer, and
+  one that offered none only without the field, an empty one included (spec 15.2; RFC 6455 §4.1,
+  §11.3.4; WHATWG WebSockets §2.2): the C# client reads the 101's own lines, the Rust client
+  refuses two, and the TypeScript client fails a socket whose `protocol` is none it offered, read
+  from an optional `protocol` of `IWebSocketLike`, which Firefox's `WebSocket` opens in a page. Firefox's also goes on over a 101 that names a
+  subprotocol when it offered none, a platform row of the support matrix.
 - `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
   side builds, and decision 0013 says the same.
 - `spec/debugging.md` 4.1 states how a trace's duration is read: the difference taken in
@@ -110,6 +117,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side reads those six fields with their lines joined, where it read their first line
   alone: two `Origin` lines, its own first, are refused 403, a connection token in two lines 400,
   and a `Content-Encoding` of `identity` in two lines 415.
+- The C# side reads an upgrade's `Origin` and each server's `X-Forwarded-For` with their lines
+  joined by ", " (spec 15.12). An empty line is no longer dropped, so an upgrade whose `Origin`
+  holds one is refused 403 `origin-refused`. A client behind a trusted proxy that wrote an empty
+  line is read where the walk ends.
 - The TypeScript side reads those fields from a request's raw lines over HTTP/2 as over HTTP/1.1,
   where Node kept the first line alone of a `Content-Encoding` over HTTP/2.
 - The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it

@@ -13,6 +13,8 @@ import type {
 export interface IFakeWebSocket extends IWebSocketLike {
   /** What `close()` does: close at once, start closing and never finish, or throw. */
   closeBehaviour: 'answer' | 'ignore' | 'throw';
+  /** The subprotocol its upgrade took, as a test sets it; none by default. */
+  protocol?: string;
   readonly closeCodes: (number | undefined)[];
   readyState: number;
   fireClose(event: ICloseEventLike): void;

@@ -641,6 +641,81 @@ async fn fails_its_connect_on_a_101_that_names_none_of_the_subprotocols_it_offer
     held.stop.cancel();
 }
 
+// a connect offering the subprotocols given, answered 101 with the fields given beside its accept:
+// what it settled to, the client closed and its socket let go once it failed
+async fn answered_101(offered: Option<Vec<String>>, fields: &str) -> Result<(), TransportError> {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+        protocols: offered,
+        ..to(held.port)
+    });
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let key = asked
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, key)| key.trim().to_owned())
+        })
+        .unwrap();
+    let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n{fields}\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let outcome = settled(connecting).await;
+
+    if outcome.is_err() {
+        assert!(is_state(&client, ReadyState::Closed), "closed");
+        assert!(ends(&mut socket).await, "its socket let go");
+    }
+
+    client.dispose();
+    held.stop.cancel();
+    outcome
+}
+
+// spec 15.2; RFC 6455 §4.1, §4.3, §11.3.4: one field line, equal to an offer byte for byte; the twin
+// of `WebSocketTransportClientTests`' own
+#[tokio::test]
+async fn fails_its_connect_on_a_101_whose_subprotocol_is_not_one_line_equal_to_an_offer_bead_bead_twice_or_bead_then_chat()
+ {
+    for fields in [
+        "Sec-WebSocket-Protocol: BEAD\r\n",
+        "Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: bead\r\n",
+        "Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: chat\r\n",
+    ] {
+        let refused = answered_101(Some(vec!["bead".to_owned()]), fields).await;
+
+        assert!(
+            matches!(&refused, Err(TransportError::Connect(_))),
+            "{fields}: {refused:?}"
+        );
+    }
+}
+
+// spec 15.2: a client that offered none takes no field, an empty one included; the twin of
+// `WebSocketTransportClientTests`' own
+#[tokio::test]
+async fn fails_its_connect_on_a_101_that_carries_a_subprotocol_field_an_empty_one_when_it_offered_none()
+ {
+    let refused = answered_101(None, "Sec-WebSocket-Protocol: \r\n").await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(_))),
+        "{refused:?}"
+    );
+}
+
 // ! tungstenite matches `Connection` whole against `Upgrade`, where RFC 6455 §4.1 and RFC 9110 §7.6.1
 // read a list of tokens: a 101 that lists another is refused, as .NET's client and the global
 // WebSocket refuse it and `ws` opens on it, a row of docs/support.md
