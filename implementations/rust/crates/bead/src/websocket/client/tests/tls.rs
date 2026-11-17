@@ -6,7 +6,7 @@ use rustls::ProtocolVersion;
 
 use super::*;
 use crate::router::types::ConnectionHandle;
-use crate::testing::tls::{PkiServerOptions, TlsFront, pki, pki_client};
+use crate::testing::tls::{PkiLeaf, PkiServerOptions, TlsFront, pki, pki_client};
 use crate::transport::ServerListener;
 
 // what the transport's own server heard: each message, and the connection it came on
@@ -227,6 +227,61 @@ async fn fails_its_connect_to_a_server_under_no_authority_it_trusts_given_or_of_
         .await
         .unwrap()
         .unwrap();
+}
+
+// spec 15.39
+#[tokio::test]
+async fn connects_to_a_server_by_a_host_its_certificate_names_and_fails_its_connect_by_one_it_does_not()
+ {
+    let trusting = tls_of((Some("root.pem"), None), None);
+
+    for version in [ProtocolVersion::TLSv1_2, ProtocolVersion::TLSv1_3] {
+        // * each leaf names one host alone, which takes it, and the other host of the same front
+        // refuses it
+        for (leaf, named, other) in [
+            (PkiLeaf::Named, "localhost", LOOPBACK),
+            (PkiLeaf::Addressed, LOOPBACK, "localhost"),
+        ] {
+            let served = served().await;
+            let front = front_of(
+                &served,
+                &PkiServerOptions {
+                    leaf: Some(leaf),
+                    requires_certificate: Some(false),
+                    ..highest(version)
+                },
+            )
+            .await;
+            let taken = tls_client(&trusting);
+
+            settled(taken.connect(&WebSocketTransportClientConnectOptions {
+                secured: Some(true),
+                ..WebSocketTransportClientConnectOptions::new(named, front.port())
+            }))
+            .await
+            .unwrap();
+            assert!(taken.is_secure(), "{version:?} {named}: secure");
+            taken.dispose();
+
+            let refused = tls_client(&trusting);
+            let outcome = settled(refused.connect(&WebSocketTransportClientConnectOptions {
+                secured: Some(true),
+                ..WebSocketTransportClientConnectOptions::new(other, front.port())
+            }))
+            .await;
+
+            assert!(outcome.is_err(), "{version:?} {other}: failed, {outcome:?}");
+            assert!(
+                !is_state(&refused, ReadyState::Open),
+                "{version:?} {other}: not open"
+            );
+            refused.dispose();
+            patience(PATIENCE, served.server.stop())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
 }
 
 // spec 15.39

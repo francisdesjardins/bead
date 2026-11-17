@@ -8,7 +8,7 @@ use super::*;
 use crate::http::peer::Started;
 use crate::http::server::HttpTransportServer;
 use crate::router::types::ConnectionHandle;
-use crate::testing::tls::{PkiServerOptions, TlsFront, pki, pki_client};
+use crate::testing::tls::{PkiLeaf, PkiServerOptions, TlsFront, pki, pki_client};
 
 fn handle_of(server: &HttpTransportServer) -> ConnectionHandle {
     Arc::clone(
@@ -169,6 +169,67 @@ async fn fails_its_connect_to_a_server_under_no_authority_it_trusts_given_or_of_
 
     assert!(outcome.is_err(), "of its platform: {outcome:?}");
     served.stop().await;
+}
+
+// spec 15.39
+#[tokio::test]
+async fn connects_to_a_server_by_a_host_its_certificate_names_and_fails_its_connect_by_one_it_does_not()
+ {
+    let trusting = tls_of((Some("root.pem"), None), None);
+
+    for version in [ProtocolVersion::TLSv1_2, ProtocolVersion::TLSv1_3] {
+        // * each leaf names one host alone, which takes it, and the other host of the same front
+        // refuses it
+        for (leaf, named, other) in [
+            (PkiLeaf::Named, "localhost", HOST),
+            (PkiLeaf::Addressed, HOST, "localhost"),
+        ] {
+            let served = started(&HttpTransportServerOptions::default()).await;
+            let front = front_of(
+                &served,
+                &PkiServerOptions {
+                    leaf: Some(leaf),
+                    requires_certificate: Some(false),
+                    ..highest(version)
+                },
+            )
+            .await;
+            let taken = tls_client(&trusting);
+
+            settled(taken.connect(&HttpTransportClientConnectOptions {
+                secured: Some(true),
+                ..HttpTransportClientConnectOptions::new(named, front.port())
+            }))
+            .await
+            .unwrap();
+            assert!(taken.is_secure(), "{version:?} {named}: secure");
+            disconnected(&taken, &quick()).await;
+            until(|| served.server.clients().is_empty()).await;
+
+            let refused = tls_client(&trusting);
+            let outcome = settled(refused.connect(&HttpTransportClientConnectOptions {
+                secured: Some(true),
+                ..HttpTransportClientConnectOptions::new(other, front.port())
+            }))
+            .await;
+
+            // * a connect's failure: never a connection drawn, then lost
+            assert!(
+                matches!(&outcome, Err(TransportError::Connect(_))),
+                "{version:?} {other}: failed, {outcome:?}"
+            );
+            assert_ne!(
+                refused.ready_state(),
+                ReadyState::Open,
+                "{version:?} {other}: not open"
+            );
+            assert!(
+                served.server.clients().is_empty(),
+                "{version:?} {other}: none drawn"
+            );
+            served.stop().await;
+        }
+    }
 }
 
 // spec 15.39

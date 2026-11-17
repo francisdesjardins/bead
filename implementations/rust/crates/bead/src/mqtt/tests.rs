@@ -522,6 +522,64 @@ async fn fails_its_start_over_tls_where_its_brokers_certificate_chains_to_no_aut
     );
 }
 
+// spec 15.39
+#[tokio::test]
+async fn links_over_tls_by_a_host_its_brokers_certificate_names_and_fails_its_start_by_one_it_does_not()
+ {
+    let trusting = TlsOptions {
+        authorities: Some(tls::pki("root.pem").unwrap()),
+        ..TlsOptions::default()
+    };
+
+    // * each leaf names one host alone, which takes it, and the other host of the same script
+    // refuses it
+    for (leaf, named, other) in [
+        (tls::PkiLeaf::Named, "localhost", "127.0.0.1"),
+        (tls::PkiLeaf::Addressed, "127.0.0.1", "localhost"),
+    ] {
+        let secured_options = MqttScriptOptions {
+            tls: Some(
+                tls::pki_server_config(&tls::PkiServerOptions {
+                    leaf: Some(leaf),
+                    requires_certificate: Some(false),
+                    ..tls::PkiServerOptions::default()
+                })
+                .unwrap(),
+            ),
+        };
+        let secured = MqttScript::new(&secured_options).await.unwrap();
+        let port = secured.url().rsplit(':').next().unwrap().to_owned();
+        let mut options = MqttBrokerAdapterOptions::new(format!("mqtts://{named}:{port}"), ID);
+
+        options.password = Some(PASSWORD.to_owned());
+        options.tls = Some(trusting.clone());
+
+        let taken = adapter_of(&options);
+
+        link_up((&taken, &secured), (&Connack::default(), None)).await;
+        assert!(taken.is_secure(), "{named}: secure");
+        taken.stop().await;
+
+        let mut options = MqttBrokerAdapterOptions::new(format!("mqtts://{other}:{port}"), ID);
+
+        options.password = Some(PASSWORD.to_owned());
+        options.tls = Some(trusting.clone());
+
+        let refused = adapter_of(&options);
+        let failed = refused.start(BrokerStart::default()).await.unwrap_err();
+
+        assert!(
+            message_of(&failed).contains("the link of ada ended before its CONNACK"),
+            "{other}: {failed}"
+        );
+        // * no CONNECT went: its broker's certificate was refused before it
+        assert!(
+            secured.link(Duration::from_millis(200)).await.is_err(),
+            "{other}: no link came"
+        );
+    }
+}
+
 // spec 15.26
 #[tokio::test]
 async fn keeps_a_server_keep_alive_shorter_than_its_own_a_pingreq_once_nothing_went_for_that_long()
