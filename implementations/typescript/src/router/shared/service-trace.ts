@@ -180,7 +180,13 @@ export const createServiceTrace = <Handle extends string>(
             ? undefined
             : (connectionHandle ?? (side() === 'client' ? SERVER_CONNECTION_HANDLE : undefined)),
         direction,
-        duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
+        // a duration as 11.1 reads one (debugging 4.1): the difference rounded to a whole
+        // nanosecond, then its fraction of a millisecond dropped
+        duration: isAnswered
+          ? Math.trunc(
+              Math.round((clock.performance.now() - started.timestamp) * 1_000_000) / 1_000_000
+            )
+          : undefined,
         options: options === undefined ? undefined : (told as IResolvedRequestOptions),
         procedureId: procedure.procedureId,
         procedureName: procedure.procedureName,

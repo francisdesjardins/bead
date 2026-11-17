@@ -31,6 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `spec/transports.json` plays it.
 - `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
   side builds, and decision 0013 says the same.
+- `spec/debugging.md` 4.1 states how a trace's duration is read: the difference taken in
+  nanoseconds, rounded to a whole one, then its fraction of a millisecond dropped, as 11.1 reads
+  one; the companion's next version is a minor.
 
 ### Removed
 
@@ -39,6 +42,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
+  so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
 - The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
   the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped

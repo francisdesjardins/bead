@@ -547,6 +547,64 @@ async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
     );
 }
 
+// debugging 4.1.6
+#[tokio::test]
+async fn tells_a_duration_from_readings_0_3_ms_and_2_3_ms_as_2_ms_the_difference_rounded_to_the_nanosecond_first()
+ {
+    let pair = pair().await;
+    let seen = recorded(&pair.client.services().manager);
+    let (release, released) = oneshot::channel::<()>();
+    let released = Arc::new(Mutex::new(Some(released)));
+
+    pair.server
+        .services()
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(move |request, response: Response<JsonCodec>| {
+            let released = locked(&released).take();
+
+            Box::pin(async move {
+                if let Some(released) = released {
+                    released.await.ok();
+                }
+
+                response.result(request.payload).await
+            })
+        }))
+        .expect("echo registered");
+
+    let origin = pair.clock.monotonic();
+    pair.clock.advance(Duration::from_micros(300)).await;
+    let before = pair.clock.monotonic().saturating_sub(origin);
+    let answering = asking(&pair.client.services().manager)
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
+        .expect("a call");
+
+    pair.settle().await;
+    pair.clock.advance(Duration::from_millis(2)).await;
+    release.send(()).ok();
+    pair.settle().await;
+    answering.await.expect("an answer");
+
+    // the call started at 0.3 ms of the monotonic reading and settled at 2.3
+    assert_eq!(
+        (before, pair.clock.monotonic().saturating_sub(origin)),
+        (Duration::from_micros(300), Duration::from_micros(2_300)),
+        "0.3 ms, then 2.3 ms"
+    );
+    assert_eq!(
+        locked(&seen)
+            .iter()
+            .map(|(_, event)| event.duration)
+            .collect::<Vec<_>>(),
+        vec![None, Some(2)],
+        "told as 2 ms"
+    );
+}
+
 // a codec that writes no value: what a value that does not write meets
 #[derive(Debug, Clone, Copy)]
 struct Unwritable;
