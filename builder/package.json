@@ -43,7 +43,7 @@
     "@playwright/test": "1.65.0",
     "@types/node": "^24.19.2",
     "c8": "12.0.0",
-    "oxfmt": "0.75.0",
+    "oxfmt": "0.78.0",
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "7.0.2007",
     "typescript-7": "npm:typescript@7.0.2"
