@@ -38,25 +38,12 @@ Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.get -> string?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.init -> void
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.init -> void
-Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.Transport.Mqtt.MqttBrokerTlsOptions?
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.TlsOptions?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.init -> void
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Uri.get -> System.Uri!
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Uri.init -> void
-Bead.Transport.Mqtt.MqttBrokerTlsOptions
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.<Clone>$() -> Bead.Transport.Mqtt.MqttBrokerTlsOptions!
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.init -> void
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(Bead.Transport.Mqtt.MqttBrokerTlsOptions? other) -> bool
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.MqttBrokerTlsOptions() -> void
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
-Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.init -> void
 override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Equals(object? obj) -> bool
 override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.GetHashCode() -> int
 override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.ToString() -> string!
-override Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(object? obj) -> bool
-override Bead.Transport.Mqtt.MqttBrokerTlsOptions.GetHashCode() -> int
-override Bead.Transport.Mqtt.MqttBrokerTlsOptions.ToString() -> string!
 static Bead.Transport.Mqtt.MqttBrokerAdapterOptions.operator !=(Bead.Transport.Mqtt.MqttBrokerAdapterOptions? left, Bead.Transport.Mqtt.MqttBrokerAdapterOptions? right) -> bool
 static Bead.Transport.Mqtt.MqttBrokerAdapterOptions.operator ==(Bead.Transport.Mqtt.MqttBrokerAdapterOptions? left, Bead.Transport.Mqtt.MqttBrokerAdapterOptions? right) -> bool
-static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator !=(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool
-static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator ==(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool

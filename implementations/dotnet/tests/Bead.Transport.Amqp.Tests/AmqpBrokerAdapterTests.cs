@@ -369,6 +369,42 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         }
     }
 
+    // spec 15.39
+    [Fact]
+    public async Task Links_over_TLS_by_a_host_its_broker_s_certificate_names_and_fails_its_start_by_one_it_does_not()
+    {
+        // * the script asks a certificate of any chain: its broker judged by the PKI's root, it presents the self-signed one
+        var tls = CertifiedOf(false) with { Authorities = Pki.Read("root.pem") };
+
+        // * each leaf names one host alone, which takes it, and the other host of the same script refuses it
+        foreach (var (serving, named, other) in new[] { ("named-server", "localhost", "127.0.0.1"), ("addressed-server", "127.0.0.1", "localhost") })
+        {
+            using var certificate = Pki.Serving(serving);
+            await using var secured = AmqpScript.Start(certificate);
+            await using var taken = new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Tls = tls, Uri = new Uri($"amqps://{named}:{secured.Uri.Port}") });
+
+            await Started((taken, secured));
+            Assert.True(taken.IsSecure);
+            await taken.Stop();
+
+            await using var refused = new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Tls = tls, Uri = new Uri($"amqps://{other}:{secured.Uri.Port}") });
+            var failure = await FailureOf(() =>
+            {
+                return refused.Start();
+            });
+
+            Assert.IsType<IOException>(failure);
+            Assert.IsType<AuthenticationException>(failure.InnerException);
+            Assert.False(refused.IsLinked);
+
+            // * no OPEN came: its broker's certificate was refused before it
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+            {
+                return secured.Connection(TimeSpan.FromMilliseconds(200));
+            });
+        }
+    }
+
     [Fact]
     public async Task Fails_its_queued_publications_and_pending_name_subscription_when_stopped_and_lets_none_reach_its_next_link()
     {

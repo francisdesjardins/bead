@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using MQTTnet;
 using MQTTnet.Diagnostics.PacketInspection;
@@ -1032,9 +1033,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     tls.WithClientCertificates(certificates);
                 }
 
-                if (_tls?.Authorities is { } trusted)
+                // ! a handler, never a trust chain, which MQTTnet's WebSocket channel does not read:
+                // its broker's name, then a chain to its authorities alone, as the AMQP adapter judges
+                if (_tls is { Authorities: not null } trusting)
                 {
-                    tls.WithTrustChain(trusted);
+                    tls.WithCertificateValidationHandler((presented) =>
+                    {
+                        return trusting.IsTrusted((presented.Certificate, presented.Chain), presented.SslPolicyErrors);
+                    }).WithRevocationMode(X509RevocationMode.NoCheck);
                 }
             });
         }

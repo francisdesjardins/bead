@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
 ### Added
 
 - `tools/check-citations.mjs`, in CI's Commits job: every test the support matrix cites, by its
@@ -46,6 +48,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an optional peer dependency of the TypeScript side, by whose own `fetch` its HTTP client presents
   a certificate in Node. Spec 15.39 states it, so the spec's next version is a minor (decision
   0053).
+- Spec 15.39 holds a client over TLS to its server's name: under the authorities given or its
+  platform's roots, it takes a certificate only where a `dNSName` or an `iPAddress` of its
+  subjectAltName names the host its URL names, never its common name (RFC 9525 §6), and under the
+  authorities given it checks no revocation; a certificate it refuses fails its connect. Twins on
+  every side's WebSocket and HTTP clients and MQTT 5 and AMQP 1.0 adapters play it under two leaves
+  `spec/pki` gains, one naming `localhost` alone, one 127.0.0.1 alone (decision 0053).
 - The demo's Packages tab plans Rust packages, beadc's third target, and adds a package in each
   language from one row. Each language's server is offered the transports its side has, as the
   support matrix gives them: the Web Worker is the TypeScript side's alone, and AMQP 1.0 is not
@@ -81,6 +89,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.15.0 (`spec-v0.15.0`), its companion, `spec/debugging.md`, to 0.10.0
+  (`debugging-v0.10.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.5.0
+  (`transcoding-v0.5.0`).
 - Bead's page and its demo are served at their own domain, https://beadproto.dev/, the demo at
   `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
   ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
@@ -235,6 +246,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its sticky scene tabs, where it could sit under them. The DevTools panel's Broker table fits
   its pane at 1280 px, its parts cut where they run long and whole in the row's detail, and the
   Timeline lists its calls newest first, row for row as the Calls list does.
+- The documents are brought to 0.14.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's gateway and beadc target among what holds.
 
 ### Removed
 
@@ -343,6 +356,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side reads its monotonic clock at the end of each counted call a closing connection
   answered, as the TypeScript and C# sides do: those calls shared one reading, short of the two
   readings a counted call takes (debugging 3.3).
+- The C# side's MQTT 5 adapter judges its broker by the authorities it is given over `wss` as over
+  `mqtts`, by the same check as its AMQP 1.0 adapter's: MQTTnet's WebSocket channel read none of
+  them, and refused a broker they certify. Under them it checks no revocation, as every other side
+  and path does, where it checked it over `mqtts`. Both adapters chain their broker's certificate
+  through the intermediates it presents, where the AMQP 1.0 adapter refused a broker whose
+  intermediate no store of the platform held (decision 0053).
+- The TypeScript side's AMQP 1.0 adapter links over `amqps` to an IP address: rhea named the
+  address as the TLS server name, which Node refuses, so the link never opened.
 
 ### Security
 
@@ -3115,7 +3136,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.13.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.14.0...develop
+[0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0

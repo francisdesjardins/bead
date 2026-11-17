@@ -6,6 +6,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Bead.Tests;
 using MQTTnet.Formatter;
 using MQTTnet.Formatter.V5;
 using MQTTnet.Packets;
@@ -553,6 +554,64 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         {
             return secured.Link(TimeSpan.FromMilliseconds(200));
         });
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Links_over_TLS_by_a_host_its_broker_s_certificate_names_and_fails_its_start_by_one_it_does_not()
+    {
+        var tls = new TlsOptions { Authorities = Pki.Read("root.pem") };
+
+        // * each leaf names one host alone, which takes it, and the other host of the same script refuses it
+        foreach (var (serving, named, other) in new[] { ("named-server", "localhost", "127.0.0.1"), ("addressed-server", "127.0.0.1", "localhost") })
+        {
+            using var certificate = Pki.Serving(serving);
+            await using var secured = MqttScript.Start(certificate);
+
+            secured.IsTakingNoCertificate = true;
+
+            await using var taken = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = Password, Tls = tls, Uri = new Uri($"mqtts://{named}:{secured.Uri.Port}") });
+
+            await LinkUp((taken, secured));
+            await taken.Stop();
+
+            await using var refused = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = Password, Tls = tls, Uri = new Uri($"mqtts://{other}:{secured.Uri.Port}") });
+
+            Assert.Contains("the link of ada ended before its CONNACK", Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return refused.Start();
+            })).Message, StringComparison.Ordinal);
+
+            // * no CONNECT went: its broker's certificate was refused before it
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+            {
+                return secured.Link(TimeSpan.FromMilliseconds(200));
+            });
+        }
+    }
+
+    // spec 15.39
+    [Fact]
+    public async Task Links_over_wss_to_a_broker_under_the_authorities_it_is_given()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        // * the test kit's TLS front, under a leaf of the PKI's root, before a WebSocket answered by hand
+        await using var front = TlsFront.Start(((IPEndPoint)listener.LocalEndpoint).Port, new TlsFrontOptions { IsRequiring = false, Serving = "named-server" });
+        await using var adapter = WebSocketAdapterOf(listener, (options) =>
+        {
+            return options with { Tls = new TlsOptions { Authorities = Pki.Read("root.pem") }, Uri = new Uri($"wss://localhost:{front.Port}/mqtt") };
+        });
+        var starting = adapter.Start();
+        using var upgraded = await UpgradedOf(listener);
+
+        await ConnectReadOf(upgraded.Broker);
+        await upgraded.Broker.SendAsync(EncodedOf(ScriptedLink.ConnAck()), System.Net.WebSockets.WebSocketMessageType.Binary, true, Cancelled);
+        await starting.WaitAsync(Patience, Cancelled);
+        Assert.True(adapter.IsSecure);
+        await adapter.Stop();
     }
 
     [Fact]

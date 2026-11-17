@@ -1,3 +1,1 @@
 #nullable enable
-*REMOVED*Bead.Protobuf.ProtoRequired
-*REMOVED*static Bead.Protobuf.ProtoRequired.Check(Google.Protobuf.IMessage! message) -> void

@@ -100,7 +100,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
   a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
 
-**Version: 0.14.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.15.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -2532,22 +2532,31 @@ application, outside a page, the authorities it judges its server by and a certi
 each as PEM text ([RFC 7468](https://www.rfc-editor.org/rfc/rfc7468)). The authorities are its trust
 anchors, in place of its platform's roots and never added to them
 ([RFC 5280 §6.1.1](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.1)); given none, its
-platform's roots and verifier judge its server. It presents its certificate when its server asks for
-one at the handshake ([RFC 8446 §4.3.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.3.2),
+platform's roots and verifier judge its server. Under either, it takes its server's certificate only
+where that certificate names the host its URL names, as section 13.4 reads that host: a name in a
+`dNSName` of its subjectAltName, an address in an `iPAddress` of it, byte for byte, and never in its
+subject's common name ([RFC 9525 §6](https://www.rfc-editor.org/rfc/rfc9525#section-6),
+[RFC 9110 §4.3.4](https://www.rfc-editor.org/rfc/rfc9110#section-4.3.4)). Under its authorities it
+checks no revocation ([RFC 5280 §6.1.3](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.3));
+under its platform's roots, revocation is its verifier's. It presents its certificate when its
+server asks for one at the handshake
+([RFC 8446 §4.3.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.3.2),
 [§4.4.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2)), the certificate first, then the
 intermediates that certify it, each certifying the one before. Its key is PKCS #8, SEC1 or PKCS #1,
 unencrypted. As it is built, a client refuses a certificate without its key, a key without its
-certificate or of another certificate, an encrypted key, and authorities, a certificate or a key that
-read as none. A handshake its server refuses fails the connect, under TLS 1.3 even once its first
-request was written ([RFC 8446 §4.4.2.4](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2.4)),
-and over HTTP never as a connection drawn and then lost; it names no status and no refusal, since a
-TLS alert is no answer of its server's (section 15.6). A certificate authenticates its client to what
-terminates TLS, never a request, whose credential its server's router alone reads (section 13.4),
-and it is no bearer credential: a client of a transport holds it in the clear and uses it on a
-connect over TLS alone, while a broker's adapter, whose URL and TLS are one, refuses it as it is
-built over a URL that is not TLS. A link's password is refused beside its certificate, and taken
-beside authorities alone (sections 15.26, 15.33). A page's TLS is its browser's, and its client
-takes none.
+certificate or of another certificate, an encrypted key, and authorities, a certificate or a key
+that read as none. A handshake its server refuses fails the connect, under TLS 1.3 even once its
+first request was written
+([RFC 8446 §4.4.2.4](https://www.rfc-editor.org/rfc/rfc8446#section-4.4.2.4)), and so does a
+certificate of its server's that it refuses, chained to none of its anchors or naming another host;
+over HTTP neither is a connection drawn and then lost, and neither names a status or a refusal,
+since a TLS alert is no answer of its server's (section 15.6). A certificate authenticates its
+client to what terminates TLS, never a request, whose credential its server's router alone reads
+(section 13.4), and it is no bearer credential: a client of a transport holds it in the clear and
+uses it on a connect over TLS alone, while a broker's adapter, whose URL and TLS are one, refuses it
+as it is built over a URL that is not TLS. A link's password is refused beside its certificate, and
+taken beside authorities alone (sections 15.26, 15.33). A page's TLS is its browser's, and its
+client takes none.
 
 ## 16. Services and procedures
 

@@ -1367,9 +1367,9 @@ holds no notifier, and on the TypeScript side one that makes no catalogue, while
 at its type, `BoundCall` against `BoundCommand`, a `Func` against `Notifier<TNotification>`, an
 object against two parameters; and none older: code that names 4 judges no required
 field, code that names 3 judges no request by its rules, and code that names 2 reads a `proto`
-payload unchecked, none of which conforms through any runtime. The Rust runtime holds 7 and 8
-alone, since no Rust code names an older one: a package's file of services names 7 and
-`bead_served.rs` 8, as on the other sides, and its route table's 5 comes with its gateway. A file
+payload unchecked, none of which conforms through any runtime. The Rust runtime holds 7 and 8,
+and 5 under its core's feature `gateway`. Rust code names no other: a package's file of services
+names 7, `bead_served.rs` 8 and its route table, `bead_http.rs`, 5, as on the other sides. A file
 of a later beadc, built against a runtime that lacks its constant, fails on the counter (TS2724,
 CS0117, E0425), not on a signature.
 

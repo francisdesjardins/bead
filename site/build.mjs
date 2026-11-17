@@ -770,7 +770,7 @@ const STRINGS = Object.freeze({
   en: {
     title: 'Bead: a binary protocol for calls between a client and a server',
     description:
-      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding.',
+      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports, its MQTT 5 binding, its HTTP/JSON gateway and beadc’s Rust target.',
     skip: 'Skip to the content',
     contents: 'Contents',
     menu: 'Open the contents',
@@ -787,7 +787,7 @@ const STRINGS = Object.freeze({
   fr: {
     title: 'Bead : un protocole binaire pour les appels entre un client et un serveur',
     description:
-      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP et sa liaison MQTT 5.',
+      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5, sa passerelle HTTP/JSON et la cible Rust de beadc.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',

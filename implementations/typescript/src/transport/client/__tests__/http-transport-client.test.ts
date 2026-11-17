@@ -3392,6 +3392,48 @@ test.describe('createHTTPTransportClient, a client certificate', () => {
   });
 
   // spec 15.39
+  test('connects to a server by a host its certificate names, and fails its connect by one it does not', async () => {
+    await using started = await startServer();
+
+    for (const maxVersion of TLS_VERSIONS) {
+      // * each leaf names one host alone, which takes it, and the other host of the same front
+      // refuses it
+      for (const [serves, named, other] of [
+        ['named', 'localhost', '127.0.0.1'],
+        ['addressed', '127.0.0.1', 'localhost'],
+      ] as const) {
+        await using front = await createTlsFront(started.port, { maxVersion, serves });
+        await using taken = createHTTPTransportClient({
+          isListening: false,
+          tls: { authorities: PKI.root },
+        });
+
+        await taken.connect({ host: named, port: front.port, secured: true });
+        expect(taken.isSecure).toBe(true);
+        await taken.disconnect();
+
+        await using refused = createHTTPTransportClient({
+          isListening: false,
+          tls: { authorities: PKI.root },
+        });
+        const outcome = await refused
+          .connect({ host: other, port: front.port, secured: true })
+          .then(
+            () => {
+              return 'connected';
+            },
+            (reason: unknown) => {
+              return reason;
+            }
+          );
+
+        expect(outcome).toBeInstanceOf(ConnectError);
+        expect(refused.isClosed()).toBe(true);
+      }
+    }
+  });
+
+  // spec 15.39
   test('connects in the clear with tls given, which a secured connect alone uses', async () => {
     await using started = await startServer();
     await using client = createHTTPTransportClient({ isListening: false, tls: TLS });

@@ -456,6 +456,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const isTls = parsed.protocol === 'amqps:';
   const host = parsed.hostname.replace(/^\[(.*)\]$/, '$1');
+  // a URL writes an IPv6 address in brackets and an IPv4 one as four decimal numbers
+  const isAddress = parsed.hostname.startsWith('[') || /^\d+\.\d+\.\d+\.\d+$/.test(host);
   const port = parsed.port === '' ? (isTls ? 5671 : 5672) : Number(parsed.port);
   const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
   const capabilities = Object.freeze({
@@ -1467,7 +1469,10 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       ...(virtualHost === undefined ? {} : { hostname: `vhost:${virtualHost}` }),
       ...(isTls
         ? {
-            servername: host,
+            // ! an address is no server name (RFC 6066 §3), and Node refuses one: an empty name sends
+            // none, where rhea would put the host in place of none, and Node checks the certificate
+            // against the host
+            servername: isAddress ? '' : host,
             transport: 'tls' as const,
             ...nodeTlsOf(tls),
             ...(tls?.certificate === undefined ? {} : { enable_sasl_external: true }),

@@ -153,9 +153,9 @@ pub fn client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
 
 /// The file `name` of `spec/pki/`, Bead's test PKI, its text whole.
 ///
-/// The PKI holds a root, an intermediate under it, a client under the intermediate and a server
-/// under the root, then a stranger root with a client and a server of its own. Its keys guard
-/// nothing.
+/// The PKI holds a root, an intermediate under it, a client under the intermediate, a server
+/// under the root and two that each name one host alone, then a stranger root with a client and a
+/// server of its own. Its keys guard nothing.
 ///
 /// # Errors
 ///
@@ -185,6 +185,16 @@ fn pki_certificates(name: &str) -> Result<Vec<CertificateDer<'static>>, String> 
         .map_err(|unread| format!("{name}: {unread}"))
 }
 
+/// A leaf of the PKI under its root that names one host alone, its subject naming none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PkiLeaf {
+    /// `named-server.pem`: `localhost` alone, a `dNSName`.
+    Named,
+    /// `addressed-server.pem`: 127.0.0.1 alone, an `iPAddress`.
+    Addressed,
+}
+
 /// How a server of the PKI serves: under which certificate, asking what of its client, up to which
 /// TLS version.
 #[derive(Debug, Clone, Default)]
@@ -193,6 +203,9 @@ pub struct PkiServerOptions {
     /// Whether it serves under `stranger-server.pem`, which chains to the stranger root, rather
     /// than `server.pem`, under the root: `false` when none.
     pub is_stranger: Option<bool>,
+    /// The leaf it serves under, which names one host alone, in place of `server.pem` or
+    /// `stranger-server.pem`: as `is_stranger` says when none.
+    pub leaf: Option<PkiLeaf>,
     /// Whether its handshake requires a client certificate under `root.pem`, or asks for none:
     /// `true` when none.
     pub requires_certificate: Option<bool>,
@@ -206,10 +219,11 @@ pub struct PkiServerOptions {
 ///
 /// What reading the PKI or rustls refuses it for.
 pub fn pki_server_config(options: &PkiServerOptions) -> Result<Arc<ServerConfig>, String> {
-    let name = if options.is_stranger.unwrap_or(false) {
-        "stranger-server"
-    } else {
-        "server"
+    let name = match options.leaf {
+        Some(PkiLeaf::Named) => "named-server",
+        Some(PkiLeaf::Addressed) => "addressed-server",
+        None if options.is_stranger.unwrap_or(false) => "stranger-server",
+        None => "server",
     };
     let chain = pki_certificates(&format!("{name}.pem"))?;
     let key = PrivateKeyDer::from_pem_slice(pki(&format!("{name}.key"))?.as_bytes())

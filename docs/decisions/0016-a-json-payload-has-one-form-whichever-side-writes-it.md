@@ -408,18 +408,19 @@ Rust's own `str::parse`, and its names compared by their UTF-16 code units.
 
 **The Rust side reads, holds and writes a `json` payload by its own parts**
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): **its reader
-is Bead's own**, a strict RFC 8259 tokenizer with 17.5's checks in the TypeScript reader's order,
-since `serde_json` refuses a surrogate alone outright, keeps the last of a name given twice and caps
-its depth at 128; a number whose value is a whole number within 64 bits is read as an integer, any
-other as the nearest double, `-0` as the double `-0.0`, both written back through the double; **its
-value is `serde_json::Value`**, the ecosystem's, re-sorted by UTF-16 code units as it is written;
-**its writer is Bead's own**, its numbers spelled by `ryu-js`, which spells every double of
-`spec/codecs.json` as RFC 8785 does; and **`bead::json::to_value`**, a `serde::Serializer` of Bead's
-own, is a resolver's road from its type to a value, refusing a double that is not finite at any
-depth, `not a finite number`, where `serde_json::to_value`, `Value::from` and `json!` write `null`.
-A `String` holds no surrogate alone, a `serde_json` map no name twice, and Rust has no `undefined`:
-five entries of `spec/codecs.json` are excused from it, each by the platform row; NaN and Infinity
-are played.
+is Bead's own**, a strict RFC 8259 tokenizer that counts the depth over the whole text, then reads
+it in one pass and refuses with the first of 17.5's faults it meets, a name given twice once its
+object closes; it is Bead's own since `serde_json` refuses a surrogate alone outright, keeps the
+last of a name given twice and caps its depth at 128; a number whose value is a whole number within
+64 bits is read as an integer, any other as the nearest double, `-0` as the double `-0.0`, both
+written back through the double; **its value is `serde_json::Value`**, the ecosystem's, re-sorted by
+UTF-16 code units as it is written; **its writer is Bead's own**, its numbers spelled by `ryu-js`,
+which spells every double of `spec/codecs.json` as RFC 8785 does; and **`bead::json::to_value`**, a
+`serde::Serializer` of Bead's own, is a resolver's road from its type to a value, refusing a double
+that is not finite at any depth, `not a finite number`, where `serde_json::to_value`, `Value::from`
+and `json!` write `null`. A `String` holds no surrogate alone, a `serde_json` map no name twice, and
+Rust has no `undefined`: five entries of `spec/codecs.json` are excused from it, each by the
+platform row; NaN and Infinity are played.
 
 **A value a side's type cannot hold** is a platform row of the matrix.
 

@@ -178,6 +178,14 @@ TLS 1.3 a client's first request may already be written as its server's refusal 
 that connect fails as a connect all the same, never as a connection drawn and then lost, since it
 awaits its answer and none comes.
 
+**Under its authorities or its platform's roots, a client takes its server's certificate only where
+it names the host its URL names**, as 13.4 reads that host: a name in a `dNSName` of its
+subjectAltName, an address in an `iPAddress`, byte for byte, never its subject's common name
+([RFC 9525 §6](https://www.rfc-editor.org/rfc/rfc9525#section-6)). Under its authorities it checks
+no revocation ([RFC 5280 §6.1.3](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.3)); under its
+platform's roots, revocation is its verifier's. A certificate it refuses, chained to none of its
+anchors or naming another host, fails the connect as a handshake its server refuses does.
+
 **In the clear, a client holds `tls` and uses it on a secured connect alone**, on every side:
 `secured` is a connect's, `tls` its client's. A client certificate is no bearer credential, so 13.4
 refuses nothing of it in the clear. A broker's adapter, whose URL and `tls` are one record, refuses
@@ -222,7 +230,11 @@ decision of its own.
   since Windows' TLS presents no key held in memory alone, into an `SslStreamCertificateContext`
   with its intermediates, and its server judged by a `CertificateChainPolicy` of `CustomRootTrust`, its
   revocation mode `NoCheck`. The broker adapters take the same `TlsOptions`, and build the
-  collection MQTTnet and AMQP.Net Lite take from it.
+  collection MQTTnet and AMQP.Net Lite take from it. Under the authorities given, each judges its
+  broker by one check of `TlsCredentials`, its library's validation callback: the platform's name
+  check, then a chain to the authorities alone through the intermediates its broker presents, no
+  revocation checked. MQTTnet calls it over TCP and over a WebSocket, whose channel reads no trust
+  chain.
 - **Rust**: Bead builds a client's `ClientConfig` from `tls`, on the platform's verifier where no
   `authorities` are given and on webpki over them where they are, the certificate by
   `with_client_auth_cert`, so a certificate with the platform's roots works; an application's own
@@ -235,21 +247,22 @@ decision of its own.
 **Every side's tests read one PKI, `spec/pki/`**, which `spec/pki/make.sh`, an openssl script,
 writes, run once and again only to renew it: a root, an intermediate under it of path length 0, a
 client's leaf under the intermediate for `clientAuth`, `client-chain.pem` holding that leaf then the
-intermediate, a server's leaf under the root for `serverAuth`, for `localhost` and `127.0.0.1`, and
-a stranger root with a client's and a server's leaf of its own, every leaf `CA:FALSE`; P-256 keys
-in PKCS #8, unencrypted, about a hundred years of validity. Its keys are published test keys:
-`spec/check.py`'s `TEST_PKI_KEYS` finds each by the first full line of its PEM's body, refuses any
-file git lists outside `spec/`, the tests and the interop service that names one, and fails where
-a key's file does not hold its own line, so that a gate matching nothing fails
-([0006](0006-a-rule-has-its-gate.md)).
+intermediate, a server's leaf under the root for `serverAuth`, for `localhost` and `127.0.0.1`, two
+more under the root, `named-server.pem` for `localhost` alone and `addressed-server.pem` for
+`127.0.0.1` alone, each of a subject that names no host, and a stranger root with a client's and a
+server's leaf of its own, every leaf `CA:FALSE`; P-256 keys in PKCS #8, unencrypted, about a hundred
+years of validity. Its keys are published test keys: `spec/check.py`'s `TEST_PKI_KEYS` finds each by
+the first full line of its PEM's body, refuses any file git lists outside `spec/`, the tests and the
+interop service that names one, and fails where a key's file does not hold its own line, so that a
+gate matching nothing fails ([0006](0006-a-rule-has-its-gate.md)).
 
 **Each side's test kit has a TLS front**, the small local proxy that stands in front of a side's
-plain WebSocket and HTTP transport servers: it listens on the loopback under `server.pem` or
-`stranger-server.pem`, asks for a client certificate under `root.pem` or for none, as its test
-says, holds its highest TLS version at 1.2 or 1.3, and pipes the bytes to the server. The
-TypeScript side's is `node:tls`; the C# side's an `SslStream` over a `TcpListener`,
-`ClientCertificateRequired`, its chain judged by `CustomRootTrust`; the Rust side's a
-`tokio_rustls::TlsAcceptor` under a `WebPkiClientVerifier` over the root, then
+plain WebSocket and HTTP transport servers: it listens on the loopback under `server.pem`,
+`stranger-server.pem`, `named-server.pem` or `addressed-server.pem`, asks for a client certificate
+under `root.pem` or for none, as its test says, holds its highest TLS version at 1.2 or 1.3, and
+pipes the bytes to the server. The TypeScript side's is `node:tls`; the C# side's an `SslStream`
+over a `TcpListener`, `ClientCertificateRequired`, its chain judged by `CustomRootTrust`; the Rust
+side's a `tokio_rustls::TlsAcceptor` under a `WebPkiClientVerifier` over the root, then
 `copy_bidirectional`. A twin's accepted connect opens a session and sends one envelope each way, so
 it proves Bead's client and Bead's server through TLS.
 
@@ -264,6 +277,12 @@ it proves Bead's client and Bead's server through TLS.
   beside a `tls` of authorities alone, built over `mqtts` or `amqps` and never started. On the
   TypeScript side in a page, under Playwright, `tls` refused, naming why. A refused connect's twin
   asserts its failure alone, its cause unnamed, since TLS versions and stacks fail it each their way.
+- **The twins of the server's name**, each naming spec 15.39, on every side's WebSocket and HTTP
+  clients under TLS 1.2 and TLS 1.3 and its MQTT 5 adapter over `mqtts`, and on the TypeScript and
+  C# sides' AMQP 1.0 adapters over `amqps`: under `root.pem` given, `named-server.pem` taken by
+  `localhost` and refused by 127.0.0.1, `addressed-server.pem` taken by 127.0.0.1 and refused by
+  `localhost`, each refusal on the listener of its success. On the C# side, its MQTT 5 adapter links over `wss` under the
+  authorities given, through its TLS front.
 - **A broker takes PEM alone, on every side**: a key no PEM carries, held in a store, a smart card
   or a hardware module, reaches a direct client through its platform's TLS, and no broker's
   adapter.
@@ -275,7 +294,8 @@ it proves Bead's client and Bead's server through TLS.
   browser chooses over a WebSocket, presents none to another origin over HTTP, and chooses to its
   own origin; `A certificate a server asks for after the handshake`, never on the Rust side and none
   over HTTP/2; `A client certificate over HTTP in Node`, undici's. **Of kind open**:
-  `A client certificate across the interop`.
+  `A client certificate across the interop`; `A server's name in its certificate's common name, or
+  under a wildcard inside a label`, which Node and .NET take and RFC 9525 does not.
 - **A password beside authorities alone is taken on every side**, so the matrix holds no row for
   it.
 - **Ahead**, each by a decision of its own: a server that takes its peer's certificate as an
@@ -293,13 +313,15 @@ PKI's keys; and `tools/names.tsv`'s one `same` row of the type.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round, at xhigh effort, against a proposal of the brokers' shape on every client. Each claim was
-checked against each side's code and against probes of `ws`, of undici's own `fetch`, of Node's
-secure context, of .NET on Windows and of rustls. Thirteen objections: eleven accepted, two in part,
-none refused. Two questions went to the user, each taken by its recommendation: the members'
-names, `authorities`, `certificate` and `key`, by RFC 5280's trust anchors; and the brokers taking
-PEM alone on every side, a platform's TLS object for them ahead, to every side at once. The
-objections, with the answers that hold:
+two rounds, each at xhigh effort. The first met a proposal of the brokers' shape on every client.
+Each claim was checked against each side's code and against probes of `ws`, of undici's own `fetch`,
+of Node's secure context, of .NET on Windows and of rustls. Thirteen objections: eleven accepted,
+two in part, none refused. Two questions went to the user, each taken by its recommendation: the
+members' names, `authorities`, `certificate` and `key`, by RFC 5280's trust anchors; and the brokers
+taking PEM alone on every side, a platform's TLS object for them ahead, to every side at once. The
+second met the name a client holds its server's certificate to, each claim checked against each
+side's code, against MQTTnet's source and by runs of .NET and Node: ten objections, five accepted,
+four in part, one refused. The objections, with the answers that hold:
 
 ### On a client's TLS certificate and the authorities it trusts
 
@@ -318,3 +340,18 @@ objections, with the answers that hold:
 | **O11.** 0034 is the wrong record. The transports' credentials and TLS are 0010's, 0049's and 0050's, and the brokers' are 0041's and 0043's. "A JWT beside a certificate is fine" needs its reason and its standard.                                                                                        | **Accepted.** 0034 is how a server tells refusals. The decision is this record, since it reaches 0010, 0040, 0041, 0043, 0049 and 0050 at once, and each points here. 0010's `A transport's credential and TLS` holds the two layers: the certificate authenticates the TLS peer to what terminates TLS (RFC 8446 §4.3.2, §4.4.2), the credential the call to the router; RFC 8705 §3 is the binding a server that judges its peer's certificate would check. A broker's password and certificate are one link's (SASL PLAIN or EXTERNAL; MQTT ties the id to the certificate), hence "never both" there (0040). A client certificate is no bearer credential, so 13.4 does not refuse it in the clear.                                                  |
 | **O12.** The twins' peer is a test-only server, so they prove each platform's TLS but never Bead across languages. The TypeScript and Rust HTTP servers can already require a certificate, C#'s cannot, no WebSocket server terminates TLS, and the interop listens in the clear.                            | **In part.** Verified in each side's HTTP server and the C# interop, which listens on `127.0.0.1` in the clear. The twins' peer is each side's TLS front, the small local proxy the repository's design names, before the side's own plain WebSocket and HTTP servers, under the one shared PKI. So a twin proves Bead's client and Bead's server through TLS. The interop over TLS with a certificate is refused for this decision, since the interop serves no TLS at all (the row `A client over HTTP/2`): it is a row of kind open, `A client certificate across the interop`. The C# HTTP server's client-certificate mode, and RFC 9440 over WebSocket, belong to the server that judges a peer's certificate, named here as its way, with no row. |
 | **O13.** A certificate asked for after the handshake (TLS 1.2 renegotiation, TLS 1.3 post-handshake authentication) is a missing platform row. rustls supports neither, and HTTP/2 forbids both.                                                                                                             | **Accepted.** Verified: rustls 0.23.46 lists renegotiation among its non-features. The row `A certificate a server asks for after the handshake` is of kind platform, not tested. On the Rust side never; Node and .NET as their platforms; over HTTP/2 none (RFC 9113 §9.2.1, RFC 8740). The twins hold a certificate asked for at the handshake.                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+### On the server's name under the authorities given
+
+| Objection                                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **O1.** The C# MQTT 5 adapter over `wss` never uses the authorities given: it hands MQTTnet a trust chain over `mqtts` and `wss` alike, and MQTTnet's WebSocket channel reads none. A broker under `spec/pki`'s root, the root given, is refused, so 15.39's sentence on anchors is false on that path. | **Accepted.** Verified by a run and in MQTTnet's source. Under the authorities given, the C# MQTT 5 adapter judges its broker by a validation handler, the check its AMQP 1.0 adapter makes, moved beside `TlsCredentials`: a certificate that names its host, then a chain to the authorities alone. MQTTnet calls the handler over TCP and over a WebSocket. On the C# side its link over `wss` through its TLS front holds it; no script serves a WebSocket under TLS, so no twin of the name stands over `wss`. |
+| **O2.** Revocation: the C# MQTT 5 adapter checks it, MQTTnet's default being online, where every other path under the authorities given checks none.                                                                                                                                                    | **In part.** 15.39 states revocation for the authorities alone ([RFC 5280 §6.1.3](https://www.rfc-editor.org/rfc/rfc5280#section-6.1.3)): none under them, the platform's verifier's under its roots. The C# MQTT 5 adapter's revocation mode is `NoCheck` under them. No twin, which would need a server of revocation lists: not tested.                                                                                                                                                                          |
+| **O3.** RFC 9525 drops the common name and allows a wildcard only as the whole left-most label. Node and .NET take a certificate by its common name where no `dNSName` stands, and a wildcard inside a label; webpki reads the subjectAltName alone.                                                    | **In part.** 15.39 cites RFC 9525 §6 and RFC 9110 §4.3.4 and names the identifiers, the common name excluded. The difference is an open row of the matrix, `A server's name in its certificate's common name, or under a wildcard inside a label`, which each side's own check closes; no twin of it now.                                                                                                                                                                                                           |
+| **O4.** "The host its URL names" must hold on every path Bead builds, and the C# WebSocket client takes a host, a port and a path.                                                                                                                                                                      | **In part.** Verified on every path: `ws`, undici, MQTT.js and rhea on the TypeScript side, `TargetHost` and AMQP's address on the C# side, the bare host as `ServerName` on the Rust side. 15.39 says the host its URL names "as section 13.4 reads that host"; an application's own platform object stays the application's; SNI is left out.                                                                                                                                                                     |
+| **O5.** Safe before the tag: MQTTnet's `mqtts` path is traced and run, and every name twin over `mqtts`, `amqps`, `https` and `wss` is expected to hold.                                                                                                                                                | **Accepted**, the risks being the PKI's renewal, the TypeScript AMQP 1.0 script's change, and the code of O1 and O2. The twins found one more: the TypeScript AMQP 1.0 adapter named an address as its TLS server name, which Node refuses, so a link over `amqps` to 127.0.0.1 never opened. It sends no name for an address ([RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066#section-3)).                                                                                                                    |
+| **O6.** Twin traps: every front listens on 127.0.0.1 alone, so another loopback address meets a TCP refusal, and macOS lacks it; and a server that demands a client certificate fails a client that checks no name all the same.                                                                        | **Accepted.** Each twin pairs its refusal with a success on the same listener under the same authorities, `localhost` and 127.0.0.1 reaching one listener, and nothing makes the server refuse its client. The TypeScript AMQP 1.0 script takes a CA apart from its own certificate.                                                                                                                                                                                                                                |
+| **O7.** Without new files in the PKI the twins meet O6's traps: `server.pem` names `localhost` and 127.0.0.1 alike.                                                                                                                                                                                     | **Accepted.** `make.sh` writes two leaves under the root, `named-server.pem` for `localhost` alone and `addressed-server.pem` for 127.0.0.1 alone, each of a subject that names no host, since Node and .NET read a common name where no `dNSName` stands. Rerunning it renews every file, and `TEST_PKI_KEYS` holds the eight keys.                                                                                                                                                                                |
+| **O8.** 15.39 states a failure's shape only for a handshake its server refuses.                                                                                                                                                                                                                         | **Accepted.** A certificate its client refuses, chained to none of its anchors or naming another host, fails the connect alike: over HTTP never a connection drawn and then lost, and naming no status and no refusal.                                                                                                                                                                                                                                                                                              |
+| **O9.** The route: with O1 and O2, the change reaches the C# side's code, `spec/pki` and `spec/check.py`.                                                                                                                                                                                               | **In part.** The small route holds, the PKI, the twins and the C# MQTT 5 adapter's lines landing as one change, and this record amended in its table.                                                                                                                                                                                                                                                                                                                                                               |
+| **O10.** Wildcards and internationalized names stay unreached.                                                                                                                                                                                                                                          | **Refused** beyond the citation: RFC 9525 holds them, and O3's open row holds the wildcard difference the runs showed.                                                                                                                                                                                                                                                                                                                                                                                              |

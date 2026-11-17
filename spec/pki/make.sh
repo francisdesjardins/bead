@@ -16,6 +16,11 @@
 #   server.pem, server.key                      CN=localhost, under the root: CA:FALSE,
 #                                               digitalSignature, serverAuth, DNS:localhost and
 #                                               IP:127.0.0.1
+#   named-server.pem, named-server.key          CN=Bead test named server, under the root: CA:FALSE,
+#                                               digitalSignature, serverAuth, DNS:localhost alone
+#   addressed-server.pem, addressed-server.key  CN=Bead test addressed server, under the root:
+#                                               CA:FALSE, digitalSignature, serverAuth,
+#                                               IP:127.0.0.1 alone
 #   stranger-root.pem                           CN=Bead test stranger: CA:TRUE, a root no test trusts,
 #                                               its key not kept
 #   stranger-client.pem, stranger-client.key    CN=Bead test stranger client, under the stranger
@@ -70,6 +75,22 @@ extendedKeyUsage = serverAuth
 subjectAltName = DNS:localhost, IP:127.0.0.1
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always
+
+[named]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:localhost
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+
+[addressed]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = IP:127.0.0.1
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
 EOF
 
 # a P-256 key in PKCS #8, unencrypted
@@ -111,6 +132,15 @@ cat "$here/client.pem" "$here/intermediate.pem" > "$here/client-chain.pem"
 
 key "$here/server.key"
 issue "$here/server.key" '/CN=localhost' server "$here/root.pem" "$here/root.key" "$here/server.pem"
+
+# * a subject that names no host: Node and .NET read a common name where no dNSName stands
+key "$here/named-server.key"
+issue "$here/named-server.key" '/CN=Bead test named server' named "$here/root.pem" "$here/root.key" \
+  "$here/named-server.pem"
+
+key "$here/addressed-server.key"
+issue "$here/addressed-server.key" '/CN=Bead test addressed server' addressed "$here/root.pem" \
+  "$here/root.key" "$here/addressed-server.pem"
 
 key "$work/stranger-root.key"
 root "$work/stranger-root.key" '/CN=Bead test stranger' "$here/stranger-root.pem"

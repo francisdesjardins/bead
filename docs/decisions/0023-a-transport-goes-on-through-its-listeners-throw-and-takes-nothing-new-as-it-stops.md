@@ -85,7 +85,7 @@ to the transports, and the DOM's inner invoke is its standard. A listener of an 
 one a side tells — its transport's, its router's, its broker participant's, its gateway's — is
 called within a guard too: what it throws is dropped, reported nowhere, since reporting it would
 tell the event that threw, and the listeners after it are called all the same. Every side's
-participant and both gateways tell their `error` so, and so do the transports and the routers;
+participant and gateway tell their `error` so, and so do the transports and the routers;
 HTML's report of an exception is its standard: it fires no `error` for one its own `error` listener
 raised
 ([WHATWG HTML §8.1.4.6](https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception)).

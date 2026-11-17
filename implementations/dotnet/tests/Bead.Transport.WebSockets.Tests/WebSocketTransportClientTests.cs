@@ -3768,6 +3768,37 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
     // spec 15.39
     [Fact]
+    public async Task Connects_to_a_server_by_a_host_its_certificate_names_and_fails_its_connect_by_one_it_does_not()
+    {
+        var trusting = new TlsOptions { Authorities = Pki.Read("root.pem") };
+
+        // ! TLS 1.3 first: on Windows, after TLS 1.2 to a host, a client given authorities alone is
+        // refused by a front of TLS 1.3 alone at that host, its alert ProtocolVersion
+        foreach (var protocol in new[] { SslProtocols.Tls13, SslProtocols.Tls12 })
+        {
+            // * each leaf names one host alone, which takes it, and the other host of the same front refuses it
+            foreach (var (serving, named, other) in new[] { ("named-server", "localhost", "127.0.0.1"), ("addressed-server", "127.0.0.1", "localhost") })
+            {
+                await using var front = TlsFront.Start(_port, new TlsFrontOptions { IsRequiring = false, Protocol = protocol, Serving = serving });
+                await using var taken = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = trusting });
+
+                await taken.Connect(new WebSocketTransportClientConnectOptions { Host = named, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                Assert.True(taken.IsSecure);
+                await taken.CloseConnection().WaitAsync(Patience, Cancelled);
+
+                await using var refused = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = trusting });
+
+                await Assert.ThrowsAnyAsync<Exception>(() =>
+                {
+                    return refused.Connect(new WebSocketTransportClientConnectOptions { Host = other, Port = front.Port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+                Assert.Equal(ReadyState.Closed, refused.ReadyState);
+            }
+        }
+    }
+
+    // spec 15.39
+    [Fact]
     public async Task Connects_in_the_clear_with_tls_given_which_a_secured_connect_alone_uses()
     {
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Tls = Pki.Client() });

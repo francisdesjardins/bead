@@ -622,8 +622,9 @@ each held by `tools/names.tsv` ([0047](0047-every-side-shows-one-public-surface.
 ### Payloads, a `JWT`, randomness
 
 **JSON** ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)): **Bead's own
-reader**, a strict RFC 8259 tokenizer with spec 17.5's checks in the TypeScript reader's order; a
-whole number within 64 bits read as an integer, any other as the nearest double, both written back
+reader**, a strict RFC 8259 tokenizer that counts the depth over the whole text, then reads it in
+one pass and refuses with the first of spec 17.5's faults it meets; a whole number within 64 bits
+read as an integer, any other as the nearest double, both written back
 through the double; **`serde_json::Value`** the value; **Bead's own canonical writer**, numbers by
 `ryu-js`, RFC 8785; and **`bead::json::to_value`**, Bead's own `serde::Serializer`, the resolver's
 documented road from its type to a `json` payload, which refuses a double that is not finite at any

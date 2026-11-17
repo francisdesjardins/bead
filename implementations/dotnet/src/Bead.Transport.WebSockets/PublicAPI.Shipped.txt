@@ -90,10 +90,14 @@ Bead.Transport.WebSockets.WebSocketTransportClientOptions.Clock.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.CloseTimeout.get -> System.TimeSpan
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.CloseTimeout.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Equals(Bead.Transport.WebSockets.WebSocketTransportClientOptions? other) -> bool
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Handler.get -> System.Net.Http.HttpMessageHandler?
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Handler.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Heartbeat.get -> System.TimeSpan
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Heartbeat.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageBytes.get -> int?
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageBytes.init -> void
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.get -> Bead.TlsOptions?
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.WebSocketTransportClientOptions() -> void
 Bead.Transport.WebSockets.WebSocketTransportServer
 Bead.Transport.WebSockets.WebSocketTransportServer.CarriesCredential(string! connectionHandle) -> bool

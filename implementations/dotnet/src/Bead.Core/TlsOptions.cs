@@ -275,6 +275,41 @@ internal sealed class TlsCredentials : IDisposable
         return options;
     }
 
+    /// <summary>
+    /// Whether a library's callback takes the certificate its server presented, with the chain the
+    /// platform built of it: the platform's judgement where it gives no authorities; otherwise a
+    /// certificate that names its host, chained to its authorities alone through the intermediates
+    /// its server presented, no revocation checked (spec 15.39). The platform's
+    /// <paramref name="errors"/> tell the name, the chain being its own.
+    /// </summary>
+    public bool IsTrusted((X509Certificate? Certificate, X509Chain? Chain) presented, SslPolicyErrors errors)
+    {
+        var (certificate, built) = presented;
+
+        if (Authorities is null)
+        {
+            return errors == SslPolicyErrors.None;
+        }
+
+        if (certificate is null || (errors & (SslPolicyErrors.RemoteCertificateNotAvailable | SslPolicyErrors.RemoteCertificateNameMismatch)) != 0)
+        {
+            return false;
+        }
+
+        using var chain = new X509Chain();
+        using var leaf = X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
+
+        chain.ChainPolicy = PolicyOf(Authorities);
+
+        // * the intermediates its server presented, which the platform's chain holds beside it
+        if (built is not null)
+        {
+            chain.ChainPolicy.ExtraStore.AddRange(built.ChainPolicy.ExtraStore);
+        }
+
+        return chain.Build(leaf);
+    }
+
     /// <summary>A chain to <paramref name="authorities"/> alone, in place of the platform's roots.</summary>
     public static X509ChainPolicy PolicyOf(X509Certificate2Collection authorities)
     {

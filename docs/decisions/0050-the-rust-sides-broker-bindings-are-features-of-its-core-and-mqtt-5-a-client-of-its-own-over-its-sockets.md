@@ -277,14 +277,14 @@ TypeScript and C# interop tests run against it.
 
 ### CI
 
-The `rust` job lints the core's library with `mqtt` alone beside `websocket` and `http`; its
-`--all-features` steps take every feature. The `mqtt` job **keeps its `needs`**: it installs the
-pinned toolchain, restores the `rust` job's Linux cache read-only, builds what it runs, and runs the
-Rust side's cases, its adapter's fixture twins, its trials and the TypeScript and C# clients against
-its server over its broker, on the runner's host, beside `rust`. `fuzz.yml` and `tools/fuzz.mjs` run
-`mqtt-packets` and `mqtt-websocket-frames` ten minutes a week each, named as the Rust side's alone,
-as `blueprint` is the TypeScript side's. The Windows leg runs every scripted twin; the fixture's
-twins and the cases skip there, saying so.
+The `rust` job lints the core's library with `mqtt` alone, beside each of `websocket`, `http`,
+`transcoding` and `gateway` alone; its `--all-features` steps take every feature. The `mqtt` job
+**keeps its `needs`**: it installs the pinned toolchain, restores the `rust` job's Linux cache
+read-only, builds what it runs, and runs the Rust side's cases, its adapter's fixture twins, its
+trials and the TypeScript and C# clients against its server over its broker, on the runner's host,
+beside `rust`. `fuzz.yml` and `tools/fuzz.mjs` run `mqtt-packets` and `mqtt-websocket-frames` ten
+minutes a week each, named as the Rust side's alone, as `blueprint` is the TypeScript side's. The
+Windows leg runs every scripted twin; the fixture's twins and the cases skip there, saying so.
 
 ## Consequences
 
@@ -295,8 +295,8 @@ twins and the cases skip there, saying so.
   seeded mutations of `tests/mqtt_packets_fuzz.rs` and `tests/mqtt_websocket_frames_fuzz.rs`; none
   has a twin, since the other sides read a broker's bytes through their libraries.
 - **No crate joins the lock** with `mqtt`.
-- **CI lints the core's library five ways**: with no feature, with `websocket`, `http` or `mqtt`
-  alone, and with all.
+- **CI lints the core's library** with no feature, with each of `websocket`, `http`, `mqtt`,
+  `transcoding` and `gateway` alone, and with all.
 - **Three serve `interop-both`**, the TypeScript, C# and Rust servers.
 - **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, 0x81
   or 0x82, and none at its stop after a packet it cannot read, each WebSocket message one frame, a

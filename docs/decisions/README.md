@@ -38,25 +38,27 @@ transport, never a network of its own
 ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
-— and proven byte for byte by the conformance files and the interop. Its third language, Rust, has
-its core: the envelope's codec, its routers and managers, the service layer, its server half and its
-client half, its sessions and credentials, the trace, the filter and the registry, the in-memory
-transport, the broker's core over an in-memory broker with the joined transport, and its `proto`
-codec on Buffa, under a toolchain, lints denied whole and a CI job of its own
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
-transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
-its core, with the interop both ways with the TypeScript and C# sides
-([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
-and its MQTT 5 binding, a feature of its core and a client of its own over its sockets, with the
-interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
-and beadc's Rust target, each package's typed shells beside the messages Buffa writes, the lists
+— and proven byte for byte by the conformance files and the interop.
+
+Its third language, Rust, has its core: the envelope's codec, its routers and managers, the service
+layer, its server half and its client half, its sessions and credentials, the trace, the filter and
+the registry, the in-memory transport, the broker's core over an in-memory broker with the joined
+transport, and its `proto` codec on Buffa, under a toolchain, lints denied whole and a CI job of its
+own ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its
+transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) are features
+of its core, with the interop both ways with the TypeScript and C# sides
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+Its MQTT 5 binding is a feature of its core and a client of its own over its sockets, with the
+interop both ways over it
+([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+beadc's Rust target writes each package's typed shells beside the messages Buffa writes, the lists
 of the procedures a server's transports take and the validators of a blueprint's rules, their
-runtime in `bead-protobuf`, with `examples/hello`'s Rust half and the Rust interop's descriptors
-generated
-([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
-and its HTTP/JSON gateway, features of its core, its JSON mapping a feature of `bead-protobuf`, met
-by one trait, with the route table, the HTTP client and the document an output with `gateway`
-writes, `examples/hello`'s Rust gateway and the interop both ways over it
+runtime in `bead-protobuf`; `examples/hello` has its Rust half, and the Rust interop's descriptors
+are generated
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+Its HTTP/JSON gateway is a feature of its core and its JSON mapping a feature of `bead-protobuf`,
+met by one trait; an output with `gateway` writes the route table, the HTTP client and the
+document, `examples/hello`'s Rust half serves a gateway, and the interop runs both ways over it
 ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
@@ -140,8 +142,9 @@ that meets the Tenth Man:
   bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
-- what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a budget that
-  sees every transfer it admits to its end, and a stall that names the side that caused it;
+- what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a share of the
+  budget per connection or per address, with
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
@@ -187,8 +190,9 @@ that meets the Tenth Man:
   keeps ahead of a client's TLS: a server that takes its peer's certificate as an identity at its
   admission, the C# HTTP server's client-certificate mode, RFC 9440's fields over a WebSocket and
   over a believed proxy, and RFC 8705 §3's binding between a `JWT` and the certificate; a platform's
-  TLS object for the brokers, on every side at once; and the interop over TLS, each side's client
-  presenting `spec/pki`'s certificate to the others' servers;
+  TLS object for the brokers, on every side at once; the interop over TLS, each side's client
+  presenting `spec/pki`'s certificate to the others' servers through a TLS front; and a gateway
+  caller's `tls`, on every side at once;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and

@@ -96,8 +96,8 @@ interop/
     InteropCredentials.cs       its credentials: the key set and the verifier
   BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager and
                                 its two interfaces, called through the generated server and client
-  Bead.Interop.Server/          its server, which the TypeScript side's interop and its page of
-                                another origin call
+  Bead.Interop.Server/          its server, which the TypeScript and Rust sides' interop and the
+                                TypeScript side's page of another origin call
 tests/
   Bead.*.Tests/                 a project's tests, beside it by name
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled

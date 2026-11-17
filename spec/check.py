@@ -267,12 +267,14 @@ TEST_KEYS = {
 # writes and anyone can read, as the JWT verdicts' keys (0053): each found by the first full line of
 # its PEM's base64 body, which holds the start of its own key, so that a renewed PKI moves its line here
 TEST_PKI_KEYS = {
-    'root': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYhJg/M9/jPZqaieY',
-    'intermediate': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbMbijo7CM1zkl3E2',
-    'client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYF7UZJYTe+M8KL0v',
-    'server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7cfM5+GqATyBpIPj',
-    'stranger-client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg36+eu9q4iP4r1DPb',
-    'stranger-server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZFytPd6/YcWSm3dy',
+    'root': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgsRak+uYPPVCkk4hQ',
+    'intermediate': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgf7LffQ5+fHg8iP3g',
+    'client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgxN+W7DRp8tVX2M1r',
+    'server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgGYzauOyX6LfrS3IX',
+    'stranger-client': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgz8kPNbq6bVk+GhMB',
+    'stranger-server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7i+G4pyEjsqU+LL4',
+    'named-server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgaQFVtTFiDrocNNrJ',
+    'addressed-server': 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgWn0ChiwAg0cruQKI',
 }
 
 # the folder of the test PKI, its keys spec/pki/<name>.key
