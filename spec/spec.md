@@ -873,13 +873,17 @@ potentially trustworthy; a server by the address it listens on (section 15.12), 
 transport or a router called in process. A broker's transport is secure while its own leg and its
 peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
 which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
-space among them, is not, nor is `localhost.`, which it keeps as given. A client takes a `localhost`
-name on the loopback without resolving it, as Secure Contexts does where the platform resolves such
-names there alone ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a
-platform whose resolver sends one elsewhere, its application gives another host. Any other leaves
-the machine in the clear. A server cannot tell what stands in front of it: its application MAY say
-so, and is then believed whatever the server listens on — TLS terminated before it, which makes it
-secure, or a proxy that serves the network in the clear, which leaves it in the clear.
+space among them, is not, nor is `localhost.`, which it keeps as given. A client judges a
+`localhost` name by the name alone, and connects it through its platform's resolver, as
+[RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets application software do
+(item 2). Secure Contexts trusts such a name only where its user agent keeps it on the loopback. A
+resolver that sends a name under `.localhost` on to its DNS server, as glibc's and musl's do,
+connects it wherever that server answers, and a credential judged secure crosses there in the clear.
+An application whose platform resolves so names the loopback by its address, `127.0.0.1` or `[::1]`,
+which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
+what stands in front of it: its application MAY say so, and is then believed whatever the server
+listens on — TLS terminated before it, which makes it secure, or a proxy that serves the network in
+the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -1922,8 +1926,8 @@ is the proxy's address, as over HTTP.
 A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
 ([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`
 ([RFC 4291 §2.5.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.3)), on one port — unless it
-is given an address: `localhost`, which names both and is never resolved, as section 13.4 takes
-it; or an `IPv4address` or an `IPv6address` of
+is given an address: `localhost`, which names both and is never resolved; or an `IPv4address` or
+an `IPv6address` of
 [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), bare, with no zone, and
 not IPv4-mapped ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)),
 which it listens on alone; never another name, which another host would resolve otherwise. On
