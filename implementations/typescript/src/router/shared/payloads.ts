@@ -136,17 +136,6 @@ const assertDepth = (text: string): void => {
   }
 };
 
-/** Throws when `value`, a leaf, is a number past a double or a string holding a surrogate alone. */
-const assertLeaf = (value: unknown): void => {
-  if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new SyntaxError(CODEC_REASONS.numberPastADouble);
-  }
-
-  if (typeof value === 'string' && !value.isWellFormed()) {
-    throw new SyntaxError(CODEC_REASONS.surrogateAlone);
-  }
-};
-
 /**
  * Throws when `value`, as `JSON.parse` gave it, holds a number past a double at any depth. A walk
  * with a stack of its own, never a recursion.
@@ -170,13 +159,11 @@ const assertFinite = (value: unknown): void => {
 };
 
 /**
- * `value`, as `JSON.parse` gave it, made the value of its canonical form in place, −0 as 0, each
- * leaf and each name checked. A walk with a stack of its own, never a recursion.
+ * `value`, as `JSON.parse` gave it, made the value of its canonical form in place, −0 as 0. A walk
+ * with a stack of its own, never a recursion.
  */
 const settle = (value: unknown): unknown => {
   if (typeof value !== 'object' || value === null) {
-    assertLeaf(value);
-
     return Object.is(value, -0) ? 0 : value;
   }
 
@@ -187,20 +174,12 @@ const settle = (value: unknown): unknown => {
     const names = Array.isArray(container) ? container.keys() : Object.keys(record);
 
     for (const name of names) {
-      if (typeof name === 'string' && !name.isWellFormed()) {
-        throw new SyntaxError(CODEC_REASONS.surrogateAlone);
-      }
-
       const item = record[name];
 
       if (typeof item === 'object' && item !== null) {
         pending.push(item);
-      } else {
-        assertLeaf(item);
-
-        if (Object.is(item, -0)) {
-          record[name] = 0;
-        }
+      } else if (Object.is(item, -0)) {
+        record[name] = 0;
       }
     }
   }
@@ -291,6 +270,83 @@ const endsScalar = (code: number): boolean => {
     code === LINE_FEED ||
     code === CARRIAGE_RETURN
   );
+};
+
+/**
+ * Of spec 17.5's items 4, 5 and 6, the reason `text`, a JSON text `JSON.parse` took, meets first
+ * from its start, and, where it meets none, whether a name of it holds an escape: a name or a
+ * string holding a surrogate alone at that name or string, a name its object gave before at that
+ * name, a number past a double at that number. A scan of the text, since `JSON.parse` keeps the
+ * last of two names and puts a name that may be an array index first.
+ */
+const firstFault = (text: string): { isEscaped: boolean; reason: string | undefined } => {
+  // each open object's names, undefined for an array
+  const scopes: (Set<string> | undefined)[] = [];
+  let expectsName = false;
+  let hasEscape = false;
+  // the next backslash at or past where the scan is, -1 for none: found again once passed, so the
+  // text is searched once
+  let backslash = text.indexOf('\\');
+
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+
+    if (code === QUOTE) {
+      const end = endOfString(text, index);
+      const isEscaped = backslash !== -1 && backslash < end;
+      const names = scopes.at(-1);
+      const isName = expectsName && names !== undefined;
+
+      if (isEscaped) {
+        backslash = text.indexOf('\\', end);
+      }
+
+      // * only an escape writes a surrogate alone: a string of none needs no reading
+      if (isEscaped || isName) {
+        const read = isEscaped
+          ? (JSON.parse(text.slice(index, end + 1)) as string)
+          : text.slice(index + 1, end);
+
+        if (!read.isWellFormed()) {
+          return { isEscaped: hasEscape, reason: CODEC_REASONS.surrogateAlone };
+        }
+
+        if (isName) {
+          if (names.has(read)) {
+            return { isEscaped: hasEscape, reason: CODEC_REASONS.nameTwice };
+          }
+
+          hasEscape ||= isEscaped;
+          names.add(read);
+          expectsName = false;
+        }
+      }
+
+      index = end;
+    } else if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
+      scopes.push(code === OPEN_OBJECT ? new Set() : undefined);
+      expectsName = code === OPEN_OBJECT;
+    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+      scopes.pop();
+      expectsName = false;
+    } else if (code === COMMA) {
+      expectsName = scopes.at(-1) !== undefined;
+    } else if (code === MINUS || (code >= DIGIT_ZERO && code <= DIGIT_NINE)) {
+      let end = index + 1;
+
+      while (end < text.length && !endsScalar(text.charCodeAt(end))) {
+        end += 1;
+      }
+
+      if (!Number.isFinite(Number(text.slice(index, end)))) {
+        return { isEscaped: hasEscape, reason: CODEC_REASONS.numberPastADouble };
+      }
+
+      index = end - 1;
+    }
+  }
+
+  return { isEscaped: hasEscape, reason: undefined };
 };
 
 /**
@@ -406,14 +462,15 @@ const readJson = (bytes: Uint8Array): JsonValue => {
     throw new SyntaxError(CODEC_REASONS.notJson, { cause: reason });
   }
 
-  const names = scanNames(text);
+  // * of the faults past the grammar, the first the text meets (spec 17.5, after item 7)
+  const { isEscaped, reason } = firstFault(text);
+
+  if (reason !== undefined) {
+    throw new SyntaxError(reason);
+  }
 
   // ! V8 can read a name that holds an escape as an earlier object's: such a payload is built again
-  value = settle(names.isEscaped ? buildJson(text) : value);
-
-  if (!names.isOnce) {
-    throw new SyntaxError(CODEC_REASONS.nameTwice);
-  }
+  value = settle(isEscaped ? buildJson(text) : value);
 
   // * what JSON.parse gives, every leaf checked: a JSON value
   return value as JsonValue;

@@ -122,6 +122,8 @@ buffa-descriptor = { workspace = true }
 buffa-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
+# what a call allocates, counted by the allocation gate's global allocator
+stats_alloc = { workspace = true }
 # a session over HTTP/2 the tests open on the HTTP server
 h2 = { workspace = true }
 
@@ -173,6 +175,11 @@ name = "gateway"
 
 [[test]]
 name = "caller"
+
+# what a call counted allocates against one uncounted (spec/debugging.md 3.3, 3.4): a binary of its
+# own, since its counting allocator is the process's
+[[test]]
+name = "allocations"
 
 # seeded mutations of the conformance files' bytes, fed to the envelope readers and the parcel's
 [[test]]

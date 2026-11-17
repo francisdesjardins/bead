@@ -775,7 +775,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 return adapter.Publish(new BrokerPublication { Payload = ReadOnlyMemory<byte>.Empty, Topic = topic });
             });
 
-            Assert.Contains("past its sender's max-message-size, 1 bytes", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("past its sender's max-message-size, 1 byte", failure.Message, StringComparison.Ordinal);
         }
 
         Assert.True(adapter.IsLinked);

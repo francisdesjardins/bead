@@ -7,6 +7,145 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-17
+
+### Added
+
+- `tools/flow.mjs finish`, which finishes a feature branch once CI has passed on its head: merged
+  into `develop` with `--no-ff`, `develop` pushed, and the branch on `origin`, its worktree and the
+  local branch deleted once CI has passed on the merge; a failure names its jobs and deletes
+  nothing, and `--dry-run` makes every check and changes nothing.
+- `tools/check-citations.mjs` holds each language cell of the support matrix's differences to a
+  citation or a word of its legend, "not tested", "not probed", "not available" or "no
+  counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
+  47; the legend defines the four words, and the 32 cells that said none of them say what holds.
+- `tools/check-twins.mjs`, in CI's Commits job, with `tools/twins.tsv`: every TypeScript and C# test
+  is played on the Rust side under its title's key, or a row gives its class and why, a folder's
+  row leaving out a program in one language no other side has; `--write` adds a `pending` row for
+  a new one, which fails until a reader classifies it.
+- `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
+  `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
+  9.4.10, 9.6.8).
+- Two vectors of `spec/vectors.json`'s `headerRefusals` pin 4.4's order on a `CREDENTIAL` block
+  that breaks two of its checks: an `OPAQUE` of 15 bytes whose padding is not zero, refused for its
+  length, and a `NONE` of 1 byte on a request whose padding is not zero, refused for its scheme.
+- `spec/check.py` refuses a `PROCEDURE_FAILED` of the protocol's that a conversation, a transports'
+  case or an exit expects with a detail other than the empty one (spec 9.0). The generators give
+  that empty detail by default, and the 23 expectations that gave none, in
+  `spec/conversations.json`, `spec/transports.json` and `spec/metrics.json`, now pin it.
+- `docs/maintaining.md`, the maintainer's guide: each gate with its command and its CI job, the
+  order to run them before a push, each workflow of `.claude/workflows/` and the procedure that
+  does the same by hand, the everyday chores and the release step by step.
+
+### Changed
+
+- The spec moves to 0.16.0 (`spec-v0.16.0`), its companion, `spec/debugging.md`, to 0.11.0
+  (`debugging-v0.11.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.6.0
+  (`transcoding-v0.6.0`).
+- Spec 7.6 states what binds a failure's detail: the words the spec gives, which every side MUST
+  write, and elsewhere the words the conformance files give. The details of 2.3, 9.2's step 5 and
+  9.2's step 6 are a MUST, and the comments of `spec/vectors.json` and `spec/conversations.json`
+  say a detail they give is compared.
+- Spec 4.4 orders a `CREDENTIAL` block's checks, once the header's length holds the block (4.3):
+  its scheme, its length, then its padding; 5.2 points to that order.
+- Spec 15.3: a side MUST ping a connection silent for `heartbeat`, where its platform can send a
+  ping, and drop it once that ping goes unanswered for `heartbeat`. Whether it pings amid traffic,
+  and which pong answers, are its platform's: the TypeScript and Rust sides ping every beat and
+  take any pong, the C# side pings on silence and takes the one that echoes its data, an open row
+  of the support matrix. A page's `WebSocket` sends none, and the server's pings stand for its own.
+- Spec 13.4 says how a client reaches a `localhost` name: it judges the name by itself and
+  connects it through its platform's resolver (RFC 6761 §6.3); where that resolver sends a name
+  under `.localhost` on to its DNS server, an application names the loopback by its address.
+- A WebSocket server selects no subprotocol and no extension, whatever its upgrade offers (spec
+  15.2, RFC 6455 §4.2.2): the TypeScript server no longer echoes the first offer; a case of
+  `spec/transports.json` plays it. A client that offered subprotocols takes a 101 only when its
+  `Sec-WebSocket-Protocol` stands in exactly one field line, equal byte for byte to an offer, and
+  one that offered none only without the field, an empty one included (spec 15.2; RFC 6455 §4.1,
+  §11.3.4; WHATWG WebSockets §2.2): the C# client reads the 101's own lines, the Rust client
+  refuses two, and the TypeScript client fails a socket whose `protocol` is none it offered, read
+  from an optional `protocol` of `IWebSocketLike`, which Firefox's `WebSocket` opens in a page. Firefox's also goes on over a 101 that names a
+  subprotocol when it offered none, a platform row of the support matrix.
+- `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
+  side builds, and decision 0013 says the same.
+- `spec/debugging.md` 4.1 states how a trace's duration is read: the difference taken in
+  nanoseconds, rounded to a whole one, then its fraction of a millisecond dropped, as 11.1 reads
+  one; the companion's next version is a minor.
+- `spec/debugging.md` 6.7 names `holds a surrogate alone`, a word holding a surrogate alone, and
+  6.8 refuses a filter given whole in the grammar's names whichever listener it is given to.
+- A field sent in more than one field line is read with its lines joined by ", " (spec 15.12, RFC
+  9110 §5.3): an `Origin`, a `bead-connection-token` and a `Content-Encoding` at the HTTP transport,
+  and a gateway's `origin`, `content-encoding` and three `Sec-Fetch-*` fields (transcoding 5.1,
+  10.1). Every side's HTTP transport refuses a `Content-Type` in more than one field line, 415
+  `type-refused`, as its gateway does. Cases of `spec/transports.json` and `spec/transcoding.json`
+  play them.
+- Spec 17.5 states the order of a `json` payload's refusals: the bytes, `not UTF-8` then `a byte
+  order mark`; the depth, counted over the whole text before any of it is read, the count free to
+  fall below 0; the grammar, of the whole text; then, of `a name twice`, `a surrogate alone` and
+  `a number past a double`, the one the text meets first. Every side's reader refuses a payload of
+  two faults with the same reason, which 23 payloads of `spec/codecs.json` and two conversations of
+  `spec/conversations.json` play. The support matrix's open row on it gives way to one on a
+  gateway's body of two faults, whose three readers refuse with the first fault they meet.
+- The documents are brought to 0.15.0: the records and the READMEs state what holds and where Bead
+  goes, the twins' gate, `tools/flow.mjs finish` and the Rust side's counted call among what holds.
+- The guides for teams are brought to 0.15.0, their code built and run again: the C# resolver
+  catches a command's `TimeoutException`, the page's call waits on its operator past its 5 s
+  default, a client given `protocols` fails its connect by spec 15.2, and the Rust side's gateway
+  is among its parts.
+
+### Removed
+
+- `spec/transports.json`'s `brokers.mqtt.sharedSubscriptions`, which no tool read: the Mosquitto
+  the cases play against offers shared subscriptions, with no setting to turn them off.
+
+### Fixed
+
+- A detail that counts 1 byte says "1 byte", not "1 bytes", on every side: a credit's or a
+  cancel's byte after its header, an opening that holds its whole total, and a payload that goes as
+  a transfer.
+- A report or an error that counts 1 byte says "1 byte" too, on every side: a message too short
+  to be a parcel, what would pass `maximumUnsentBytes` at a broker, a socket or a gateway's
+  response, and a message past an AMQP sender's `max-message-size`, which the Rust side has no
+  binding for.
+- The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
+  so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
+- The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a
+  kind its grammar names none of, whichever listener it is given to, and a filter's word holding a
+  surrogate alone (debugging §6.7, §6.8).
+- The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
+  the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
+- The Rust side's metrics registry adds a call's end, a notification and a subscription dropped
+  with no lookup and no allocation, and a counted call allocates not a byte more than an uncounted
+  one, which a gate counts through a counting allocator (debugging §3.3, §3.4).
+- The C# side judges a `CREDENTIAL` block's scheme and length before its padding, as section 4.4
+  lists them and the other sides do: a block that breaks both is refused in the words of its scheme
+  or its length.
+- The C# side's `WebSocketTransportClientConnectOptions`, `HttpCallerOptions` and `HttpCallOptions`,
+  and the Rust side's `HttpCallerOptions` and `HttpCallOptions`, print whether a credential is set,
+  never the credential.
+- Under `bearer-jwt`, the TypeScript and Rust gateways take one or more spaces after `Bearer` and
+  nothing else, as RFC 6750 §2.1 writes it and the C# side holds: a tab there is answered 401
+  `invalid_request`, where it presented its token.
+- The Rust side reads those six fields with their lines joined, where it read their first line
+  alone: two `Origin` lines, its own first, are refused 403, a connection token in two lines 400,
+  and a `Content-Encoding` of `identity` in two lines 415.
+- The C# side reads an upgrade's `Origin` and each server's `X-Forwarded-For` with their lines
+  joined by ", " (spec 15.12). An empty line is no longer dropped, so an upgrade whose `Origin`
+  holds one is refused 403 `origin-refused`. A client behind a trusted proxy that wrote an empty
+  line is read where the walk ends.
+- The TypeScript side reads those fields from a request's raw lines over HTTP/2 as over HTTP/1.1,
+  where Node kept the first line alone of a `Content-Encoding` over HTTP/2.
+- The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it
+  and the other sides do, on protobuf-es 2.17.0, which its peer range now asks for: `spec/codecs.json`
+  excuses it no longer, and the `proto` differential takes the entry as a seed.
+- The TypeScript side refuses a `json` payload of two faults past the grammar with the one its text
+  meets first, where it checked a name twice last and the leaves in the order its walk popped them.
+- The C# side counts a `json` payload's depth before it parses, so `x` then 65 `[` is `nested
+  past 64`, and meets a fault past the grammar in its text's order, where it met one as its
+  canonical form was written, its names sorted.
+- The Rust side reads a `json` payload's grammar whole before any fault past it, so `[11E400` is
+  `not JSON`; counts its depth below 0, so `]` then 65 `[` is `not JSON`; and meets a name twice
+  at the name that repeats, where it met one as its object closed.
+
 ## [0.14.0] - 2026-11-16
 
 ### Added
@@ -3132,7 +3271,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.14.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.15.0...develop
+[0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0

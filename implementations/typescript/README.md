@@ -1108,9 +1108,10 @@ stream `PROTOCOL_ERROR`, as the C# side does.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP
-literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
-them. `hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
-case (RFC 9110 §4.2.3) as the field carries it, an IDN host in the punycode a browser sends:
+literal, and a localhost name is answered with the loopback by the resolvers RFC 6761 §6.3 asks it
+of, so a page cannot rebind its name to any of them. `hosts` names the hosts it takes besides, each
+a host without its port, compared in any ASCII case (RFC 9110 §4.2.3) as the field carries it, an
+IDN host in the punycode a browser sends:
 `hosts: ['bead.example']` takes `bead.example` and `bead.example:8443` alike. Any other host, an
 empty one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its
 name to the server's address among them. So a server reached by a name names it in `hosts`: a public
@@ -1210,37 +1211,34 @@ const server = createHTTPTransportServer({
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
 `bead-listen: ?1` (an Item of RFC 9651 whose bare item is a Boolean, its parameters ignored), and
-the server's 201 says it back when it takes the
-listen, as a WebSocket server names the subprotocol it chose: a client whose header something on the
-way dropped never listens where it would be refused. It holds for the connection's life, and
-`isTwoWay` says it of the connection; to a client that does not listen, a request that opens a
-subscription is refused, `SUBSCRIPTION_UNSUPPORTED`, a command rejects, and a relay passes no
-request. The server numbers each such envelope into the connection's outbox. A listen, a
-`GET /bead` carrying `bead-after` and `bead-wait`, acknowledges what `bead-after` names, which goes,
-and brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope
-after its length in 4 bytes, the number of the first in `bead-sequence`, the others following one
-by one. Nothing left, the server holds the listen up to its `bead-wait` milliseconds, 0 when left
-out, no longer than `maximumWait` — 30 seconds — and ends it 204; a second listen takes the first's
-place. Each count is an Item of RFC 9651 whose bare item is an Integer of 0 or more, its parameters
-ignored; a listen without `bead-after`, or with a count that does not read so, is refused 400
-`malformed`, and no exchange's query is read. The client reads a batch as it comes and hears each envelope as it
-comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
+the server's 201 says it back when it takes the listen: a client whose header something on the way
+dropped never listens where it would be refused. It holds for the connection's life, and `isTwoWay`
+says it of the connection; to a client that does not listen, a request that opens a subscription is
+refused, `SUBSCRIPTION_UNSUPPORTED`, a command rejects, and a relay passes no request. The server
+numbers each such envelope into the connection's outbox. A listen, a `GET /bead` carrying
+`bead-after` and `bead-wait`, acknowledges what `bead-after` names, which goes, and brings back all
+that is left in a batch of type `application/prs.bead-batch`: each envelope after its length in 4
+bytes, the number of the first in `bead-sequence`, the others following one by one. Nothing left,
+the server holds the listen up to its `bead-wait` milliseconds, 0 when left out, no longer than
+`maximumWait` — 30 seconds — and ends it 204; a second listen takes the first's place. Each count is
+an Item of RFC 9651 whose bare item is an Integer of 0 or more, its parameters ignored; a listen
+without `bead-after`, or with a count that does not read so, is refused 400 `malformed`, and no
+exchange's query is read. The client reads a batch as it comes and hears each envelope as it comes
+whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
 twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, drops its connection, reported on
-`error` as it closes, naming the bound and its value; a paced subscription queues on the server
-what its client has not credited, so that never reaches the outbox. The client listens from its
-connect on, asking a `wait` of 25 seconds; a listen lost is listened again from where it was, as
-EventSource reconnects:
-at once, then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of
-it, so the clients one restart dropped come back apart. A listen that reaches the server ends the
-losses; a short outage costs nothing — the same connection, its session, its subscriptions, and
+`error` as it closes, naming the bound and its value; a paced subscription queues on the server what
+its client has not credited, so that never reaches the outbox. The client listens from its connect
+on, asking a `wait` of 25 seconds; a listen lost is listened again from where it was, as EventSource
+reconnects: at once, then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and
+all of it, so the clients one restart dropped come back apart. A listen that reaches the server ends
+the losses; a short outage costs nothing — the same connection, its session, its subscriptions, and
 what came meanwhile, in order. Past `inactivityTimeout` of losses — 5 minutes, the server's own —
-the client counts the connection lost; the server's marked 404 says it sooner.
-A listen held is an exchange under way, so a client that listens is never idle; `pause` spaces the
-listens that bring nothing, and must stay under the server's idleness. Long polling, rather than a
-response held open for ever: no heartbeat, nothing an intermediary buffers, and a batch lost comes
-again.
+the client counts the connection lost; the server's marked 404 says it sooner. A listen held is an
+exchange under way, so a client that listens is never idle; `pause` spaces the listens that bring
+nothing, and must stay under the server's idleness. Long polling, rather than a response held open
+for ever: no heartbeat, nothing an intermediary buffers, and a batch lost comes again.
 
 Nor does HTTP carry a transfer: a request's body is in before its answer goes, so no
 credit could come back, and `createHTTPServer` and `createHTTPClient` fix the limits — no transfer

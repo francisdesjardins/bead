@@ -1327,7 +1327,10 @@ export interface IDebugFilter {
   directions?: readonly DebugDirection[] | undefined;
   exclude?: readonly string[] | undefined;
   include?: readonly string[] | undefined;
-  /** The kinds of envelope a router's `debug` tells of; a call's listener does not ask. */
+  /**
+   * The kinds of envelope a router's `debug` tells of; a call's listener does not ask, but refuses
+   * one the grammar names none of, as every listener does.
+   */
   kinds?: readonly EnvelopeKind[] | undefined;
   types?: readonly DebugType[] | undefined;
 }

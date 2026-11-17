@@ -17,8 +17,8 @@ public sealed record WebSocketTransportClientOptions
     public int? MaximumMessageBytes { get; init; }
 
     /// <summary>
-    /// How often the connection is pinged, and how long its pong may take: a server gone without a
-    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// How long the connection may stay silent before it is pinged, and how long its pong may take:
+    /// a server gone without a word ends in a close rather than never (spec 15.3). From 1 to 2³¹ − 1 milliseconds, rounded to the
     /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
     /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
     /// The platform's, on the real clock.
@@ -128,11 +128,20 @@ public sealed record WebSocketTransportClientConnectOptions
     /// connect's alone: a reconnection replays the rest of these options, never this token.
     /// </summary>
     public CancellationToken CancellationToken { get; init; }
+
+    // every member as the compiler writes it, but its credential and its provider, of which whether one is set
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential reaches no log, no exception's message and no debugger
+        builder.Append(CultureInfo.InvariantCulture, $"Host = {Host}, Port = {Port}, Secured = {Secured}, Pathname = {Pathname}, Protocols = {Protocols}, Timeout = {Timeout}, Credential = {(Credential is null ? "none" : "set")}, CredentialProvider = {(CredentialProvider is null ? "none" : "set")}, CancellationToken = {CancellationToken}");
+
+        return true;
+    }
 }
 
 /// <summary>
 /// A transport client over one WebSocket connection: one envelope per binary message, what goes out
-/// in order, one message at a time, and the connection pinged every
+/// in order, one message at a time, and the connection pinged once silent for
 /// <see cref="WebSocketTransportClientOptions.Heartbeat"/>. It goes from
 /// <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed, and
 /// connects again once Closed — or reconnects, with the options of its last connect.
@@ -724,6 +733,30 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             });
     }
 
+    // whether its upgrade's answer names its subprotocol as the client takes it (spec 15.2): in
+    // exactly one field line, equal to an offer byte for byte (RFC 6455 §4.1, §11.3.4); offered
+    // none, in no field line at all, an empty one included
+    private static bool TakesItsSubprotocol(ClientWebSocket socket, IReadOnlyList<string>? offered)
+    {
+        var lines = (socket.HttpResponseHeaders ?? new Dictionary<string, IEnumerable<string>>())
+            .Where((field) =>
+            {
+                return string.Equals(field.Key, "Sec-WebSocket-Protocol", StringComparison.OrdinalIgnoreCase);
+            })
+            .SelectMany((field) =>
+            {
+                return field.Value;
+            })
+            .ToList();
+
+        if (offered is not { Count: > 0 })
+        {
+            return lines.Count == 0;
+        }
+
+        return lines.Count == 1 && offered.Contains(lines[0], StringComparer.Ordinal);
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -967,6 +1000,16 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             if (NamesAnExtension(socket))
             {
                 throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names an extension never offered (RFC 6455 §4.1)");
+            }
+
+            // ! ClientWebSocket opens on a 101 that names none of the subprotocols it offered, matches
+            // one in any case, reads one of two lines, and opens on an empty one when it offered
+            // none: the client reads the 101's own lines and fails the connection (spec 15.2)
+            if (!TakesItsSubprotocol(socket, options.Protocols))
+            {
+                throw new WebSocketException(WebSocketError.HeaderError, options.Protocols is { Count: > 0 }
+                    ? "the server's upgrade names none of the subprotocols offered in one field line (spec 15.2)"
+                    : "the server's upgrade names a subprotocol, none offered (spec 15.2)");
             }
 
             lock (_gate)

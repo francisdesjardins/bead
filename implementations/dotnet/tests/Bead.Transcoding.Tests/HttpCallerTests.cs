@@ -49,6 +49,26 @@ public sealed class HttpCallerTests
     }
 
     [Fact]
+    public void Prints_no_authorization_in_its_options()
+    {
+        var given = new HttpCallerOptions { Authorization = "Bearer good", MaximumBodyBytes = 64 };
+
+        Assert.DoesNotContain("good", given.ToString(), StringComparison.Ordinal);
+        Assert.Equal("HttpCallerOptions { Handler = , Authorization = set, MaximumBodyBytes = 64 }", given.ToString());
+        Assert.Contains("Authorization = none", new HttpCallerOptions().ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Prints_no_authorization_in_a_call_s_options()
+    {
+        var given = new HttpCallOptions { Authorization = "Bearer good" };
+
+        Assert.DoesNotContain("good", given.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith("HttpCallOptions { Authorization = set, WithoutAuthorization = False, CancellationToken = ", given.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Authorization = none, WithoutAuthorization = True", new HttpCallOptions { WithoutAuthorization = true }.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Refuses_a_given_handler_that_would_follow_a_redirect_AllowAutoRedirect_named_before_any_exchange()
     {
         using var sockets = new SocketsHttpHandler();

@@ -200,7 +200,7 @@ public sealed class BrokerTransportServerTests
             },
             "its CLOSE, reported");
         Assert.Equal([(BrokerParcelKinds.Close, 1UL, (int?)4000)], heard);
-        Assert.Equal([("a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 bytes", "")], told);
+        Assert.Equal([("a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 byte", "")], told);
         Assert.Equal((0L, 0L), (server.Gauges().Counts["connections"], server.Gauges().Counts["halfOpen"]));
     }
 

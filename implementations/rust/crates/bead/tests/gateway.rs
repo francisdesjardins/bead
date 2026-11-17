@@ -1768,6 +1768,31 @@ async fn presents_the_authorization_field_elsewhere_or_as_a_jwt_under_bearer_jwt
     jwt.dispose().await.expect("disposed");
 }
 
+// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_401_to_a_tab_after_bearer_its_separator_one_or_more_spaces() {
+    let jwt = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.authorization = Some(GatewayAuthorization::BearerJwt);
+        },
+        true,
+    ))
+    .await;
+    let tab = who_am_i(jwt.port, Some("Bearer	a.b.c".to_owned())).await;
+
+    assert_eq!(
+        (tab.head.status, field(&tab, "www-authenticate")),
+        (401, Some("Bearer error=\"invalid_request\""))
+    );
+
+    // two spaces present the token, which a server with no JWT verifier refuses
+    let spaces = who_am_i(jwt.port, Some("Bearer  a.b.c".to_owned())).await;
+
+    assert_eq!(spaces.head.status, 500);
+
+    jwt.dispose().await.expect("disposed");
+}
+
 // a request of `method` to `path` with the fetch metadata given, each field where it holds a value
 // a request's method, its path, and its fetch metadata, each field where it holds a value
 struct Fetch<'a> {
@@ -4434,7 +4459,7 @@ async fn writes_a_comment_on_a_quiet_stream_each_heartbeat_on_its_clock_and_drop
     until(|| !locked(&reported).is_empty()).await;
     assert_eq!(
         *locked(&reported),
-        ["the response is dropped: maximumUnsentBytes 1 bytes"]
+        ["the response is dropped: maximumUnsentBytes 1 byte"]
     );
 
     bounded.dispose().await.expect("disposed");
@@ -4462,7 +4487,7 @@ async fn counts_pending_bytes_with_the_write_at_the_maximum_unsent_bytes_edge() 
             until(|| !locked(&reported).is_empty()).await;
             assert_eq!(
                 *locked(&reported),
-                ["the response is dropped: maximumUnsentBytes 1 bytes"]
+                ["the response is dropped: maximumUnsentBytes 1 byte"]
             );
         } else {
             assert!(received > 0, "written");
@@ -4873,7 +4898,7 @@ async fn reports_one_send_bound_drop_when_consecutive_stream_frames_exceed_the_b
     assert_eq!(scripted.requests(), 1, "one call");
     assert_eq!(
         scripted.reported(),
-        ["the response is dropped: maximumUnsentBytes 1 bytes"],
+        ["the response is dropped: maximumUnsentBytes 1 byte"],
         "one drop, reported once"
     );
 
@@ -5236,7 +5261,7 @@ async fn bounds_every_response_body_by_maximum_unsent_bytes_before_writing() {
         until(|| !locked(&reported).is_empty()).await;
         assert_eq!(
             *locked(&reported),
-            ["the response is dropped: maximumUnsentBytes 1 bytes"],
+            ["the response is dropped: maximumUnsentBytes 1 byte"],
             "{kind}"
         );
 

@@ -427,7 +427,9 @@ export const createWebSocketTransportClient = (
                     socket =
                       opened =
                       client.socket =
-                        new WebSocket(url, protocols, {
+                        // ! `?? []`: Chromium offers "undefined" for an `undefined` beside the
+                        // options, a subprotocol no server selects (spec 15.2)
+                        new WebSocket(url, protocols ?? [], {
                           closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
                           maxPayload,
                           // ! no permessage-deflate offer, as the C# client offers none: a third-party
@@ -484,6 +486,23 @@ export const createWebSocketTransportClient = (
                   socket.onopen = () => {
                     if (ended || signal?.aborted === true) {
                       client[dispose]();
+                      return;
+                    }
+
+                    // ! a page's WebSocket, in Firefox, opens on a 101 that names none of the
+                    // subprotocols it offered: the connect fails a socket whose protocol is none
+                    // of them, compared byte for byte (spec 15.2), its socket closed as it fails
+                    if (
+                      protocols !== undefined &&
+                      protocols.length > 0 &&
+                      socket.protocol !== undefined &&
+                      !protocols.includes(socket.protocol)
+                    ) {
+                      reject(
+                        new ConnectError(
+                          "the server's upgrade names none of the subprotocols offered (spec 15.2)"
+                        )
+                      );
                       return;
                     }
 

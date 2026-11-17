@@ -183,10 +183,10 @@ const takenOf = <Value>({ named, what }: ISelected<Value>): string => {
 };
 
 /** The kinds `filter` keeps, each checked to be one, named for a refusal in the grammar's names. */
-const kindsOf = (filter: IDebugFilter): EnvelopeKind[] => {
+const kindsOf = (kinds: readonly EnvelopeKind[]): EnvelopeKind[] => {
   const known = [...KIND_NAMES.values()];
 
-  return (filter.kinds ?? []).map((kind) => {
+  return kinds.map((kind) => {
     if (!known.includes(kind)) {
       throw new ProgrammerError(
         `a debug filter takes a kind among ${[...KIND_NAMES.keys()].join(', ')}, not ${quotedOf(kind)}`
@@ -197,8 +197,13 @@ const kindsOf = (filter: IDebugFilter): EnvelopeKind[] => {
   });
 };
 
-/** Whether a call's event passes `filter`: its direction, its type, its procedure's name. */
-const callPredicateOf = (filter: IDebugFilter): ((event: IDebugEvent) => boolean) => {
+/**
+ * The directions, the types and the kinds `filter` keeps, each list read once and each value
+ * checked to be one of the grammar's, whichever listener it is given to (debugging 6.8).
+ */
+const selectorsOf = (
+  filter: IDebugFilter
+): { directions: DebugDirection[]; kinds: EnvelopeKind[]; types: DebugType[] } => {
   const directions = valuesOf(filter.directions ?? [], {
     known: DIRECTIONS,
     names: `direction among ${DIRECTIONS.join(', ')}`,
@@ -207,6 +212,13 @@ const callPredicateOf = (filter: IDebugFilter): ((event: IDebugEvent) => boolean
     known: TYPES,
     names: `type among ${TYPES.join(', ')}`,
   });
+
+  return { directions, kinds: kindsOf(filter.kinds ?? []), types };
+};
+
+/** Whether a call's event passes `filter`: its direction, its type, its procedure's name. */
+const callPredicateOf = (filter: IDebugFilter): ((event: IDebugEvent) => boolean) => {
+  const { directions, types } = selectorsOf(filter);
   const include = (filter.include ?? []).map(patternOf);
   const exclude = (filter.exclude ?? []).map(patternOf);
 
@@ -227,11 +239,7 @@ const callPredicateOf = (filter: IDebugFilter): ((event: IDebugEvent) => boolean
 
 /** Whether an envelope's event passes `filter`: its direction and its kind; it carries no name. */
 const envelopePredicateOf = (filter: IDebugFilter): ((event: IEnvelopeDebug) => boolean) => {
-  const directions = valuesOf(filter.directions ?? [], {
-    known: DIRECTIONS,
-    names: `direction among ${DIRECTIONS.join(', ')}`,
-  });
-  const kinds = kindsOf(filter);
+  const { directions, kinds } = selectorsOf(filter);
 
   return ({ direction, header }) => {
     return (
@@ -331,7 +339,7 @@ const selectedOf = <Value>(
  * case. Each list keeps the order of its words, a value given twice kept twice. Throws a
  * {@link ProgrammerError} for the first word that does not hold, naming it, or its value, as it was
  * written: a selector empty or with a value left empty, a value that names none of its letter's, a
- * word holding a parenthesis that is no selector.
+ * word holding a parenthesis that is no selector, a word holding a surrogate alone.
  *
  * @example
  * import { parseDebugFilter } from '@francisdesjardins/bead/service-manager';
@@ -373,6 +381,8 @@ export const parseDebugFilter = (spec: string): IDebugFilter => {
       throw new ProgrammerError(
         `a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not ${quotedOf(word)}`
       );
+    } else if (!word.isWellFormed()) {
+      throw new ProgrammerError(`a debug filter holds no surrogate alone, not ${quotedOf(word)}`);
     } else if (word.startsWith('-')) {
       exclude.push(word.slice(1));
     } else {
@@ -390,7 +400,8 @@ export const parseDebugFilter = (spec: string): IDebugFilter => {
  * changed; a function that gives none keeps every event, as an empty filter does. The filter given
  * at first must hold, or this throws a {@link ProgrammerError}; one that stops holding later — or a
  * function that throws — leaves the last that held in place, reported to no one, since a trace
- * never fails a call. A filter given whole, not as a string, is refused in the grammar's names.
+ * never fails a call. A filter given whole, not as a string, is refused in the grammar's names, its
+ * kinds among them, though a call's listener does not ask them.
  *
  * @example
  * import { createServiceManager, filterDebug } from '@francisdesjardins/bead/service-manager';
@@ -421,8 +432,9 @@ export const filterDebug = (
 /**
  * `listener`, hearing only the envelopes a router's `debug` tells of that its filter keeps: their
  * direction and their kind. An envelope carries no procedure's name, and a call's type is the
- * services': names and types are not asked, so one spec serves both listeners. Given as a
- * function, and at first, the filter behaves as {@link filterDebug}'s.
+ * services': names and types are not asked, so one spec serves both listeners, and a filter given
+ * whole is refused in the grammar's names, its types among them. Given as a function, and at first,
+ * the filter behaves as {@link filterDebug}'s.
  *
  * @example
  * import { createRouterClient, filterEnvelopeDebug } from '@francisdesjardins/bead/router-client';

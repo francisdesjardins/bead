@@ -5,7 +5,7 @@
     "Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.",
     "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
     "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
-    "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
+    "A refusal names the protocol code a reader answers with; its detail, where given, is the detail every side writes, compared (spec 7.6).",
     "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
@@ -19,7 +19,7 @@
     "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
     "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
-  "specVersion": "0.15.0",
+  "specVersion": "0.16.0",
   "headers": [
     {
       "name": "a request",
@@ -1357,6 +1357,28 @@
       "detail": "a credential's padding is zero bytes"
     },
     {
+      "name": "an opaque token of 15 bytes whose padding is not zero, refused for its length",
+      "clauses": [
+        "4.4",
+        "7.6",
+        "5.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  FF",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 15"
+    },
+    {
+      "name": "NONE of 1 byte on a request, whose padding is not zero, refused for its scheme",
+      "clauses": [
+        "4.4",
+        "7.6",
+        "5.2"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 00 00 01  01  FF FF FF",
+      "code": 1,
+      "detail": "a request presents a credential, never NONE"
+    },
+    {
       "name": "CREDENTIAL on a request whose message ends before its block",
       "clauses": [
         "4.3",
@@ -1747,7 +1769,7 @@
       ],
       "bytes": "A1 16 00 02  00 00 00 05 | 00",
       "code": 1,
-      "detail": "a cancel carries no payload, not 1 bytes"
+      "detail": "a cancel carries no payload, not 1 byte"
     },
     {
       "name": "a chunk without a byte",
@@ -1765,7 +1787,7 @@
       ],
       "bytes": "A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01",
       "code": 1,
-      "detail": "a credit carries no payload, not 1 bytes"
+      "detail": "a credit carries no payload, not 1 byte"
     },
     {
       "name": "an envelope past its bound",

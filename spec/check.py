@@ -15,7 +15,8 @@ spec/debugging-units.txt and spec/transcoding-units.txt list every unit of each,
 section's lead among them, cited or the reason none cites it, each reason held by its rule, with the
 sha256 of its text, which moves only where --write-units names the unit; an advance follows a timer
 armed, and in the transports' cases ends on its due at the latest; a debug filter keeps fixtures the
-file has; an exit counts after a step its server takes;
+file has; an exit counts after a step its server takes; a PROCEDURE_FAILED of the protocol's that a
+conversation, a transports' case or an exit expects gives the empty detail (9.0);
 each exposition the metrics pin reads as 0.0.4, its families in the order of their names under the
 companion's help and type, its buckets rising under the companion's bounds, each le OpenMetrics'
 canonical number for its bound, each _count the sum of its handled counts, none started below
@@ -582,6 +583,29 @@ for response in documents['transports']['responses']:
     if response['name'] in responses:
         problems.append(f'transports: two responses named {response["name"]!r}')
     responses.add(response['name'])
+
+
+def failures_in(value):
+    """Every failure a case's steps expect, however deep they hold it."""
+    if isinstance(value, dict):
+        if isinstance(value.get('failure'), dict):
+            yield value['failure']
+
+        for member in value.values():
+            yield from failures_in(member)
+    elif isinstance(value, list):
+        for item in value:
+            yield from failures_in(item)
+
+
+# a PROCEDURE_FAILED of the protocol's carries no detail (9.0): each case that expects one gives its
+# empty detail, which every side compares
+for group in ('conversations', 'transports', 'exits'):
+    for entry in named[group]:
+        for failure in failures_in(entry['steps']):
+            if failure.get('code') == 64 and failure.get('scope') == 0 and failure.get('detail') != '':
+                problems.append(f"{group}: {entry['name']!r} expects a PROCEDURE_FAILED of the protocol's with "
+                                f"the detail {failure.get('detail')!r}, where 9.0 has it carry none: ''")
 
 # an entry that crosses a row of the matrix is named by that row, between backticks, as a word of its
 # own: a name found inside another word, or inside the row's title, names nothing

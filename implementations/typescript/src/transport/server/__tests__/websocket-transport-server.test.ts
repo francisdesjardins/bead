@@ -1803,14 +1803,21 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
       fake.instances[0]?.emit('listening');
       await starting;
 
-      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as {
+      const {
+        handleProtocols,
+        server: given,
+        ...options
+      } = (fake.instances[0]?.options ?? {}) as {
         closeTimeout: number;
+        handleProtocols: () => false;
         maxPayload: number;
         server: Server;
       };
 
-      // the transport's own HTTP server, which judges each request before ws reads it
+      // the transport's own HTTP server, which judges each request before ws reads it; no
+      // subprotocol selected (spec 15.2)
       expect(options).toEqual({ closeTimeout: CLOSE_TIMEOUT, maxPayload: expected });
+      expect(handleProtocols()).toBe(false);
       expect(given).toBeInstanceOf(Server);
       // the scripted bind opens no TCP socket, even once Node can finish a real listen
       await new Promise<void>((resolve) => {

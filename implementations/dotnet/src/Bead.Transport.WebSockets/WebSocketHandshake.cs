@@ -339,7 +339,7 @@ internal static class WebSocketHandshake
         // its own origin by the very Host * did not check
         var own = HostsAndOrigins.OwnAuthorityOf(authority, options.Hosts);
 
-        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (own, options.Origins)))
+        if (!HostsAndOrigins.IsTakenOrigin(FieldLines.JoinedOf(origin), (own, options.Origins)))
         {
             return OriginRefused;
         }

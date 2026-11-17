@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -18,6 +19,15 @@ public sealed record HttpCallerOptions
 
     /// <summary>The largest unary body or event, in bytes; the gateway's body bound by default.</summary>
     public int MaximumBodyBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
+
+    // every member as the compiler writes it, but its authorization, of which whether one is set
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential reaches no log, no exception's message and no debugger
+        builder.Append(CultureInfo.InvariantCulture, $"Handler = {Handler}, Authorization = {(Authorization is null ? "none" : "set")}, MaximumBodyBytes = {MaximumBodyBytes}");
+
+        return true;
+    }
 }
 
 /// <summary>A call's authorization and cancellation; WithoutAuthorization overrides either field.</summary>
@@ -33,6 +43,15 @@ public sealed record HttpCallOptions
     public CancellationToken CancellationToken { get; init; }
 
     internal bool Stream { get; init; }
+
+    // every member as the compiler writes it, but its authorization, of which whether one is set
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential reaches no log, no exception's message and no debugger
+        builder.Append(CultureInfo.InvariantCulture, $"Authorization = {(Authorization is null ? "none" : "set")}, WithoutAuthorization = {WithoutAuthorization}, CancellationToken = {CancellationToken}");
+
+        return true;
+    }
 }
 
 /// <summary>A stream's result or notification, with its kind explicit.</summary>

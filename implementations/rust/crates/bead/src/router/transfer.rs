@@ -4,7 +4,7 @@
 use bytes::{Bytes, BytesMut};
 
 use crate::constants::{ProtocolCode, RouterSide};
-use crate::failure::Failure;
+use crate::failure::{Failure, byte_count_of};
 
 /// One chunk to send: its bytes, where they start in the whole payload, and whether they end it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +155,8 @@ impl IncomingTransfer {
         // an opening that holds the whole payload opens no transfer
         if opening_length >= total {
             return Err(invalid(format!(
-                "an opening of {opening_length} bytes holds its whole total of {total}"
+                "an opening of {} holds its whole total of {total}",
+                byte_count_of(opening_length)
             )));
         }
 

@@ -20,14 +20,15 @@ HTTP's `Via` lists the intermediaries a message crossed (RFC 9110 §7.6.3).
 **A relay terminates each leg**, as a gateway does for what stands behind it. A request that names a
 destination is asked the relay's admission on its header, then whether its destination exists, then
 the smaller of both legs' limits; every refusal falls on the opening, and a requester not admitted
-learns only whether the relay has any destination. It then goes on to its target as a request of the
-relay's own, its payload's bytes undecoded, under a call id of that leg. The answer comes back under
-the requester's call id: a result as it came, a failure of the target's one relay more.
+learns only whether the relay has any destination. It then goes on to its destination as a request
+of the relay's own, its payload's bytes undecoded, under a call id of that leg. The answer comes
+back under the requester's call id: a result as it came, a failure of the destination's one relay
+more.
 
 **What the relay raises itself says how far the request went**, as every code does:
 `DESTINATION_UNREACHABLE` (17) while the relay's transport was never handed the request, or refused
-it, so nothing was tried, and `DESTINATION_LOST` (65) once that transport had it and the target was
-lost, the procedure run or not: a gateway's 503 against its 502 (`spec/transcoding.md`'s table),
+it, so nothing was tried, and `DESTINATION_LOST` (65) once that transport had it and the destination
+was lost, the procedure run or not: a gateway's 503 against its 502 (`spec/transcoding.md`'s table),
 and what gRPC's retry rules turn on. Those failures name no address behind the relay: why leg B
 failed is reported where the relay runs.
 
@@ -66,14 +67,15 @@ the relay.
 **A requester behind a relay shares its leg B's session only where its admission says so.** Every
 requester shares leg B's call ids and transfer places. A server's relay admits by default only a
 credential it forwards, `requireCredential`: one that presents none or `OPAQUE` is refused
-`ACCESS_DENIED`, its detail naming the default, since leg A's session opens nothing at the target,
-and a relay that lent leg B's session to any session of leg A's would be the deputy that lends its
-own authority (Hardy, 1988; [CWE-441](https://cwe.mitre.org/data/definitions/441.html)). Sharing it
-is written: a `beforeRoute` of the application's, which sees the procedure and the destination and
-checks the one against the requester's session; or `shareLegBSession`, which lends it to every
-session at every destination, and is named for it. A requester so admitted shares leg B's session at
-the target, which sees the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the
-target in the session its own credential resolves to, which the target verifies
+`ACCESS_DENIED`, its detail naming the default, since leg A's session opens nothing at the
+destination, and a relay that lent leg B's session to any session of leg A's would be the deputy
+that lends its own authority (Hardy, 1988;
+[CWE-441](https://cwe.mitre.org/data/definitions/441.html)). Sharing it is written: a `beforeRoute`
+of the application's, which sees the procedure and the destination and checks the one against the
+requester's session; or `shareLegBSession`, which lends it to every session at every destination,
+and is named for it. A requester so admitted shares leg B's session at the destination, which sees
+the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the destination in the session
+its own credential resolves to, which the destination verifies
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 **A client behind a relay subscribes to nothing**: what it would be notified of stops at the relay,

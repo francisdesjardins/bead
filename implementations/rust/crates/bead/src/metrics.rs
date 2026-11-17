@@ -209,10 +209,10 @@ const DROPPED: Family = (
 );
 
 // a slot of a call family's handled series: its outcome, and its code when it has one
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct Slot {
     outcome: &'static str,
-    code: Option<String>,
+    code: Option<&'static str>,
 }
 
 // the handled series a call family's series holds, in exposition order
@@ -226,56 +226,73 @@ enum Layout {
     Made,
 }
 
-// every code, section 8's 23 by their numbers, then application and _OTHER
-fn every_code() -> Vec<(CallEnding, String)> {
-    let mut codes: Vec<(CallEnding, String)> = ProtocolCode::named()
-        .into_iter()
-        .map(|code| {
-            (
-                CallEnding::Failure(code),
-                code.name().unwrap_or_default().to_owned(),
-            )
-        })
-        .collect();
-
-    codes.push((CallEnding::Application, "application".to_owned()));
-    codes.push((CallEnding::Other, "_OTHER".to_owned()));
-
-    codes
-}
-
+// * a slot is reached by its place in fixed tables, with no allocation (spec/debugging.md 3.3):
+// result, a failure under each of the layout's codes, application, _OTHER where the layout holds
+// it, timeout where it is made, then cancelled, closed and error
 impl Layout {
-    fn codes(self) -> Vec<(CallEnding, String)> {
+    // the codes its failures are counted under by name: section 8's 23, or a procedure's answered
+    // ones
+    fn codes(self) -> &'static [ProtocolCode] {
         match self {
-            Self::Answered => {
-                let mut codes: Vec<(CallEnding, String)> = ANSWERED_CODES
-                    .iter()
-                    .map(|&code| {
-                        (
-                            CallEnding::Failure(code),
-                            code.name().unwrap_or_default().to_owned(),
-                        )
-                    })
-                    .collect();
-
-                codes.push((CallEnding::Application, "application".to_owned()));
-
-                codes
-            }
-            Self::AnsweredOther | Self::Made => every_code(),
+            Self::Answered => &ANSWERED_CODES,
+            Self::AnsweredOther | Self::Made => &ProtocolCode::NAMED,
         }
     }
 
+    fn holds_other(self) -> bool {
+        self != Self::Answered
+    }
+
+    // its application slot, after result and each code's
+    fn application(self) -> usize {
+        self.codes().len().saturating_add(1)
+    }
+
+    // its _OTHER slot, where it holds one
+    fn other(self) -> Option<usize> {
+        self.holds_other()
+            .then(|| self.application().saturating_add(1))
+    }
+
+    // its timeout slot, where it holds one
+    fn timeout(self) -> Option<usize> {
+        (self == Self::Made).then(|| {
+            self.other()
+                .unwrap_or_else(|| self.application())
+                .saturating_add(1)
+        })
+    }
+
+    // how many slots it holds: cancelled, closed and error last
+    fn count(self) -> usize {
+        self.timeout()
+            .or_else(|| self.other())
+            .unwrap_or_else(|| self.application())
+            .saturating_add(4)
+    }
+
+    // its slots, in exposition order
     fn slots(self) -> Vec<Slot> {
         let mut slots = vec![Slot {
             outcome: "result",
             code: None,
         }];
 
-        slots.extend(self.codes().into_iter().map(|(_, code)| Slot {
+        slots.extend(self.codes().iter().map(|code| Slot {
             outcome: "failure",
-            code: Some(code),
+            code: code.name(),
         }));
+        slots.push(Slot {
+            outcome: "failure",
+            code: Some("application"),
+        });
+
+        if self.holds_other() {
+            slots.push(Slot {
+                outcome: "failure",
+                code: Some("_OTHER"),
+            });
+        }
 
         if self == Self::Made {
             slots.push(Slot {
@@ -298,32 +315,29 @@ impl Layout {
     // holds, _OTHER, else PROCEDURE_FAILED (spec/debugging.md 9.8); a timeout on a call answered,
     // as an error
     fn slot_of(self, ending: CallEnding) -> usize {
+        let error = self.count().saturating_sub(1);
         let codes = self.codes();
-        let at = |wanted: CallEnding| {
+        let at = |wanted: ProtocolCode| {
             codes
                 .iter()
-                .position(|(code, _)| *code == wanted)
+                .position(|&code| code == wanted)
                 .map(|index| index.saturating_add(1))
         };
-        let count = self.slots().len();
-        let error = count.saturating_sub(1);
+        let other = || {
+            self.other()
+                .or_else(|| at(ProtocolCode::PROCEDURE_FAILED))
+                .unwrap_or(error)
+        };
 
         match ending {
             CallEnding::Result => 0,
-            CallEnding::Timeout => {
-                if self == Self::Made {
-                    codes.len().saturating_add(1)
-                } else {
-                    error
-                }
-            }
+            CallEnding::Timeout => self.timeout().unwrap_or(error),
             CallEnding::Cancelled => error.saturating_sub(2),
             CallEnding::Closed => error.saturating_sub(1),
             CallEnding::Error => error,
-            CallEnding::Application | CallEnding::Other | CallEnding::Failure(_) => at(ending)
-                .or_else(|| at(CallEnding::Other))
-                .or_else(|| at(CallEnding::Failure(ProtocolCode::PROCEDURE_FAILED)))
-                .unwrap_or(error),
+            CallEnding::Application => self.application(),
+            CallEnding::Other => other(),
+            CallEnding::Failure(code) => at(code).unwrap_or_else(other),
         }
     }
 }
@@ -347,7 +361,7 @@ impl CallData {
             layout,
             buckets: vec![0; LES.len()],
             count: 0,
-            handled: vec![0; layout.slots().len()],
+            handled: vec![0; layout.count()],
             started: 0,
             sum_seconds: 0,
             sum_microseconds: 0,
@@ -412,17 +426,27 @@ impl CallType {
     }
 }
 
+// a subscription dropped is counted with none, then under each of section 8's codes, application
+// and _OTHER
+const DROPPED_SLOTS: usize = ProtocolCode::NAMED.len().saturating_add(3);
+
+// a procedure's notification series: its subscriptions dropped, none first, then under every code;
+// its notifications heard, at the side that hears; its sent and failed, at the side that notifies
+#[derive(Debug)]
+struct Notified {
+    dropped: [u64; DROPPED_SLOTS],
+    heard: Option<u64>,
+    sent: Option<(u64, u64)>,
+}
+
 // a procedure the registry holds: its one name, and its series in each family, by their place in
-// the registry's arena
+// the registry's arenas
 #[derive(Debug, Default)]
 struct Entry {
     name: String,
     made: BTreeMap<CallType, usize>,
     answered: BTreeMap<CallType, usize>,
-    // its subscriptions dropped, none first, then under every code
-    dropped: Option<Vec<u64>>,
-    heard: Option<u64>,
-    sent: Option<(u64, u64)>,
+    notified: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -437,6 +461,8 @@ struct State {
     names: HashMap<u16, Vec<(String, u16)>>,
     // every call series, and _OTHER's in each role, by type
     calls: Vec<CallData>,
+    // every procedure's notification series, each reached by its place, as a call series is
+    notifications: Vec<Notified>,
     other_made: BTreeMap<CallType, usize>,
     other_answered: BTreeMap<CallType, usize>,
 }
@@ -537,6 +563,26 @@ impl State {
         self.calls.push(CallData::new(layout));
         self.calls.len().saturating_sub(1)
     }
+
+    // the place of the notification series of the procedure at `key`, made at 0 as its first
+    // declaration that notifies or hears admits it
+    fn notified_at(&mut self, key: (u16, u16)) -> usize {
+        let made = self.notifications.len();
+        let at = self
+            .entries
+            .get_mut(&key)
+            .map_or(made, |entry| *entry.notified.get_or_insert(made));
+
+        if at == made {
+            self.notifications.push(Notified {
+                dropped: [0; DROPPED_SLOTS],
+                heard: None,
+                sent: None,
+            });
+        }
+
+        at
+    }
 }
 
 /// A registry of Bead's metrics, which a router counts into once given it; one given to two
@@ -601,21 +647,21 @@ impl ProcedureSeries {
 #[derive(Clone)]
 pub struct NotificationSeries {
     state: Arc<Mutex<State>>,
-    key: (u16, u16),
+    at: usize,
 }
 
 impl fmt::Debug for NotificationSeries {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NotificationSeries")
-            .field("key", &self.key)
+            .field("at", &self.at)
             .finish_non_exhaustive()
     }
 }
 
 // the slot a subscription dropped by a failure counts in: its code's, or none's
 fn drop_slot_of(failure: Option<(NonZeroU16, FailureScope)>) -> usize {
-    let codes = ProtocolCode::named();
+    let codes = &ProtocolCode::NAMED;
 
     match failure.map(|(code, scope)| CallEnding::of_failure(code, scope)) {
         None => 0,
@@ -633,12 +679,13 @@ fn drop_slot_of(failure: Option<(NonZeroU16, FailureScope)>) -> usize {
 impl NotificationSeries {
     #[cfg(test)]
     pub(crate) fn is_same(&self, other: &Self) -> bool {
-        self.key == other.key && Arc::ptr_eq(&self.state, &other.state)
+        self.at == other.at && Arc::ptr_eq(&self.state, &other.state)
     }
 
-    fn with<F: FnOnce(&mut Entry)>(&self, change: F) {
-        if let Some(entry) = locked(&self.state).entries.get_mut(&self.key) {
-            change(entry);
+    // * its series reached by its place, with no lookup (spec/debugging.md 3.3)
+    fn with<F: FnOnce(&mut Notified)>(&self, change: F) {
+        if let Some(notified) = locked(&self.state).notifications.get_mut(self.at) {
+            change(notified);
         }
     }
 
@@ -647,12 +694,8 @@ impl NotificationSeries {
     pub fn dropped(&self, failure: Option<&Failure>) {
         let slot = drop_slot_of(failure.map(|failure| (failure.code(), failure.scope())));
 
-        self.with(|entry| {
-            if let Some(dropped) = entry
-                .dropped
-                .as_mut()
-                .and_then(|dropped| dropped.get_mut(slot))
-            {
+        self.with(|notified| {
+            if let Some(dropped) = notified.dropped.get_mut(slot) {
                 *dropped = dropped.saturating_add(1);
             }
         });
@@ -660,8 +703,8 @@ impl NotificationSeries {
 
     /// Counts a notification handed to its transport for one subscription.
     pub fn sent(&self) {
-        self.with(|entry| {
-            if let Some((sent, _)) = entry.sent.as_mut() {
+        self.with(|notified| {
+            if let Some((sent, _)) = notified.sent.as_mut() {
                 *sent = sent.saturating_add(1);
             }
         });
@@ -669,8 +712,8 @@ impl NotificationSeries {
 
     /// Counts a notification that could not be handed to its transport for one subscription.
     pub fn failed(&self) {
-        self.with(|entry| {
-            if let Some((_, failed)) = entry.sent.as_mut() {
+        self.with(|notified| {
+            if let Some((_, failed)) = notified.sent.as_mut() {
                 *failed = failed.saturating_add(1);
             }
         });
@@ -678,8 +721,8 @@ impl NotificationSeries {
 
     /// Counts a notification paired with a subscription its router holds.
     pub fn heard(&self) {
-        self.with(|entry| {
-            if let Some(heard) = entry.heard.as_mut() {
+        self.with(|notified| {
+            if let Some(heard) = notified.heard.as_mut() {
                 *heard = heard.saturating_add(1);
             }
         });
@@ -793,11 +836,10 @@ impl RouterMetrics {
             at
         });
 
-        if notifies && let Some(entry) = state.entries.get_mut(&key) {
-            entry.sent.get_or_insert((0, 0));
-            entry
-                .dropped
-                .get_or_insert_with(|| vec![0; ProtocolCode::named().len().saturating_add(3)]);
+        let notifying = notifies.then(|| state.notified_at(key));
+
+        if let Some(series) = notifying.and_then(|at| state.notifications.get_mut(at)) {
+            series.sent.get_or_insert((0, 0));
         }
 
         drop(state);
@@ -807,9 +849,9 @@ impl RouterMetrics {
                 state: Arc::clone(&self.registry.state),
                 at,
             },
-            notifying: notifies.then(|| NotificationSeries {
+            notifying: notifying.map(|at| NotificationSeries {
                 state: Arc::clone(&self.registry.state),
-                key,
+                at,
             }),
         })
     }
@@ -825,19 +867,17 @@ impl RouterMetrics {
     ) -> Result<NotificationSeries, ProgrammerError> {
         let mut state = locked(&self.registry.state);
         let key = state.admit(procedure, &[Group::Notifications])?;
+        let at = state.notified_at(key);
 
-        if let Some(entry) = state.entries.get_mut(&key) {
-            entry.heard.get_or_insert(0);
-            entry
-                .dropped
-                .get_or_insert_with(|| vec![0; ProtocolCode::named().len().saturating_add(3)]);
+        if let Some(series) = state.notifications.get_mut(at) {
+            series.heard.get_or_insert(0);
         }
 
         drop(state);
 
         Ok(NotificationSeries {
             state: Arc::clone(&self.registry.state),
-            key,
+            at,
         })
     }
 }
@@ -924,6 +964,7 @@ impl MetricsRegistry {
     pub fn exposition(&self) -> MetricsExposition {
         let state = locked(&self.state);
         let mut lines: Vec<String> = Vec::new();
+        let notified_of = |entry: &Entry| entry.notified.and_then(|at| state.notifications.get(at));
         let labels_of = |key: Option<&(u16, u16)>| -> String {
             match key.and_then(|key| state.entries.get(key).map(|entry| (key.0, &entry.name))) {
                 Some((service, name)) => {
@@ -1040,8 +1081,8 @@ impl MetricsRegistry {
                 .entries
                 .iter()
                 .filter_map(|(key, entry)| {
-                    entry
-                        .heard
+                    notified_of(entry)
+                        .and_then(|notified| notified.heard)
                         .map(|heard| format!("{}{{{}}} {heard}", HEARD.0, labels_of(Some(key))))
                 })
                 .collect(),
@@ -1052,20 +1093,22 @@ impl MetricsRegistry {
                 .entries
                 .iter()
                 .flat_map(|(key, entry)| {
-                    entry.sent.map_or_else(Vec::new, |(sent, failed)| {
-                        vec![
-                            format!(
-                                "{}{{{},outcome=\"sent\"}} {sent}",
-                                SENT.0,
-                                labels_of(Some(key))
-                            ),
-                            format!(
-                                "{}{{{},outcome=\"failed\"}} {failed}",
-                                SENT.0,
-                                labels_of(Some(key))
-                            ),
-                        ]
-                    })
+                    notified_of(entry)
+                        .and_then(|notified| notified.sent)
+                        .map_or_else(Vec::new, |(sent, failed)| {
+                            vec![
+                                format!(
+                                    "{}{{{},outcome=\"sent\"}} {sent}",
+                                    SENT.0,
+                                    labels_of(Some(key))
+                                ),
+                                format!(
+                                    "{}{{{},outcome=\"failed\"}} {failed}",
+                                    SENT.0,
+                                    labels_of(Some(key))
+                                ),
+                            ]
+                        })
                 })
                 .collect(),
         );
@@ -1074,7 +1117,7 @@ impl MetricsRegistry {
             write_family(family, samples);
         }
 
-        let codes = ProtocolCode::named();
+        let codes = &ProtocolCode::NAMED;
 
         write_family(
             DROPPED,
@@ -1082,8 +1125,9 @@ impl MetricsRegistry {
                 .entries
                 .iter()
                 .flat_map(|(key, entry)| {
-                    entry.dropped.as_ref().map_or_else(Vec::new, |dropped| {
-                        dropped
+                    notified_of(entry).map_or_else(Vec::new, |notified| {
+                        notified
+                            .dropped
                             .iter()
                             .enumerate()
                             .map(|(slot, count)| {

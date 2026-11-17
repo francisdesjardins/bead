@@ -7,6 +7,7 @@
 use bytes::Bytes;
 
 use crate::errors::ProgrammerError;
+use crate::failure::byte_count_of;
 use crate::transport::is_field_value;
 
 /// The layout this side writes and reads whole: `0xB1`; `0xB2` to `0xBF` are the layouts to come.
@@ -295,8 +296,8 @@ pub(crate) fn read_parcel(message: &Bytes) -> ParcelRead {
 
     if bytes.len() < PREFIX_BYTES {
         return ParcelRead::NoParcel(format!(
-            "{} bytes, under a parcel's {PREFIX_BYTES}",
-            bytes.len()
+            "{}, under a parcel's {PREFIX_BYTES}",
+            byte_count_of(bytes.len())
         ));
     }
 

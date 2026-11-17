@@ -602,6 +602,20 @@ impl ClientInner {
             )));
         }
 
+        // ! tungstenite reads the first of a 101's subprotocol lines alone: the client takes it in
+        // one field line (spec 15.2; RFC 6455 §11.3.4), its socket dropped
+        if response
+            .headers()
+            .get_all(SEC_WEBSOCKET_PROTOCOL)
+            .iter()
+            .count()
+            > 1
+        {
+            return Err(TransportError::Connect(ConnectError::new(
+                "the server's upgrade names its subprotocol in more than one field line (spec 15.2)",
+            )));
+        }
+
         Ok(Opened { socket, credential })
     }
 

@@ -56,10 +56,10 @@ public sealed class EnvelopeFuzzTests
     [Fact]
     public void Finds_the_vectors_bytes()
     {
-        Assert.Equal(273, Seeds.Count);
+        Assert.Equal(275, Seeds.Count);
 
         // * the seeds in their order, as every side holds them
-        Assert.Equal("da5504c90e2f128e857c8111daf89b83a499ba58178644a2136b429900b6d702", Mutations.DigestOf(Seeds));
+        Assert.Equal("107796c1b11a3cdb2a3a74f3c67472a51ec8771eac0ff3c5952f40dfeb1bc430", Mutations.DigestOf(Seeds));
     }
 
     /// <summary>The generator draws what the other sides' draw for a seed, so a seed replays alike on every side.</summary>
@@ -74,7 +74,7 @@ public sealed class EnvelopeFuzzTests
         }));
 
         // * the first eight inputs of a seed of 1, as every side draws them
-        Assert.Equal("a9fdb025bb9eb61a4cd1b1ddb9523fb1edc4d518f9386bfc55ada17b68cb28b8", Mutations.DigestOf(Mutations.FirstInputs(Seeds, (8, 1))));
+        Assert.Equal("b475a2244d28b1d3c7b57b630f84c239ab24cce7b529d08ffbbfee862db2177f", Mutations.DigestOf(Mutations.FirstInputs(Seeds, (8, 1))));
     }
 
     /// <summary>The readers return or refuse with a failure for every mutation of a vector.</summary>

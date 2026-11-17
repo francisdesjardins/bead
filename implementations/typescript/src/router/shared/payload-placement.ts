@@ -3,6 +3,7 @@
 // dependencies
 
 import { EnvelopeKind, SESSION_TOKEN_BYTES } from './constants';
+import { byteCountOf } from '../../transport/shared/errors';
 import { headerBytesOf, MAXIMUM_HEADER_BYTES, unboundedHeaderBytesOf } from './header';
 import {
   chunkPayloadBytes,
@@ -143,7 +144,7 @@ export const createPayloadPlacement = (
     if (limits.maximumTransfers === 0) {
       return {
         ...failures.payloadTooLarge,
-        detail: `a payload of ${String(payload.length)} bytes goes as a transfer, which this side sends none of`,
+        detail: `a payload of ${byteCountOf(payload.length)} goes as a transfer, which this side sends none of`,
       };
     }
 
@@ -158,8 +159,8 @@ export const createPayloadPlacement = (
         ...failures.payloadTooLarge,
         detail:
           openingHeaderBytes > MAXIMUM_HEADER_BYTES
-            ? `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes passes ${String(MAXIMUM_HEADER_BYTES)}`
-            : `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes leaves it no byte within ${String(wholeBytes)}`,
+            ? `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes passes ${String(MAXIMUM_HEADER_BYTES)}`
+            : `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes leaves it no byte within ${String(wholeBytes)}`,
       };
     }
 

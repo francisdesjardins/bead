@@ -306,10 +306,53 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
       }
 
-      // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens: `ws` opens on one
-      // that lists another beside upgrade, where the global WebSocket, .NET's client and tungstenite
-      // refuse it; a row of docs/support.md
-      const answeringUpgrade = async () => {
+      // spec 15.2; WHATWG WebSockets §2.2
+      test('fails its connect on a 101 that names none of the subprotocols it offered', async () => {
+        const http = createNodeServer();
+        const upgraded = Promise.withResolvers<Socket>();
+        const offered = Promise.withResolvers<string | undefined>();
+
+        // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+        http.on('upgrade', (request, socket) => {
+          const accept = createHash('sha1')
+            .update(
+              `${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
+            )
+            .digest('base64');
+
+          offered.resolve(request.headers['sec-websocket-protocol']);
+          socket.on('error', () => {});
+          socket.resume();
+          socket.write(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+          );
+          upgraded.resolve(socket as Socket);
+        });
+        http.listen(0, host);
+        await once(http, 'listening');
+
+        try {
+          await expect(
+            client.connect({
+              host,
+              port: (http.address() as AddressInfo).port,
+              protocols: ['chat', 'bead'],
+            })
+          ).rejects.toBeInstanceOf(ConnectError);
+          expect([(await offered.promise)?.split(/ *, */), client.isClosed()]).toEqual([
+            ['chat', 'bead'],
+            true,
+          ]);
+        } finally {
+          (await upgraded.promise).destroy();
+          await new Promise((resolve) => {
+            http.close(resolve);
+          });
+        }
+      });
+
+      // a 101 of the fields given, beside its Upgrade and its Sec-WebSocket-Accept
+      const answeringUpgrade = async (fields: string) => {
         const http = createNodeServer();
         const upgraded = Promise.withResolvers<Socket>();
 
@@ -324,7 +367,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           socket.on('error', () => {});
           socket.resume();
           socket.write(
-            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n${fields}\r\n`
           );
           upgraded.resolve(socket as Socket);
         });
@@ -343,9 +386,49 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         };
       };
 
+      // spec 15.2; RFC 6455 §4.1, §4.3, §11.3.4: one field line, equal to an offer byte for byte
+      test('fails its connect on a 101 whose subprotocol is not one line equal to an offer, BEAD, bead twice or bead then chat', async () => {
+        for (const lines of [
+          'Sec-WebSocket-Protocol: BEAD\r\n',
+          'Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: bead\r\n',
+          'Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: chat\r\n',
+        ]) {
+          await using answering = await answeringUpgrade(`Connection: Upgrade\r\n${lines}`);
+
+          await expect(
+            client.connect({ host, port: answering.port, protocols: ['bead'] })
+          ).rejects.toBeInstanceOf(ConnectError);
+          expect(client.isClosed()).toBe(true);
+        }
+      });
+
+      // spec 15.2: a client that offered none takes no field, an empty one included
+      test('fails its connect on a 101 that carries a subprotocol field, an empty one, when it offered none', async () => {
+        // ! Node 24's global WebSocket throws inside its own handshake on this 101, reading the
+        // offers it did not send, and leaves the connect waiting; Node 26's fails it: a row of
+        // docs/support.md
+        test.skip(
+          label !== 'ws' && Number(process.versions.node.split('.')[0]) < 26,
+          "Node 24's global WebSocket throws inside its handshake"
+        );
+        await using answering = await answeringUpgrade(
+          'Connection: Upgrade\r\nSec-WebSocket-Protocol: \r\n'
+        );
+
+        await expect(client.connect({ host, port: answering.port })).rejects.toBeInstanceOf(
+          ConnectError
+        );
+        expect(client.isClosed()).toBe(true);
+      });
+
+      // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens: `ws` opens on one
+      // that lists another beside upgrade, where the global WebSocket, .NET's client and tungstenite
+      // refuse it; a row of docs/support.md
+      const listingUpgrade = 'Connection: keep-alive, Upgrade\r\n';
+
       if (label === 'ws') {
         test('opens on a 101 whose Connection lists upgrade among other tokens', async () => {
-          await using answering = await answeringUpgrade();
+          await using answering = await answeringUpgrade(listingUpgrade);
 
           await client.connect({ host, port: answering.port });
           expect(client.isOpen()).toBe(true);
@@ -353,7 +436,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
       } else {
         test('fails a 101 whose Connection lists upgrade among other tokens', async () => {
-          await using answering = await answeringUpgrade();
+          await using answering = await answeringUpgrade(listingUpgrade);
 
           await expect(client.connect({ host, port: answering.port })).rejects.toBeInstanceOf(
             ConnectError
@@ -1207,6 +1290,39 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 }
 
 test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
+  // ! spec 15.2: a page's WebSocket in Firefox goes on over a 101 that names none of the
+  // subprotocols it offered, its `protocol` empty, and reads a case apart; a socket's protocol
+  // that is none it offered fails the connect
+  test('fails its connect on a socket whose protocol is none it offered, empty or BEAD, and opens on one it offered', async () => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+
+    for (const protocol of ['', 'BEAD']) {
+      const connecting = client.connect({ host: 'h', port: 1, protocols: ['chat', 'bead'] });
+      const socket = sockets.at(-1);
+
+      if (socket !== undefined) {
+        socket.protocol = protocol;
+      }
+      socket?.fireOpen();
+
+      await expect(connecting).rejects.toThrow(ConnectError);
+      await expect(connecting).rejects.toThrow('names none of the subprotocols offered');
+      expect([client.isClosed(), socket?.closeCodes]).toEqual([true, [undefined]]);
+    }
+
+    const opening = client.connect({ host: 'h', port: 1, protocols: ['chat', 'bead'] });
+    const socket = sockets.at(-1);
+
+    if (socket !== undefined) {
+      socket.protocol = 'bead';
+    }
+    socket?.fireOpen();
+    await opening;
+
+    expect(client.isOpen()).toBe(true);
+  });
+
   test('keeps the cause an error event carries, and names the close by its reason', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
     const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });

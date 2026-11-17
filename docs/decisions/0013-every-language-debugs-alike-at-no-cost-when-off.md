@@ -299,12 +299,15 @@ and it gates nothing: what the clause bounds, the readings and the allocations, 
   a router show a counted call reading two more than an uncounted one. On the C# side,
   `GC.GetAllocatedBytesForCurrentThread()` around a call's synchronous steps, with no `await` within
   them, shows a counted call allocating not a byte more than an uncounted one, and pins what a call
-  allocates with nobody listening. The TypeScript and Rust sides have no allocation count a test
-  reads, and hold that part by inspection, a row of the matrix.
-- **Two build switches**, for a side whose platform builds that way: one leaves out the trace and
-  the filter, the other the registry, each alone or both, so a 1 kHz loop that wants its dashboard
-  builds the registry without the trace. A C side takes them as its preprocessor's, in its own
-  record. Every side builds both, and pays the check alone.
+  allocates with nobody listening. On the Rust side, a counting allocator a dev-dependency holds,
+  the global allocator of a test binary of its own, shows the same of a call made and answered. The
+  TypeScript side has no allocation count a test reads, and holds that part by inspection. So does
+  the Rust side for what a call allocates while nobody listens. The matrix's row "What a call
+  allocates for debugging" holds both.
+- **Two build switches**, for a constrained profile: one leaves out the trace and the filter, the
+  other the registry, each alone or both, so a 1 kHz loop that wants its dashboard builds the
+  registry without the trace. A C side takes them as its preprocessor's, in its own record. Every
+  side builds both, and pays the check alone.
 
 **The companion is a document of its own, with a version of its own**
 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), and two conformance files,

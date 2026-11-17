@@ -100,7 +100,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
   a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
 
-**Version: 0.15.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.16.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -155,8 +155,8 @@ the call id (bytes 4 to 7).
 A reader MUST refuse it with `ENVELOPE_MALFORMED`.
 
 2.3. This document describes layout 0xA1. 0xA2 to 0xAF are the layouts to come: a reader MUST refuse
-one with `LAYOUT_UNSUPPORTED`, and SHOULD give the layouts it reads as the failure's detail —
-`0xA1`.
+one with `LAYOUT_UNSUPPORTED`, and MUST give the layouts it reads as the failure's detail, each `0x`
+and its two upper-case hexadecimal digits, ascending, a comma and a space between: `0xA1`.
 
 2.4. A reader MUST read the prefix of a layout to come — its kind and its call id — since whether a
 refusal is answered depends on them (section 9).
@@ -237,9 +237,10 @@ connection's session (section 13.3):
 A `JWT`'s bytes are its token's characters, base64url and periods, as JWS Compact Serialization
 writes them ([RFC 7515 §7.1](https://www.rfc-editor.org/rfc/rfc7515#section-7.1)). What the header
 leaves a credential is its 1,020 bytes less all that comes before: 1,004 bytes on a request with no
-other block, 992 on one with a destination and a total. A reader MUST refuse with
-`ENVELOPE_MALFORMED` a scheme on a kind that does not take it, a length that is not its scheme's, an
-`OPAQUE` of 16 zero bytes, padding that is not zero, and a block that runs past the header's length.
+other block, 992 on one with a destination and a total. Once the header's length holds the block
+(section 4.3), a reader MUST refuse with `ENVELOPE_MALFORMED`, in this order, a scheme on a kind
+that does not take it; a length that is not its scheme's, or an `OPAQUE` of 16 zero bytes; padding
+that is not zero.
 
 4.5. `DESTINATION`: what the request is for behind the peer that takes it, never 0. A reader MUST
 refuse 0 with `ENVELOPE_MALFORMED`. An answer names its call alone, and carries none.
@@ -276,8 +277,8 @@ _Vectors: `headerRefusals`, `envelopeRefusals`, `reads`._
 7. Everything else, the header's length among it, which its kind, its flags and its `CREDENTIAL`
    block's own length give; else `ENVELOPE_MALFORMED`.
 
-5.2. Within step 7 the order is not observable, since every check refuses with the same code. The
-failure's detail SHOULD say which check failed, and is informative.
+5.2. Within step 7 every check refuses with the same code. Its detail says which check failed
+(section 7.6), and section 4.4 orders a `CREDENTIAL` block's checks.
 
 ## 6. What follows the header
 
@@ -317,6 +318,11 @@ lone surrogate as U+FFFD.
 
 7.5. A relay that passes a failure on writes one relay more than it received. The side that raised
 a failure is deduced, never sent: a failure received with no relay is the peer's.
+
+7.6. A failure's detail is for a person: its requester acts on its code alone
+([RFC 9457 §3.1.4](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.4)). Where this document gives
+a detail's words, a side MUST write them as given. Where it gives none, the words are the side's
+own, and every side writes those its conformance files give.
 
 ## 8. The protocol's codes
 
@@ -421,12 +427,12 @@ first that applies:
    `DESTINATION_UNKNOWN`.
 5. No resolver for its service among those its connection's transport takes (section 9.11):
    `SERVICE_UNKNOWN`; for its procedure in a service known there: `PROCEDURE_UNKNOWN`. Its
-   detail SHOULD be `no service <service id>`, or `no procedure <procedure id> in service
+   detail MUST be `no service <service id>`, or `no procedure <procedure id> in service
    <service id>`, each id in decimal: `no service 9`, `no procedure 99 in service 1`.
 6. Its credential, then its admission, in this order, which read its header, never its payload,
    each refusal told as section 13.12 says:
    1. a credential scheme the receiver takes none of — one to come, or one it has no verifier for:
-      answered with `CREDENTIAL_UNSUPPORTED`, whose detail SHOULD name the schemes it takes, as a
+      answered with `CREDENTIAL_UNSUPPORTED`, whose detail MUST name the schemes it takes, as a
       401 names its own in `WWW-Authenticate`
       ([RFC 9110 §11.6.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.1)), so its requester
       presents another: their names, in the order of their numbers, a comma and a space between —
@@ -437,7 +443,7 @@ first that applies:
       once it verifies (section 13.8); `ELSEWHERE`, to the session the receiver's verifier makes of
       what its transport carried. A credential that does not resolve, or an `ELSEWHERE` whose
       transport carried nothing, is answered with `SESSION_REQUIRED`, whatever the procedure
-      requires; its detail SHOULD say whether no credential came or one came and did not hold:
+      requires; its detail MUST say whether no credential came or one came and did not hold:
       `no credential came`, or `the credential does not hold`. A verifier that fails — it throws
       or rejects, its key set's ask fails, unreached or unsettled as its deadline is reached
       (section 13.9) — is answered with `PROCEDURE_FAILED`, and reported, never with
@@ -873,13 +879,17 @@ potentially trustworthy; a server by the address it listens on (section 15.12), 
 transport or a router called in process. A broker's transport is secure while its own leg and its
 peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
 which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
-space among them, is not, nor is `localhost.`, which it keeps as given. A client takes a `localhost`
-name on the loopback without resolving it, as Secure Contexts does where the platform resolves such
-names there alone ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a
-platform whose resolver sends one elsewhere, its application gives another host. Any other leaves
-the machine in the clear. A server cannot tell what stands in front of it: its application MAY say
-so, and is then believed whatever the server listens on — TLS terminated before it, which makes it
-secure, or a proxy that serves the network in the clear, which leaves it in the clear.
+space among them, is not, nor is `localhost.`, which it keeps as given. A client judges a
+`localhost` name by the name alone, and connects it through its platform's resolver, as
+[RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets application software do
+(item 2). Secure Contexts trusts such a name only where its user agent keeps it on the loopback. A
+resolver that sends a name under `.localhost` on to its DNS server, as glibc's and musl's do,
+connects it wherever that server answers, and a credential judged secure crosses there in the clear.
+An application whose platform resolves so names the loopback by its address, `127.0.0.1` or `[::1]`,
+which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
+what stands in front of it: its application MAY say so, and is then believed whatever the server
+listens on — TLS terminated before it, which makes it secure, or a proxy that serves the network in
+the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -1342,7 +1352,19 @@ scheme.
 each binary message one envelope. A text message is no envelope: its transport hands it on, and its
 router reports it as `ENVELOPE_MALFORMED`, as section 9.0 reports an error, and answers nothing; it
 counts as a message its router has not taken by the bytes it came as (section 15.12). No
-subprotocol is required. A WebSocket upgrade that carries no `Origin` carries one credential,
+subprotocol is required. A server selects none: its 101 names no `Sec-WebSocket-Protocol` and no
+`Sec-WebSocket-Extensions`, whatever its upgrade offers
+([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)). A client offers the
+subprotocols it is given, none otherwise. One that offered some fails an upgrade whose 101 does
+not carry `Sec-WebSocket-Protocol` in exactly one field line, its value one it offered, compared
+byte for byte ([WHATWG WebSockets §2.2](https://websockets.spec.whatwg.org/#websocket-opening-handshake);
+[RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1),
+[§4.3](https://www.rfc-editor.org/rfc/rfc6455#section-4.3),
+[§11.3.4](https://www.rfc-editor.org/rfc/rfc6455#section-11.3.4)); one that offered none fails a
+101 that carries the field at all, an empty one included. A page's `WebSocket` judges the 101 as
+its browser does, and a client over it fails besides a socket whose `protocol` is none it offered
+([`docs/support.md`](../docs/support.md), "Differences"). A WebSocket
+upgrade that carries no `Origin` carries one credential,
 toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
@@ -1432,12 +1454,18 @@ unclean whatever code the peer answers with; a side reports it, naming the bound
 5 seconds by default, bounds each closing handshake it begins, its 1009 among them: a peer that
 has not answered by then is dropped, and a server tells its
 close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
-close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
-or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
-in a close; a ping waits behind what was sent before it, so a peer that stops reading leaves it
-unanswered too. What waits for a server's socket is held besides as section 15.12 says. A side
-that closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
-handshake completes as its stop begins among them. A close with 1000 is the clean one.
+close as its platform does. A side MUST, where its platform can send a ping, ping a connection once
+nothing has come of it for `heartbeat` — 30 seconds by default, or never — and drop the connection
+once that ping has gone unanswered for `heartbeat`, its close unclean (section 15.1), so a peer
+gone without a word is dropped; each comes at that time or within a further `heartbeat`, as its
+platform's timer runs. Whether it pings besides while frames come, and drops a connection that
+leaves such a ping unanswered, and whether any pong answers its ping or only the one that echoes
+its data ([RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.3)), are its
+platform's ([`docs/support.md`](../docs/support.md), "Differences"). A page's `WebSocket` sends
+none, and the server's pings, which it answers, stand for its own. What waits for a server's socket
+is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+each connection it holds, one whose opening handshake completes as its stop begins among them. A
+close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1519,7 +1547,7 @@ the request ran: the client counts the exchange lost.
 | 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed (section 15.12)                                                                                                                                                                       |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
-| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                       |
+| 415    | `type-refused`                        | not `application/prs.bead` in one field line, or encoded                                                                                                                                                                                                                     |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                          |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way; `Retry-After` 1                                                                                                                                                                                         |
 | 503    | `busy`                                | too many connections — all, or one address's —, over HTTP or at a WebSocket's address; bytes of body being read; or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                           |
@@ -1541,17 +1569,17 @@ naming the three — never the 501 §9.1 suggests for a method a server does not
 ([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), since what a server
 recognizes beyond the path's methods is its HTTP parser's, which no two platforms share, and
 `Allow` tells a client what to send where 501 tells nothing; a WebSocket's address compares alike
-(section 15.2, step 3). A `POST` that presents no token connects: no type, or another than
-`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began, or
-past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged by its
-token: none, or one of another form, 400; once the server's stop began, the 404 marked
-`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
-then ends its connection. A listen is refused 409 when its client did not say it listens, then 400
-for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its encoding, then
-400 for two `Authorization` fields, 413 for a length it declares past `maximumBodyBytes`, and 429
-past what its connection has under way, each before its body is read; what its body brings is judged
-as it comes (section 15.5): past `maximumBodyBytes` 413, past the budget 503, slower than its rate
-408 (section 15.12).
+(section 15.2, step 3). A `POST` that presents no token connects: no type, a type in more than one
+field line or another than `application/prs.bead`, or a body encoded, 415; the connect's own 400;
+then, once its stop began, or past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any
+other request is judged by its token: none, or one of another form, 400; once the server's stop
+began, the 404 marked `connection-unknown`, the token not looked up; a token it does not hold, the
+same 404. A `DELETE` then ends its connection. A listen is refused 409 when its client did not say
+it listens, then 400 for a body or its counts (section 15.9). A `POST` is refused 415 for its type
+or its encoding, then 400 for two `Authorization` fields, 413 for a length it declares past
+`maximumBodyBytes`, and 429 past what its connection has under way, each before its body is read;
+what its body brings is judged as it comes (section 15.5): past `maximumBodyBytes` 413, past the
+budget 503, slower than its rate 408 (section 15.12).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. A
 server waits 40 ms from a request's hand-off for its answer: one that comes within them goes whole,
@@ -1706,7 +1734,8 @@ answer — so a paused connection resumes with nothing more of it read
 its own — a timer, a resolution, its dispose, a turn it defers — is no envelope handed, and waits
 for no bound. A side that ends resumes each connection it paused. A pause is a reader that stops:
 its peer loses the connection past its own bounds — a server's send pace and
-`maximumUnsentBytes`, an outbox's bound (section 15.9), the heartbeat — as it loses any reader
+`maximumUnsentBytes`, an outbox's bound (section 15.9), and, while nothing comes of it, the
+heartbeat — as it loses any reader
 that stops. So, beyond one read of its socket or one batch, no connection's envelope waits behind
 more than these bounds of another's on a transport that hands many in one step, and a peer over a
 socket is paced by its transport's own window
@@ -1810,6 +1839,21 @@ policy; and any other scheme, an extension's or a `blob:` URL's among them. A se
 among them, so no `origins` names it. A request without an `Origin` comes from no page, and is
 taken.
 
+A field in more than one field line is read with its lines joined in their order by `, `, as
+[RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient combine them,
+so that two lines are judged as the one line a proxy may make of them. So are read an `Origin`, on
+an exchange and on an upgrade alike (section 15.2, step 7), a `bead-connection-token` and a
+`Content-Encoding`. An `Origin` so joined is no serialized origin, since a browser sends one at most
+([RFC 6454 §7.3](https://www.rfc-editor.org/rfc/rfc6454#section-7.3)): it is none of the server's
+own, and none `origins` lists, refused 403 `origin-refused`. A token so joined is one of another
+form, refused 400 `malformed`. `Content-Encoding` is a list
+([RFC 9110 §8.4](https://www.rfc-editor.org/rfc/rfc9110#section-8.4)): a body is sent as it is when
+the field is absent or its lines joined are `identity`, in any case, and is encoded otherwise,
+`identity` in two lines among it. A `Content-Type`, a singleton field
+([RFC 9110 §8.3](https://www.rfc-editor.org/rfc/rfc9110#section-8.3)), is refused 415 `type-refused`
+in more than one field line wherever a type is judged. An `Authorization` is refused in more than
+one as section 15.5 says, and a `Host` as HTTP refuses it.
+
 An HTTP server answers the CORS protocol
 ([Fetch Standard §3.3](https://fetch.spec.whatwg.org/#http-cors-protocol)) to the origins `origins`
 names, and to no other. Once a request's origin is taken (section 15.6's order), every response it
@@ -1901,8 +1945,8 @@ is the proxy's address, as over HTTP.
 A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
 ([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`
 ([RFC 4291 §2.5.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.3)), on one port — unless it
-is given an address: `localhost`, which names both and is never resolved, as section 13.4 takes
-it; or an `IPv4address` or an `IPv6address` of
+is given an address: `localhost`, which names both and is never resolved; or an `IPv4address` or
+an `IPv6address` of
 [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), bare, with no zone, and
 not IPv4-mapped ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)),
 which it listens on alone; never another name, which another host would resolve otherwise. On
@@ -2719,6 +2763,15 @@ literal. A reader MUST refuse:
 6. a number that rounds past the largest finite double, as `1E400` does;
 7. an array or an object nested deeper than 64, the outermost at depth 1, as RFC 8259 §9 lets a
    parser bound it. A reader MUST refuse it before it builds anything deeper.
+
+A reader that finds more than one of these refuses with the first in this order: item 1; item 2;
+item 7, counted over the whole text before anything of it is read, each `[` and `{` outside a
+string one level in and each `]` and `}` one level out, the count free to fall below 0, a string
+running from its quotation mark to the next one that no backslash escapes, a backslash escaping
+the character after it, or to the text's end; item 3, of the whole text, as an I-JSON message is
+a JSON text first (RFC 7493 §2); then, of items 4, 5 and 6, the one the text meets first,
+reading from its start: a name or a string holding a surrogate alone at that name or string, a
+name its object gave before at that name, a number past a double at that number.
 
 17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
 `JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 might not stay exact,

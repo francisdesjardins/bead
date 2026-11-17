@@ -7,9 +7,12 @@
 // placed by what it names: a file or a folder git lists, a class or a method a C# test file
 // declares, a `fn` of a Rust test file or a trial's title, a test's title (one built at run time
 // filled by a literal of its file or an entry), an entry of `spec/*.json` a harness names at run
-// time, a case's label, a row of the document, or a literal LITERALS lists with its reason.
+// time, a case's label, a row of the document, or a literal LITERALS lists with its reason. Each
+// language cell of the differences places a citation, a tool's run or a row or a section it sends
+// the reader to among them, or says a word of the legend, MARKERS; the cells of open rows that hold
+// by no test are counted against UNTESTED_OPEN.
 //
-//   node tools/check-citations.mjs             docs/support.md, with its floors
+//   node tools/check-citations.mjs             docs/support.md, with its floors and its cells
 //   node tools/check-citations.mjs <file…>     those Markdown files alone, with no floor
 //
 // What it does not reach: a name tied to the file cited before it, so a name declared twice
@@ -18,7 +21,9 @@
 //
 // Exit 1 on a held span placed by nothing, with its file, its line and its row; on a literal
 // LITERALS lists that no span of docs/support.md holds; and, on the default run, on a kind whose
-// citations placed fall under its floor in FLOORS.
+// citations placed fall under its floor in FLOORS, on a language cell of the differences that
+// places no citation and says no word of MARKERS, and on more cells of open rows held by no test
+// than UNTESTED_OPEN.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -72,6 +77,32 @@ export const FLOORS = Object.freeze({
   'C#': 400,
   Rust: 200,
 });
+
+/**
+ * The words of the matrix's legend: a language cell of its differences that places no citation says
+ * one of them. "none" is none: it is a behaviour, not a word on its tests.
+ */
+export const MARKERS = Object.freeze([
+  'not tested',
+  'not probed',
+  'not available',
+  'no counterpart',
+]);
+
+/** What says a cell holds by no test of a side's suite. */
+export const UNTESTED = Object.freeze([
+  'not tested',
+  'not probed',
+  'by reading',
+  'by a probe outside the suite',
+]);
+
+/**
+ * The language cells of the differences' open rows that hold by no test, at most: each says a word
+ * of UNTESTED or places no citation, the Rust cell of a row spec/check.py's AHEAD holds ahead left
+ * out. A count over it fails; lowered as tests land.
+ */
+export const UNTESTED_OPEN = 47;
 
 // the group of the floors and of the count each kind is counted in
 const GROUP = Object.freeze({
@@ -503,11 +534,24 @@ const add = (map, key, value) => {
   map.get(key).push(value);
 };
 
+// the rows AHEAD names, each a key of a side's dict, as spec/check.py writes them
+const aheadOf = (source) => {
+  // ! spec/check.py's form: `AHEAD = {` at a line's start, closed by `}` at one, each row a quoted
+  // key opening its dict two levels in
+  const body = source.match(/^AHEAD = \{\n([\s\S]*?)^\}/m)?.[1] ?? '';
+
+  return new Set(
+    [...body.matchAll(/^ {8}(["'])(.+?)\1: \{$/gm)].map((row) => {
+      return row[2];
+    })
+  );
+};
+
 /**
  * What the citations are placed in, read from the files git lists under `root`: its files and
  * folders, the TypeScript tests' titles and templates, the Rust trials' titles and templates, each
- * test file's whole literals, the C# tests' classes and methods, the Rust tests' functions and the
- * entries of `spec/*.json`.
+ * test file's whole literals, the C# tests' classes and methods, the Rust tests' functions, the
+ * entries of `spec/*.json`, and the rows of the matrix whose part spec/check.py's AHEAD holds ahead.
  */
 export const poolsOf = (root) => {
   const listed = execFileSync(
@@ -533,6 +577,7 @@ export const poolsOf = (root) => {
     methods: new Map(),
     functions: new Set(),
     entries: new Set(),
+    ahead: aheadOf(read('spec/check.py')),
   };
 
   for (const path of listed) {
@@ -773,9 +818,10 @@ const rowsOf = (text) => {
   );
 };
 
-// each span of a text held as a citation: its kind, and whether it is placed, or listed
-const citationsOf = (text, pools) => {
-  const rows = rowsOf(text);
+// each span of a text held as a citation: its kind, and whether it is placed, or listed; a sentence
+// placed by `options.rows`, the text's own rows by default
+const citationsOf = (text, pools, options = {}) => {
+  const rows = options.rows ?? rowsOf(text);
 
   return spansOf(text).flatMap((span) => {
     const kind = shapeOf(span.text, { inParentheses: span.inParentheses });
@@ -803,6 +849,127 @@ const countsOf = (citations) => {
   }
 
   return counts;
+};
+
+// ── The differences' cells ─────────────────────────────────────────────────────
+
+const DIFFERENCES = '## Differences';
+const LANGUAGES = Object.freeze(['TypeScript', 'C#', 'Rust']);
+
+// a tool's run, its script a path and its arguments after it: `tools/protobuf-conformance.mjs rust`
+const TOOL_RUN = /^(\S+\.(?:mjs|py|sh|ps1)) \S/;
+
+// each row of the differences, `{ title, kind, cells, line }`, its cells by their column's heading,
+// a cell's escaped bars kept as written
+const differencesOf = (text) => {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const start = lines.indexOf(DIFFERENCES);
+  const rows = [];
+  let header;
+
+  for (let at = start + 1; start !== -1 && at < lines.length; at += 1) {
+    const line = lines[at];
+
+    if (line.startsWith('#')) {
+      break;
+    }
+    if (!line.startsWith('|') || /^\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line)) {
+      continue;
+    }
+    // ! a bar a cell escapes, `\|`, splits no cell
+    const cells = line
+      .split(/(?<!\\)\|/)
+      .slice(1, -1)
+      .map((cell) => {
+        return cell.trim();
+      });
+
+    if (header === undefined) {
+      header = cells;
+      continue;
+    }
+    const byHeading = Object.fromEntries(
+      header.map((heading, index) => {
+        return [heading, cells[index] ?? ''];
+      })
+    );
+
+    rows.push({
+      title: cells[0].replace(/\\\|/g, '|'),
+      kind: byHeading.Kind,
+      cells: byHeading,
+      line: at + 1,
+    });
+  }
+
+  return rows;
+};
+
+// the headings of a text, without their marks
+const headingsOf = (text) => {
+  return new Set(
+    [...text.replace(/\r\n?/g, '\n').matchAll(/^#{1,6} +(.+?) *$/gm)].map((heading) => {
+      return heading[1];
+    })
+  );
+};
+
+// whether a cell places a citation: a test, a file, an entry or a row its spans name, a tool's run
+// whose script git lists, or a row or a section it sends the reader to, `(see Transports)`
+const placesACitation = (cell, pools, options) => {
+  const citations = citationsOf(`| ${cell} |`, pools, { rows: options.rows });
+  const isPlaced = citations.some((citation) => {
+    return citation.placed || citation.listed;
+  });
+  const isRun = spansOf(`| ${cell} |`).some((span) => {
+    const script = span.text.match(TOOL_RUN)?.[1];
+
+    return script !== undefined && placesPath(script, pools);
+  });
+  const isSent = [...cell.matchAll(/\(see ([^)`]+)\)/g)].some((sent) => {
+    return options.rows.has(sent[1]) || options.headings.has(sent[1]);
+  });
+
+  return isPlaced || isRun || isSent;
+};
+
+// whether a cell says one of the words given, in any case
+const saysOneOf = (cell, words) => {
+  const lower = cell.toLowerCase();
+
+  return words.some((word) => {
+    return lower.includes(word);
+  });
+};
+
+/**
+ * Each language cell of the differences, `{ row, language, kind, line, isPlaced, isMarked,
+ * isUntested }`: whether it places a citation, whether it says a word of MARKERS, and whether, in
+ * an open row, it holds by no test, saying a word of UNTESTED or placing nothing, but the Rust cell
+ * of a row spec/check.py's AHEAD holds ahead.
+ */
+export const cellsOf = (text, pools) => {
+  const context = { rows: rowsOf(text), headings: headingsOf(text) };
+
+  return differencesOf(text).flatMap((row) => {
+    return LANGUAGES.filter((language) => {
+      return Object.hasOwn(row.cells, language);
+    }).map((language) => {
+      const cell = row.cells[language];
+      const isPlaced = placesACitation(cell, pools, context);
+      const isAhead = language === 'Rust' && pools.ahead.has(row.title);
+
+      return {
+        row: row.title,
+        language,
+        kind: row.kind,
+        line: row.line,
+        isPlaced,
+        isMarked: saysOneOf(cell, MARKERS),
+        isUntested: row.kind === 'open' && !isAhead && (!isPlaced || saysOneOf(cell, UNTESTED)),
+      };
+    });
+  });
 };
 
 // ── Check ──────────────────────────────────────────────────────────────────────
@@ -847,6 +1014,24 @@ export const problemsOf = (text, pools, options = {}) => {
     if (counts[kind] < floor) {
       problems.push(`${SUPPORT}: placed ${counts[kind]} ${kind}, under its floor of ${floor}`);
     }
+  }
+  const cells = cellsOf(text, pools);
+
+  for (const cell of cells) {
+    if (!cell.isPlaced && !cell.isMarked) {
+      problems.push(
+        `${SUPPORT}:${cell.line}: the ${cell.language} cell of the row ${cell.row} places no citation and says none of ${MARKERS.join(', ')}`
+      );
+    }
+  }
+  const untested = cells.filter((cell) => {
+    return cell.isUntested;
+  }).length;
+
+  if (untested > UNTESTED_OPEN) {
+    problems.push(
+      `${SUPPORT}: ${untested} cells of open rows hold by no test, over UNTESTED_OPEN, ${UNTESTED_OPEN}`
+    );
   }
 
   return problems;

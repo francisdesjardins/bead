@@ -40,7 +40,7 @@ internal static partial class EnvelopeCodec
     {
         if (body.Length > 0)
         {
-            throw MalformedOf(reading.Side, $"a {reading.What} carries no payload, not {body.Length} bytes");
+            throw MalformedOf(reading.Side, $"a {reading.What} carries no payload, not {FailureException.ByteCountOf(body.Length)}");
         }
     }
 

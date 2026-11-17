@@ -257,7 +257,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -394,7 +394,7 @@ dependencies = [
  "defmt-parser",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -436,7 +436,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -536,7 +536,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "francisdesjardins-bead"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -566,6 +566,7 @@ dependencies = [
  "sha1",
  "sha2",
  "socket2",
+ "stats_alloc",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
@@ -576,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-bench"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa-descriptor",
  "francisdesjardins-bead",
@@ -588,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-goldens"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -601,15 +602,15 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-house"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "proc-macro2",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
 name = "francisdesjardins-bead-interop"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -622,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-interop-server"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa-types",
  "bytes",
@@ -639,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -659,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf-build"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "buffa",
  "buffa-build",
@@ -1530,7 +1531,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1638,6 +1639,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1662,9 +1669,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.9"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1679,7 +1686,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1712,7 +1719,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1748,7 +1755,7 @@ checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2032,7 +2039,7 @@ checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -2053,7 +2060,7 @@ checksum = "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -2093,7 +2100,7 @@ checksum = "c3743ddbf47738d929cd1ae2e199d40d0162979dfe31aef8ae646d2bf00bf97a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]

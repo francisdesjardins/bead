@@ -146,9 +146,12 @@ A connection's life, on the client:
   anew: the application subscribes again, and reads the state anew.
 - **A command resolver stays.** What `station.on('promptOperator', …)` registered answers on the
   new connection too.
-- **A peer gone without a word** ends within two heartbeats: each WebSocket end pings every 30 s by
-  default. A browser's socket cannot ping, and answers the server's pings by itself, so the
-  server's heartbeat covers a page.
+- **A peer gone without a word** is dropped within four heartbeats at most by an end that pings.
+  That end pings a connection silent for a heartbeat, 30 s by default. It drops the connection once
+  that ping goes unanswered for another heartbeat. Each step may come up to one heartbeat late, as
+  its platform's timer runs. The C# server pings. A client on the global `WebSocket` cannot ping,
+  in a page or in Node; it answers the server's pings by itself, so the server's heartbeat covers
+  it.
 
 This client, run against the getting-started server on port 8080 while that server was killed and
 started again, reconnected, subscribed again, and answered the server's command on the new
@@ -227,7 +230,11 @@ client: reconnected
 client: subscribed again
 client: promptOperator asked "Read ST-002's status?"
 client: getStationStatus ST-002 answered operatorAnswer="acknowledged: after a reconnection"
+client: dropped watchTelemetry, with its connection
 ```
+
+The last drop comes as the script ends: `await using` disposes the client, and the subscription
+goes with its connection.
 
 `INotificationRegistration` comes from `@francisdesjardins/bead/service`. A subscription the
 **server** ends is dropped too, with its failure: past its queue's bounds (64 notifications or

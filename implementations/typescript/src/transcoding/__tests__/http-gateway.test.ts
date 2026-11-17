@@ -539,6 +539,23 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   ).toBe(431);
 });
 
+// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
+test('answers 401 to a tab after Bearer, its separator one or more spaces', async () => {
+  await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+
+  expect(
+    await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer\ta.b.c' } })
+  ).toMatchObject({
+    headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+    status: 401,
+  });
+  // two spaces present the token, which a server with no JWT verifier refuses
+  expect(
+    (await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer  a.b.c' } })).status
+  ).toBe(500);
+});
+
 test('refuses a request with no Origin from a page of another site, and a navigation to an unmarked get rule', async () => {
   await using fixture = await startTranscoding({ origins: [ORIGIN] });
   const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' };
@@ -2605,7 +2622,7 @@ test('reports one send-bound drop when consecutive stream frames exceed the boun
   expect(received).toBe(0);
   expect(requests).toBe(1);
   expect(frames).toBe(5);
-  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
 });
 
 test('writes native JSON results and notifications in stream order', async () => {
@@ -3300,7 +3317,7 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   await using bounded = await startTranscoding({ maximumUnsentBytes: 1 });
   const reported = reportedBy(bounded.gateway);
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
-  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
 });
 
 // transcoding 10.2
@@ -3474,7 +3491,7 @@ test('bounds every response body by maximumUnsentBytes before writing', async ()
       return fixture.memory.clients.length === 0;
     });
     await fixture.watched(2);
-    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 byte']);
   }
 });
 

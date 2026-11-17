@@ -637,7 +637,7 @@ describe('the corpus', () => {
       });
     };
 
-    assert.equal(seeds.length, 87);
+    assert.equal(seeds.length, 88);
     assert.ok(has(named('an empty payload')));
     assert.ok(has(named('100 groups below the top')));
     assert.ok(has(named('a varint of 10 bytes')));
@@ -654,7 +654,19 @@ describe('the corpus', () => {
         )
       )
     );
-    assert.ok(!has(named("a string's leading U+FEFF")));
+    assert.ok(has(named("a string's leading U+FEFF")));
+    assert.deepEqual(
+      codecsSeedsOf({
+        payloads: [
+          {
+            encoding: 'proto',
+            bytes: '0A 00',
+            differs: [{ row: 'a row', language: 'TypeScript' }],
+          },
+        ],
+      }),
+      []
+    );
   });
 
   test('draws its seeds after its own payloads, each as it is and mutated', () => {

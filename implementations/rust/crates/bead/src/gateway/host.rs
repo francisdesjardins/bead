@@ -745,7 +745,7 @@ fn asks_stream(fields: &Fields<'_>) -> bool {
 // case-insensitively, no parameter but `charset=utf-8`; its `content-encoding` none or `identity`
 fn is_taken_type(fields: &Fields<'_>, encoding: Encoding) -> bool {
     if fields
-        .header_of("content-encoding")
+        .joined_of("content-encoding")
         .is_some_and(|coding| !coding.trim().eq_ignore_ascii_case("identity"))
     {
         return false;
@@ -772,7 +772,7 @@ fn is_taken_type(fields: &Fields<'_>, encoding: Encoding) -> bool {
 // whether a request carries content: a length past 0, or a transfer coding (4.4, 10.1 step 8)
 fn carries_content(fields: &Fields<'_>) -> bool {
     fields
-        .header_of("content-length")
+        .first_line_of("content-length")
         .and_then(|length| length.trim().parse::<u64>().ok())
         .is_some_and(|length| length > 0)
         || fields.headers.contains_key("transfer-encoding")
@@ -791,16 +791,17 @@ fn matches_tag(fields: &Fields<'_>, etag: &str) -> bool {
         })
 }
 
-// a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it
+// a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it: `"Bearer" 1*SP
+// b64token`, spaces alone between the two
 fn bearer_of(value: &str) -> Option<&str> {
     let scheme = value.get(..6)?;
     let rest = value.get(6..)?;
 
-    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with([' ', '\t']) {
+    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with(' ') {
         return None;
     }
 
-    let token = rest.trim_start_matches([' ', '\t']);
+    let token = rest.trim_start_matches(' ');
 
     (!token.is_empty()).then(|| token.trim())
 }
@@ -1396,7 +1397,8 @@ impl Inner {
         }
 
         // 4: its origin
-        let origin = fields.header_of("origin");
+        let origin = fields.joined_of("origin");
+        let origin = origin.as_deref();
         let origins = &self.settings.origins;
 
         if !is_taken_origin(
@@ -1422,13 +1424,14 @@ impl Inner {
 
         // 5: a request of no origin from another site, but a GET navigation no `object` or
         // `embed` makes, to what reads alone (web.dev's resource isolation policy)
-        let site = fields.header_of("sec-fetch-site");
+        // * each read with its lines joined, so two lines are none of its tokens, as if absent
+        let site = fields.joined_of("sec-fetch-site");
 
-        if origin.is_none() && matches!(site, Some("same-site" | "cross-site")) {
-            let destination = fields.header_of("sec-fetch-dest");
-            let is_navigation = fields.header_of("sec-fetch-mode") == Some("navigate")
+        if origin.is_none() && matches!(site.as_deref(), Some("same-site" | "cross-site")) {
+            let destination = fields.joined_of("sec-fetch-dest");
+            let is_navigation = fields.joined_of("sec-fetch-mode").as_deref() == Some("navigate")
                 && method == "GET"
-                && !matches!(destination, Some("object" | "embed"));
+                && !matches!(destination.as_deref(), Some("object" | "embed"));
             let is_navigable = is_document
                 || (is_navigation
                     && path
@@ -1455,7 +1458,9 @@ impl Inner {
 
         // 6: a preflight from an origin `origins` names
         if method == "OPTIONS"
-            && fields.header_of("access-control-request-method").is_some()
+            && fields
+                .first_line_of("access-control-request-method")
+                .is_some()
             && is_listed_origin(origin, origins)
         {
             let asked = fields.lines_of("access-control-request-headers").join(", ");
@@ -1724,7 +1729,7 @@ impl Inner {
         let maximum = self.settings.maximum_body_bytes;
 
         if fields
-            .header_of("content-length")
+            .first_line_of("content-length")
             .and_then(|length| length.trim().parse::<u64>().ok())
             .is_some_and(|declared| declared > maximum)
         {
@@ -1756,7 +1761,7 @@ impl Inner {
             .outlet
             .on_gone(Box::new(move || releasing.release()));
 
-        if is_stream && fields.header_of("last-event-id").is_some() {
+        if is_stream && fields.first_line_of("last-event-id").is_some() {
             admitted.release();
 
             return self.reply((&exchange, Reply::of(204)));
@@ -2323,7 +2328,7 @@ impl Inner {
 fn flow_judged(exchange: &Exchange, fields: &Fields<'_>) -> Option<BodyHead> {
     exchange.flow.is_none().then(|| BodyHead {
         declared: fields
-            .header_of("content-length")
+            .first_line_of("content-length")
             .and_then(|length| length.trim().parse::<u64>().ok()),
         is_coded: fields.headers.contains_key("transfer-encoding"),
         is_http2: !fields.is_http1,

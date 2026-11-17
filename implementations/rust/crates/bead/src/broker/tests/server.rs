@@ -495,7 +495,7 @@ async fn reports_a_half_open_connection_it_lost_of_its_own_by_its_opener_s_id_wi
     assert_eq!(
         *locked(&told.errors),
         [(
-            "a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 bytes".to_owned(),
+            "a half-open connection of peer is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1 byte".to_owned(),
             None
         )],
         "reported with no handle"

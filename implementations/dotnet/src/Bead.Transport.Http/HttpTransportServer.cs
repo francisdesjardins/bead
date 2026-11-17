@@ -1201,7 +1201,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (FieldLines.JoinedOf(forwarded), _proxyTrust));
     }
 
     // an exchange from the server's own origin, its request's authority under http or https when its

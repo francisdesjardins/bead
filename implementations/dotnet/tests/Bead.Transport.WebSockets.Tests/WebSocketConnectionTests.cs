@@ -237,11 +237,22 @@ public sealed class WebSocketConnectionTests
     public async Task Settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_twice()
     {
         using var socket = new HeldWebSocket();
-        var connection = ConnectionOf(socket, true);
+        // * a bound of 1, which its drop names as 1 byte
+        var connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+        {
+            MaximumMessageBytes = 64,
+            CloseTimeout = Timeout.InfiniteTimeSpan,
+            Pace = new WebSocketConnection.Pacing
+            {
+                MaximumUnsentBytes = 1,
+                MinimumSendBytesPerSecond = 0,
+                SendGracePeriod = TimeSpan.Zero,
+            },
+        });
 
         try
         {
-            await connection.Send(new byte[65]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            await connection.Send(new byte[2]).WaitAsync(Patience, TestContext.Current.CancellationToken);
             await connection.Send(new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
             Assert.Empty(socket.Sent);
@@ -249,7 +260,7 @@ public sealed class WebSocketConnectionTests
             Assert.Equal(0, connection.UnsentBytes);
             Assert.True(connection.IsEndedHere);
             Assert.False(connection.IsTooBig);
-            Assert.Equal("what waits for its socket would pass maximumUnsentBytes, 64 bytes", connection.Dropped);
+            Assert.Equal("what waits for its socket would pass maximumUnsentBytes, 1 byte", connection.Dropped);
         }
         finally
         {

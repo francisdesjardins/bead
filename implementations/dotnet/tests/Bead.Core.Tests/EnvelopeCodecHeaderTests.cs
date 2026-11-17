@@ -355,6 +355,27 @@ public sealed class EnvelopeCodecHeaderTests
             written);
     }
 
+    // spec 4.4, 5.2: a block whose padding is not zero is refused for its scheme or its length
+    // first, as the other sides refuse it
+    [Fact]
+    public void Refuses_a_credential_for_its_scheme_or_its_length_before_its_padding()
+    {
+        string RefusalOf(string hexadecimal)
+        {
+            return Assert.Throws<FailureException>(() =>
+            {
+                EnvelopeCodec.ReadHeader(Vectors.FromHexadecimal(hexadecimal), RouterSide.Server);
+            }).Detail;
+        }
+
+        Assert.Equal(
+            "an answer announces OPAQUE or NONE, not JWT",
+            RefusalOf("A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 01"));
+        Assert.Equal(
+            "an OPAQUE token is 16 bytes, not 15",
+            RefusalOf("A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  01"));
+    }
+
     // spec 4.10
     [Fact]
     public void Refuses_a_header_of_no_kind_it_writes()

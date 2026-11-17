@@ -169,6 +169,14 @@ public sealed class FailureException : Exception
     }
 
     /// <summary>
+    /// A count of bytes as a failure's detail writes it: <c>1 byte</c>, or <c>0 bytes</c>, <c>2 bytes</c>.
+    /// </summary>
+    internal static string ByteCountOf(long count)
+    {
+        return count == 1 ? "1 byte" : $"{count} bytes";
+    }
+
+    /// <summary>
     /// A failure a router of <paramref name="side"/> received: the peer's when it crossed no relay,
     /// of no side known when it did.
     /// </summary>

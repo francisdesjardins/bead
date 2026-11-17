@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime
 
-from conformance import ROOT, advance, armed, hexadecimal, text, word, write_json
+from conformance import ROOT, advance, armed, citing_no_detail, detail_by_default, hexadecimal, text, word, write_json
 from details import detail_of as violations_detail, judged, violation
 from interop import API, PROCEDURES, SERVICE_ID
 from jws import compact, signed, unbase64url
@@ -67,6 +67,7 @@ def result(call_id, value, credential=None):
 
 
 def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0, detail=None):
+    detail = detail_by_default(code, scope, detail)
     return {'expect': {'kind': FAILURE, 'callId': call_id,
                        'failure': {'code': code, 'scope': scope, 'relays': relays,
                                    **({'detail': detail} if detail is not None else {})},
@@ -974,6 +975,14 @@ conversations = [
         *undecodable(1, 'echo', text('[' * 65 + ']' * 65))]),
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
         *undecodable(1, 'echo', text('1E400'))]),
+    # 17.5's order on the wire: of two faults past the grammar, the one the text meets first; and the
+    # depth counted from the text's start, free to fall below 0
+    ('a payload that names a member twice, the first holding a number past a double, is answered PAYLOAD_UNDECODABLE for the number',
+     ['17.2.1', '17.5', '17.5.4', '17.5.6'], None, [
+         *undecodable(1, 'echo', text('{"a":1e400,"a":2}'))]),
+    ('a payload that closes an array before any opens, then opens 65, is answered PAYLOAD_UNDECODABLE as not JSON',
+     ['17.2.1', '17.5', '17.5.3', '17.5.7'], None, [
+         *undecodable(1, 'echo', text(']' + '[' * 65))]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.6'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),
@@ -1239,6 +1248,11 @@ conversations = [
     ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
         result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
+    ('a result\'s chunk that does not read ends the command CHUNK_INVALID, and cancels it', ['9.6', '9.6.4'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 300), credited(2, 156),
+        raw('A1 14 40 04  00 00 00 02  00 20 00 00 00 00 00 00 | 01'),
+        cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
     # 12.2: a result, whole or an opening, held to chunkBytes, of 64 here, and one of 64 taken: its 56
     # bytes go back to ask's caller as a transfer, past what a result's header and an announcement's 20
     # bytes leave whole
@@ -1828,7 +1842,7 @@ document = {
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
         'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
-        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
+        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail every side writes, compared (spec 7.6); elsewhere its detail is not compared. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none. closed is the server closing that connection itself: nothing more comes on it, and the conversation\'s next steps name another connection, or none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. procedures beside open declares the procedures that connection\'s transport takes, by service id and procedure id (section 9.11): absent, every one; empty, none. A connection closed and opened again is a new connection under the same name.',
@@ -1841,7 +1855,7 @@ document = {
     'specVersion': spec_version(),
     'wallClock': WALL_CLOCK,
     'conversations': [
-        {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
+        {'name': name, 'clauses': citing_no_detail(clauses, rest[-1]), **({'limits': limits} if limits else {}),
          **({'pacing': rest[0]} if len(rest) > 1 else {}), **({'relay': RELAY_OPTIONS[name]} if name in RELAY_OPTIONS else {}),
          **({'listener': LISTENERS[name]} if name in LISTENERS else {}),
          'steps': rest[-1]}

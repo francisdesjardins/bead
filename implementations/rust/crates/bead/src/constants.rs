@@ -336,13 +336,38 @@ impl ProtocolCode {
         Self(number)
     }
 
+    // every code the protocol names, in the order of their numbers: what the metrics registry
+    // counts by, with no allocation
+    pub(crate) const NAMED: [Self; CODES.len()] = [
+        Self::ENVELOPE_MALFORMED,
+        Self::LAYOUT_UNSUPPORTED,
+        Self::KIND_UNSUPPORTED,
+        Self::ENVELOPE_TOO_LARGE,
+        Self::DESTINATION_UNKNOWN,
+        Self::DESTINATION_UNREACHABLE,
+        Self::SERVICE_UNKNOWN,
+        Self::PROCEDURE_UNKNOWN,
+        Self::CALL_UNKNOWN,
+        Self::SUBSCRIPTION_UNKNOWN,
+        Self::SUBSCRIPTION_UNSUPPORTED,
+        Self::SESSION_REQUIRED,
+        Self::ACCESS_DENIED,
+        Self::PAYLOAD_TOO_LARGE,
+        Self::CAPACITY_EXCEEDED,
+        Self::CREDENTIAL_UNSUPPORTED,
+        Self::CHUNK_INVALID,
+        Self::CREDIT_EXCEEDED,
+        Self::PAYLOAD_UNDECODABLE,
+        Self::TRANSFER_STALLED,
+        Self::PAYLOAD_INVALID,
+        Self::PROCEDURE_FAILED,
+        Self::DESTINATION_LOST,
+    ];
+
     /// Every code the protocol names, in the order of their numbers.
     #[must_use]
     pub fn named() -> Vec<Self> {
-        CODES
-            .iter()
-            .filter_map(|&(number, _)| NonZeroU16::new(number).map(Self))
-            .collect()
+        Self::NAMED.to_vec()
     }
 
     /// Its number.

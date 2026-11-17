@@ -18,7 +18,6 @@ import {
 const BROKER = {
   maximumPacketSize: 4096,
   retainAvailable: false,
-  sharedSubscriptions: true,
   users: ['peer', 'server'],
 };
 

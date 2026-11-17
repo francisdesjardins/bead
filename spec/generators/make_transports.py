@@ -6,7 +6,7 @@ from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
-from conformance import advance, armed, hexadecimal, text, word, write_json
+from conformance import advance, armed, citing_no_detail, detail_by_default, hexadecimal, text, word, write_json
 from interop import PROCEDURES, SERVICE_ID
 from jws import signed, unbase64url
 from mqtt_packets import largest_payload, receive_bound
@@ -62,6 +62,7 @@ def result(call_id, value, credential=None):
 
 
 def failure(call_id, code, scope=PROTOCOL, credential=None, detail=None):
+    detail = detail_by_default(code, scope, detail)
     return {'kind': FAILURE, 'callId': call_id,
             'failure': {'code': code, 'scope': scope, 'relays': 0, **({'detail': detail} if detail is not None else {})},
             **({'credential': credential} if credential else {})}
@@ -306,6 +307,16 @@ cases = [
         send('none', 'POST', fields={'content-type': BEAD}, body=ECHO), refused('none', 400, 'malformed'),
         send('bad', 'POST', fields={'bead-connection-token': 'x', 'content-type': BEAD}, body=ECHO),
         refused('bad', 400, 'malformed')]),
+    # 15.12: a token in two lines is read with its lines joined (RFC 9110 §5.3), a token of another form
+    ('a cancel or a DELETE whose bead-connection-token comes in two lines, its connection\'s first, is refused 400, marked; one line ends its connection',
+     ['15.6.4', '15.12'], None, [
+         *drawn(),
+         send('cancel', 'POST', fields=[('bead-connection-token', '{token}'), ('bead-connection-token', '{token}'),
+                                        ('content-type', BEAD)], body=cancel(5)),
+         refused('cancel', 400, 'malformed'),
+         send('twice', 'DELETE', fields=[('bead-connection-token', '{token}'), ('bead-connection-token', 'x')]),
+         refused('twice', 400, 'malformed'),
+         send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body='')]),
     ('an exchange of a connection the server does not hold is refused 404, connection-unknown', ['15.6.6'], None, [
         send('gone', 'POST', fields={'bead-connection-token': 'AAAAAAAAAAAAAAAAAAAAAA', 'content-type': BEAD},
              body=ECHO), refused('gone', 404, 'connection-unknown')]),
@@ -332,6 +343,23 @@ cases = [
         send('plain', 'POST', fields={'bead-connection-token': '{token}', 'content-type': 'text/plain'}, body=ECHO),
         refused('plain', 415, 'type-refused'),
         post('encoded', ECHO, fields={'content-encoding': 'gzip'}), refused('encoded', 415, 'type-refused')]),
+    # 15.12: Content-Encoding is a list, read with its lines joined, identity in two lines no identity
+    ('a connect whose Content-Encoding is identity in two lines, identity then gzip, or identity twice in one line is refused 415, marked',
+     ['15.6.11', '15.12'], None, [
+         send('twice', 'POST', fields=[('content-type', BEAD), ('content-encoding', 'identity'),
+                                       ('content-encoding', 'identity')]),
+         refused('twice', 415, 'type-refused'),
+         send('gzip', 'POST', fields=[('content-type', BEAD), ('content-encoding', 'identity'),
+                                      ('content-encoding', 'gzip')]),
+         refused('gzip', 415, 'type-refused'),
+         connect('joined', fields={'content-encoding': 'identity, identity'}), refused('joined', 415, 'type-refused')]),
+    # 15.12: Content-Type is a singleton field (RFC 9110 §8.3), refused in two lines
+    ('a connect, or a POST on a connection, whose Content-Type comes in two lines, Bead\'s first, is refused 415, marked',
+     ['15.6.11', '15.12'], None, [
+         send('connect', 'POST', fields=[('content-type', BEAD), ('content-type', 'text/html')]),
+         refused('connect', 415, 'type-refused'),
+         *drawn('drawn'), post('post', ECHO, fields=[('content-type', BEAD)]), refused('post', 415, 'type-refused'),
+         post('echo', ECHO), answered('echo', result(1, '"x"'))]),
     ('a body past its bound is refused 413, marked', ['15.6.10', '15.12.5'], {'maximumBodyBytes': 64}, [
         *drawn(), post('large', request(1, 'echo', '"' + 'x' * 60 + '"')), refused('large', 413, 'too-large')]),
     # 15.6: a request at the path that holds two faults, answered by the first in 15.6's order
@@ -501,6 +529,20 @@ cases = [
          send('mixed', 'POST', 'hTtP://{host}/bead', fields={'content-type': BEAD}), expect('mixed', 201)]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
+    # 15.12: two Origin lines are read joined, no serialized origin (RFC 6454 §7.3), whichever comes first
+    ('an exchange whose Origin comes in two lines, its own first, or in one line of two origins, is refused 403, marked',
+     ['15.6.5', '15.12'], None, [
+         send('lines', 'POST', fields=[('content-type', BEAD), ('origin', 'http://{host}'),
+                                       ('origin', 'https://elsewhere.test')]),
+         refused('lines', 403, 'origin-refused'),
+         connect('joined', fields={'origin': 'http://{host}, http://{host}'}), refused('joined', 403, 'origin-refused')]),
+    # 15.12: an empty line is a line, joined with the others, so the Origin is none of the server's own
+    ('an exchange whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked',
+     ['15.6.5', '15.12'], None, [
+         send('last', 'POST', fields=[('content-type', BEAD), ('origin', 'http://{host}'), ('origin', '')]),
+         refused('last', 403, 'origin-refused'),
+         send('first', 'POST', fields=[('content-type', BEAD), ('origin', ''), ('origin', 'http://{host}')]),
+         refused('first', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
         connect(fields={'origin': 'https://bead.test'}), expect('connect', 201)]),
     ('a host and an origin are compared in any ASCII case', ['15.12'], {'hosts': ['bead.test']}, [
@@ -593,6 +635,20 @@ cases = [
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
          refused('second', 503, 'busy', BUSY),
          connect('other', fields={'x-forwarded-for': '192.0.2.2'}), expect('other', 201)]),
+    # 15.12: X-Forwarded-For's lines joined by ", ", an empty one among them, whose empty entry ends
+    # the walk where it stands
+    ('behind proxies it names, X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a refusal tells the address where it ended',
+     ['15.6.5', '15.12', '15.12.2'], {'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}, [
+         send('last', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', '')]),
+         refused('last', 403, 'host-refused'),
+         send('first', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', ''), ('x-forwarded-for', '198.51.100.7')]),
+         refused('first', 403, 'host-refused'),
+         send('between', 'POST', host='rebind.example',
+              fields=[('content-type', BEAD), ('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', ''),
+                      ('x-forwarded-for', '10.0.0.5')]),
+         refused('between', 403, 'host-refused')]),
     # 15.12: the client's address, walked from the right past each proxy a server names, every
     # runner's socket on 127.0.0.1
     ('an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503',
@@ -1112,11 +1168,27 @@ websocket = [
          refused('elsewhere', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('own', {'origin': 'http://{host}'}), message('own', binary=ECHO), heard('own', envelope=result(1, '"x"')),
          *upgrade('none'), message('none', binary=ECHO), heard('none', envelope=result(1, '"x"'))]),
+    ('an upgrade whose Origin comes in two lines, its own first, is refused 403, marked', ['15.2', '15.2.7', '15.12'], {}, [
+        handshake('lines', [('origin', 'http://{host}'), ('origin', 'https://elsewhere.test')]),
+        refused('lines', 403, 'origin-refused', UPGRADE_REFUSED)]),
+    # 15.12: an empty line is a line, joined with the others, so the Origin is none of the server's own
+    ('an upgrade whose Origin comes in two lines, its own and an empty one, in either order, is refused 403, marked',
+     ['15.2', '15.2.7', '15.12'], {}, [
+        handshake('last', [('origin', 'http://{host}'), ('origin', '')]),
+        refused('last', 403, 'origin-refused', UPGRADE_REFUSED),
+        handshake('first', [('origin', ''), ('origin', 'http://{host}')]),
+        refused('first', 403, 'origin-refused', UPGRADE_REFUSED)]),
     # a WebSocket answers no CORS, which no browser asks of an upgrade (spec 15.12)
     ('an upgrade from an origin the server takes is served', ['15.12'], {'options': {'origins': ['https://bead.test']}}, [
         handshake('socket', {'origin': 'https://bead.test'}),
         expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
                                       'access-control-allow-origin': None, 'vary': None}),
+        message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    # 15.2: a server selects no subprotocol and no extension, whatever its upgrade offers (RFC 6455 §4.2.2)
+    ('an upgrade offering subprotocols is taken 101, naming none, and served', ['15.2'], {}, [
+        handshake('socket', {'sec-websocket-protocol': 'chat, bead', 'sec-websocket-extensions': 'permessage-deflate'}),
+        expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
+                                      'sec-websocket-protocol': None, 'sec-websocket-extensions': None}),
         message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.2.2', '15.2.7', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
@@ -1191,6 +1263,17 @@ websocket = [
          refused('unknown', 403, 'host-refused', UPGRADE_REFUSED),
          *upgrade('taken', {'x-forwarded-for': '203.0.113.9'}), message('taken', binary=ECHO),
          heard('taken', envelope=result(1, '"x"'))]),
+    # 15.12: X-Forwarded-For's lines joined by ", ", an empty one among them, whose empty entry ends
+    # the walk where it stands
+    ('behind proxies it names, an upgrade\'s X-Forwarded-For is read with its lines joined, an empty one among them, whose empty entry ends the walk: a WebSocket server\'s refusal tells the address where it ended',
+     ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}}, [
+         handshake('last', [('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', '')], host='rebind.example'),
+         refused('last', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('first', [('x-forwarded-for', ''), ('x-forwarded-for', '198.51.100.7')], host='rebind.example'),
+         refused('first', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('between', [('x-forwarded-for', '198.51.100.7'), ('x-forwarded-for', ''),
+                               ('x-forwarded-for', '10.0.0.5')], host='rebind.example'),
+         refused('between', 403, 'host-refused', UPGRADE_REFUSED)]),
     ('an upgrade\'s X-Forwarded-For from a socket no trustedProxies entry holds is not read: a WebSocket server\'s refusal tells the socket\'s address',
      ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'trustedProxies': ['192.0.2.0/24']}}, [
          handshake('rebound', {'x-forwarded-for': '192.0.2.1'}, host='rebind.example'),
@@ -2600,12 +2683,11 @@ def mqtt_broker():
 
     return {
         '$comment': [
-            "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, its shared subscriptions offered, and its users, each authenticated by the run's password, its Client Identifier tied to its user.",
+            "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, and its users, each authenticated by the run's password, its Client Identifier tied to its user. It offers shared subscriptions, which no setting of Mosquitto's turns off.",
             "Its access control is spec 15.31's for them: a participant reads its own inbox and its will writes its own departure; every participant writes any inbox and reads any departure; and every user reads and writes every name, so that a peer plays an acceptor. Its queues are lifted, its receive maximum toward a participant none, and it persists nothing.",
         ],
         'maximumPacketSize': MQTT_BROKER_PACKET_SIZE,
         'retainAvailable': False,
-        'sharedSubscriptions': True,
         'users': sorted(users),
     }
 
@@ -2676,15 +2758,15 @@ document = {
         for name, pieces, status, fields, body in responses
     ],
     'cases': [
-        {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}),
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': 'http', **({'options': options} if options else {}),
          **({'realTime': True} if name in HTTP_REAL_TIME else {}),
          **({'differs': HTTP_DIFFERS[name]} if name in HTTP_DIFFERS else {}), 'steps': steps}
         for name, clauses, options, steps in cases
     ] + [
-        {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': 'websocket', **fields, 'steps': steps}
         for name, clauses, fields, steps in websocket
     ] + [
-        {'name': name, 'clauses': clauses, 'transport': transport, **fields, 'steps': steps}
+        {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': transport, **fields, 'steps': steps}
         for transport in (IN_MEMORY, MQTT, AMQP) for name, clauses, fields, steps in played[transport]
     ],
     'brokers': {MQTT: mqtt_broker(), AMQP: amqp_broker()},

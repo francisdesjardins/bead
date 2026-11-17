@@ -353,6 +353,11 @@ export interface IUpgradeResponseLike {
 /** The part of a WebSocket this transport touches — met by the global `WebSocket` and by `ws`. */
 export interface IWebSocketLike {
   binaryType: string;
+  /**
+   * The subprotocol its upgrade took, empty for none, once open (WHATWG WebSockets §2.2): the
+   * global `WebSocket` and `ws` carry it; an injected socket without it is not judged by it.
+   */
+  readonly protocol?: string;
   readonly readyState: number;
   onclose: Handler<ICloseEventLike> | null;
   onerror: Handler<unknown> | null;

@@ -269,6 +269,13 @@ header_refusals = [
      MALFORMED, "a credential's padding is zero bytes"),
     ('a scheme to come whose padding is not zero', ['4.4'], 'A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 05  01 02 03 04 05  80 00 00',
      MALFORMED, "a credential's padding is zero bytes"),
+    # two faults of one block, refused with the first in 4.4's order: its scheme, its length, then its padding
+    ('an opaque token of 15 bytes whose padding is not zero, refused for its length', ['4.4', '7.6'],
+     header_of(0x10, 0x08, 3, '00 02 00 01', '00 01 00 0F', hexadecimal(bytes(range(1, 16))), 'FF'),
+     MALFORMED, 'an OPAQUE token is 16 bytes, not 15'),
+    ('NONE of 1 byte on a request, whose padding is not zero, refused for its scheme', ['4.4', '7.6'],
+     header_of(0x10, 0x08, 3, '00 02 00 01', '00 00 00 01', '01', 'FF FF FF'),
+     MALFORMED, 'a request presents a credential, never NONE'),
     # a block past the header's length, which counts it to the end of its padding exactly
     ('CREDENTIAL on a request whose message ends before its block', ['4.3'], 'A1 10 08 03  00 00 00 03  00 02 00 01',
      MALFORMED, "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"),
@@ -341,11 +348,11 @@ envelopes = [
 
 envelope_refusals = [
     ('a cancel with a byte after its header', ['6.4'], 'A1 16 00 02  00 00 00 05 | 00', None, None, MALFORMED,
-     'a cancel carries no payload, not 1 bytes'),
+     'a cancel carries no payload, not 1 byte'),
     ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, None, MALFORMED,
      'a chunk carries one byte at least'),
     ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, None, MALFORMED,
-     'a credit carries no payload, not 1 bytes'),
+     'a credit carries no payload, not 1 byte'),
     # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
     # vector that fails two checks cites 5.1's order
     ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {text("hi")}', 13, None,
@@ -1096,7 +1103,7 @@ document = {
         'Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.',
         "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
         'kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.',
-        "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
+        "A refusal names the protocol code a reader answers with; its detail, where given, is the detail every side writes, compared (spec 7.6).",
         "maximumEnvelopeBytes, chunkBytes and maximumDetailBytes, where given, are the reader's bounds, chunkBytes the one it holds a request and a result to (spec 12.2); where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',

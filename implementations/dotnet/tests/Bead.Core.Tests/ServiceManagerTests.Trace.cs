@@ -295,6 +295,38 @@ public sealed partial class ServiceManagerTests
             }));
     }
 
+    // debugging 4.1.6
+    [Fact]
+    public async Task Tells_a_duration_from_readings_0_3_ms_and_2_3_ms_as_2_ms_the_difference_rounded_to_the_nanosecond_first()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter(RouterSide.Client) { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var origin = clock.GetTimestamp();
+
+        await clock.Advance(TimeSpan.FromMicroseconds(300));
+        var before = clock.GetElapsedTime(origin);
+        router.Answer = async (payload) =>
+        {
+            await clock.Advance(TimeSpan.FromMilliseconds(2));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        // the call started at 0.3 ms of the monotonic reading and settled at 2.3
+        Assert.Equal(
+            [TimeSpan.FromMicroseconds(300), TimeSpan.FromMicroseconds(2_300)],
+            new[] { before, clock.GetElapsedTime(origin) });
+        Assert.Equal<TimeSpan?>(
+            [null, TimeSpan.FromMilliseconds(2)],
+            seen.Select((told) =>
+            {
+                return told.Event.Duration;
+            }));
+    }
+
     // debugging 4.1.5, 4.2.5 and 4.2.6
     [Fact]
     public async Task A_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_its_failure_at_that_same_start()

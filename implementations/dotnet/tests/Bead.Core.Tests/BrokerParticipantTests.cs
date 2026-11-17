@@ -598,7 +598,7 @@ public sealed class BrokerParticipantTests
         })).Message);
         await participant.Stop();
         Assert.False(participant.IsLinked);
-        Assert.Equal(["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"], reported);
+        Assert.Equal(["a message to the inbox of ada is no parcel: 1 byte, under a parcel's 28"], reported);
         await participant.DisposeAsync();
 
         // * taken over, then stopped: a stop leaves the fence, so a connect reads the takeover's words
@@ -1439,7 +1439,7 @@ public sealed class BrokerParticipantTests
 
         string[] reports =
         [
-            "a message to the name interop is no parcel: 1 bytes, under a parcel's 28",
+            "a message to the name interop is no parcel: 1 byte, under a parcel's 28",
             "an OPEN to the name interop does not read, dropped: an OPEN whose id runs past its bytes",
             "an OPEN to the name interop does not read, dropped: a kept byte that is not 0",
         ];
@@ -1480,7 +1480,7 @@ public sealed class BrokerParticipantTests
 
         // the report told the next listener once, the throw of the first told to none
         Assert.Equal(ReadyState.Open, client.ReadyState);
-        Assert.Equal(["a message to the inbox of client is no parcel: 1 bytes, under a parcel's 28"], heard);
+        Assert.Equal(["a message to the inbox of client is no parcel: 1 byte, under a parcel's 28"], heard);
     }
 
     // spec 15.12.17, 15.23.5

@@ -263,6 +263,35 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
     }
 
+    // a connect offering the subprotocols given, answered 101 with the fields given beside its
+    // accept: it fails, the client closed, and its socket let go
+    private async Task AssertRefusedOver101(string fields, IReadOnlyList<string>? offered)
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = offered, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, (head, fields));
+
+            await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
+    }
+
     /// <summary>
     /// A listener of the tests' own: it takes each connection's first bytes, a request's head or a
     /// TLS hello, and answers the handshake, or refuses it, only when told to.
@@ -438,6 +467,24 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         await _client.DisposeAsync();
         await _server.Stop();
+    }
+
+    [Fact]
+    public void Prints_no_credential_nor_its_provider()
+    {
+        var given = new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = 8080, Credential = "Bearer good" };
+        var asked = given with
+        {
+            Credential = null,
+            CredentialProvider = (_) =>
+            {
+                return ValueTask.FromResult("Bearer good");
+            },
+        };
+
+        Assert.DoesNotContain("good", given.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith("WebSocketTransportClientConnectOptions { Host = 127.0.0.1, Port = 8080, Secured = False, Pathname = /, Protocols = , Timeout = 00:00:30, Credential = set, CredentialProvider = none, CancellationToken = ", given.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Credential = none, CredentialProvider = set", asked.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1272,6 +1319,56 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             }
             while (read > 0);
         }
+    }
+
+    // spec 15.2; WHATWG WebSockets §2.2
+    [Fact]
+    public async Task Fails_its_connect_on_a_101_that_names_none_of_the_subprotocols_it_offered()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = ["chat", "bead"], CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            Assert.Contains("\r\nSec-WebSocket-Protocol: chat, bead\r\n", Encoding.ASCII.GetString(head), StringComparison.OrdinalIgnoreCase);
+            await Listener.Upgrade(peer, (head, ""));
+
+            var refused = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Contains("names none of the subprotocols", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            // its socket let go: the listener's read meets its end
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
+    }
+
+    // spec 15.2; RFC 6455 §4.1, §4.3, §11.3.4: one field line, equal to an offer byte for byte
+    [Theory]
+    [InlineData("Sec-WebSocket-Protocol: BEAD\r\n")]
+    [InlineData("Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: bead\r\n")]
+    [InlineData("Sec-WebSocket-Protocol: bead\r\nSec-WebSocket-Protocol: chat\r\n")]
+    public async Task Fails_its_connect_on_a_101_whose_subprotocol_is_not_one_line_equal_to_an_offer_BEAD_bead_twice_or_bead_then_chat(string fields)
+    {
+        await AssertRefusedOver101(fields, ["bead"]);
+    }
+
+    // spec 15.2: a client that offered none takes no field, an empty one included
+    [Fact]
+    public async Task Fails_its_connect_on_a_101_that_carries_a_subprotocol_field_an_empty_one_when_it_offered_none()
+    {
+        await AssertRefusedOver101("Sec-WebSocket-Protocol: \r\n", null);
     }
 
     // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens, which .NET's client

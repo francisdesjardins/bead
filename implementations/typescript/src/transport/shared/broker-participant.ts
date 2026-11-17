@@ -37,6 +37,7 @@ import { assertHeldFinite, type IClock, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from './constants';
 import { createEmitter, tellError } from './emitter';
 import {
+  byteCountOf,
   ConnectError,
   GenericError,
   notServedOf,
@@ -876,7 +877,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       if (unsentBytes + bytes.length > maximumUnsentBytes && fields.kind !== ParcelKind.CLOSE) {
         lose({
           code: CloseCode.LOST,
-          reason: `what waits for its broker would pass maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`,
+          reason: `what waits for its broker would pass maximumUnsentBytes, ${byteCountOf(maximumUnsentBytes)}`,
         });
 
         return undefined;

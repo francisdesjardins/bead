@@ -120,7 +120,7 @@ and AMQP 1.0 on RabbitMQ 4 its second
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
   whatever that payload's format.
-- **Subscriptions at the client's pace.** A paced subscription sends only what the client has
+- **Subscriptions the client can pace.** A paced subscription sends only what the client has
   credited. What waits is kept by key, so a state keeps its latest value and an event keeps every
   one. A queue past its bound ends the subscription out loud, never in silence.
 - **Large payloads under credit.** A transfer goes in chunks, as fast as its receiver credits them,
@@ -199,7 +199,7 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
+tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
   fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
   protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
@@ -226,19 +226,19 @@ procedures, each under a version of its own. Beside them:
 
 | File                                                            | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                             | 472 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
+| [`vectors.json`](spec/vectors.json)                             | 474 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
-| [`transports.json`](spec/transports.json)                       | 269 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
+| [`transports.json`](spec/transports.json)                       | 279 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
 | [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
 | [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
 | [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                                                                                     |
 | [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                                                                              |
 | [`debug-filters.json`](spec/debug-filters.json)                 | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                                                                                                                                                                                                                                                            |
-| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 55 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
+| [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 61 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 83 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 91 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
 | [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
 | [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
@@ -1030,8 +1030,10 @@ against each server.
 - `node tools/check-citations.mjs`: every test `docs/support.md` cites, wherever it stands — a
   file, a C# class or method, a Rust function or trial, a title — is one its side's tests declare,
   an entry of a conformance file a harness names at run time, a case's label or a row of the
-  matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason.
-  Given files, those alone.
+  matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason;
+  each language cell of the matrix's differences places a citation or says a word of its legend,
+  and the cells of open rows that hold by no test number at most its `UNTESTED_OPEN`. Given files,
+  those alone.
 - `node tools/check-details.mjs`: on every side, no exception's message goes into a failure's detail
   but at a site that reports alone (spec 9.0) or whose words are the side's own, a built-in codec's
   reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
@@ -1050,6 +1052,14 @@ against each server.
 - `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.
+- `node tools/check-twins.mjs`: every TypeScript and C# test — a title, a `[Fact]` or `[Theory]`
+  method — is played on the Rust side under its title's key, a `#[test]` or `#[tokio::test]` `fn`
+  or a trial, or a row of `tools/twins.tsv` gives its class and why: a twin under another sentence,
+  a twin the key does not reach, ahead for the Rust side, or native to its platform. A folder's row
+  leaves out every test of a program in one language no other side has: the builder, the root's
+  tools, the demo, the DevTools extension and the browser page. `--write` adds a `pending` row for
+  each new one, which fails until a reader classifies it, and drops each row whose test is twinned
+  or under a folder's row.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, the Rust workspace's and its lock's members, and each conformance file's
@@ -1121,6 +1131,25 @@ Two run before each commit, once a clone opts in with `git config core.hooksPath
 `pre-commit` holds the staged root files to their format, when the TypeScript side is installed,
 and `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
+
+## Finishing a feature
+
+A `feature/*` branch is finished by `tools/flow.mjs finish`, from a clone on `develop` or the one
+`--repo` names, each step checked before the next. It holds the branch to being on `origin`,
+`develop` to being clean and at `origin/develop`, a worktree that has the branch checked out to
+being clean, and the branch's head on `origin` to a run of `ci.yml` that passed, awaiting one still
+going. It then merges that head into `develop` with `--no-ff`, git's hooks run, and leaves a
+conflict to whoever resolves it. It pushes `develop` and awaits CI's run of the merge; when a newer
+push cancelled that run, it follows the newest run whose commit contains the merge. On that run's
+success alone, it deletes the branch on `origin`, the worktree, its `node_modules` folders first,
+and the local branch; on its failure, it names the failed jobs and deletes nothing. It never pushes
+`main` or a tag, and refuses a `release/*` or a `hotfix/*` branch, which
+[Releasing](#releasing) finishes. `--dry-run` fetches, makes every check and says what it would do.
+
+```sh
+node tools/flow.mjs finish feature/<name> --dry-run
+node tools/flow.mjs finish feature/<name>
+```
 
 ## Releasing
 
@@ -1244,10 +1273,11 @@ then one corpus of `Probe` through every side's testee); `protovalidate-differen
 (protovalidate-es, by its pin's sha512, over the verdicts of `spec/validations.json`, then those
 verdicts and a corpus mutated from them through every side's generated validators and through
 protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`
-(the subjects, the links, the details, the page, the versions, the root's tools' own tests, then the
-supply chain: every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and
-Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its
-digest). `ci-ok` needs them all, so one check stands for every job.
+(the subjects, the links, the cited tests, the details, the page and its deploy's tests, the names,
+the durations' members, the twins, the versions, the root's tools' own tests, then the supply chain:
+every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's
+community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok`
+needs them all, so one check stands for every job.
 
 Dependabot, by [`dependabot.yml`](.github/dependabot.yml), brings the dependency updates each week to
 `develop` as grouped pull requests, which CI judges as any other, each release waiting out its first
@@ -1279,6 +1309,8 @@ know better are welcome.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+- [`docs/maintaining.md`](docs/maintaining.md) is the maintainer's guide: the gates and their
+  order, each workflow done by hand, the everyday chores and the release.
 - A comment a reader must not miss opens with its tag, after its marker (`//`, `#`), as the
   [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments)
   extension shows them: `!` an alert, a trap or an invariant that breaks something when changed;

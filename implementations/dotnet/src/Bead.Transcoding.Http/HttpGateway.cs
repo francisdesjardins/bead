@@ -1494,7 +1494,7 @@ public sealed class HttpGateway : IAsyncDisposable
         var pending = writer.CanGetUnflushedBytes ? writer.UnflushedBytes : 0;
         if (bytes.Length > _options.MaximumUnsentBytes - pending)
         {
-            var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {_options.MaximumUnsentBytes} bytes");
+            var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {FailureException.ByteCountOf(_options.MaximumUnsentBytes)}");
             DropWriter(context, (drop, detail));
             throw new IOException(detail);
         }
@@ -1585,11 +1585,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
     // ── Fields ──────────────────────────────────────────────────────────────────────────────────
 
+    // a header as the request gives it, its lines joined in their order by ", " (spec 15.12); none
+    // when absent, which is not empty
     private static string? HeaderOf(HttpRequest request, string name)
     {
-        var values = request.Headers[name];
-
-        return values.Count == 0 ? null : values.ToString();
+        return FieldLines.JoinedOf(request.Headers[name]);
     }
 
     // whether the server it is mounted on read a body before it, wholly or in part (transcoding
@@ -1662,7 +1662,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (FieldLines.JoinedOf(forwarded), _proxyTrust));
     }
 
     // each error listener within a guard that drops what it throws, the listeners after it told:

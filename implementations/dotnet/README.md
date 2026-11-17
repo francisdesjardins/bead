@@ -718,9 +718,10 @@ nothing written; the transport answers alike what Kestrel reads past.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP
-literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
-them. `Hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
-case as the field carries it, an IDN host in the punycode a browser sends: `["bead.example"]` takes
+literal, and a localhost name is answered with the loopback by the resolvers RFC 6761 §6.3 asks it
+of, so a page cannot rebind its name to any of them. `Hosts` names the hosts it takes besides, each
+a host without its port, compared in any ASCII case as the field carries it, an IDN host in the
+punycode a browser sends: `["bead.example"]` takes
 `bead.example` and `bead.example:8443` alike; none and `[]` take no other. Any other host, an empty
 one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its name to
 the server's address among them. So a server reached by a name names it in `Hosts`: a public one,

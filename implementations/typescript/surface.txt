@@ -3223,6 +3223,7 @@ src/transport/client/types.ts IWebSocketConstructor
 src/transport/client/types.ts IWebSocketLike
   interface IWebSocketLike
     binaryType: string
+    readonly protocol?: string
     readonly readyState: number
     onclose: Handler<ICloseEventLike> | null
     onerror: Handler<unknown> | null
@@ -3684,7 +3685,7 @@ src/transport/server/types.ts IUpgradeSocketLike
     once(event: 'finish', listener: () => void): unknown
 src/transport/server/types.ts IWebSocketServerConstructor
   interface IWebSocketServerConstructor
-    new (options: {closeTimeout?: number | undefined; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
+    new (options: {closeTimeout?: number | undefined; handleProtocols: () => false; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
 src/transport/server/types.ts IWebSocketServerLike
   interface IWebSocketServerLike
     address(): {address: string; port: number} | string | null

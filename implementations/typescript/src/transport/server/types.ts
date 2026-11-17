@@ -495,10 +495,12 @@ export interface IWebSocketServerConstructor {
   /**
    * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
    * closes; `closeTimeout`, the transport's, which `ws` waits on a close within, its own 1009's
-   * among them, from ws 8.22.
+   * among them, from ws 8.22; `handleProtocols`, the transport's, which selects no subprotocol
+   * (spec 15.2).
    */
   new (options: {
     closeTimeout?: number | undefined;
+    handleProtocols: () => false;
     maxPayload?: number | undefined;
     server: Server;
   }): IWebSocketServerLike;
@@ -687,8 +689,9 @@ export interface IHTTPRequestLike {
   readonly complete?: boolean | undefined;
   readonly method?: string | undefined;
   /**
-   * Its fields as they came, each name before its value: what counts an `Authorization` or a
-   * `Host` given twice, which `headers` keeps once.
+   * Its fields as they came, each name before its value: what counts an `Authorization`, a `Host`
+   * or a `Content-Type` given twice, which `headers` keeps once, and what an `Origin`, a
+   * `Content-Encoding` or another field spec 15.12 joins is read from.
    */
   readonly rawHeaders: readonly string[];
   /** Whether any of its body was read; Node's has it, and HTTP/2's compatibility one. */
