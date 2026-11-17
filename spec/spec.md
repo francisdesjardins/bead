@@ -1461,11 +1461,11 @@ gone without a word is dropped; each comes at that time or within a further `hea
 platform's timer runs. Whether it pings besides while frames come, and drops a connection that
 leaves such a ping unanswered, and whether any pong answers its ping or only the one that echoes
 its data ([RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.3)), are its
-platform's ([`docs/support.md`](../docs/support.md), "Differences"). A page's `WebSocket` sends none, and the server's
-pings, which it answers, stand for its own. What waits for a server's socket is held besides as
-section 15.12 says. A side that closes says 1000; a server that stops, 1001, to each connection it
-holds, one whose opening handshake completes as its stop begins among them. A close with 1000 is the
-clean one.
+platform's ([`docs/support.md`](../docs/support.md), "Differences"). A page's `WebSocket` sends
+none, and the server's pings, which it answers, stand for its own. What waits for a server's socket
+is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+each connection it holds, one whose opening handshake completes as its stop begins among them. A
+close with 1000 is the clean one.
 
 ### HTTP
 
