@@ -74,6 +74,9 @@ h2 = { version = "0.4.20", default-features = false }
 tower-service = { version = "0.3.3", default-features = false }
 httpdate = { version = "1.0.3", default-features = false }
 libtest-mimic = { version = "0.8.2" }
+# the allocation gate's counting allocator, its `unsafe impl` its own, so that the crate that names
+# it as its global allocator still forbids unsafe code
+stats_alloc = { version = "0.1.10", default-features = false }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 # the proto payload's codec: Buffa's runtime, its descriptors and dynamic message, its well-known
