@@ -1587,12 +1587,9 @@ public sealed class HttpGateway : IAsyncDisposable
 
     // a header as the request gives it, its lines joined in their order by ", " (spec 15.12); none
     // when absent, which is not empty
-    // ! joined here, as the other sides join them: StringValues.ToString() joins by ","
     private static string? HeaderOf(HttpRequest request, string name)
     {
-        var values = request.Headers[name];
-
-        return values.Count == 0 ? null : string.Join(", ", values.AsEnumerable());
+        return FieldLines.JoinedOf(request.Headers[name]);
     }
 
     // whether the server it is mounted on read a body before it, wholly or in part (transcoding
@@ -1665,7 +1662,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (FieldLines.JoinedOf(forwarded), _proxyTrust));
     }
 
     // each error listener within a guard that drops what it throws, the listeners after it told:

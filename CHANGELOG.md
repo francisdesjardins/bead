@@ -110,6 +110,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side reads those six fields with their lines joined, where it read their first line
   alone: two `Origin` lines, its own first, are refused 403, a connection token in two lines 400,
   and a `Content-Encoding` of `identity` in two lines 415.
+- The C# side reads an upgrade's `Origin` and each server's `X-Forwarded-For` with their lines
+  joined by ", " (spec 15.12). An empty line is no longer dropped, so an upgrade whose `Origin`
+  holds one is refused 403 `origin-refused`. A client behind a trusted proxy that wrote an empty
+  line is read where the walk ends.
 - The TypeScript side reads those fields from a request's raw lines over HTTP/2 as over HTTP/1.1,
   where Node kept the first line alone of a `Content-Encoding` over HTTP/2.
 - The TypeScript side keeps a string's leading U+FEFF in a `proto` payload, as spec 17.9.4 has it

@@ -64,12 +64,9 @@ public sealed partial class HttpTransportServer
 
         // a header as the request gives it, its lines joined in their order by ", " (RFC 9110 §5.3,
         // spec 15.12); none when absent, which is not empty
-        // ! joined here, as the other sides join them: StringValues.ToString() joins by ","
         internal static string? HeaderOf(HttpRequest request, string name)
         {
-            var values = request.Headers[name];
-
-            return values.Count == 0 ? null : string.Join(", ", values.AsEnumerable());
+            return FieldLines.JoinedOf(request.Headers[name]);
         }
 
         // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or

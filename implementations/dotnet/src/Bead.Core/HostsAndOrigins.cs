@@ -488,12 +488,7 @@ internal static class HostsAndOrigins
     /// </summary>
     public static string? OriginOf(IReadOnlyList<string?> lines)
     {
-        ArgumentNullException.ThrowIfNull(lines);
-
-        return lines.Count == 0 ? null : string.Join(", ", lines.Select((line) =>
-        {
-            return line ?? "";
-        }));
+        return FieldLines.JoinedOf(lines);
     }
 
     /// <summary>

@@ -786,7 +786,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (FieldLines.JoinedOf(forwarded), _proxyTrust));
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the
