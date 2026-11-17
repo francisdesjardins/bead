@@ -276,6 +276,36 @@ test.describe('createServiceManager', () => {
       ).toEqual([undefined, 30]);
     });
 
+    // debugging 4.1.6
+    test('tells a duration from readings 0.3 ms and 2.3 ms as 2 ms, the difference rounded to the nanosecond first', async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const { control, router } = createFakeRouter('client', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      // the readings, as Bead reads them
+      const given: IClock = clock;
+
+      await clock.tickAsync(0.3);
+      const before = given.performance.now();
+
+      control.answer = async (payload) => {
+        await clock.tickAsync(2);
+
+        return answerOf(payload);
+      };
+
+      await manager.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      // the call started at 0.3 ms of the monotonic reading and settled at 2.3, whose difference
+      // as doubles falls short of 2
+      expect([before, given.performance.now()]).toEqual([0.3, 2.3]);
+      expect(
+        seen.map(({ info }) => {
+          return info.duration;
+        })
+      ).toEqual([undefined, 2]);
+    });
+
     // debugging 4.1.5, 4.2.5 and 4.2.6
     test('a notification starts as it is heard or sent, and a failed notify tells its failure at that same start', async () => {
       const start = Date.UTC(2026, 0, 1);

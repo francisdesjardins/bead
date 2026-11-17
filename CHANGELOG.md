@@ -21,6 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is played on the Rust side under its title's key, or a row gives its class and why, a folder's
   row leaving out a program in one language no other side has; `--write` adds a `pending` row for
   a new one, which fails until a reader classifies it.
+- `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
+  `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
+  9.4.10, 9.6.8).
 
 ### Changed
 
@@ -32,6 +35,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
   and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
   `spec/transports.json` plays it.
+- `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
+  side builds, and decision 0013 says the same.
+- `spec/debugging.md` 4.1 states how a trace's duration is read: the difference taken in
+  nanoseconds, rounded to a whole one, then its fraction of a millisecond dropped, as 11.1 reads
+  one; the companion's next version is a minor.
+- `spec/debugging.md` 6.7 names `holds a surrogate alone`, a word holding a surrogate alone, and
+  6.8 refuses a filter given whole in the grammar's names whichever listener it is given to.
 - A field sent in more than one field line is read with its lines joined by ", " (spec 15.12, RFC
   9110 §5.3): an `Origin`, a `bead-connection-token` and a `Content-Encoding` at the HTTP transport,
   and a gateway's `origin`, `content-encoding` and three `Sec-Fetch-*` fields (transcoding 5.1,
@@ -46,6 +56,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript trace reads a call's duration as its metrics do, rounded to the nanosecond first,
+  so readings of 0.3 ms and 2.3 ms are told 2 ms, as on the other sides (debugging §4.1).
+- The TypeScript and C# sides refuse a debug filter given whole holding a direction, a type or a
+  kind its grammar names none of, whichever listener it is given to, and a filter's word holding a
+  surrogate alone (debugging §6.7, §6.8).
 - The TypeScript WebSocket client given no subprotocol offers none: in a page, Chromium offered
   the subprotocol "undefined", which no server selects, so its connect failed (spec 15.2).
 - The Rust side's metrics registry adds a call's end, a notification and a subscription dropped

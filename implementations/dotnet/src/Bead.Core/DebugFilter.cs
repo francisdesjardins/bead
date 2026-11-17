@@ -50,7 +50,10 @@ public sealed record DebugFilter
     /// <summary>The procedures kept, by a pattern of their name: <c>*</c> for any run of characters.</summary>
     public IReadOnlyList<string> Include { get; init; } = [];
 
-    /// <summary>The kinds of envelope a router's <c>Debug</c> tells of; a call's listener does not ask.</summary>
+    /// <summary>
+    /// The kinds of envelope a router's <c>Debug</c> tells of; a call's listener does not ask, but
+    /// refuses one the grammar names none of, as every listener does.
+    /// </summary>
     public IReadOnlyList<EnvelopeKind> Kinds { get; init; } = [];
 
     /// <summary>The types of call kept.</summary>
@@ -272,6 +275,35 @@ public sealed record DebugFilter
         return values;
     }
 
+    // the directions, the types and the kinds kept, each value checked to be one of the grammar's,
+    // whichever listener the filter is given to (debugging 6.8)
+    private (IReadOnlyList<DebugDirection> Directions, IReadOnlyList<DebugType> Types, IReadOnlyList<EnvelopeKind> Kinds) SelectorsOf()
+    {
+        var directions = ValuesOf(Directions, (DirectionNames, "direction"));
+        var types = ValuesOf(Types, (TypeNames, "type"));
+        var kinds = ValuesOf(Kinds, (KindNames, "kind"));
+
+        return (directions, types, kinds);
+    }
+
+    // whether `word` holds a surrogate that no other completes: a valid pair is a code point
+    private static bool HoldsSurrogateAlone(string word)
+    {
+        for (var index = 0; index < word.Length; index += 1)
+        {
+            if (char.IsHighSurrogate(word[index]) && index + 1 < word.Length && char.IsLowSurrogate(word[index + 1]))
+            {
+                index += 1;
+            }
+            else if (char.IsSurrogate(word[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // definition
 
     /// <summary>
@@ -288,7 +320,8 @@ public sealed record DebugFilter
     /// Each list keeps the order of its words, a value given twice kept twice. The first word that
     /// does not hold is an <see cref="ArgumentException"/>, naming it, or its value, as it was
     /// written, quoted as JSON: a selector empty or with a value left empty, a value that names none
-    /// of its letter's, a word holding a parenthesis that is no selector.
+    /// of its letter's, a word holding a parenthesis that is no selector, a word holding a surrogate
+    /// alone.
     /// </summary>
     /// <example><c>DebugFilter.Parse("d(rx), t(r|c), e(failure), get*, -getStatus")</c></example>
     public static DebugFilter Parse(string spec)
@@ -335,6 +368,10 @@ public sealed record DebugFilter
             {
                 throw new ArgumentException($"a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not {QuotedOf(word)}");
             }
+            else if (HoldsSurrogateAlone(word))
+            {
+                throw new ArgumentException($"a debug filter holds no surrogate alone, not {QuotedOf(word)}");
+            }
             else if (word.StartsWith('-'))
             {
                 exclude.Add(word[1..]);
@@ -375,12 +412,11 @@ public sealed record DebugFilter
     /// <summary>
     /// Whether a call's event passes: its direction, its type, its procedure's name. A filter given
     /// whole holding a value the grammar names none of is an <see cref="ArgumentException"/>, in the
-    /// grammar's names.
+    /// grammar's names, its kinds among them.
     /// </summary>
     internal Func<DebugEvent, bool> CallPredicate()
     {
-        var directions = ValuesOf(Directions, (DirectionNames, "direction"));
-        var types = ValuesOf(Types, (TypeNames, "type"));
+        var (directions, types, _) = SelectorsOf();
         var include = Include.Select(PatternOf).ToArray();
         var exclude = Exclude.Select(PatternOf).ToArray();
 
@@ -399,11 +435,14 @@ public sealed record DebugFilter
         };
     }
 
-    /// <summary>Whether an envelope passes: its direction and its kind; it carries no name.</summary>
+    /// <summary>
+    /// Whether an envelope passes: its direction and its kind; it carries no name. A filter given
+    /// whole holding a value the grammar names none of is an <see cref="ArgumentException"/>, in the
+    /// grammar's names, its types among them.
+    /// </summary>
     internal Func<(DebugDirection Direction, TracedEnvelope Envelope), bool> EnvelopePredicate()
     {
-        var directions = ValuesOf(Directions, (DirectionNames, "direction"));
-        var kinds = ValuesOf(Kinds, (KindNames, "kind"));
+        var (directions, _, kinds) = SelectorsOf();
 
         return (traced) =>
         {

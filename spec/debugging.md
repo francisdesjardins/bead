@@ -95,29 +95,28 @@ thread allocates, a counted call's synchronous steps allocate not a byte more th
 one's, and what a call allocates while nobody listens is pinned; where it does not, the side holds
 that part by inspection, a row of the support matrix.
 
-3.5. A side whose platform builds that way has two build switches: one leaves out the trace and the
-filter, the other the registry, each alone or both. Built with the registry and without the trace, a
-side pays two monotonic readings and a few increments a counted call, and nothing more; built with
-neither, it pays nothing. A side that builds both pays the check alone while nobody listens and no
-registry is given.
+3.5. A constrained profile (1.2) leaves out the trace and the filter by one build switch, and the
+registry by another, each alone or both. Built with the registry and without the trace, it pays two
+monotonic readings and a few increments a counted call, and nothing more; built with neither, it pays
+nothing. A side that builds both pays the check alone while nobody listens and no registry is given.
 
 ## 4. The trace of calls
 
 4.1. A service manager tells each step of a call to whoever listens, with the same fields on every
 side, each in its platform's case:
 
-| Field                          | What it holds                                                                                                                                             |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `direction`                    | `tx` for a step out, `rx` for a step in                                                                                                                   |
-| `type`                         | `request` or `command` for a call, by its router's side (8.2); `notification` for a notification sent or heard                                            |
-| `procedureId`, `procedureName` | its procedure                                                                                                                                             |
-| `serviceId`, `serviceRevision` | its procedure's service                                                                                                                                   |
-| `startedAt`                    | the call's start, on the wall clock; a notification's, as it is sent or heard                                                                             |
-| `duration`                     | whole milliseconds of the monotonic clock, a fraction dropped, once the call's answer settled: went, or did not; none before, and none for a notification |
-| `options`                      | the call's options, its defaults applied, its credential left out                                                                                         |
-| `rx`, `tx`                     | what came in and what went out, decoded                                                                                                                   |
-| the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                                                |
-| `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none                                |
+| Field                          | What it holds                                                                                                                                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `direction`                    | `tx` for a step out, `rx` for a step in                                                                                                                                                                                                                                  |
+| `type`                         | `request` or `command` for a call, by its router's side (8.2); `notification` for a notification sent or heard                                                                                                                                                           |
+| `procedureId`, `procedureName` | its procedure                                                                                                                                                                                                                                                            |
+| `serviceId`, `serviceRevision` | its procedure's service                                                                                                                                                                                                                                                  |
+| `startedAt`                    | the call's start, on the wall clock; a notification's, as it is sent or heard                                                                                                                                                                                            |
+| `duration`                     | whole milliseconds of the monotonic clock: the difference taken in nanoseconds, rounded to a whole one, then its fraction of a millisecond dropped, as 11.1 reads a duration; once the call's answer settled: went, or did not; none before, and none for a notification |
+| `options`                      | the call's options, its defaults applied, its credential left out                                                                                                                                                                                                        |
+| `rx`, `tx`                     | what came in and what went out, decoded                                                                                                                                                                                                                                  |
+| the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                                                                                                                                                               |
+| `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none                                                                                                                                               |
 
 A step's `rx` and `tx` may be the call's own values, not copies of them: a listener MUST NOT change
 them, since its call may still read what it changed.
@@ -225,20 +224,22 @@ and its exclusions, as they were written, an exclusion without its `-`.
 selector. A side MUST refuse a filter whose words do not all hold, naming the first that does not,
 in the order of its words and of a selector's values, by its reason:
 
-| Reason                | A word refused                                                  | Named     |
-| --------------------- | --------------------------------------------------------------- | --------- |
-| `selector empty`      | a selector with nothing within its parentheses: `d()`           | the word  |
-| `value empty`         | a selector with a value left empty: `d(rx\|)`                   | the word  |
-| `names nothing`       | a value that names none of its letter's: `d(UP)`, `d(rx)(tx)`   | the value |
-| `holds a parenthesis` | any other word holding `(` or `)`: `d(rx,tx)` is two such words | the word  |
+| Reason                    | A word refused                                                  | Named     |
+| ------------------------- | --------------------------------------------------------------- | --------- |
+| `selector empty`          | a selector with nothing within its parentheses: `d()`           | the word  |
+| `value empty`             | a selector with a value left empty: `d(rx\|)`                   | the word  |
+| `names nothing`           | a value that names none of its letter's: `d(UP)`, `d(rx)(tx)`   | the value |
+| `holds a parenthesis`     | any other word holding `(` or `)`: `d(rx,tx)` is two such words | the word  |
+| `holds a surrogate alone` | any other word holding a surrogate alone: `get` then U+D800     | the word  |
 
 A refusal names the value or the word as it was written, quoted as JSON writes a string
 ([RFC 8259](https://www.rfc-editor.org/rfc/rfc8259)):
 `a debug filter takes a direction among rx, tx, not "UP"`. The sentence is each side's own, and a C
 side reports a code.
 
-6.8. A filter given whole, not as a string, is refused in this grammar's names: its directions, its
-types and its kinds.
+6.8. A filter given whole, not as a string, is refused in this grammar's names, whichever listener it
+is given to: its directions, its types and its kinds, each value held to those this grammar names.
+Its patterns and its exclusions are taken as they are given.
 
 6.9. A filter given as a function is asked as its listener is made, and again at each event. The
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function

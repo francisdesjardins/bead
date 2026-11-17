@@ -1239,6 +1239,11 @@ conversations = [
     ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
         result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
+    ('a result\'s chunk that does not read ends the command CHUNK_INVALID, and cancels it', ['9.6', '9.6.4'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 300), credited(2, 156),
+        raw('A1 14 40 04  00 00 00 02  00 20 00 00 00 00 00 00 | 01'),
+        cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
     # 12.2: a result, whole or an opening, held to chunkBytes, of 64 here, and one of 64 taken: its 56
     # bytes go back to ask's caller as a transfer, past what a result's header and an announcement's 20
     # bytes leave whole
