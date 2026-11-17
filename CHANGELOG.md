@@ -21,6 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is played on the Rust side under its title's key, or a row gives its class and why, a folder's
   row leaving out a program in one language no other side has; `--write` adds a `pending` row for
   a new one, which fails until a reader classifies it.
+- `spec/metrics.json` plays the six paths the companion's 0.10.0 added to its exit tables, and
+  `spec/conversations.json` a result's chunk that does not read (spec 9.6.4; debugging 9.4.8 to
+  9.4.10, 9.6.8).
 
 ### Changed
 
