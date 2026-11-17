@@ -193,8 +193,9 @@ the CHANGELOG's entries; whether a document's move is its minor or its patch, pa
 0 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); each Yarn project's
 `enableScripts: false`, the scripts its `dependenciesMeta` lets run alone
 ([0005](0005-a-toolchain-per-language.md)); a row of the support matrix for every difference between
-languages ([0004](0004-one-behaviour-in-every-language.md)); what a call allocates for debugging and
-what a parcel allocates for its trace on the TypeScript and Rust sides, which no test reads
+languages ([0004](0004-one-behaviour-in-every-language.md)); what a call allocates for debugging on
+the TypeScript side, and on the Rust side while nobody listens, and what a parcel allocates for its
+trace on both, which no test reads
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)); the house styles kept alike
 ([0005](0005-a-toolchain-per-language.md)); a comment's tags, as the README's "Contributing" gives
 them; the voice of what the repository says outside the TypeScript sources, and where a change's

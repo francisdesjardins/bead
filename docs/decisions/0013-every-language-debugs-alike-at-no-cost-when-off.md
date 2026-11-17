@@ -299,8 +299,10 @@ and it gates nothing: what the clause bounds, the readings and the allocations, 
   a router show a counted call reading two more than an uncounted one. On the C# side,
   `GC.GetAllocatedBytesForCurrentThread()` around a call's synchronous steps, with no `await` within
   them, shows a counted call allocating not a byte more than an uncounted one, and pins what a call
-  allocates with nobody listening. The TypeScript and Rust sides have no allocation count a test
-  reads, and hold that part by inspection, a row of the matrix.
+  allocates with nobody listening. On the Rust side, a counting allocator a dev-dependency holds,
+  the global allocator of a test binary of its own, shows the same of a call made and answered. The
+  TypeScript side has no allocation count a test reads; it, and the Rust side for what a call
+  allocates with nobody listening, hold that part by inspection, a row of the matrix.
 - **Two build switches**, for a side whose platform builds that way: one leaves out the trace and
   the filter, the other the registry, each alone or both, so a 1 kHz loop that wants its dashboard
   builds the registry without the trace. A C side takes them as its preprocessor's, in its own
