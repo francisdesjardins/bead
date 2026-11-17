@@ -33,6 +33,7 @@ const poolsWith = (given) => {
     methods: new Map(),
     functions: new Set(),
     entries: new Set(),
+    ahead: new Set(),
     ...given,
   };
 };
@@ -404,8 +405,11 @@ const differencesWith = (rows) => {
   ].join('\n');
 };
 
-// the pools a fixture's cells place by: a test file, and a tool's script
-const CELL_POOLS = poolsWith({ paths: new Set(['a.test.ts', 'tools/run.mjs']) });
+// the pools a fixture's cells place by: a test file, a tool's script, and a row AHEAD holds ahead
+const CELL_POOLS = poolsWith({
+  paths: new Set(['a.test.ts', 'tools/run.mjs']),
+  ahead: new Set(['Open']),
+});
 
 describe('cellsOf', () => {
   test('fails a language cell of the differences that places no citation and says no word of the legend, none among them', () => {
@@ -430,10 +434,11 @@ describe('cellsOf', () => {
     assert.deepEqual(MARKERS, ['not tested', 'not probed', 'not available', 'no counterpart']);
   });
 
-  test('counts a cell of an open row that places no citation or says it holds by no test, a Rust cell ahead left out', () => {
+  test('counts a cell of an open row that places no citation or says it holds by no test, the Rust cell of a row AHEAD holds left out', () => {
     const text = differencesWith([
       '| Open | open | held: `a.test.ts` | held: `a.test.ts`, by reading | ahead, not available | x |',
       '| Bare | open | kept | not probed | held: `a.test.ts`; by a probe outside the suite | x |',
+      '| Early | open | held: `a.test.ts` | held: `a.test.ts` | ahead: designed | x |',
       '| Platform | platform | not tested | kept | by reading | x |',
     ]);
     const untested = cellsOf(text, CELL_POOLS)
@@ -449,7 +454,26 @@ describe('cellsOf', () => {
       ['Bare', 'TypeScript'],
       ['Bare', 'C#'],
       ['Bare', 'Rust'],
+      ['Early', 'Rust'],
     ]);
+  });
+
+  test('reads the rows spec/check.py’s AHEAD holds ahead, each an open row of the differences', () => {
+    const { text, pools } = repositoryOf();
+    const open = new Set(
+      cellsOf(text, pools)
+        .filter((cell) => {
+          return cell.kind === 'open';
+        })
+        .map((cell) => {
+          return cell.row;
+        })
+    );
+
+    assert.ok(pools.ahead.size > 0);
+    for (const row of pools.ahead) {
+      assert.ok(open.has(row), row);
+    }
   });
 
   test('fails over its ceiling of untested cells in open rows, and holds at it', () => {

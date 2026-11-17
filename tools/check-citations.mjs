@@ -99,10 +99,10 @@ export const UNTESTED = Object.freeze([
 
 /**
  * The language cells of the differences' open rows that hold by no test, at most: each says a word
- * of UNTESTED or places no citation, a Rust cell that says it is ahead left out, the part
- * spec/check.py's AHEAD holds. A count over it fails; lowered as tests land.
+ * of UNTESTED or places no citation, the Rust cell of a row spec/check.py's AHEAD holds ahead left
+ * out. A count over it fails; lowered as tests land.
  */
-export const UNTESTED_OPEN = 46;
+export const UNTESTED_OPEN = 47;
 
 // the group of the floors and of the count each kind is counted in
 const GROUP = Object.freeze({
@@ -534,11 +534,24 @@ const add = (map, key, value) => {
   map.get(key).push(value);
 };
 
+// the rows AHEAD names, each a key of a side's dict, as spec/check.py writes them
+const aheadOf = (source) => {
+  // ! spec/check.py's form: `AHEAD = {` at a line's start, closed by `}` at one, each row a quoted
+  // key opening its dict two levels in
+  const body = source.match(/^AHEAD = \{\n([\s\S]*?)^\}/m)?.[1] ?? '';
+
+  return new Set(
+    [...body.matchAll(/^ {8}(["'])(.+?)\1: \{$/gm)].map((row) => {
+      return row[2];
+    })
+  );
+};
+
 /**
  * What the citations are placed in, read from the files git lists under `root`: its files and
  * folders, the TypeScript tests' titles and templates, the Rust trials' titles and templates, each
- * test file's whole literals, the C# tests' classes and methods, the Rust tests' functions and the
- * entries of `spec/*.json`.
+ * test file's whole literals, the C# tests' classes and methods, the Rust tests' functions, the
+ * entries of `spec/*.json`, and the rows of the matrix whose part spec/check.py's AHEAD holds ahead.
  */
 export const poolsOf = (root) => {
   const listed = execFileSync(
@@ -564,6 +577,7 @@ export const poolsOf = (root) => {
     methods: new Map(),
     functions: new Set(),
     entries: new Set(),
+    ahead: aheadOf(read('spec/check.py')),
   };
 
   for (const path of listed) {
@@ -931,8 +945,8 @@ const saysOneOf = (cell, words) => {
 /**
  * Each language cell of the differences, `{ row, language, kind, line, isPlaced, isMarked,
  * isUntested }`: whether it places a citation, whether it says a word of MARKERS, and whether, in
- * an open row, it holds by no test, saying a word of UNTESTED or placing nothing, but a Rust cell
- * ahead, a part spec/check.py's AHEAD holds.
+ * an open row, it holds by no test, saying a word of UNTESTED or placing nothing, but the Rust cell
+ * of a row spec/check.py's AHEAD holds ahead.
  */
 export const cellsOf = (text, pools) => {
   const context = { rows: rowsOf(text), headings: headingsOf(text) };
@@ -943,7 +957,7 @@ export const cellsOf = (text, pools) => {
     }).map((language) => {
       const cell = row.cells[language];
       const isPlaced = placesACitation(cell, pools, context);
-      const isAhead = language === 'Rust' && cell.startsWith('ahead');
+      const isAhead = language === 'Rust' && pools.ahead.has(row.title);
 
       return {
         row: row.title,

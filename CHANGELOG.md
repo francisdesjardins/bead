@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-citations.mjs` holds each language cell of the support matrix's differences to a
   citation or a word of its legend, "not tested", "not probed", "not available" or "no
   counterpart", and fails when more cells of its open rows hold by no test than `UNTESTED_OPEN`,
-  46; the legend defines the four words, and the 32 cells that said none of them say what holds.
+  47; the legend defines the four words, and the 32 cells that said none of them say what holds.
 
 ### Changed
 
