@@ -20,9 +20,9 @@ HTTP's `Via` lists the intermediaries a message crossed (RFC 9110 §7.6.3).
 **A relay terminates each leg**, as a gateway does for what stands behind it. A request that names a
 destination is asked the relay's admission on its header, then whether its destination exists, then
 the smaller of both legs' limits; every refusal falls on the opening, and a requester not admitted
-learns only whether the relay has any destination. It then goes on to its target as a request of the
+learns only whether the relay has any destination. It then goes on to its destination as a request of the
 relay's own, its payload's bytes undecoded, under a call id of that leg. The answer comes back under
-the requester's call id: a result as it came, a failure of the target's one relay more.
+the requester's call id: a result as it came, a failure of the destination's one relay more.
 
 **What the relay raises itself says how far the request went**, as every code does:
 `DESTINATION_UNREACHABLE` (17) while the relay's transport was never handed the request, or refused
