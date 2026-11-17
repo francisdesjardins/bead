@@ -729,12 +729,33 @@ pub(crate) fn reported_call(error: CallError) -> RouterError {
 // ── Writing ──────────────────────────────────────────────────────────────────────────────────
 
 /// What a delivered envelope goes with: its transport's credential, what runs as its transport
-/// has it, and what hears whether it went.
+/// has it, what hears whether it went, and the call it ends.
 pub(crate) struct Deliver<S> {
     pub(crate) connection_handle: ConnectionHandle,
     pub(crate) credential: Option<String>,
     pub(crate) on_hand_off: Option<Job<S>>,
     pub(crate) then: Option<Then<S>>,
+    // * held in place, never boxed, so a counted call allocates not a byte more than an uncounted
+    // one (spec/debugging.md 3.3, 3.4)
+    pub(crate) ends: Option<Ends>,
+}
+
+/// A counted call its envelope ends: as its ending once the envelope is handed off, as an error
+/// should it not go.
+pub(crate) struct Ends {
+    pub(crate) series: ProcedureSeries,
+    pub(crate) ending: CallEnding,
+    pub(crate) started_at: Duration,
+}
+
+impl Ends {
+    // counted at `now`, as its ending once its envelope `went`, as an error otherwise
+    fn count(self, now: Duration, went: bool) {
+        let ending = if went { self.ending } else { CallEnding::Error };
+
+        self.series
+            .end(ending, microseconds_of(now.saturating_sub(self.started_at)));
+    }
 }
 
 /// What hears whether an envelope went.
@@ -747,6 +768,7 @@ impl<S> Deliver<S> {
             credential: None,
             on_hand_off: None,
             then: None,
+            ends: None,
         }
     }
 }
@@ -803,8 +825,16 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
         credential,
         on_hand_off,
         then,
+        mut ends,
     } = options;
-    let settle = |state: &mut S, outcome: Result<(), CallError>, then: Option<Then<S>>| {
+    // what did not go ends its call as an error, now; what hears it, in a later turn
+    let settle = |state: &mut S,
+                  outcome: Result<(), CallError>,
+                  (then, ends): (Option<Then<S>>, Option<Ends>)| {
+        if let Some(ends) = ends {
+            ends.count(state.core().now(), false);
+        }
+
         if let Some(then) = then {
             state.core().later(move |state| then(state, outcome));
         }
@@ -816,7 +846,7 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
         return settle(
             state,
             Err(CallError::Disconnected(DISPOSED.to_owned())),
-            then,
+            (then, ends),
         );
     }
 
@@ -836,12 +866,12 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
             .too_large_of(length, limits.maximum_payload_bytes)
             .about(&envelope.header());
 
-        return settle(state, Err(CallError::Failure(failure)), then);
+        return settle(state, Err(CallError::Failure(failure)), (then, ends));
     }
 
     let (envelope, announced) = match announce(state, (envelope, &connection_handle)) {
         Ok(announced) => announced,
-        Err(error) => return settle(state, Err(call_error_of(error)), then),
+        Err(error) => return settle(state, Err(call_error_of(error)), (then, ends)),
     };
     let detail_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
@@ -873,7 +903,7 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
                 state.core().announcements.restore(announced);
             }
 
-            return settle(state, Err(error), then);
+            return settle(state, Err(error), (then, ends));
         }
     };
 
@@ -896,15 +926,19 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
                 state.core().announcements.restore(announced);
             }
 
-            settle(state, Err(call_error_of(error)), then);
+            settle(state, Err(call_error_of(error)), (then, ends));
         }
         Ok(sent) => {
+            if let Some(ends) = ends.take() {
+                ends.count(state.core().now(), true);
+            }
+
             if let Some(on_hand_off) = on_hand_off {
                 on_hand_off(state);
             }
 
             match sent {
-                Sent::Done => settle(state, Ok(()), then),
+                Sent::Done => settle(state, Ok(()), (then, None)),
                 Sent::Later(sending) => {
                     let owner = state.core().owner.clone();
 
@@ -950,6 +984,11 @@ pub(crate) fn send_reporting<S: Side>(
     state: &mut S,
     (envelope, handle): (Envelope, &ConnectionHandle),
 ) {
+    deliver(state, (envelope, reporting(handle)));
+}
+
+// what an envelope no call waits on goes with: what keeps it from going out is reported
+fn reporting<S: Side>(handle: &ConnectionHandle) -> Deliver<S> {
     let reported_on = Arc::clone(handle);
     let mut options = Deliver::to(handle);
 
@@ -960,7 +999,7 @@ pub(crate) fn send_reporting<S: Side>(
             }
         },
     ));
-    deliver(state, (envelope, options));
+    options
 }
 
 // a failure the core raises itself, on what came in, for the side to hear
@@ -1177,40 +1216,18 @@ fn refuse_unread<S: Side>(
         .metrics
         .as_ref()
         .map(|metrics| metrics.other_server().clone());
-    let Some(series) = series else {
-        return send_reporting(state, (refusal, handle));
-    };
+    let mut options = reporting(handle);
 
-    series.start();
+    // * counted, it goes as an uncounted one does, its count held in place
+    if let Some(series) = series {
+        series.start();
+        options.ends = Some(Ends {
+            series,
+            ending: CallEnding::of_failure(failure.code(), failure.scope()),
+            started_at: state.core().now(),
+        });
+    }
 
-    let started_at = state.core().now();
-    let ended = Arc::new(Mutex::new(false));
-    let ending = CallEnding::of_failure(failure.code(), failure.scope());
-    let mut options = Deliver::to(handle);
-    let (on_end, on_error) = (Arc::clone(&ended), Arc::clone(&ended));
-    let (series_handed, series_failed) = (series.clone(), series);
-    let reported_on = Arc::clone(handle);
-
-    options.on_hand_off = Some(Box::new(move |state: &mut S| {
-        if !core::mem::replace(&mut *locked(&on_end), true) {
-            let elapsed = state.core().now().saturating_sub(started_at);
-
-            series_handed.end(ending, microseconds_of(elapsed));
-        }
-    }));
-    options.then = Some(Box::new(
-        move |state: &mut S, outcome: Result<(), CallError>| {
-            if let Err(error) = outcome {
-                if !core::mem::replace(&mut *locked(&on_error), true) {
-                    let elapsed = state.core().now().saturating_sub(started_at);
-
-                    series_failed.end(CallEnding::Error, microseconds_of(elapsed));
-                }
-
-                state.report(reported_call(error), &reported_on);
-            }
-        },
-    ));
     deliver(state, (refusal, options));
 }
 

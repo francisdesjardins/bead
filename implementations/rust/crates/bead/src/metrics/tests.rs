@@ -69,8 +69,8 @@ fn shares_notification_counts_across_repeated_declarations_and_keeps_another_pro
         .notifying
         .expect("a notifying series");
     assert!(Arc::ptr_eq(&first.state, &second.state));
-    assert_eq!(first.key, second.key);
-    assert_ne!(first.key, other.key);
+    assert_eq!(first.at, second.at);
+    assert_ne!(first.at, other.at);
     first.sent();
     second.sent();
     second.failed();

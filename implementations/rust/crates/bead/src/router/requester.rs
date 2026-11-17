@@ -9,6 +9,7 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+use crate::clock::SharedClock;
 use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::duration::{NEVER, hold};
 use crate::envelope::{
@@ -61,6 +62,39 @@ impl<S> core::fmt::Debug for CoreRequest<S> {
             .field("connection_handle", &self.connection_handle)
             .field("procedure", &self.procedure)
             .finish_non_exhaustive()
+    }
+}
+
+// a call's count, ended as its caller is told: its series, and its start on its router's clock
+struct Counting {
+    series: ProcedureSeries,
+    clock: SharedClock,
+    started_at: Duration,
+}
+
+// what a call made settles through: its caller's reply, and its count while its router counts
+// * one type, counted or not, so the box that holds it is the same size either way, and a counted
+// call allocates not a byte more (spec/debugging.md 3.3, 3.4)
+struct MadeReply {
+    reply: CallReply,
+    counting: Option<Counting>,
+}
+
+impl MadeReply {
+    // its count ended as `outcome` says, then its caller told
+    fn settle(self, outcome: Result<RouterResult, CallError>) {
+        if let Some(Counting {
+            series,
+            clock,
+            started_at,
+        }) = self.counting
+        {
+            let elapsed = clock.monotonic().saturating_sub(started_at);
+
+            series.end(made_ending_of(&outcome), microseconds_of(elapsed));
+        }
+
+        (self.reply)(outcome);
     }
 }
 
@@ -491,7 +525,6 @@ pub(crate) fn request<S: Side>(
             .clone()
             .unwrap_or_else(|| metrics.other_client().clone())
     });
-    let clock = Arc::clone(&core.clock);
     // * read only for a call counted (spec/debugging.md 3.1)
     let started_at = if series.is_some() {
         core.now()
@@ -505,18 +538,17 @@ pub(crate) fn request<S: Side>(
         series.start();
     }
 
-    let reply: CallReply = match series {
-        None => reply,
-        Some(series) => Box::new(move |outcome: Result<RouterResult, CallError>| {
-            let elapsed = clock.monotonic().saturating_sub(started_at);
-
-            series.end(made_ending_of(&outcome), microseconds_of(elapsed));
-            reply(outcome);
+    let reply = MadeReply {
+        reply,
+        counting: series.map(|series| Counting {
+            series,
+            clock: Arc::clone(&state.core().clock),
+            started_at,
         }),
     };
 
     if let Some(refusal) = request.refusal {
-        return reply(Err(refusal));
+        return reply.settle(Err(refusal));
     }
 
     let core = state.core();
@@ -530,7 +562,7 @@ pub(crate) fn request<S: Side>(
                 core.limits.maximum_answering_calls
             ));
 
-        return reply(Err(fail(failure)));
+        return reply.settle(Err(fail(failure)));
     }
 
     let Some(call_id) = draw_call_id(state, &handle) else {
@@ -539,7 +571,7 @@ pub(crate) fn request<S: Side>(
             .failure(ProtocolCode::CAPACITY_EXCEEDED)
             .saying(format!("every call id of {handle} is in use"));
 
-        return reply(Err(fail(failure)));
+        return reply.settle(Err(fail(failure)));
     };
     let header = RequestHeader {
         call_id,
@@ -564,7 +596,9 @@ pub(crate) fn request<S: Side>(
         ),
     ) {
         Ok(placed) => placed,
-        Err(failure) => return reply(Err(fail(failure.about(&EnvelopeHeader::Request(header))))),
+        Err(failure) => {
+            return reply.settle(Err(fail(failure.about(&EnvelopeHeader::Request(header)))));
+        }
     };
     let id = core.draw_id();
     let call = CallAddress {
@@ -588,7 +622,7 @@ pub(crate) fn request<S: Side>(
                 drop(ended);
                 // ! cancellation settles the caller before its deferred cleanup; an answer read
                 // in that turn takes the pending call out, but cannot change that settlement
-                reply(
+                reply.settle(
                     if signal.as_ref().is_some_and(CancellationToken::is_cancelled) {
                         Err(CallError::Cancelled(Some(call_id)))
                     } else {
