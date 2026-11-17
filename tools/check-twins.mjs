@@ -660,16 +660,16 @@ export const checkOf = (declarations, text) => {
     }
   }
   for (const [identity, { side, file, line, title }] of unmatched) {
-    if (!rowed.has(identity)) {
+    if (rowed.has(identity)) {
+      continue;
+    }
+    if (/[\t\n]/.test(title)) {
+      problems.push(`${file}:${line}: a title with a tab or a line break, which a row cannot hold`);
+    } else {
       problems.push(
         `${file}:${line}: \`${title}\` has no Rust twin and no row in ${TWINS}: run --write, then classify it`
       );
       added.push({ side, file, title, kind: 'pending', reason: UNREAD });
-    }
-  }
-  for (const row of added) {
-    if (/[\t\n]/.test(row.title)) {
-      problems.push(`${row.file}: a title with a tab or a line break, which a row cannot hold`);
     }
   }
 
@@ -737,7 +737,7 @@ export const runOf = (root, options = {}) => {
     });
 
     if (malformed.length > 0) {
-      return { ...check, problems: malformed, declarations };
+      return { ...check, problems: malformed, added: [], dropped: [], declarations };
     }
     writeFileSync(path, check.written);
 

@@ -362,6 +362,19 @@ describe('checkOf', () => {
     );
   });
 
+  test('fails a title with a tab, which --write leaves out', () => {
+    const { problems, written, added } = checkOf(
+      declarationsWith({ [TS_FILE]: "test('a\ttab', () => {});" }),
+      twinsOf()
+    );
+
+    assert.deepEqual(problems, [
+      `${TS_FILE}:1: a title with a tab or a line break, which a row cannot hold`,
+    ]);
+    assert.deepEqual(added, []);
+    assert.equal(written, twinsOf());
+  });
+
   test('fails a row whose declaration is gone, which --write keeps for its reader', () => {
     const twins = twinsOf(
       ['typescript', TS_FILE, 'reads a frame', 'native', 'Its platform’s.'],
@@ -418,6 +431,13 @@ describe('runOf', () => {
       writeFileSync(join(root, TWINS), twins.replace('pending\t-', 'native\tIts platform’s.'));
       assert.deepEqual(runOf(root).problems, []);
       assert.equal(runOf(root, { write: true }).added.length, 0);
+
+      // a file a reader broke is left as it is, and nothing is added to it
+      const broken = `${twinsOf()}typescript\tone cell\n`;
+
+      writeFileSync(join(root, TWINS), broken);
+      assert.deepEqual(runOf(root, { write: true }).added, []);
+      assert.equal(readFileSync(join(root, TWINS), 'utf8'), broken);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
