@@ -4,11 +4,11 @@
 //! Bead's own, since `serde_json` reads a surrogate alone as an error, keeps the last of a name
 //! given twice, and writes a double that is not finite as `null`.
 //!
-//! The reader holds a text to RFC 8259 and 17.5's checks: it counts the depth over the whole text,
-//! then reads it in one pass and refuses with the first fault it meets, a name given twice once
-//! its object closes, an order of its own (`docs/support.md`, the row of a payload that breaks two
-//! of 17.5's rules); the writer writes RFC 8785's canonical form, each number as ECMAScript's
-//! `Number::toString` spells it, each object's names sorted by their UTF-16 code units.
+//! The reader holds a text to RFC 8259 and 17.5's checks, in the order 17.5 states after its item
+//! 7: it counts the depth over the whole text, then reads it in one pass, refusing a fault of the
+//! grammar wherever it comes, and otherwise the first surrogate alone, name given twice or number
+//! past a double the text meets; the writer writes RFC 8785's canonical form, each number as
+//! ECMAScript's `Number::toString` spells it, each object's names sorted by their UTF-16 code units.
 
 use core::fmt;
 use std::error::Error;
@@ -128,9 +128,10 @@ fn end_of_string(text: &[u8], index: usize) -> usize {
 }
 
 // whether `text` opens an array or an object deeper than 64, its strings skipped: a count over the
-// text, whether or not it is JSON, before it is parsed, so a peer never chooses how deep it goes
+// whole text, whether or not it is JSON, before it is parsed, so a peer never chooses how deep it
+// goes; the count falls below 0 at a closer no JSON text holds there (spec 17.5, after item 7)
 fn is_too_deep(text: &[u8]) -> bool {
-    let mut depth = 0_usize;
+    let mut depth = 0_i64;
     let mut index = 0_usize;
 
     while let Some(&byte) = text.get(index) {
@@ -139,7 +140,7 @@ fn is_too_deep(text: &[u8]) -> bool {
             b'[' | b'{' => {
                 depth = depth.saturating_add(1);
 
-                if depth > DEPTH {
+                if usize::try_from(depth).is_ok_and(|depth| depth > DEPTH) {
                     return true;
                 }
             }
@@ -153,21 +154,23 @@ fn is_too_deep(text: &[u8]) -> bool {
     false
 }
 
-// a refusal met as the parser reads: one of the grammar's, or of the value's
-enum Met {
-    Grammar,
-    Surrogate,
-    PastADouble,
-    NameTwice,
-}
+// a fault of the grammar, which ends the read where it is met
+struct Grammar;
 
 struct Parser<'text> {
     text: &'text [u8],
     at: usize,
     surrogates: LoneSurrogates,
+    // * the first fault past the grammar the text meets, a surrogate alone, a name twice or a number
+    // past a double: held, never returned, so that a fault of the grammar after it comes first
+    first: Option<JsonRefusal>,
 }
 
 impl Parser<'_> {
+    fn met(&mut self, refusal: JsonRefusal) {
+        self.first.get_or_insert(refusal);
+    }
+
     fn peek(&self) -> Option<u8> {
         self.text.get(self.at).copied()
     }
@@ -178,18 +181,18 @@ impl Parser<'_> {
         }
     }
 
-    fn expect(&mut self, literal: &[u8]) -> Result<(), Met> {
+    fn expect(&mut self, literal: &[u8]) -> Result<(), Grammar> {
         let end = self.at.saturating_add(literal.len());
 
         if self.text.get(self.at..end) == Some(literal) {
             self.at = end;
             Ok(())
         } else {
-            Err(Met::Grammar)
+            Err(Grammar)
         }
     }
 
-    fn value(&mut self) -> Result<Value, Met> {
+    fn value(&mut self) -> Result<Value, Grammar> {
         self.skip_white();
 
         match self.peek() {
@@ -206,13 +209,12 @@ impl Parser<'_> {
             Some(b'f') => self.expect(b"false").map(|()| Value::Bool(false)),
             Some(b'n') => self.expect(b"null").map(|()| Value::Null),
             Some(b'-' | b'0'..=b'9') => self.number(),
-            Some(_) | None => Err(Met::Grammar),
+            Some(_) | None => Err(Grammar),
         }
     }
 
-    fn object(&mut self) -> Result<Value, Met> {
+    fn object(&mut self) -> Result<Value, Grammar> {
         let mut members = Map::new();
-        let mut is_twice = false;
 
         self.at = self.at.saturating_add(1);
         self.skip_white();
@@ -226,14 +228,19 @@ impl Parser<'_> {
             self.skip_white();
 
             if self.peek() != Some(QUOTE) {
-                return Err(Met::Grammar);
+                return Err(Grammar);
             }
 
             let (name, has_lone) = self.string()?;
 
-            // ! a name holding a surrogate alone is refused whatever a value so is read as
+            // ! a name holding a surrogate alone is refused whatever a value so is read as, and a
+            // name twice is met at the name that repeats, before its value
             if has_lone {
-                return Err(Met::Surrogate);
+                self.met(JsonRefusal::SurrogateAlone);
+            }
+
+            if members.contains_key(&name) {
+                self.met(JsonRefusal::NameTwice);
             }
 
             self.skip_white();
@@ -241,7 +248,7 @@ impl Parser<'_> {
 
             let value = self.value()?;
 
-            is_twice = members.insert(name, value).is_some() || is_twice;
+            members.insert(name, value);
             self.skip_white();
 
             match self.peek() {
@@ -250,18 +257,14 @@ impl Parser<'_> {
                     self.at = self.at.saturating_add(1);
                     break;
                 }
-                Some(_) | None => return Err(Met::Grammar),
+                Some(_) | None => return Err(Grammar),
             }
-        }
-
-        if is_twice {
-            return Err(Met::NameTwice);
         }
 
         Ok(Value::Object(members))
     }
 
-    fn array(&mut self) -> Result<Value, Met> {
+    fn array(&mut self) -> Result<Value, Grammar> {
         let mut items = Vec::new();
 
         self.at = self.at.saturating_add(1);
@@ -282,30 +285,30 @@ impl Parser<'_> {
                     self.at = self.at.saturating_add(1);
                     break;
                 }
-                Some(_) | None => return Err(Met::Grammar),
+                Some(_) | None => return Err(Grammar),
             }
         }
 
         Ok(Value::Array(items))
     }
 
-    fn hex4(&mut self) -> Result<u16, Met> {
+    fn hex4(&mut self) -> Result<u16, Grammar> {
         let end = self.at.saturating_add(4);
-        let digits = self.text.get(self.at..end).ok_or(Met::Grammar)?;
-        let digits = core::str::from_utf8(digits).map_err(|_error| Met::Grammar)?;
+        let digits = self.text.get(self.at..end).ok_or(Grammar)?;
+        let digits = core::str::from_utf8(digits).map_err(|_error| Grammar)?;
 
         if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(Met::Grammar);
+            return Err(Grammar);
         }
 
         self.at = end;
 
-        u16::from_str_radix(digits, 16).map_err(|_error| Met::Grammar)
+        u16::from_str_radix(digits, 16).map_err(|_error| Grammar)
     }
 
     // a string's text, each surrogate alone U+FFFD, and whether it held one: refused, unless its
     // reader reads it as null
-    fn string(&mut self) -> Result<(String, bool), Met> {
+    fn string(&mut self) -> Result<(String, bool), Grammar> {
         let mut units: Vec<u16> = Vec::new();
         let mut text = String::new();
         let mut has_lone = false;
@@ -323,11 +326,11 @@ impl Parser<'_> {
                 self.at = self.at.saturating_add(1);
             }
 
-            let run = self.text.get(start..self.at).ok_or(Met::Grammar)?;
+            let run = self.text.get(start..self.at).ok_or(Grammar)?;
 
             if !run.is_empty() {
                 flush(&mut units, (&mut text, &mut has_lone));
-                text.push_str(core::str::from_utf8(run).map_err(|_error| Met::Grammar)?);
+                text.push_str(core::str::from_utf8(run).map_err(|_error| Grammar)?);
             }
 
             match self.peek() {
@@ -339,7 +342,7 @@ impl Parser<'_> {
                 Some(BACKSLASH) => {
                     self.at = self.at.saturating_add(1);
 
-                    let escaped = self.peek().ok_or(Met::Grammar)?;
+                    let escaped = self.peek().ok_or(Grammar)?;
 
                     self.at = self.at.saturating_add(1);
 
@@ -356,24 +359,24 @@ impl Parser<'_> {
                             units.push(self.hex4()?);
                             continue;
                         }
-                        _ => return Err(Met::Grammar),
+                        _ => return Err(Grammar),
                     };
 
                     flush(&mut units, (&mut text, &mut has_lone));
                     text.push(short);
                 }
-                Some(_) | None => return Err(Met::Grammar),
+                Some(_) | None => return Err(Grammar),
             }
         }
 
         if has_lone && self.surrogates == LoneSurrogates::Refuse {
-            return Err(Met::Surrogate);
+            self.met(JsonRefusal::SurrogateAlone);
         }
 
         Ok((text, has_lone))
     }
 
-    fn number(&mut self) -> Result<Value, Met> {
+    fn number(&mut self) -> Result<Value, Grammar> {
         let start = self.at;
         let mut is_whole = true;
 
@@ -384,7 +387,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(b'0') => self.at = self.at.saturating_add(1),
             Some(b'1'..=b'9') => self.digits(),
-            Some(_) | None => return Err(Met::Grammar),
+            Some(_) | None => return Err(Grammar),
         }
 
         if self.peek() == Some(b'.') {
@@ -392,7 +395,7 @@ impl Parser<'_> {
             is_whole = false;
 
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return Err(Met::Grammar);
+                return Err(Grammar);
             }
 
             self.digits();
@@ -407,16 +410,24 @@ impl Parser<'_> {
             }
 
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return Err(Met::Grammar);
+                return Err(Grammar);
             }
 
             self.digits();
         }
 
-        let written = self.text.get(start..self.at).ok_or(Met::Grammar)?;
-        let written = core::str::from_utf8(written).map_err(|_error| Met::Grammar)?;
+        let written = self.text.get(start..self.at).ok_or(Grammar)?;
+        let written = core::str::from_utf8(written).map_err(|_error| Grammar)?;
 
-        number_of(written, is_whole).map(Value::Number)
+        let number = number_of(written, is_whole)?;
+
+        Ok(number.map_or_else(
+            || {
+                self.met(JsonRefusal::NumberPastADouble);
+                Value::Null
+            },
+            Value::Number,
+        ))
     }
 
     fn digits(&mut self) {
@@ -440,8 +451,8 @@ fn flush(units: &mut Vec<u16>, (text, has_lone): (&mut String, &mut bool)) {
 }
 
 // the value of a number written so: a whole number within 64 bits an integer, -0 the double -0.0,
-// any other the double nearest it, as `JSON.parse` reads it
-fn number_of(written: &str, is_whole: bool) -> Result<Number, Met> {
+// any other the double nearest it, as `JSON.parse` reads it; none for a number past a double
+fn number_of(written: &str, is_whole: bool) -> Result<Option<Number>, Grammar> {
     let is_negative_zero = written.starts_with('-')
         && written
             .bytes()
@@ -449,25 +460,22 @@ fn number_of(written: &str, is_whole: bool) -> Result<Number, Met> {
 
     if is_whole && !is_negative_zero {
         if let Ok(integer) = written.parse::<u64>() {
-            return Ok(Number::from(integer));
+            return Ok(Some(Number::from(integer)));
         }
 
         if let Ok(integer) = written.parse::<i64>() {
-            return Ok(Number::from(integer));
+            return Ok(Some(Number::from(integer)));
         }
     }
 
-    let double: f64 = written.parse().map_err(|_error| Met::Grammar)?;
-
-    if !double.is_finite() {
-        return Err(Met::PastADouble);
-    }
+    let double: f64 = written.parse().map_err(|_error| Grammar)?;
 
     if !is_negative_zero && let Some(integer) = integer_of(double) {
-        return Ok(Number::from(integer));
+        return Ok(Some(Number::from(integer)));
     }
 
-    Number::from_f64(double).ok_or(Met::PastADouble)
+    // * none where the double is not finite
+    Ok(Number::from_f64(double))
 }
 
 /// `double` as the integer it is, when it is a whole number every side holds exactly: within
@@ -498,7 +506,7 @@ pub struct ReadJsonOptions {
 ///
 /// # Errors
 ///
-/// The [`JsonRefusal`] of the first check it fails.
+/// The [`JsonRefusal`] of the first check it fails, in the order spec 17.5 states after its item 7.
 pub fn read(bytes: &[u8]) -> Result<Value, JsonRefusal> {
     read_with(bytes, &ReadJsonOptions::default())
 }
@@ -507,7 +515,7 @@ pub fn read(bytes: &[u8]) -> Result<Value, JsonRefusal> {
 ///
 /// # Errors
 ///
-/// The [`JsonRefusal`] of the first check it fails.
+/// The [`JsonRefusal`] of the first check it fails, in the order spec 17.5 states after its item 7.
 pub fn read_with(bytes: &[u8], options: &ReadJsonOptions) -> Result<Value, JsonRefusal> {
     let text = core::str::from_utf8(bytes).map_err(|_error| JsonRefusal::NotUtf8)?;
 
@@ -523,23 +531,23 @@ pub fn read_with(bytes: &[u8], options: &ReadJsonOptions) -> Result<Value, JsonR
         text: bytes,
         at: 0,
         surrogates: options.lone_surrogates.unwrap_or_default(),
+        first: None,
     };
-    let value = parser.value().and_then(|value| {
-        parser.skip_white();
+    let value = parser
+        .value()
+        .and_then(|value| {
+            parser.skip_white();
 
-        if parser.at == bytes.len() {
-            Ok(value)
-        } else {
-            Err(Met::Grammar)
-        }
-    });
+            if parser.at == bytes.len() {
+                Ok(value)
+            } else {
+                Err(Grammar)
+            }
+        })
+        .map_err(|Grammar| JsonRefusal::NotJson)?;
 
-    value.map_err(|met| match met {
-        Met::Grammar => JsonRefusal::NotJson,
-        Met::Surrogate => JsonRefusal::SurrogateAlone,
-        Met::PastADouble => JsonRefusal::NumberPastADouble,
-        Met::NameTwice => JsonRefusal::NameTwice,
-    })
+    // * the grammar whole, then the first fault past it the text met (spec 17.5, after item 7)
+    parser.first.map_or(Ok(value), Err)
 }
 
 // writes `text` as a JSON string, as RFC 8785 §3.2.2.2 escapes one

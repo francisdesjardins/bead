@@ -116,6 +116,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side counts a `json` payload's depth before it parses, so `x` then 65 `[` is `nested
   past 64`, and meets a fault past the grammar in its text's order, where it met one as its
   canonical form was written, its names sorted.
+- The Rust side reads a `json` payload's grammar whole before any fault past it, so `[11E400` is
+  `not JSON`; counts its depth below 0, so `]` then 65 `[` is `not JSON`; and meets a name twice
+  at the name that repeats, where it met one as its object closed.
 
 ## [0.14.0] - 2026-11-16
 
