@@ -1196,6 +1196,11 @@ jobs:
       # spec/durations.json, or says why none, in tools/durations.tsv (decision 0014).
       - name: Check the durations' members
         run: node tools/check-durations.mjs
+      # Every TypeScript and C# test is played on the Rust side under its title's key, or a row of
+      # tools/twins.tsv gives its class and why: a twin under another sentence, ahead for the Rust
+      # side, or native to its platform (CLAUDE.md, Parity).
+      - name: Check the twins
+        run: node tools/check-twins.mjs
       # Each version agrees with itself, the C# lock files' project ranges included, and a released
       # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
       # into main and main, the release moved each version its changes owe, dated its section, and
