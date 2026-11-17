@@ -94,10 +94,9 @@ what every conforming reader refuses fails at the far end, after the call went o
 writer refuses past 64 for that reason (17.7).
 
 **The leading U+FEFF.** It is Bead's rule, with 17.4.2's reason, RFC 3629 §6: protobuf says a
-string holds UTF-8 text, and U+FEFF is a character of it. protobuf-es strips it: its strict decoder
-is `new TextDecoder("utf-8", { fatal: true })`, whose `ignoreBOM` is false (WHATWG Encoding), and
-the only lever is `configureTextEncoding`, global to the library's copy and deprecated. The
-TypeScript side's row is a `differs`, crossing an open row of the matrix.
+string holds UTF-8 text, and U+FEFF is a character of it. Every side's library keeps it:
+protobuf-es's strict decoder is `new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`
+(WHATWG Encoding), so every side plays the row.
 
 **Where a stock library reads on.** Each side reads a payload's records against its message before
 its library does, and refuses what protobuf refuses, where a stock library reads on
@@ -122,8 +121,8 @@ version, which the generated file's header names the oldest of.
 _Conformance:_ 17.9; `spec/codecs.json`'s `proto` rows, its schema's encoding, two reasons and the
 fields read; its generator's reader of `Probe`, written with the standard library from protobuf's
 Encoding guide ([0005](0005-a-toolchain-per-language.md)); `spec/check.py` over them. _Matrix:_ the
-feature "Payloads" counts `proto`; an open row, "A string's leading U+FEFF in a proto payload"; a
-platform row, "A proto string no string holds, given to a writer"; and the rows
+feature "Payloads" counts `proto`; a platform row, "A proto string no string holds, given to a
+writer"; and the rows
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
 keeps, a known field at a wire type its type does not take among them, a row of "Leveled down".
 
@@ -354,40 +353,40 @@ and Bead's 17.9.2 to 17.9.8. The rows, those
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
 states aside:
 
-| Row                                                               | Bytes                                | Outcome                        | `differs`  |
-| ----------------------------------------------------------------- | ------------------------------------ | ------------------------------ | ---------- |
-| an empty payload                                                  | none                                 | taken: no field set            |            |
-| a string and a number                                             | `0A 01 61 10 07`                     | taken: `a`, 7                  |            |
-| a length past the bytes                                           | `0A 05 61 62`                        | refused: not its message       |            |
-| a varint cut short                                                | `10 80`                              | refused: not its message       |            |
-| a tag alone                                                       | `0A`                                 | refused: not its message       |            |
-| a string that is not UTF-8                                        | `0A 01 FF`                           | refused: not its message       |            |
-| an overlong form in a string                                      | `0A 02 C0 AF`                        | refused: not its message       |            |
-| a surrogate in UTF-8                                              | `0A 03 ED A0 80`                     | refused: not its message       |            |
-| a string's leading U+FEFF                                         | `0A 04 EF BB BF 61`                  | taken: U+FEFF `a`              | TypeScript |
-| U+FEFF after a string's first character                           | `0A 04 61 EF BB BF`                  | taken: `a` U+FEFF              |            |
-| a noncharacter, U+FFFF                                            | `0A 03 EF BF BF`                     | taken: U+FFFF                  |            |
-| U+0000                                                            | `0A 01 00`                           | taken: U+0000                  |            |
-| an unknown field after the known                                  | `0A 01 61 78 07`                     | taken: `a`                     |            |
-| an unknown field before the known                                 | `78 07 0A 01 61`                     | taken: `a`                     |            |
-| an unknown field of each wire type                                | `21 01 … 08 2A 01 7A 35 01 02 03 04` | taken: no field set            |            |
-| a number given at its default                                     | `10 00`                              | taken: 0                       |            |
-| a scalar given twice                                              | `10 01 10 02`                        | taken: 2                       |            |
-| a message given twice                                             | `1A 02 1A 00 1A 02 10 01`            | taken: merged, 2 below the top |            |
-| a message field set to the empty message                          | `1A 00`                              | taken: a child, no field set   |            |
-| field number 0                                                    | `00 01`                              | refused: not its message       |            |
-| a varint of 10 bytes                                              | `10 FF FF FF FF FF FF FF FF FF 01`   | taken: 4294967295              |            |
-| a varint of 11 bytes                                              | `10 80 … 80 01`                      | refused: not its message       |            |
-| an end group no group opened                                      | `24`                                 | refused: not its message       |            |
-| an unknown group, closed                                          | `23 24`                              | taken: no field set            |            |
-| an unknown group never closed                                     | `23`                                 | refused: not its message       |            |
-| 99 messages below the top                                         | `1A E6 01 …`                         | taken: 99 below                |            |
-| 100 messages below the top                                        | `1A E9 01 …`                         | taken: 100 below               |            |
-| 101 messages below the top                                        | `1A EC 01 …`                         | refused: nested past 100       |            |
-| 100 groups below the top                                          | `6B 6B … 6C 6C`                      | taken: 100 below               |            |
-| 101 groups below the top                                          | `6B 6B … 6C 6C`                      | refused: nested past 100       |            |
-| 99 messages below the top, the last holding a scalar map's entry  | `1A F2 01 … 82 01 05 0A 01 61 10 01` | taken: 100 below               |            |
-| 100 messages below the top, the last holding a scalar map's entry | `1A F5 01 … 82 01 05 0A 01 61 10 01` | refused: nested past 100       |            |
+| Row                                                               | Bytes                                | Outcome                        |
+| ----------------------------------------------------------------- | ------------------------------------ | ------------------------------ |
+| an empty payload                                                  | none                                 | taken: no field set            |
+| a string and a number                                             | `0A 01 61 10 07`                     | taken: `a`, 7                  |
+| a length past the bytes                                           | `0A 05 61 62`                        | refused: not its message       |
+| a varint cut short                                                | `10 80`                              | refused: not its message       |
+| a tag alone                                                       | `0A`                                 | refused: not its message       |
+| a string that is not UTF-8                                        | `0A 01 FF`                           | refused: not its message       |
+| an overlong form in a string                                      | `0A 02 C0 AF`                        | refused: not its message       |
+| a surrogate in UTF-8                                              | `0A 03 ED A0 80`                     | refused: not its message       |
+| a string's leading U+FEFF                                         | `0A 04 EF BB BF 61`                  | taken: U+FEFF `a`              |
+| U+FEFF after a string's first character                           | `0A 04 61 EF BB BF`                  | taken: `a` U+FEFF              |
+| a noncharacter, U+FFFF                                            | `0A 03 EF BF BF`                     | taken: U+FFFF                  |
+| U+0000                                                            | `0A 01 00`                           | taken: U+0000                  |
+| an unknown field after the known                                  | `0A 01 61 78 07`                     | taken: `a`                     |
+| an unknown field before the known                                 | `78 07 0A 01 61`                     | taken: `a`                     |
+| an unknown field of each wire type                                | `21 01 … 08 2A 01 7A 35 01 02 03 04` | taken: no field set            |
+| a number given at its default                                     | `10 00`                              | taken: 0                       |
+| a scalar given twice                                              | `10 01 10 02`                        | taken: 2                       |
+| a message given twice                                             | `1A 02 1A 00 1A 02 10 01`            | taken: merged, 2 below the top |
+| a message field set to the empty message                          | `1A 00`                              | taken: a child, no field set   |
+| field number 0                                                    | `00 01`                              | refused: not its message       |
+| a varint of 10 bytes                                              | `10 FF FF FF FF FF FF FF FF FF 01`   | taken: 4294967295              |
+| a varint of 11 bytes                                              | `10 80 … 80 01`                      | refused: not its message       |
+| an end group no group opened                                      | `24`                                 | refused: not its message       |
+| an unknown group, closed                                          | `23 24`                              | taken: no field set            |
+| an unknown group never closed                                     | `23`                                 | refused: not its message       |
+| 99 messages below the top                                         | `1A E6 01 …`                         | taken: 99 below                |
+| 100 messages below the top                                        | `1A E9 01 …`                         | taken: 100 below               |
+| 101 messages below the top                                        | `1A EC 01 …`                         | refused: nested past 100       |
+| 100 groups below the top                                          | `6B 6B … 6C 6C`                      | taken: 100 below               |
+| 101 groups below the top                                          | `6B 6B … 6C 6C`                      | refused: nested past 100       |
+| 99 messages below the top, the last holding a scalar map's entry  | `1A F2 01 … 82 01 05 0A 01 61 10 01` | taken: 100 below               |
+| 100 messages below the top, the last holding a scalar map's entry | `1A F5 01 … 82 01 05 0A 01 61 10 01` | refused: nested past 100       |
 
 A message given twice is merged, so its row gives the child of the first copy a child of its own:
 a reader that merges reads 2 below the top, and one that keeps the last copy reads 1. Six values,
@@ -467,9 +466,8 @@ its own outcome for the platform row, none, since a Rust `String` holds no surro
 language after it** plays them through its own library and its target's calls, sets the bound in its
 library, and finds its own outcome for the platform row.
 
-**The matrix's `proto` rows.** The feature "Payloads" counts `proto`; the open row "A string's
-leading U+FEFF in a proto payload" holds the one `differs` of these rows, the TypeScript side's; the
-platform row "A proto string no string holds, given to a writer" says what each library writes; and
+**The matrix's `proto` rows.** The feature "Payloads" counts `proto`; the platform row "A proto
+string no string holds, given to a writer" says what each library writes; and
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s
 rows say where the libraries read or write apart, in "Leveled down" and as platform rows.
 
