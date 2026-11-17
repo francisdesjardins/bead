@@ -124,7 +124,7 @@ none, and ends at its end, when the application ends it, or with its connection
 Within step 6 of section 9.2, in this order:
 
 1. **a credential scheme the side takes none of** — one to come, or one it has no verifier for — is
-   refused `CREDENTIAL_UNSUPPORTED`, the admission block's code 36, whose detail SHOULD name the
+   refused `CREDENTIAL_UNSUPPORTED`, the admission block's code 36, whose detail MUST name the
    schemes the side takes, as a 401 names its own in `WWW-Authenticate` (RFC 9110 §11.6.1): the
    requester presents another, where `SESSION_REQUIRED` would send it to authenticate again;
 2. **the credential resolves to a session**: none, to its connection's session if it has one;
@@ -132,7 +132,7 @@ Within step 6 of section 9.2, in this order:
    time; `JWT`, to the session its claims carry once it verifies (below); `ELSEWHERE`, to the
    session the side's verifier makes of what the transport carried. A credential that does not
    resolve, or an `ELSEWHERE` whose transport carried nothing, is refused `SESSION_REQUIRED`, whose
-   detail SHOULD say whether no credential came or one came and did not hold. A verifier that fails
+   detail MUST say whether no credential came or one came and did not hold. A verifier that fails
    — it throws or rejects, its key set cannot be reached — refuses with `PROCEDURE_FAILED`,
    reported, as an admission that fails does, and never with `SESSION_REQUIRED`, which would
    withdraw a credential that holds;

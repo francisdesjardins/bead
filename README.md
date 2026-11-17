@@ -120,7 +120,7 @@ and AMQP 1.0 on RabbitMQ 4 its second
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
   whatever that payload's format.
-- **Subscriptions at the client's pace.** A paced subscription sends only what the client has
+- **Subscriptions the client can pace.** A paced subscription sends only what the client has
   credited. What waits is kept by key, so a state keeps its latest value and an event keeps every
   one. A queue past its bound ends the subscription out loud, never in silence.
 - **Large payloads under credit.** A transfer goes in chunks, as fast as its receiver credits them,
@@ -1053,12 +1053,13 @@ against each server.
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.
 - `node tools/check-twins.mjs`: every TypeScript and C# test — a title, a `[Fact]` or `[Theory]`
-  method — is played on the Rust side under its title's key, a `#[test]` `fn` or a trial, or a row
-  of `tools/twins.tsv` gives its class, a twin under another sentence, ahead for the Rust side or
-  native to its platform, and why; a folder's row leaves out every test of a program in one
-  language no other side has, the builder, the root's tools, the demo, the DevTools extension and
-  the browser page. `--write` adds a `pending` row for each new one, which fails until a reader
-  classifies it, and drops each row whose test is twinned or under a folder's row.
+  method — is played on the Rust side under its title's key, a `#[test]` or `#[tokio::test]` `fn`
+  or a trial, or a row of `tools/twins.tsv` gives its class and why: a twin under another sentence,
+  a twin the key does not reach, ahead for the Rust side, or native to its platform. A folder's row
+  leaves out every test of a program in one language no other side has: the builder, the root's
+  tools, the demo, the DevTools extension and the browser page. `--write` adds a `pending` row for
+  each new one, which fails until a reader classifies it, and drops each row whose test is twinned
+  or under a folder's row.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, the Rust workspace's and its lock's members, and each conformance file's
@@ -1272,10 +1273,11 @@ then one corpus of `Probe` through every side's testee); `protovalidate-differen
 (protovalidate-es, by its pin's sha512, over the verdicts of `spec/validations.json`, then those
 verdicts and a corpus mutated from them through every side's generated validators and through
 protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`
-(the subjects, the links, the details, the page, the versions, the root's tools' own tests, then the
-supply chain: every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and
-Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its
-digest). `ci-ok` needs them all, so one check stands for every job.
+(the subjects, the links, the cited tests, the details, the page and its deploy's tests, the names,
+the durations' members, the twins, the versions, the root's tools' own tests, then the supply chain:
+every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's
+community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok`
+needs them all, so one check stands for every job.
 
 Dependabot, by [`dependabot.yml`](.github/dependabot.yml), brings the dependency updates each week to
 `develop` as grouped pull requests, which CI judges as any other, each release waiting out its first

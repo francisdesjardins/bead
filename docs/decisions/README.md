@@ -84,6 +84,9 @@ that meets the Tenth Man:
 
 - what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
   ahead of the Rust side's trace: an optional bridge from it to `tracing`;
+- what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
+  ahead of the Rust side's core: its service manager over a router of the application's own,
+  through a port of the crate's own;
 - **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
   executor, its clock and its tests, then what it serves there: the transports in a page, the Rust
   side's client over the page's `WebSocket` and `fetch` among them
@@ -156,6 +159,11 @@ that meets the Tenth Man:
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
+- what
+  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)
+  keeps ahead of a client's `localhost`: such a name, and one under `.localhost`, connected to the
+  loopback with no resolver asked, on every dialer Bead owns
+  ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3));
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
   ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));

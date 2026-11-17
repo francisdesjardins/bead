@@ -85,6 +85,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   two faults with the same reason, which 23 payloads of `spec/codecs.json` and two conversations of
   `spec/conversations.json` play. The support matrix's open row on it gives way to one on a
   gateway's body of two faults, whose three readers refuse with the first fault they meet.
+- The documents are brought to 0.15.0: the records and the READMEs state what holds and where Bead
+  goes, the twins' gate, `tools/flow.mjs finish` and the Rust side's counted call among what holds.
 
 ### Removed
 

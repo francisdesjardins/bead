@@ -330,10 +330,13 @@ and the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)
 tuple, the same exports on every side, each side's surface pinned to its list, as
 [0047](0047-every-side-shows-one-public-surface.md) decides.
 
-A test missing on one side is added to the others. What couples transports stays outside the
-protocol: one public port for WebSocket and HTTP comes from a small local proxy in front, as the
-demo's `demo/relay.ts` is, never from a server the transports share, so no transport needs
-another's server in any language.
+A test missing on one side is added to the others. `tools/check-twins.mjs` holds every TypeScript
+and C# test to a Rust twin under its title's key, or to a row of `tools/twins.tsv` that gives its
+class and why. It runs in CI's `commits` job ([0006](0006-a-rule-has-its-gate.md)).
+
+What couples transports stays outside the protocol: one public port for WebSocket and HTTP comes
+from a small local proxy in front, as the demo's `demo/relay.ts` is, never from a server the
+transports share, so no transport needs another's server in any language.
 
 **A difference between languages is a row of the support matrix**, `docs/support.md`, with the test
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that
