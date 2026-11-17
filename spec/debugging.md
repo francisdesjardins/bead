@@ -95,11 +95,10 @@ thread allocates, a counted call's synchronous steps allocate not a byte more th
 one's, and what a call allocates while nobody listens is pinned; where it does not, the side holds
 that part by inspection, a row of the support matrix.
 
-3.5. A side whose platform builds that way has two build switches: one leaves out the trace and the
-filter, the other the registry, each alone or both. Built with the registry and without the trace, a
-side pays two monotonic readings and a few increments a counted call, and nothing more; built with
-neither, it pays nothing. A side that builds both pays the check alone while nobody listens and no
-registry is given.
+3.5. A constrained profile (1.2) leaves out the trace and the filter by one build switch, and the
+registry by another, each alone or both. Built with the registry and without the trace, it pays two
+monotonic readings and a few increments a counted call, and nothing more; built with neither, it pays
+nothing. A side that builds both pays the check alone while nobody listens and no registry is given.
 
 ## 4. The trace of calls
 

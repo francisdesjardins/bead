@@ -29,6 +29,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   6455 §4.2.2, WHATWG WebSockets §2.2): the TypeScript server no longer echoes the first offer,
   and the C# client fails such an upgrade, as `ws` and tungstenite do; a case of
   `spec/transports.json` plays it.
+- `spec/debugging.md` 3.5 states its two build switches as a constrained profile's (1.2), which no
+  side builds, and decision 0013 says the same.
 
 ### Removed
 
