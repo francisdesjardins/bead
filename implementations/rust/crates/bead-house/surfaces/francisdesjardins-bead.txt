@@ -1098,12 +1098,14 @@ crate::gateway::caller
     pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
     pub client_config: Option<Arc<ClientConfig>> #[cfg(feature = "gateway")]
     pub runtime: Option<Handle> #[cfg(feature = "gateway")]
-    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+    implements Debug
+    derives Clone, Default #[cfg(feature = "gateway")]
   struct HttpCallOptions #[non_exhaustive] #[cfg(feature = "gateway")]
     pub authorization: Option<String> #[cfg(feature = "gateway")]
     pub without_authorization: Option<bool> #[cfg(feature = "gateway")]
     pub signal: Option<CancellationToken> #[cfg(feature = "gateway")]
-    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+    implements Debug
+    derives Clone, Default #[cfg(feature = "gateway")]
   enum HttpEvent<R, N> #[cfg(feature = "gateway")]
     Result(R) #[cfg(feature = "gateway")]
     Notification(N) #[cfg(feature = "gateway")]
