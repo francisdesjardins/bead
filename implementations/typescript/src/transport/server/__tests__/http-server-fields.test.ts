@@ -14,7 +14,15 @@ import {
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../http-transport-server';
-import { countOf, hasBody, headerOf, linesOf, listeningOf } from '../http-server-fields';
+import {
+  countOf,
+  hasBody,
+  headerOf,
+  isBeadBody,
+  joinedOf,
+  linesOf,
+  listeningOf,
+} from '../http-server-fields';
 import type { TransportServerConnectionHandle } from '../types';
 import {
   BEARER,
@@ -180,7 +188,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     }
   });
 
-  test('reads any target without throwing, a header given twice by its first, and HTTP/2’s authority as the host', async () => {
+  test('reads any target without throwing, a Content-Type given twice as no type, and HTTP/2’s authority as the host', async () => {
     const { fake, server } = await startScripted({ hosts: ['bead.example'] });
     const statusOf = (
       headers: Record<string, string | string[]>,
@@ -257,7 +265,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: '/bead%23' }),
       statusOf(bead, { url: '/bead?a%23b' }),
     ]).toEqual([
-      [201, undefined],
+      [415, HTTP_REFUSALS.TYPE],
       [404, HTTP_REFUSALS.PATH],
       [404, HTTP_REFUSALS.PATH],
       [201, undefined],
@@ -969,6 +977,10 @@ test.describe('the fields a request carries', () => {
     expect(headerOf(twice, 'authorization')).toBe(BEARER);
     expect(linesOf(twice, 'authorization')).toEqual([BEARER, 'Basic']);
     expect([
+      joinedOf(twice, 'authorization'),
+      joinedOf(requestLikeOf([]), 'authorization'),
+    ]).toEqual([`${BEARER}, Basic`, undefined]);
+    expect([
       counted(['3']),
       counted(['0;p=1']),
       counted([]),
@@ -992,5 +1004,21 @@ test.describe('the fields a request carries', () => {
         return hasBody(requestLikeOf(fields as [string, string][]));
       })
     ).toEqual([false, true, true, false]);
+
+    // a type in one line alone, and an encoding by its lines joined (spec 15.12)
+    const bead = ['Content-Type', BEAD_MEDIA_TYPE] as const;
+
+    expect(
+      [
+        [bead],
+        [bead, ['Content-Encoding', 'IDENTITY']],
+        [bead, ['Content-Type', BEAD_MEDIA_TYPE]],
+        [bead, ['Content-Type', 'text/html']],
+        [bead, ['Content-Encoding', 'identity'], ['Content-Encoding', 'identity']],
+        [bead, ['Content-Encoding', 'identity, gzip']],
+      ].map((fields) => {
+        return isBeadBody(requestLikeOf(fields as [string, string][]));
+      })
+    ).toEqual([true, true, false, false, false, false]);
   });
 });
