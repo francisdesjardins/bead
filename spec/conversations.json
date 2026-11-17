@@ -6786,6 +6786,66 @@
       ]
     },
     {
+      "name": "a result's chunk that does not read ends the command CHUNK_INVALID, and cancels it",
+      "clauses": [
+        "9.6",
+        "9.6.4"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 2,
+            "paced": false,
+            "creditEnd": 156
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 02  00 20 00 00 00 00 00 00 | 01"
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": 48
+        }
+      ]
+    },
+    {
       "name": "a result past chunkBytes ends the command ENVELOPE_TOO_LARGE, and cancels it, where one of chunkBytes is taken",
       "clauses": [
         "9.6.3",
