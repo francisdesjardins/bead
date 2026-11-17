@@ -1,7 +1,7 @@
-//! One WebSocket connection's heartbeat, as the other sides' `createHeartbeat` and the C# side's
-//! keep-alive beat it: a ping every heartbeat, and a drop at the beat after a ping its peer left
-//! unanswered, so a peer gone without a word — a network cut, a machine asleep — ends in a close
-//! rather than never. It lives below the protocol, a WebSocket's own PING and PONG frames (RFC 6455
+//! One WebSocket connection's heartbeat, as the TypeScript side's `createHeartbeat` beats it: a ping
+//! every heartbeat, whatever comes, any pong answering it, and a drop at the beat after a ping its
+//! peer left unanswered, so a peer gone without a word — a network cut, a machine asleep — is
+//! dropped rather than kept for ever (spec 15.3). It lives below the protocol, a WebSocket's own PING and PONG frames (RFC 6455
 //! §5.5.2), which a page's browser answers by itself, and runs on the platform's clock, never the
 //! clock a side is given, as a ping plays in real time on every side (decision 0011); without end,
 //! it arms nothing.

@@ -146,9 +146,10 @@ A connection's life, on the client:
   anew: the application subscribes again, and reads the state anew.
 - **A command resolver stays.** What `station.on('promptOperator', …)` registered answers on the
   new connection too.
-- **A peer gone without a word** ends within two heartbeats: each WebSocket end pings every 30 s by
-  default. A browser's socket cannot ping, and answers the server's pings by itself, so the
-  server's heartbeat covers a page.
+- **A peer gone without a word** is dropped within four heartbeats at most: each WebSocket end pings
+  a connection silent for a heartbeat, 30 s by default, and drops it once that ping goes unanswered
+  for another, each within a further heartbeat as its platform's timer runs. A browser's socket
+  cannot ping, and answers the server's pings by itself, so the server's heartbeat covers a page.
 
 This client, run against the getting-started server on port 8080 while that server was killed and
 started again, reconnected, subscribed again, and answered the server's command on the new

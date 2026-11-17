@@ -38,10 +38,11 @@ reading, 59 MiB in `bufferedAmount` on the TypeScript side, the C# side's workin
 30 s, and at 31.2 s by Kestrel; a body a byte a second held to Node's `requestTimeout`, 300 s, and
 failed at 6 s by Kestrel's `MinRequestBodyDataRate`, an abort that names no bound of Bead's.
 
-**The heartbeat already drops a reader that stops**: its ping waits behind the backlog and goes
-unanswered. Paused 75 s, the client is closed by both servers before it resumes, within two beats on
-the TypeScript side, by `KeepAliveTimeout` on the C# side. What it leaves unbounded is the bytes
-held within a beat, and everything where the heartbeat is never.
+**The heartbeat already drops a reader that stops and sends nothing**: its ping waits behind the
+backlog and goes unanswered. Paused 75 s and silent, the client is closed by both servers before it
+resumes, within two beats on the TypeScript side, by `KeepAliveTimeout` on the C# side. What it
+leaves unbounded is the bytes held within a beat, a reader that stops but sends on, and everything
+where the heartbeat is never.
 
 **A byte bound judged at once drops an honest reader.** 100 results of 1 MiB, the answers to calls a
 peer may hold, fill `bufferedAmount` with 102,761,428 bytes in one turn and are read whole in 97 ms;
@@ -171,9 +172,9 @@ can be owed at once — the answers to the calls it has answered and the server'
 4 × 4,194,304 + 2 × 16,778,240 = 184,551,424 at the defaults, the WebSocket facades deriving it from
 their router's limits as they derive the message limit. An envelope that would take what waits past
 it drops the connection. The heartbeat stays as 15.3 has it, the judge of a reader stopped behind a
-large backlog, whose allowance at the pace runs long; the pace and the bound stand beside it, since
-the heartbeat is the platform's ping, .NET's `KeepAliveTimeout` on the C# side, which Bead cannot
-make finer, and may be never. **Each drop is reported**, naming its connection and its bound, on the
+large backlog that sends nothing, whose allowance at the pace runs long; the pace and the bound
+stand beside it, since the heartbeat is the platform's ping, .NET's `KeepAliveTimeout` on the C#
+side, which Bead cannot make finer, and may be never. **Each drop is reported**, naming its connection and its bound, on the
 transport's `error` before its `close`, so an operator tells it from a network that failed (RFC 6455
 §7.1.7), and an HTTP outbox's overflow alike; a WebSocket so dropped closes with no closing
 handshake, unclean, since a peer that does not read would read no close frame waiting behind its
