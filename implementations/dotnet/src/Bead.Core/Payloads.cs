@@ -30,10 +30,19 @@ internal static class Payloads
     private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     // ! a name given twice refuses the JSON, and the 65th level refuses it as it is read, before
-    // anything deeper is built: a json payload's, and a JWT's header and claims set (13.8 step 1)
+    // anything deeper is built: a JWT's header and claims set (13.8 step 1)
     internal static readonly JsonDocumentOptions Strictly = new()
     {
         AllowDuplicateProperties = false,
+        MaxDepth = Depth,
+    };
+
+    // ! a json payload's: every member kept, in its text's order, so the walk after the parse meets a
+    // name twice where its text gives it (17.5, after item 7); 64 deep, which the count before the
+    // parse holds already
+    private static readonly JsonDocumentOptions AsWritten = new()
+    {
+        AllowDuplicateProperties = true,
         MaxDepth = Depth,
     };
 
@@ -77,32 +86,126 @@ internal static class Payloads
 
     // helpers
 
-    // what a strict parse refused, read again with nothing built: nested past 64 where a reader
-    // meets a 65th level before anything else it refuses, a name twice where it meets nothing it
-    // refuses, and not JSON otherwise
-    private static string RefusalOf(ReadOnlySpan<byte> bytes)
+    // whether the text opens an array or an object deeper than 64, counted over the whole text
+    // before anything of it is read (17.5, after item 7): its strings skipped, a backslash escaping
+    // the byte after it, a string never closed ending the count, the count free to fall below 0
+    private static bool IsTooDeep(ReadOnlySpan<byte> text)
     {
-        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { MaxDepth = Depth + 1 });
-        var isRead = false;
+        var depth = 0;
+
+        for (var index = 0; index < text.Length; index += 1)
+        {
+            switch (text[index])
+            {
+                case (byte)'"':
+                    index += 1;
+
+                    while (index < text.Length && text[index] != (byte)'"')
+                    {
+                        index += text[index] == (byte)'\\' ? 2 : 1;
+                    }
+
+                    break;
+                case (byte)'[' or (byte)'{':
+                    depth += 1;
+
+                    if (depth > Depth)
+                    {
+                        return true;
+                    }
+
+                    break;
+                case (byte)']' or (byte)'}':
+                    depth -= 1;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return false;
+    }
+
+    // of 17.5's items 4, 5 and 6, the reason the value meets first, read in its text's order: a name
+    // or a string holding a surrogate alone at that name or string, a name its object gave before at
+    // that name, a number past a double at that number; null where it meets none. Recursive, as the
+    // canonical write is, 64 deep at most
+    private static string? FirstFault(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                return IsWellFormed(value) ? null : ASurrogateAlone;
+            case JsonValueKind.Number:
+                return double.IsFinite(DoubleOf(value)) ? null : Read.NotFinite;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (FirstFault(item) is { } fault)
+                    {
+                        return fault;
+                    }
+                }
+
+                return null;
+            case JsonValueKind.Object:
+                return FirstFaultOfMembers(value);
+            default:
+                return null;
+        }
+    }
+
+    // an object's members in their text's order, each name before its value
+    private static string? FirstFaultOfMembers(JsonElement value)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var member in value.EnumerateObject())
+        {
+            string name;
+
+            try
+            {
+                name = member.Name;
+            }
+            catch (InvalidOperationException)
+            {
+                // ! reading a name that holds a surrogate alone throws this
+                return ASurrogateAlone;
+            }
+
+            if (!names.Add(name))
+            {
+                return ANameTwice;
+            }
+
+            if (FirstFault(member.Value) is { } fault)
+            {
+                return fault;
+            }
+        }
+
+        return null;
+    }
+
+    // whether a string holds no surrogate alone, which only an escape writes
+    private static bool IsWellFormed(JsonElement value)
+    {
+        if (!JsonMarshal.GetRawUtf8Value(value).Contains((byte)'\\'))
+        {
+            return true;
+        }
 
         try
         {
-            while (reader.Read())
-            {
-                isRead = true;
+            _ = value.GetString();
 
-                if (reader.CurrentDepth >= Depth && reader.TokenType is JsonTokenType.StartArray or JsonTokenType.StartObject)
-                {
-                    return Read.Nested;
-                }
-            }
+            return true;
         }
-        catch (JsonException)
+        catch (InvalidOperationException)
         {
-            return NotJson;
+            return false;
         }
-
-        return isRead ? Read.NameTwice : NotJson;
     }
 
     // a number as a double, read from its digits
@@ -155,8 +258,9 @@ internal static class Payloads
     /// <summary>
     /// The value of a <c>json</c> payload (17.5, 17.6), its canonical form's: the document read when
     /// its bytes are canonical already, otherwise the canonical bytes written of it, parsed again.
-    /// Refused: bytes that are not UTF-8, a byte order mark, bytes that are not one JSON text, a
-    /// name given twice, a surrogate alone, a number past the largest double, and nesting past 64.
+    /// Refused with the first reason in 17.5's order: bytes that are not UTF-8, a byte order mark,
+    /// nesting past 64, bytes that are not one JSON text, then of a name given twice, a surrogate
+    /// alone and a number past the largest double the one its text meets first.
     /// </summary>
     public static JsonElement ReadJson(ReadOnlyMemory<byte> payload)
     {
@@ -171,26 +275,31 @@ internal static class Payloads
             throw new FormatException(AByteOrderMark);
         }
 
+        // * before the parse, so a peer never chooses how deep it goes
+        if (IsTooDeep(payload.Span))
+        {
+            throw new FormatException(NestedPast64);
+        }
+
         JsonDocument document;
 
         try
         {
             // ! the overload of memory: the one of a stream skips a byte order mark
-            document = JsonDocument.Parse(payload, Strictly);
+            document = JsonDocument.Parse(payload, AsWritten);
         }
         catch (JsonException reason)
         {
-            throw new FormatException(RefusalOf(payload.Span), reason);
-        }
-        catch (InvalidOperationException reason)
-        {
-            // ! the check of names given twice reads each name, and one holding a surrogate alone
-            // throws this, not a JsonException
-            throw new FormatException(Read.SurrogateAlone, reason);
+            throw new FormatException(NotJson, reason);
         }
 
         using (document)
         {
+            if (FirstFault(document.RootElement) is { } fault)
+            {
+                throw new FormatException(fault);
+            }
+
             // the canonical form is about as long as the payload, so its buffer grows rarely
             var canonical = new Canonical(Read, Math.Max(payload.Length, 1));
 

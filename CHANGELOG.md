@@ -113,6 +113,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   excuses it no longer, and the `proto` differential takes the entry as a seed.
 - The TypeScript side refuses a `json` payload of two faults past the grammar with the one its text
   meets first, where it checked a name twice last and the leaves in the order its walk popped them.
+- The C# side counts a `json` payload's depth before it parses, so `x` then 65 `[` is `nested
+  past 64`, and meets a fault past the grammar in its text's order, where it met one as its
+  canonical form was written, its names sorted.
 
 ## [0.14.0] - 2026-11-16
 
