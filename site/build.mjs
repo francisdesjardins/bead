@@ -176,8 +176,11 @@ const grouped = (value, language) => {
 
 // French typography over the text of a page, never inside a tag, a code span or a block of code: a
 // narrow no-break space before a colon, a semicolon, a question or an exclamation mark, inside
-// guillemets and between the groups of a number, and a no-break space where a number meets the
-// word it counts, its unit among them
+// guillemets and between the groups of a number, and a no-break space where a number meets its
+// unit, one of UNITS
+const UNITS =
+  /(\d) (?=(?:s|ms|µs|min|Kio|Mio|Gio|octets?|bits?|mots?|caractères?|cellules?)(?![\p{L}\d]))/gu;
+
 export const typeset = (html) => {
   const parts = html.split(
     /(<code\b[\s\S]*?<\/code>|<pre\b[\s\S]*?<\/pre>|<svg\b[\s\S]*?<\/svg>|<[^>]+>)/u
@@ -191,7 +194,7 @@ export const typeset = (html) => {
         .replace(/[ \xA0]([:;?!»])/gu, `${NARROW}$1`)
         .replace(/«[ \xA0]/gu, `«${NARROW}`)
         .replace(/(\d)[ \xA0](?=\d{3}(?!\d))/gu, `$1${NARROW}`)
-        .replace(/(\d) (?=\p{L})/gu, `$1${NO_BREAK}`);
+        .replace(UNITS, `$1${NO_BREAK}`);
     })
     .join('');
 };

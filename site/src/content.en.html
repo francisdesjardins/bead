@@ -759,8 +759,8 @@
     Bead has no encryption of its own: TLS carries it, <code>wss</code>, <code>https</code> or a
     broker’s link under TLS. A client outside a page takes from its application the authorities it
     trusts and a certificate with its key, and presents that certificate when its server asks for
-    one. It takes its server’s certificate only when it names the host the client asked for. A
-    page’s TLS is its browser’s.
+    one. It takes its server’s certificate only when that certificate names the host the client
+    asked for. A page’s TLS is its browser’s.
   </p>
   <p>
     A client certificate authenticates its client to what terminates TLS, never a request: a call’s

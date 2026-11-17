@@ -1,6 +1,7 @@
 // What the page draws from data rather than prose, in both its languages: the byte examples, the
-// header's words, the protocol's failures and the status a gateway answers each with, and the table
-// of the three implementations, each part by the rows of the support matrix it stands for. Each
+// header's words, the protocol's failures and the status a gateway answers each with, and the tables
+// of the three implementations and of the transports, each part or transport by the rows of the
+// support matrix it stands for. Each
 // label is a pair, `[english, french]`; a byte's role is one of prefix, kind, block, record or
 // payload.
 
@@ -909,7 +910,7 @@ export const TRANSPORTS = Object.freeze([
     detail: '#memoire',
   },
   {
-    where: ['One server, several of these', 'Un serveur, plusieurs de ceux-ci'],
+    where: ['One server over several transports', 'Un serveur sur plusieurs transports'],
     name: ['Joined', 'Joints'],
     rows: ["Joined, a server's transports through one"],
     sides: ['TypeScript', 'C#', 'Rust'],

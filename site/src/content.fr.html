@@ -165,7 +165,7 @@
   <p>
     <a href="{{tree path="examples/hello"}}"><code>examples/hello</code></a> est le même programme
     en TypeScript, en C# et en Rust. Dans la CI, chaque client appelle chaque serveur, et chaque
-    client écrit les mêmes lignes. Pour en partir hors de ce dépôt,
+    client écrit les mêmes lignes. Pour en démarrer un hors de ce dépôt,
     <a href="{{blob path="docs/guides/getting-started.md"}}">le guide de démarrage</a> bâtit un
     serveur C# et un client TypeScript à partir d’un dossier vide.
   </p>
@@ -384,8 +384,8 @@
 <section id="transports" data-toc="Les transports">
   <h2 id="transports-h">Les transports</h2>
   <p class="gist">
-    Les deux bouts gardent la même API, quoi qui porte les enveloppes, si bien qu’une équipe choisit
-    le transport selon l’endroit où passent ses appels.
+    Les deux bouts gardent la même API, quel que soit ce qui porte les enveloppes, si bien qu’une
+    équipe choisit le transport selon l’endroit où passent ses appels.
   </p>
   {{transports}}
   <p class="space">
@@ -517,8 +517,8 @@
   </details>
   <p class="space">
     Les fichiers n’atteignent pas tout. Les revues avant chaque sortie trouvent encore des écarts
-    entre les côtés qu’aucun fichier n’avait pris, et chacun est corrigé ou devient une ligne de la
-    matrice de support.
+    entre les côtés qu’aucun fichier n’avait relevés, et chacun est corrigé ou devient une ligne de
+    la matrice de support.
   </p>
   <h3 id="methode-portes">Ce que tient la CI</h3>
   <ul>
@@ -801,7 +801,7 @@
     Bead n’a pas de chiffrement à lui : TLS le porte, <code>wss</code>, <code>https</code> ou le
     lien d’un courtier sous TLS. Un client hors d’une page prend de son application les autorités
     auxquelles il se fie et un certificat avec sa clé, et présente ce certificat quand son serveur en
-    demande un. Il ne prend le certificat de son serveur que s’il nomme l’hôte que le client a
+    demande un. Il ne prend le certificat de son serveur que si ce certificat nomme l’hôte
     demandé. Le TLS d’une page est celui de son navigateur.
   </p>
   <p>

@@ -107,12 +107,12 @@ describe('the table of the transports', () => {
 // ── French typography ─────────────────────────────────────────────────────────
 
 describe('French typography', () => {
-  test('keeps a number whole and with its unit, and a mark with its word, never inside code', () => {
+  test('keeps a number whole and with its unit alone, and a mark with its word, never inside code', () => {
     const narrow = String.fromCodePoint(0x20_2f);
     const noBreak = String.fromCodePoint(0xa0);
     assert.equal(
-      typeset('<p>16 778 240 octets, 30 s : « oui » ?</p><code>a : b</code>'),
-      `<p>16${narrow}778${narrow}240${noBreak}octets, 30${noBreak}s${narrow}: «${narrow}oui${narrow}»${narrow}?</p><code>a : b</code>`
+      typeset('<p>16 778 240 octets, 30 s : « oui » ? MQTT 5 ou 2 sides</p><code>a : b</code>'),
+      `<p>16${narrow}778${narrow}240${noBreak}octets, 30${noBreak}s${narrow}: «${narrow}oui${narrow}»${narrow}? MQTT 5 ou 2 sides</p><code>a : b</code>`
     );
   });
 });

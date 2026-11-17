@@ -2202,7 +2202,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     Both ends keep the same API whatever carries the envelopes, so a team picks the transport by
     where its calls run.
   </p>
-  <div class="table-wrap" tabindex="0"><table><thead><tr><th scope="col">Where the call runs</th><th scope="col">Transport</th><th scope="col">Sides</th></tr></thead><tbody><tr><td>A page or a service</td><td><a href="#http">WebSocket</a></td><td>all three</td></tr><tr><td>Where WebSocket cannot pass</td><td><a href="#http-ecoute">HTTP, a long poll for what the server sends</a></td><td>all three</td></tr><tr><td>A page and its Web Worker</td><td>Web Worker</td><td>TypeScript</td></tr><tr><td>Two routers of one process</td><td><a href="#memoire">In memory</a></td><td>all three</td></tr><tr><td>One server, several of these</td><td><a href="#memoire">Joined</a></td><td>all three</td></tr><tr><td>Devices and services</td><td><a href="#courtier">MQTT 5</a></td><td>all three</td></tr><tr><td>Services behind RabbitMQ 4</td><td><a href="#courtier">AMQP 1.0</a></td><td>TypeScript and C#</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table><thead><tr><th scope="col">Where the call runs</th><th scope="col">Transport</th><th scope="col">Sides</th></tr></thead><tbody><tr><td>A page or a service</td><td><a href="#http">WebSocket</a></td><td>all three</td></tr><tr><td>Where WebSocket cannot pass</td><td><a href="#http-ecoute">HTTP, a long poll for what the server sends</a></td><td>all three</td></tr><tr><td>A page and its Web Worker</td><td>Web Worker</td><td>TypeScript</td></tr><tr><td>Two routers of one process</td><td><a href="#memoire">In memory</a></td><td>all three</td></tr><tr><td>One server over several transports</td><td><a href="#memoire">Joined</a></td><td>all three</td></tr><tr><td>Devices and services</td><td><a href="#courtier">MQTT 5</a></td><td>all three</td></tr><tr><td>Services behind RabbitMQ 4</td><td><a href="#courtier">AMQP 1.0</a></td><td>TypeScript and C#</td></tr></tbody></table></div>
   <p class="space">
     The sides call each other in CI over WebSocket, HTTP and MQTT 5, and the TypeScript and C# sides
     over AMQP 1.0 too. In a page or in Node, the TypeScript side needs nothing installed, and takes
@@ -2711,8 +2711,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     Bead has no encryption of its own: TLS carries it, <code>wss</code>, <code>https</code> or a
     broker’s link under TLS. A client outside a page takes from its application the authorities it
     trusts and a certificate with its key, and presents that certificate when its server asks for
-    one. It takes its server’s certificate only when it names the host the client asked for. A
-    page’s TLS is its browser’s.
+    one. It takes its server’s certificate only when that certificate names the host the client
+    asked for. A page’s TLS is its browser’s.
   </p>
   <p>
     A client certificate authenticates its client to what terminates TLS, never a request: a call’s
@@ -4068,7 +4068,7 @@ offerHello(server);
   <main id="main" tabindex="-1">
 <div class="opening">
   <header class="hero">
-    <p class="eyebrow">bead 0.15.0 · spécification 0.16.0 · dispositions 0xA1 et 0xB1</p>
+    <p class="eyebrow">bead 0.15.0 · spécification 0.16.0 · dispositions 0xA1 et 0xB1</p>
     <h1>Bead</h1>
     <p class="lede">
       Un contrat typé pour les équipes qui s’appellent en TypeScript, en C# et en Rust, depuis un
@@ -4214,7 +4214,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>Un courtier est un transport de plus</strong
-      ><span>Sur MQTT 5, et sur AMQP 1.0 côtés TypeScript et C#, les deux bouts gardent l’API qu’ils
+      ><span>Sur MQTT 5, et sur AMQP 1.0 côtés TypeScript et C#, les deux bouts gardent l’API qu’ils
         ont sur un WebSocket : des appels avec leurs échecs, l’annulation, les justificatifs, le
         rythme de chaque client et les transferts.</span>
     </li>
@@ -4262,7 +4262,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   <p>
     <a href="https://github.com/francisdesjardins/bead/tree/main/examples/hello"><code>examples/hello</code></a> est le même programme
     en TypeScript, en C# et en Rust. Dans la CI, chaque client appelle chaque serveur, et chaque
-    client écrit les mêmes lignes. Pour en partir hors de ce dépôt,
+    client écrit les mêmes lignes. Pour en démarrer un hors de ce dépôt,
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/getting-started.md">le guide de démarrage</a> bâtit un
     serveur C# et un client TypeScript à partir d’un dossier vide.
   </p>
@@ -4313,7 +4313,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     Ce que le fil peut et qu’une passerelle ne porte pas est listé, pas caché : la session d’une
     connexion, une commande, la reprise d’un flux et sa fenêtre, chacune une ligne du registre
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/support.md#leveled-down">« Leveled down »</a> de la matrice (§2.5,
-    §2.6, §8.3 et §8.8 du compagnon).
+    §2.6, §8.3 et §8.8 du compagnon).
   </p>
   <figure class="figure">
     <figcaption>Une connexion par échange : ce qu’elle tient finit avec lui</figcaption>
@@ -4353,7 +4353,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
       de tout le blueprint par défaut. Un blueprint donne les mêmes octets, quel que soit ce qui
       l’écrit. La passerelle le sert à
       <code>/openapi.json</code>, avec un <code>etag</code>. Les règles d’une charge y sont écrites
-      dans les mots de JSON Schema 2020-12. Les détails sont aux §3, §4 et §11 du compagnon.
+      dans les mots de JSON Schema 2020-12. Les détails sont aux §3, §4 et §11 du compagnon.
     </p>
   </details>
   <h3 id="transcodage-json">Le JSON d’un message</h3>
@@ -4375,9 +4375,9 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE, une lecture refusée ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
   <p class="space">
-    Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
+    Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
     <code>pointer</code> dans le corps, ou <code>parameter</code> pour une variable du chemin ou de
-    la chaîne de requête. Ici, <code>from</code> dépasse 10 dans le corps, et <code>title</code>,
+    la chaîne de requête. Ici, <code>from</code> dépasse 10 dans le corps, et <code>title</code>,
     une variable du chemin, dépasse 3 caractères.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-plaintext">POST /v1/ruled/Bead HTTP/1.1
@@ -4494,7 +4494,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     </li>
     <li>
       <strong>Un schéma de justificatif à venir</strong
-      ><span>De 4 à 65 535 : lu en entier ; sur une requête, refusé
+      ><span>De 4 à 65 535 : lu en entier ; sur une requête, refusé
         <code>CREDENTIAL_UNSUPPORTED</code> ; sur un résultat ou un échec,
         <code>ENVELOPE_MALFORMED</code>.</span>
     </li>
@@ -4521,10 +4521,10 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
 <section id="transports">
   <h2 id="transports-h">Les transports</h2>
   <p class="gist">
-    Les deux bouts gardent la même API, quoi qui porte les enveloppes, si bien qu’une équipe choisit
-    le transport selon l’endroit où passent ses appels.
+    Les deux bouts gardent la même API, quel que soit ce qui porte les enveloppes, si bien qu’une
+    équipe choisit le transport selon l’endroit où passent ses appels.
   </p>
-  <div class="table-wrap" tabindex="0"><table><thead><tr><th scope="col">Où passe l’appel</th><th scope="col">Transport</th><th scope="col">Côtés</th></tr></thead><tbody><tr><td>Une page ou un service</td><td><a href="#http">WebSocket</a></td><td>les trois</td></tr><tr><td>Là où WebSocket ne passe pas</td><td><a href="#http-ecoute">HTTP, une longue écoute pour ce qu’envoie le serveur</a></td><td>les trois</td></tr><tr><td>Une page et son Web Worker</td><td>Web Worker</td><td>TypeScript</td></tr><tr><td>Deux routeurs d’un même processus</td><td><a href="#memoire">En mémoire</a></td><td>les trois</td></tr><tr><td>Un serveur, plusieurs de ceux-ci</td><td><a href="#memoire">Joints</a></td><td>les trois</td></tr><tr><td>Des appareils et des services</td><td><a href="#courtier">MQTT 5</a></td><td>les trois</td></tr><tr><td>Des services derrière RabbitMQ 4</td><td><a href="#courtier">AMQP 1.0</a></td><td>TypeScript et C#</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table><thead><tr><th scope="col">Où passe l’appel</th><th scope="col">Transport</th><th scope="col">Côtés</th></tr></thead><tbody><tr><td>Une page ou un service</td><td><a href="#http">WebSocket</a></td><td>les trois</td></tr><tr><td>Là où WebSocket ne passe pas</td><td><a href="#http-ecoute">HTTP, une longue écoute pour ce qu’envoie le serveur</a></td><td>les trois</td></tr><tr><td>Une page et son Web Worker</td><td>Web Worker</td><td>TypeScript</td></tr><tr><td>Deux routeurs d’un même processus</td><td><a href="#memoire">En mémoire</a></td><td>les trois</td></tr><tr><td>Un serveur sur plusieurs transports</td><td><a href="#memoire">Joints</a></td><td>les trois</td></tr><tr><td>Des appareils et des services</td><td><a href="#courtier">MQTT 5</a></td><td>les trois</td></tr><tr><td>Des services derrière RabbitMQ 4</td><td><a href="#courtier">AMQP 1.0</a></td><td>TypeScript et C#</td></tr></tbody></table></div>
   <p class="space">
     Les côtés s’appellent les uns les autres dans la CI sur WebSocket, HTTP et MQTT 5, et les côtés
     TypeScript et C# aussi sur AMQP 1.0. Dans une page ou dans Node, le côté TypeScript n’a besoin
@@ -4548,10 +4548,10 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     HTTP, sa liaison MQTT 5, sa passerelle et la cible Rust de <code>beadc</code>. Chaque partie qui
     lui manque est à venir, une ligne de la matrice de support.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     Côté Rust, vient ensuite la liaison sur AMQP 1.0, par une décision à elle. Ses transports
-    WebSocket et HTTP, sa liaison MQTT 5 et sa passerelle rencontrent les deux autres côtés dans
+    WebSocket et HTTP, sa liaison MQTT 5 et sa passerelle rencontrent les deux autres côtés dans
     l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -4585,29 +4585,29 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
     <ul>
-      <li><strong>Les unités</strong> : 411 pour la spécification,
-        185 pour le débogage et 194 pour le
-        transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
+      <li><strong>Les unités</strong> : 411 pour la spécification,
+        185 pour le débogage et 194 pour le
+        transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
       <li><strong>Les vecteurs</strong> : 474, en 17
         groupes. Ils tiennent les octets des en-têtes, des enveloppes et des échecs, et ce qu’un
         lecteur en refuse ; les verdicts d’un JWT et les justificatifs refusés ; les parcelles d’un
-        courtier ; la PUBLISH de MQTT 5 et le message d’AMQP 1.0 qui portent une parcelle, comptés
+        courtier ; la PUBLISH de MQTT 5 et le message d’AMQP 1.0 qui portent une parcelle, comptés
         à l’octet ; et les Reason Codes que nomme chaque accusé de MQTT 5.</li>
       <li><strong>Les conversations</strong> : 210, chacune un script entre
         des clients et le serveur d’interop, relais compris.</li>
       <li><strong>Les cas des transports</strong> : 279, chacun au bord
         d’un transport, sur HTTP, sur WebSocket et sur un courtier, écrit octet par octet.</li>
-      <li><strong>Les durées</strong> : 35 endroits qui prennent une
-        durée, et ce que chacun fait de 19 entrées.</li>
-      <li><strong>Les charges</strong> : 182 charges lues et
-        54 valeurs écrites, en <code>raw</code>, <code>text</code>,
+      <li><strong>Les durées</strong> : 35 endroits qui prennent une
+        durée, et ce que chacun fait de 19 entrées.</li>
+      <li><strong>Les charges</strong> : 182 charges lues et
+        54 valeurs écrites, en <code>raw</code>, <code>text</code>,
         <code>json</code> et <code>proto</code>.</li>
-      <li><strong>Les règles d’une charge</strong> : 180 verdicts et
-        64 détails, et un différentiel contre protovalidate-es dans la CI.</li>
-      <li><strong>Le transcodage</strong> : 26 gabarits,
-        192 lectures, 78 écritures,
-        66 liaisons, 46 échecs,
-        10 flux d’évènements et 91 échanges.</li>
+      <li><strong>Les règles d’une charge</strong> : 180 verdicts et
+        64 détails, et un différentiel contre protovalidate-es dans la CI.</li>
+      <li><strong>Le transcodage</strong> : 26 gabarits,
+        192 lectures, 78 écritures,
+        66 liaisons, 46 échecs,
+        10 flux d’évènements et 91 échanges.</li>
       <li><strong>Le fuzzing</strong> : chaque suite passe ses lecteurs au fuzzing sur des
         mutations des vecteurs, et <code>tools/fuzz.mjs</code> y passe les analyseurs de chaque
         côté, guidé par la couverture.</li>
@@ -4678,8 +4678,8 @@ disallowed-types = [
   </details>
   <p class="space">
     Les fichiers n’atteignent pas tout. Les revues avant chaque sortie trouvent encore des écarts
-    entre les côtés qu’aucun fichier n’avait pris, et chacun est corrigé ou devient une ligne de la
-    matrice de support.
+    entre les côtés qu’aucun fichier n’avait relevés, et chacun est corrigé ou devient une ligne de
+    la matrice de support.
   </p>
   <h3 id="methode-portes">Ce que tient la CI</h3>
   <ul>
@@ -4885,7 +4885,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
     Un registre de métriques, <code>createMetricsRegistry()</code>, se donne à un routeur. Le
     routeur compte à ses portes, par service et par procédure, dans le vocabulaire RPC
     d’OpenTelemetry : les appels qui commencent et ceux qui finissent, par issue, côté client et
-    côté serveur. Les durées vont dans les seaux de l’A66 de gRPC, de 0 à 100 s.
+    côté serveur. Les durées vont dans les seaux de l’A66 de gRPC, de 0 à 100 s.
     <code>exposition()</code> écrit le registre au format texte de Prometheus. L’application le
     sert à <code>/metrics</code> : Bead n’ouvre aucun port.
   </p>
@@ -4927,7 +4927,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <ul class="space">
       <li>Un filtre ne fait jamais échouer l’appel qu’il trace. Un sens, un type ou un genre qui
         n’existe pas est refusé, jamais oublié en silence.</li>
-      <li>Chaque série existe à 0 dès que sa procédure est déclarée, si bien qu’une alerte la lit
+      <li>Chaque série existe à 0 dès que sa procédure est déclarée, si bien qu’une alerte la lit
         depuis son début.</li>
       <li>Aucune étiquette n’est une connexion, une session, un callId ni un justificatif : un pair
         ne fait pas grossir le registre.</li>
@@ -5058,7 +5058,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     Bead n’a pas de chiffrement à lui : TLS le porte, <code>wss</code>, <code>https</code> ou le
     lien d’un courtier sous TLS. Un client hors d’une page prend de son application les autorités
     auxquelles il se fie et un certificat avec sa clé, et présente ce certificat quand son serveur en
-    demande un. Il ne prend le certificat de son serveur que s’il nomme l’hôte que le client a
+    demande un. Il ne prend le certificat de son serveur que si ce certificat nomme l’hôte
     demandé. Le TLS d’une page est celui de son navigateur.
   </p>
   <p>
@@ -5173,7 +5173,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <p>
       Chaque serveur dit aussi chaque appel que son routeur refuse au justificatif ou à l’admission :
       l’étape, le code, la raison en un mot, le schéma, ce qui a été appelé, la connexion et
-      l’adresse. Jamais le justificatif ni ses claims : l’ASVS 5.0 de l’OWASP veut qu’un échec
+      l’adresse. Jamais le justificatif ni ses claims : l’ASVS 5.0 de l’OWASP veut qu’un échec
       d’authentification ou d’autorisation soit journalisé sans ses secrets. Un JWT refusé pour
       <code>exp</code> ou
       <code>kid</code> dit ainsi à l’exploitant si une horloge a dérivé ou si une clé a tourné
@@ -5195,7 +5195,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <summary>Ce qu’un pair tient d’un serveur</summary>
     <p>
       Un pair qui retient un serveur lui coûte de la mémoire, des sockets et du temps. Chaque côté
-      borne donc ce qu’un pair tient de lui, sur le modèle de HTTP/2 et de Kestrel, et chaque borne
+      borne donc ce qu’un pair tient de lui, sur le modèle de HTTP/2 et de Kestrel, et chaque borne
       se règle.
     </p>
     <div class="table-wrap" tabindex="0">
@@ -5262,14 +5262,14 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Pour qui implante un côté, en audite un, ou veut les octets. Chaque section suit la
     spécification, <a href="https://github.com/francisdesjardins/bead/blob/main/spec/spec.md"><code>spec/spec.md</code></a>, et les
-    renvois comme §12 désignent ses sections.
+    renvois comme §12 désignent ses sections.
   </p>
   <ul class="chips space" aria-label="En chiffres">
     <li>8 octets de préfixe</li>
     <li>12 octets pour une requête</li>
     <li>des charges au-delà d’une enveloppe</li>
-    <li>23 codes d’échec</li>
-    <li>411 unités dans la spécification</li>
+    <li>23 codes d’échec</li>
+    <li>411 unités dans la spécification</li>
   </ul>
   <p class="space">
     Trois buts guident chaque choix. Un décodeur écrit à la main lit chaque champ à sa place, sans
@@ -5298,7 +5298,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         </tr>
         <tr>
           <th scope="row">Les champs</th>
-          <td>Des champs de 1, 2, 4 ou 8 octets, à positions fixes dans des mots de 4 octets</td>
+          <td>Des champs de 1, 2, 4 ou 8 octets, à positions fixes dans des mots de 4 octets</td>
           <td>Chaque champ se lit entier à sa place ; un drapeau est un bit à tester</td>
         </tr>
         <tr>
@@ -5314,7 +5314,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         <tr>
           <th scope="row">L’en-tête</th>
           <td>
-            12 octets pour une requête, 16 pour un morceau ou un crédit, 8 pour les autres, avant ses
+            12 octets pour une requête, 16 pour un morceau ou un crédit, 8 pour les autres, avant ses
             blocs
           </td>
           <td>Une taille connue par le genre, les drapeaux et la longueur d’un justificatif</td>
@@ -5348,7 +5348,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     octets, une longueur sur 2, les octets, puis des zéros jusqu’au mot suivant. Les drapeaux du
     quartet haut n’ajoutent rien : SUBSCRIPTION (<code>0x10</code>), PACED (<code>0x20</code>) et
     MORE (<code>0x40</code>). Les bits <code>0x01</code> et <code>0x80</code> sont gardés pour des
-    drapeaux à venir. Un en-tête tient 1 020 octets au plus (§2 à §4).
+    drapeaux à venir. Un en-tête tient 1 020 octets au plus (§2 à §4).
   </p>
   <div class="bitmap" role="img" tabindex="0" aria-label="Les mots de 32 bits d’une REQUEST qui porte DESTINATION, TRANSFER et CREDENTIAL, ici OPAQUE"><div class="word"><code class="word-name">octets 0-3</code><div class="word-bits"><span class="bits" style="--w:8"><b>layout</b><i>8</i></span><span class="bits" style="--w:8"><b>kind</b><i>8</i></span><span class="bits" style="--w:8"><b>flags</b><i>8</i></span><span class="bits" style="--w:8"><b>longueur</b><i>8</i></span></div></div><div class="word"><code class="word-name">octets 4-7</code><div class="word-bits"><span class="bits" style="--w:32"><b>callId</b><i>32</i></span></div></div><div class="word"><code class="word-name">octets 8-11</code><div class="word-bits"><span class="bits" style="--w:16"><b>serviceId</b><i>16</i></span><span class="bits" style="--w:16"><b>procedureId</b><i>16</i></span></div></div><div class="word"><code class="word-name">DESTINATION</code><div class="word-bits"><span class="bits" style="--w:32"><b>destinationId</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 1/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids fort</b><i>32</i></span></div></div><div class="word"><code class="word-name">TRANSFER 2/2</code><div class="word-bits"><span class="bits" style="--w:32"><b>total, poids faible</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 1/5</code><div class="word-bits"><span class="bits" style="--w:16"><b>schéma : OPAQUE</b><i>16</i></span><span class="bits" style="--w:16"><b>longueur : 16</b><i>16</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 2/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 0-31</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 3/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 32-63</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 4/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 64-95</b><i>32</i></span></div></div><div class="word"><code class="word-name">CREDENTIAL 5/5</code><div class="word-bits"><span class="bits" style="--w:32"><b>jeton, bits 96-127</b><i>32</i></span></div></div></div>
   <div class="table-wrap" tabindex="0">
@@ -5418,12 +5418,12 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <summary>Trois autres enveloppes, octet par octet</summary>
     <div class="example">
       <h3 id="exemple-result">Un RESULT qui annonce une session</h3>
-      <p>Le drapeau 0x08 ajoute le bloc CREDENTIAL, ici OPAQUE et un jeton de 16 octets.</p>
+      <p>Le drapeau 0x08 ajoute le bloc CREDENTIAL, ici OPAQUE et un jeton de 16 octets.</p>
       <div class="bytes" role="img" aria-label="Un RESULT qui annonce la session : A1 11 08 07, 00 00 00 03, 00 01 00 10, le jeton de 16 octets, puis la charge"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">11</span><span class="lbl">RESULT</span></span><span class="seg seg-prefix"><span class="hex">08</span><span class="lbl">CREDENTIAL</span></span><span class="seg seg-prefix"><span class="hex">07</span><span class="lbl">7 mots : 28 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 03</span><span class="lbl">callId 3 : la même requête</span></span><span class="seg seg-block"><span class="hex">00 01</span><span class="lbl">schéma : OPAQUE</span></span><span class="seg seg-block"><span class="hex">00 10</span><span class="lbl">longueur : 16</span></span><span class="seg seg-block"><span class="hex">9F 3C 51 … 0B</span><span class="lbl">le jeton, 16 octets</span></span><span class="seg seg-payload"><span class="hex">48 49</span><span class="lbl">charge : « HI »</span></span></div>
     </div>
     <div class="example">
       <h3 id="exemple-request">Une REQUEST qui ouvre un abonnement</h3>
-      <p>Le drapeau 0x10 n’ajoute aucun bloc : l’en-tête reste à 3 mots.</p>
+      <p>Le drapeau 0x10 n’ajoute aucun bloc : l’en-tête reste à 3 mots.</p>
       <div class="bytes" role="img" aria-label="Une REQUEST qui ouvre un abonnement : A1 10 10 03, 00 00 00 07, 00 02 00 05, puis la charge"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">10</span><span class="lbl">REQUEST</span></span><span class="seg seg-prefix"><span class="hex">10</span><span class="lbl">SUBSCRIPTION</span></span><span class="seg seg-prefix"><span class="hex">03</span><span class="lbl">3 mots : 12 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 07</span><span class="lbl">callId 7 : celui de l’abonnement</span></span><span class="seg seg-kind"><span class="hex">00 02</span><span class="lbl">service 2</span></span><span class="seg seg-kind"><span class="hex">00 05</span><span class="lbl">procédure 5</span></span><span class="seg seg-payload"><span class="hex">7B 7D</span><span class="lbl">charge</span></span></div>
     </div>
     <div class="example">
@@ -5444,12 +5444,12 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </p>
   <p>
     Chaque côté parcourt sa moitié des callId, environ 2<sup>31</sup>, en sautant ceux qui sont en
-    usage ou réservés. À 10 000 appels par seconde, le tour prend deux jours et demi. Quand tous sont pris, l’appel
+    usage ou réservés. À 10 000 appels par seconde, le tour prend deux jours et demi. Quand tous sont pris, l’appel
     échoue sur place avec <code>CAPACITY_EXCEEDED</code>.
   </p>
   <p>
-    Par défaut, un pair ne fait répondre à l’autre que 64 appels à la fois sur une connexion,
-    <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
+    Par défaut, un pair ne fait répondre à l’autre que 64 appels à la fois sur une connexion,
+    <code>maximumAnsweringCalls</code>, comme HTTP/2 borne les flux qu’un pair ouvre. Rien
     n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> dès que son en-tête
     se lit, avant d’en regarder la route, le justificatif ou la charge (§9.2). Un résolveur qui
@@ -5482,7 +5482,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     propre au côté, comme un résolveur qui lève, ne porte aucun détail. L’erreur reste chez ce
     côté, qui la signale à son application.
   </p>
-  <div class="bytes" role="img" aria-label="Une FAILURE : A1 12 00 02, 00 00 00 05, puis l’échec 00 15 00 01 et son détail"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">00</span><span class="lbl">aucun bloc</span></span><span class="seg seg-prefix"><span class="hex">02</span><span class="lbl">2 mots : 8 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 05</span><span class="lbl">callId 5</span></span><span class="seg seg-record"><span class="hex">00 15</span><span class="lbl">code 21</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">01</span><span class="lbl">APPLICATION</span></span><span class="seg seg-payload"><span class="hex">65 6D 70 74 79</span><span class="lbl">détail : « empty »</span></span></div>
+  <div class="bytes" role="img" aria-label="Une FAILURE : A1 12 00 02, 00 00 00 05, puis l’échec 00 15 00 01 et son détail"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">00</span><span class="lbl">aucun bloc</span></span><span class="seg seg-prefix"><span class="hex">02</span><span class="lbl">2 mots : 8 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 05</span><span class="lbl">callId 5</span></span><span class="seg seg-record"><span class="hex">00 15</span><span class="lbl">code 21</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">01</span><span class="lbl">APPLICATION</span></span><span class="seg seg-payload"><span class="hex">65 6D 70 74 79</span><span class="lbl">détail : « empty »</span></span></div>
   <p class="space">
     Les codes du protocole vont par blocs de 16, selon l’étape atteinte : l’enveloppe, la route,
     l’admission, la charge, la procédure. Un pair qui ne connaît pas un code en connaît au moins
@@ -5499,7 +5499,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       terminé pour une réponse de la disposition <code>0xA1</code>, signalé sinon</span>
     </li>
   </ul>
-  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Nom</th><th scope="col">Étape</th><th scope="col">Sort</th><th scope="col">Quand</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Les octets ne forment pas une enveloppe que cette disposition lit.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une disposition à venir, de 0xA2 à 0xAF ; le détail dit celles lues.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un genre à venir, de 0x17 à 0x7F ; une NOTIFICATION reçue par un serveur, ou un crédit de notifications reçu par un client.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une requête ou un résultat au-delà de chunkBytes, entiers ou une ouverture, ou une autre enveloppe au-delà de maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Une destination que le relais n’a pas, ou un pair qui ne relaie rien.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La requête n’a pas pu partir, donc rien n’a été tenté : sa destination partie, par exemple, ou un justificatif que son transport ne peut porter.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Aucune procédure n’est enregistrée pour ce service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le service existe, pas la procédure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un RESULT, une FAILURE ou un CHUNK qu’aucun appel n’attend.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Une NOTIFICATION sous aucun abonnement.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un abonnement sur un chemin sans notification : un relais, une connexion HTTP qui n’écoute pas.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Le justificatif ne tient pas, ou la procédure veut une session que l’appel n’a pas ; envoyé aussi quand une session finit.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>L’admission refuse l’appel, sur son en-tête et sa session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-rejected">rejeté</span> <span class="fate fate-ended">terminé</span></td><td>La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span> <span class="fate fate-ended">terminé</span></td><td>Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un schéma de justificatif que ce pair ne prend pas ; le détail nomme les siens.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-ended">terminé</span></td><td>Un morceau hors des règles : vide, mal placé, de la mauvaise taille ou au-delà du total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-ended">terminé</span></td><td>Un morceau dépasse le crédit accordé.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-ended">terminé</span></td><td>Le codec de la procédure refuse la charge.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Rien n’est venu pour un transfert pendant 30 s, par défaut.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge se lit, mais enfreint une règle de son message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>La procédure, son admission ou le vérificateur d’un justificatif a échoué, une règle n’a pas pu juger, ou le résultat ne s’écrit pas ou est trop gros pour partir.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le relais a perdu sa destination après l’envoi : la procédure a peut-être tourné.</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Code</th><th scope="col">Nom</th><th scope="col">Étape</th><th scope="col">Sort</th><th scope="col">Quand</th></tr></thead><tbody><tr><td class="code-num">1</td><td><code>ENVELOPE_MALFORMED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Les octets ne forment pas une enveloppe que cette disposition lit.</td></tr><tr><td class="code-num">2</td><td><code>LAYOUT_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une disposition à venir, de 0xA2 à 0xAF ; le détail dit celles lues.</td></tr><tr><td class="code-num">3</td><td><code>KIND_UNSUPPORTED</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un genre à venir, de 0x17 à 0x7F ; une NOTIFICATION reçue par un serveur, ou un crédit de notifications reçu par un client.</td></tr><tr><td class="code-num">4</td><td><code>ENVELOPE_TOO_LARGE</code></td><td><span class="stage">enveloppe</span></td><td><span class="fate fate-gate">porte</span></td><td>Une requête ou un résultat au-delà de chunkBytes, entiers ou une ouverture, ou une autre enveloppe au-delà de maximumEnvelopeBytes.</td></tr><tr><td class="code-num">16</td><td><code>DESTINATION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Une destination que le relais n’a pas, ou un pair qui ne relaie rien.</td></tr><tr><td class="code-num">17</td><td><code>DESTINATION_UNREACHABLE</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La requête n’a pas pu partir, donc rien n’a été tenté : sa destination partie, par exemple, ou un justificatif que son transport ne peut porter.</td></tr><tr><td class="code-num">18</td><td><code>SERVICE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Aucune procédure n’est enregistrée pour ce service.</td></tr><tr><td class="code-num">19</td><td><code>PROCEDURE_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le service existe, pas la procédure.</td></tr><tr><td class="code-num">20</td><td><code>CALL_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Un RESULT, une FAILURE ou un CHUNK qu’aucun appel n’attend.</td></tr><tr><td class="code-num">21</td><td><code>SUBSCRIPTION_UNKNOWN</code></td><td><span class="stage">route</span></td><td><span class="fate fate-reported">signalé</span></td><td>Une NOTIFICATION sous aucun abonnement.</td></tr><tr><td class="code-num">22</td><td><code>SUBSCRIPTION_UNSUPPORTED</code></td><td><span class="stage">route</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un abonnement sur un chemin sans notification : un relais, une connexion HTTP qui n’écoute pas.</td></tr><tr><td class="code-num">32</td><td><code>SESSION_REQUIRED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>Le justificatif ne tient pas, ou la procédure veut une session que l’appel n’a pas ; envoyé aussi quand une session finit.</td></tr><tr><td class="code-num">33</td><td><code>ACCESS_DENIED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>L’admission refuse l’appel, sur son en-tête et sa session.</td></tr><tr><td class="code-num">34</td><td><code>PAYLOAD_TOO_LARGE</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-rejected">rejeté</span> <span class="fate fate-ended">terminé</span></td><td>La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.</td></tr><tr><td class="code-num">35</td><td><code>CAPACITY_EXCEEDED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span> <span class="fate fate-ended">terminé</span></td><td>Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.</td></tr><tr><td class="code-num">36</td><td><code>CREDENTIAL_UNSUPPORTED</code></td><td><span class="stage">admission</span></td><td><span class="fate fate-answered">répondu</span></td><td>Un schéma de justificatif que ce pair ne prend pas ; le détail nomme les siens.</td></tr><tr><td class="code-num">48</td><td><code>CHUNK_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-ended">terminé</span></td><td>Un morceau hors des règles : vide, mal placé, de la mauvaise taille ou au-delà du total.</td></tr><tr><td class="code-num">49</td><td><code>CREDIT_EXCEEDED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-ended">terminé</span></td><td>Un morceau dépasse le crédit accordé.</td></tr><tr><td class="code-num">50</td><td><code>PAYLOAD_UNDECODABLE</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-reported">signalé</span> <span class="fate fate-ended">terminé</span></td><td>Le codec de la procédure refuse la charge.</td></tr><tr><td class="code-num">51</td><td><code>TRANSFER_STALLED</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span></td><td>Rien n’est venu pour un transfert pendant 30 s, par défaut.</td></tr><tr><td class="code-num">52</td><td><code>PAYLOAD_INVALID</code></td><td><span class="stage">charge</span></td><td><span class="fate fate-answered">répondu</span> <span class="fate fate-rejected">rejeté</span></td><td>La charge se lit, mais enfreint une règle de son message.</td></tr><tr><td class="code-num">64</td><td><code>PROCEDURE_FAILED</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>La procédure, son admission ou le vérificateur d’un justificatif a échoué, une règle n’a pas pu juger, ou le résultat ne s’écrit pas ou est trop gros pour partir.</td></tr><tr><td class="code-num">65</td><td><code>DESTINATION_LOST</code></td><td><span class="stage">procédure</span></td><td><span class="fate fate-answered">répondu</span></td><td>Le relais a perdu sa destination après l’envoi : la procédure a peut-être tourné.</td></tr></tbody></table></div>
   <h3 id="echecs-code">Côté code</h3>
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
@@ -5551,7 +5551,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
 <section id="regles">
   <h2 id="regles-h">Les règles d’une charge</h2>
   <p class="gist">
-    Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
+    Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
     63 caractères. Ces règles s’écrivent dans le <code>.proto</code> avec les options de
     protovalidate, la norme de l’écosystème protobuf, et <code>beadc</code> les compile en
     validateurs natifs, en TypeScript, en C# et en Rust.
@@ -5573,7 +5573,7 @@ message CountDownRequest {
   <div class="example">
     <h3 id="exemple-invalide">Une FAILURE PAYLOAD_INVALID</h3>
     <p>Le détail porte une ligne par violation, puis une ligne qui clôt.</p>
-    <div class="bytes" role="img" aria-label="Une FAILURE PAYLOAD_INVALID : A1 12 00 02, 00 00 00 09, puis l’échec 00 34 00 00 et son détail, une violation par ligne"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">00</span><span class="lbl">aucun bloc</span></span><span class="seg seg-prefix"><span class="hex">02</span><span class="lbl">2 mots : 8 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 09</span><span class="lbl">callId 9</span></span><span class="seg seg-record"><span class="hex">00 34</span><span class="lbl">code 52</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">PROTOCOL</span></span><span class="seg seg-payload"><span class="hex">7B 22 62 6F …</span><span class="lbl">détail : {"bo…, une violation par ligne</span></span><span class="seg seg-payload"><span class="hex">0A 7B 22 6D …</span><span class="lbl">puis {"more":0}</span></span></div>
+    <div class="bytes" role="img" aria-label="Une FAILURE PAYLOAD_INVALID : A1 12 00 02, 00 00 00 09, puis l’échec 00 34 00 00 et son détail, une violation par ligne"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">00</span><span class="lbl">aucun bloc</span></span><span class="seg seg-prefix"><span class="hex">02</span><span class="lbl">2 mots : 8 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 09</span><span class="lbl">callId 9</span></span><span class="seg seg-record"><span class="hex">00 34</span><span class="lbl">code 52</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">PROTOCOL</span></span><span class="seg seg-payload"><span class="hex">7B 22 62 6F …</span><span class="lbl">détail : {"bo…, une violation par ligne</span></span><span class="seg seg-payload"><span class="hex">0A 7B 22 6D …</span><span class="lbl">puis {"more":0}</span></span></div>
   </div>
   <pre class="snippet" tabindex="0"><code class="language-json">{<span class="tok-string">"bounds"</span>:{<span class="tok-string">"lte"</span>:<span class="tok-number">10</span>},<span class="tok-string">"fieldPath"</span>:<span class="tok-string">"from"</span>,<span class="tok-string">"message"</span>:<span class="tok-string">"must be less than or equal to 10"</span>,<span class="tok-string">"ruleId"</span>:<span class="tok-string">"int32.lte"</span>}
 {<span class="tok-string">"more"</span>:<span class="tok-number">0</span>}</code></pre>
@@ -5602,7 +5602,7 @@ message CountDownRequest {
       <a href="#suite">Les règles en CEL sont à venir, puis le reste des règles qu’il refuse.</a>
     </p>
     <p>
-      Un motif suit la syntaxe de RE2 et se juge en temps linéaire, sans retour arrière
+      Un motif suit la syntaxe de RE2 et se juge en temps linéaire, sans retour arrière
       (CWE-1333). <code>beadc</code> en construit d’avance l’automate, tiré de ses propres tables
       d’Unicode, et chaque validateur lit une cellule par caractère. Un motif dont la table
       dépasserait 16 384 cellules est refusé, avec <code>VALIDATE_PATTERN_LARGE</code>. Les violations suivent un ordre fixé
@@ -5665,7 +5665,7 @@ message CountDownRequest {
     clé. Une notification de même clé remplace celle qui attend, et l’état d’une entité ne garde
     ainsi que sa dernière valeur : quarante-cinq changements d’un article, pendant qu’un rappel va
     chercher ses données, arrivent en deux notifications. Sans clé, chaque événement est gardé,
-    dans l’ordre. Une file pleine, 64 notifications ou 1 Mio par défaut, termine l’abonnement par
+    dans l’ordre. Une file pleine, 64 notifications ou 1 Mio par défaut, termine l’abonnement par
     <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en silence : le client se réabonne et relit
     l’état.
   </p>
@@ -5756,7 +5756,7 @@ message CountDownRequest {
           <td>La session que le vérificateur de l’application en tire</td>
         </tr>
         <tr>
-          <td class="code-num">4 et plus</td>
+          <td class="code-num">4 et plus</td>
           <td>à venir</td>
           <td>Ceux d’un format à venir</td>
           <td>Lu, puis refusé <code>CREDENTIAL_UNSUPPORTED</code></td>
@@ -5774,7 +5774,7 @@ message CountDownRequest {
     <div class="example">
       <h3 id="exemple-fin-session">Une FAILURE qui annonce la fin</h3>
       <p>NONE n’a aucun octet : le bloc tient en 4.</p>
-      <div class="bytes" role="img" aria-label="Une FAILURE qui annonce la fin de la session : A1 12 08 03, 00 00 00 05, 00 00 00 00, puis l’échec 00 20 00 00"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">08</span><span class="lbl">CREDENTIAL</span></span><span class="seg seg-prefix"><span class="hex">03</span><span class="lbl">3 mots : 12 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 05</span><span class="lbl">callId 5 : l’abonnement</span></span><span class="seg seg-block"><span class="hex">00 00</span><span class="lbl">schéma : NONE</span></span><span class="seg seg-block"><span class="hex">00 00</span><span class="lbl">longueur : 0</span></span><span class="seg seg-record"><span class="hex">00 20</span><span class="lbl">code 32</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">PROTOCOL</span></span></div>
+      <div class="bytes" role="img" aria-label="Une FAILURE qui annonce la fin de la session : A1 12 08 03, 00 00 00 05, 00 00 00 00, puis l’échec 00 20 00 00"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">12</span><span class="lbl">FAILURE</span></span><span class="seg seg-prefix"><span class="hex">08</span><span class="lbl">CREDENTIAL</span></span><span class="seg seg-prefix"><span class="hex">03</span><span class="lbl">3 mots : 12 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 05</span><span class="lbl">callId 5 : l’abonnement</span></span><span class="seg seg-block"><span class="hex">00 00</span><span class="lbl">schéma : NONE</span></span><span class="seg seg-block"><span class="hex">00 00</span><span class="lbl">longueur : 0</span></span><span class="seg seg-record"><span class="hex">00 20</span><span class="lbl">code 32</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">0 relais</span></span><span class="seg seg-record"><span class="hex">00</span><span class="lbl">PROTOCOL</span></span></div>
     </div>
   </details>
 
@@ -5782,7 +5782,7 @@ message CountDownRequest {
   <p>
     Le serveur juge le justificatif, puis l’admission, sur l’en-tête seul. Un schéma qu’il ne prend
     pas reçoit <code>CREDENTIAL_UNSUPPORTED</code> (36), et le détail nomme ceux qu’il prend, comme
-    un 401 les nomme dans <code>WWW-Authenticate</code>. Un justificatif qui ne tient pas reçoit
+    un 401 les nomme dans <code>WWW-Authenticate</code>. Un justificatif qui ne tient pas reçoit
     <code>SESSION_REQUIRED</code> (32), quoi que veuille la procédure, comme un jeton porteur
     invalide reçoit un 401. Un vérificateur qui échoue donne <code>PROCEDURE_FAILED</code>. Enfin
     l’admission décide sur la session de l’appel, que le résolveur reçoit ensuite.
@@ -5798,7 +5798,7 @@ message CountDownRequest {
     Un JWT est un jeton d’accès du profil de la RFC 9068, et chaque côté le vérifie de la même
     façon, comme le recommande la RFC 8725. Son <code>typ</code> est <code>at+jwt</code>, ou <code>application/at+jwt</code>, ce qui
     écarte un jeton d’identité du même émetteur. Sa clé est l’une de celles que l’application
-    donne, chacune avec son émetteur et un seul algorithme, ES256 ou HS256. Son <code>iss</code>
+    donne, chacune avec son émetteur et un seul algorithme, ES256 ou HS256. Son <code>iss</code>
     doit être l’émetteur de cette clé, son <code>exp</code> tenir avec 60 s de marge, et son
     <code>aud</code> nommer l’audience du pair. Un jeton ne choisit jamais sa propre clé :
     <code>jwk</code>, <code>jku</code>, <code>x5u</code> et <code>x5c</code> ne sont jamais lus. Sa
@@ -5810,7 +5810,7 @@ message CountDownRequest {
       Une application peut donner un jeu de clés pour certains émetteurs. Bead le demande quand
       aucune clé connue ne porte le <code>kid</code> du jeton, au plus une fois par minute et par
       émetteur, si bien qu’aucun pair ne le fait interroger à sa guise. Les clés reçues valent dix
-      minutes. Par défaut, au plus 64 appels d’un émetteur attendent sa prochaine demande, puis l’appel
+      minutes. Par défaut, au plus 64 appels d’un émetteur attendent sa prochaine demande, puis l’appel
       suivant reçoit <code>CAPACITY_EXCEEDED</code> ; un appel qui attend une demande en cours
       n’est jamais compté. Bead ne va rien chercher de lui-même : la fonction qui
       rapporte les clés appartient à l’application (§13.9).
@@ -5896,8 +5896,8 @@ message CountDownRequest {
     <summary>Un transfert de 20 Mio, octet par octet</summary>
     <div class="example">
       <h3 id="transfert-ouverture">L’ouverture</h3>
-      <p>Le drapeau 0x04 ajoute le total : l’en-tête passe à 5 mots.</p>
-      <div class="bytes" role="img" aria-label="Une REQUEST qui ouvre un transfert : A1 10 04 05, 00 00 00 07, 00 02 00 05, le total sur 8 octets, puis les premiers octets"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">10</span><span class="lbl">REQUEST</span></span><span class="seg seg-prefix"><span class="hex">04</span><span class="lbl">TRANSFER</span></span><span class="seg seg-prefix"><span class="hex">05</span><span class="lbl">5 mots : 20 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 07</span><span class="lbl">callId 7</span></span><span class="seg seg-kind"><span class="hex">00 02</span><span class="lbl">service 2</span></span><span class="seg seg-kind"><span class="hex">00 05</span><span class="lbl">procédure 5</span></span><span class="seg seg-block"><span class="hex">00 00 00 00 01 40 00 00</span><span class="lbl">le total : 20 971 520 octets</span></span><span class="seg seg-payload"><span class="hex">…</span><span class="lbl">les 1 048 556 premiers, sans crédit</span></span></div>
+      <p>Le drapeau 0x04 ajoute le total : l’en-tête passe à 5 mots.</p>
+      <div class="bytes" role="img" aria-label="Une REQUEST qui ouvre un transfert : A1 10 04 05, 00 00 00 07, 00 02 00 05, le total sur 8 octets, puis les premiers octets"><span class="seg seg-prefix"><span class="hex">A1</span><span class="lbl">disposition</span></span><span class="seg seg-prefix"><span class="hex">10</span><span class="lbl">REQUEST</span></span><span class="seg seg-prefix"><span class="hex">04</span><span class="lbl">TRANSFER</span></span><span class="seg seg-prefix"><span class="hex">05</span><span class="lbl">5 mots : 20 octets</span></span><span class="seg seg-prefix"><span class="hex">00 00 00 07</span><span class="lbl">callId 7</span></span><span class="seg seg-kind"><span class="hex">00 02</span><span class="lbl">service 2</span></span><span class="seg seg-kind"><span class="hex">00 05</span><span class="lbl">procédure 5</span></span><span class="seg seg-block"><span class="hex">00 00 00 00 01 40 00 00</span><span class="lbl">le total : 20 971 520 octets</span></span><span class="seg seg-payload"><span class="hex">…</span><span class="lbl">les 1 048 556 premiers, sans crédit</span></span></div>
     </div>
     <div class="example">
       <h3 id="transfert-credit">Un CREDIT</h3>
@@ -5988,7 +5988,7 @@ message CountDownRequest {
     <p class="space">
       Le transport délimite ses messages, porte les deux sens et remet chaque enveloppe une fois,
       dans l’ordre. Savoir si une connexion vit lui revient aussi : aucune enveloppe de Bead n’est
-      un ping. <a href="#http">WebSocket</a> fait tout cela (§1.3, §15.1 à §15.3). HTTP ne garde
+      un ping. <a href="#http">WebSocket</a> fait tout cela (§1.3, §15.1 à §15.3). HTTP ne garde
       aucun ordre entre les échanges d’un client, si bien qu’un CANCEL peut arriver avant sa
       REQUEST (§15.1, §15.5). Sur un courtier, Bead tient son propre battement (§15.21).
     </p>
@@ -6055,7 +6055,7 @@ message CountDownRequest {
     </table>
   </div>
   <p class="space">
-    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP. Les règles
+    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP. Les règles
     de reprise de gRPC reposent sur la même différence : si la procédure a pu tourner.
   </p>
   <details class="more">
@@ -6087,7 +6087,7 @@ message CountDownRequest {
   <p class="gist">
     Sur WebSocket, chaque enveloppe est un message binaire, dans les deux sens. HTTP sert là où
     WebSocket ne passe pas. Il ne garde pas de connexion, alors le transport en tire une, et chaque
-    <code>POST</code> porte une enveloppe (§15.4 à §15.12).
+    <code>POST</code> porte une enveloppe (§15.4 à §15.12).
   </p>
   <p>
     WebSocket fait tout ce que Bead demande à un transport : il délimite les messages, porte les
@@ -6098,7 +6098,7 @@ message CountDownRequest {
     avec le code 1009 (RFC 6455).
   </p>
   <p>
-    Un <code>POST</code> sans corps connecte. Le serveur répond 201 avec un jeton de 16 octets dans
+    Un <code>POST</code> sans corps connecte. Le serveur répond 201 avec un jeton de 16 octets dans
     le champ <code>bead-connection-token</code>, que chaque échange suivant présente, et un
     <code>DELETE</code> termine la connexion. Le routeur, les sessions et les relais y voient une
     connexion comme sur un socket. Chaque enveloppe a le type <code>application/prs.bead</code>. Le
@@ -6107,7 +6107,7 @@ message CountDownRequest {
   </p>
   <p>
     Le serveur marque chacun de ses refus dans le champ <code>bead-refusal</code>, et seul un refus
-    marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut, le 502 d’une
+    marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut, le 502 d’une
     passerelle par exemple, a pu venir après que la requête a tourné, et compte comme un échange
     perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
     <code>DESTINATION_LOST</code>. Un client ne suit aucune redirection : elle porterait le jeton de
@@ -6142,7 +6142,7 @@ message CountDownRequest {
   <p class="space">
     Un client qui n’écoute pas ne reçoit ni abonnement, ni commande, ni requête relayée. HTTP ne
     porte pas de transfert : le corps d’une requête arrive avant que sa réponse parte, et aucun
-    crédit ne pourrait revenir. Sous TLS, le serveur sert HTTP/1.1 et HTTP/2 sur un même port.
+    crédit ne pourrait revenir. Sous TLS, le serveur sert HTTP/1.1 et HTTP/2 sur un même port.
   </p>
   <details class="more">
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
@@ -6151,12 +6151,12 @@ message CountDownRequest {
       serveur répond 408. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
-      reste, 400 sur HTTP/1.1 (§15.12).
+      reste, 400 sur HTTP/1.1 (§15.12).
     </p>
     <p>
       La poignée de main de WebSocket est une requête HTTP. Le serveur WebSocket la juge par ses
       propres <code>hosts</code> et <code>origins</code>, aux mêmes règles, et borne ses connexions
-      comme un serveur HTTP : 10 000 en tout, 64 par adresse. Une poignée de main sans
+      comme un serveur HTTP : 10 000 en tout, 64 par adresse. Une poignée de main sans
       <code>Origin</code>, celle d’un client hors navigateur, porte son <code>Authorization</code> à
       côté de chaque enveloppe de sa connexion. Celle d’une page n’en porte aucun, car un navigateur
       y ajoute de lui-même ce qu’il garde. Une page présente donc un JWT.
@@ -6219,14 +6219,14 @@ offerHello(server);
   <p class="gist">
     Un courtier de publication-abonnement à sujets est un transport de plus, et Bead n’y devient
     jamais un réseau à lui. Chaque côté en tient le cœur, un courtier en mémoire pour les tests, et
-    ses liaisons : MQTT 5 de tous les côtés, et AMQP 1.0 sur RabbitMQ 4 des côtés TypeScript et C#
-    (§15.16 à §15.38).
+    ses liaisons : MQTT 5 de tous les côtés, et AMQP 1.0 sur RabbitMQ 4 des côtés TypeScript et C#
+    (§15.16 à §15.38).
   </p>
   <p>
     Un participant est le lien d’un côté vers son courtier. Son identifiant est l’identité que le
     courtier authentifie, et sa boîte, le sujet <code>bead/i/&lt;id&gt;</code>, reçoit tout ce qui
     vient vers lui. Un serveur sert un nom, <code>bead/s/&lt;nom&gt;</code>, seul ou dans un groupe
-    de participants qui se le partagent. MQTT 5 écrit ces sujets avec des barres obliques. AMQP 1.0
+    de participants qui se le partagent. MQTT 5 écrit ces sujets avec des barres obliques. AMQP 1.0
     les écrit avec des points, <code>bead.i.&lt;id&gt;</code> et <code>bead.s.&lt;nom&gt;</code>.
   </p>
   <p>
@@ -6255,12 +6255,12 @@ offerHello(server);
     sur une connexion silencieuse.
   </p>
   <details class="more">
-    <summary>Les deux liaisons, MQTT 5 et AMQP 1.0</summary>
+    <summary>Les deux liaisons, MQTT 5 et AMQP 1.0</summary>
     <h3 id="courtier-mqtt">Sur MQTT 5</h3>
     <p>
       Chaque participant est un lien propre, que le courtier ne garde pas au-delà de sa connexion :
       Clean Start et une session qui expire à 0. Chaque parcelle est une PUBLISH de QoS 1, ou de
-      QoS 0 sur un lien réglé pour livrer au plus une fois. Un nom servi par un groupe est un
+      QoS 0 sur un lien réglé pour livrer au plus une fois. Un nom servi par un groupe est un
       abonnement partagé, <code>$share/&lt;nom&gt;/bead/s/&lt;nom&gt;</code>. Chaque paquet est
       compté à l’octet sous la taille maximale de chaque bout. Le testament d’un participant
       annonce son départ aux pairs. Le côté TypeScript passe par MQTT.js, et le côté C# par
@@ -6273,7 +6273,7 @@ offerHello(server);
       La liaison vise RabbitMQ 4. Chaque lien est une connexion neuve, et sa boîte une file exclusive
       qui finit avec elle. Le déploiement provisionne la file de chaque nom, et le courtier en remet
       chaque message à un seul membre. Chaque message suit un seul profil, compté à l’octet.
-      AMQP 1.0 n’a pas de testament : le battement de Bead dit seul qu’un pair s’est tu. Le côté
+      AMQP 1.0 n’a pas de testament : le battement de Bead dit seul qu’un pair s’est tu. Le côté
       TypeScript passe par rhea, le côté C# par AMQPNetLite, et les deux sont joués contre
       RabbitMQ 4. La liaison du côté Rust est à venir. Aucune page n’atteint un courtier AMQP 1.0.
     </p>
@@ -6289,7 +6289,7 @@ offerHello(server);
   <h2 id="suite-h">Ce qui vient</h2>
   <ul class="rules">
     <li>
-      <strong>L’AMQP 1.0 de Rust</strong
+      <strong>L’AMQP 1.0 de Rust</strong
       ><span>Sa liaison sur AMQP 1.0, par une décision à elle.</span>
     </li>
     <li>
@@ -6400,7 +6400,7 @@ offerHello(server);
   <span class="tok-keyword">return</span> headerBytes;
 };</code></pre><figcaption><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/header.ts"><code>implementations/typescript/src/router/shared/header.ts</code></a></figcaption></figure>
   <p class="space">Chacun des dix, sur GitHub :</p>
-  <ul class="files"><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/constants.ts"><code>constants.ts</code></a><span class="file-label">Dispositions, genres, drapeaux, schémas, codes, limites</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/header.ts"><code>header.ts</code></a><span class="file-label">L’en-tête : écrit et lu à positions fixes</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/envelope.ts"><code>envelope.ts</code></a><span class="file-label">L’enveloppe entière, et l’enregistrement d’un échec</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/transfer.ts"><code>transfer.ts</code></a><span class="file-label">Les transferts : les morceaux envoyés, placés, et le crédit</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/identifiers.ts"><code>identifiers.ts</code></a><span class="file-label">Les callId et les jetons de session</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/errors.ts"><code>errors.ts</code></a><span class="file-label">FailureError : un échec reçu, lisible</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/violations.ts"><code>violations.ts</code></a><span class="file-label">Les violations d’un PAYLOAD_INVALID : écrites en lignes de JSON, relues</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/broker-parcel.ts"><code>broker-parcel.ts</code></a><span class="file-label">La parcelle d’un courtier : écrite et lue à positions fixes</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/mqtt-packets.ts"><code>mqtt-packets.ts</code></a><span class="file-label">Une PUBLISH de MQTT 5 comptée à l’octet, ses sujets et son groupe</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/amqp-messages.ts"><code>amqp-messages.ts</code></a><span class="file-label">Un message d’AMQP 1.0 compté à l’octet, son profil, ses sujets et ses adresses</span></li></ul>
+  <ul class="files"><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/constants.ts"><code>constants.ts</code></a><span class="file-label">Dispositions, genres, drapeaux, schémas, codes, limites</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/header.ts"><code>header.ts</code></a><span class="file-label">L’en-tête : écrit et lu à positions fixes</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/envelope.ts"><code>envelope.ts</code></a><span class="file-label">L’enveloppe entière, et l’enregistrement d’un échec</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/transfer.ts"><code>transfer.ts</code></a><span class="file-label">Les transferts : les morceaux envoyés, placés, et le crédit</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/identifiers.ts"><code>identifiers.ts</code></a><span class="file-label">Les callId et les jetons de session</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/errors.ts"><code>errors.ts</code></a><span class="file-label">FailureError : un échec reçu, lisible</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/router/shared/violations.ts"><code>violations.ts</code></a><span class="file-label">Les violations d’un PAYLOAD_INVALID : écrites en lignes de JSON, relues</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/broker-parcel.ts"><code>broker-parcel.ts</code></a><span class="file-label">La parcelle d’un courtier : écrite et lue à positions fixes</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/mqtt-packets.ts"><code>mqtt-packets.ts</code></a><span class="file-label">Une PUBLISH de MQTT 5 comptée à l’octet, ses sujets et son groupe</span></li><li><a href="https://github.com/francisdesjardins/bead/blob/main/implementations/typescript/src/transport/shared/amqp-messages.ts"><code>amqp-messages.ts</code></a><span class="file-label">Un message d’AMQP 1.0 compté à l’octet, son profil, ses sujets et ses adresses</span></li></ul>
 </section>
 
 <section class="closing" aria-labelledby="essayer">
