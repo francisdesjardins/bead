@@ -296,13 +296,7 @@ fn refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed() {
         "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
     ] {
         // * Bead's refusal, before Buffa's
-        let refusal = check_proto_records(&bytes_of(hex), &schema).expect_err(hex);
-
-        assert_eq!(
-            (refusal.reason(), refusal.source().map(ToString::to_string)),
-            ("not its message", Some("a varint past 64 bits".to_owned())),
-            "{hex}"
-        );
+        refuses(&schema, hex);
     }
 
     // a 10th byte of 0x01 is the 64th bit, within
@@ -448,6 +442,121 @@ fn refuses_a_field_at_a_wire_type_its_type_does_not_take_in_a_map_s_entry_too() 
     ] {
         refuses(&schema, hex);
     }
+}
+
+// each case the check refuses with `not its message`, in the same words on every side: its
+// payloads, its reason, its cause
+const CASES: [(&[&str], &str, &str); 15] = [
+    (
+        &["90"],
+        "not its message",
+        "a proto payload holds a tag cut short, or past the end of its message",
+    ),
+    (
+        &["90 80 80 80 80 00 07", "90 80 80 80 40 07"],
+        "not its message",
+        "a proto payload holds a tag of more than 5 bytes, or past 32 bits",
+    ),
+    (
+        &["00 01"],
+        "not its message",
+        "a proto payload holds field number 0",
+    ),
+    (
+        &["24", "6B 0A 01 61 74"],
+        "not its message",
+        "a proto payload holds an end group that closes no group open",
+    ),
+    (
+        &["23", "6B 0A 01 61"],
+        "not its message",
+        "a proto payload holds a group never closed",
+    ),
+    (
+        &["62 05 0A 00 1A 01 7A"],
+        "not its message",
+        "a proto payload holds a map's entry with a field other than its key and its value",
+    ),
+    (
+        &["08 61"],
+        "not its message",
+        "a proto payload holds field 1 at a wire type its type does not take",
+    ),
+    (
+        &["A6 06"],
+        "not its message",
+        "a proto payload holds the wire type 6",
+    ),
+    (
+        &["A7 06"],
+        "not its message",
+        "a proto payload holds the wire type 7",
+    ),
+    (
+        &["10 80", "1A 02 20 80 01", "52 01 81"],
+        "not its message",
+        "a proto payload holds a varint cut short, or past the end of its message",
+    ),
+    (
+        &[
+            "10 FF FF FF FF FF FF FF FF FF 02",
+            "52 0A FF FF FF FF FF FF FF FF FF 02",
+        ],
+        "not its message",
+        "a proto payload holds a varint past 64 bits",
+    ),
+    (
+        &["10 80 80 80 80 80 80 80 80 80 80 00"],
+        "not its message",
+        "a proto payload holds a varint of more than 10 bytes",
+    ),
+    (
+        &["5D 01 00"],
+        "not its message",
+        "a proto payload holds a record past the end of its message",
+    ),
+    (
+        &["0A 05 61", "1A 02 0A 03 61 62 63"],
+        "not its message",
+        "a proto payload holds a length past the bytes that follow it",
+    ),
+    (
+        &["5A 05 01 00 00 00 02"],
+        "not its message",
+        "a proto payload holds a packed record whose values do not end at its length",
+    ),
+];
+
+#[test]
+fn says_the_record_it_refused_in_its_cause_each_case_in_its_own_words() {
+    let schema = probe();
+    let said = |bytes: &[u8]| {
+        let refusal = check_proto_records(bytes, &schema).expect_err("a refusal");
+
+        (
+            refusal.reason().to_owned(),
+            refusal.source().map(ToString::to_string),
+        )
+    };
+
+    for (payloads, reason, cause) in CASES {
+        for hex in payloads {
+            assert_eq!(
+                said(&bytes_of(hex)),
+                (reason.to_owned(), Some(cause.to_owned())),
+                "{hex}"
+            );
+        }
+    }
+
+    // * the depth, under its own reason
+    assert_eq!(
+        said(&nested(101, child)),
+        (
+            "nested past 100".to_owned(),
+            Some("a proto payload nests a message more than 100 deep below the top one".to_owned())
+        )
+    );
 }
 
 // spec 17.9.6
