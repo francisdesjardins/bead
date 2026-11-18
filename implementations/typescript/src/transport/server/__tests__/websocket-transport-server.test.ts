@@ -2614,6 +2614,46 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     }
   });
 
+  // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops nothing of
+  // one not paused
+  test('delivers each of 300 messages its peer sends in one write with its close and its end, then tells its close clean', async () => {
+    await using started = await startDated({});
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange({ host, port }, encoder.encode(upgradeRequest()));
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+    const delivered: Uint8Array[] = [];
+    const frames = Array.from({ length: 300 }, (_, index) => {
+      return {
+        fin: true,
+        opcode: OPCODES.BINARY,
+        payload: Uint8Array.of(index >> 8, index & 0xff),
+      };
+    });
+
+    server.on('message', ({ data }) => {
+      delivered.push(new Uint8Array(data as ArrayBuffer));
+    });
+
+    try {
+      exchange.send([
+        ...frames,
+        { fin: true, opcode: OPCODES.CLOSE, payload: Uint8Array.of(0x03, 0xe8) },
+      ]);
+      exchange.end();
+
+      expect(await closed).toEqual([true, connectionHandle]);
+      expect(delivered).toEqual(
+        frames.map(({ payload }) => {
+          return payload;
+        })
+      );
+    } finally {
+      exchange.destroy();
+    }
+  });
+
   // spec 15.3
   test('pings with 8 bytes of a count from 1, new at each ping, and drops a peer that answers with an empty pong or an earlier ping’s echo', async () => {
     await using started = await startDated({ heartbeat: 200 });
