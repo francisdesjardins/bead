@@ -3392,8 +3392,9 @@ async fn pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog
         server.send(message_of(vec![0; 65_536]), &handle).unwrap();
     }
 
-    // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-    rest(Duration::from_millis(1_200)).await;
+    // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
+    // of a heartbeat late, it reads all, echoing the ping as it comes
+    rest(Duration::from_millis(1_500)).await;
 
     while order.len() < 401 {
         match heard_on(&mut peer, Duration::from_secs(10)).await {

@@ -2642,8 +2642,9 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
         void server.send({ data: new Uint8Array(65_536) }, connectionHandle);
       }
 
-      // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-      await sleep(1_200);
+      // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
+      // of a heartbeat late, it reads all, echoing the ping as it comes
+      await sleep(1_500);
       socket.on('data', (chunk: Buffer) => {
         rest = Buffer.concat([rest, chunk]);
 

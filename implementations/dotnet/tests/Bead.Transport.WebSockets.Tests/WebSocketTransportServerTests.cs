@@ -3461,8 +3461,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 _ = _server.Send(new TransportMessage(new byte[65_536], false), connectionHandle);
             }
 
-            // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-            await Task.Delay(1_200, Cancelled);
+            // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
+            // of a heartbeat late, it reads all, echoing the ping as it comes
+            await Task.Delay(1_500, Cancelled);
 
             while (order.Count < 401)
             {
