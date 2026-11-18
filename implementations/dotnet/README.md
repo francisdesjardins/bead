@@ -492,7 +492,9 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `MaximumOutboxBytes` is. A head is Kestrel's `RequestHeadersTimeout`, the transport's
   `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Every answer written
   before its body is whole closes its socket in stages (RFC 9112 §9.6): its end flushed, what still
-  comes read and dropped until its client closes or 2 seconds pass, so a reset never erases it.
+  comes read and dropped until its client closes or 2 seconds pass, then its socket closed, so a
+  reset never erases it. Kestrel's socket transport has no half-close: the socket's write side ends
+  with that close, not first.
 - **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
   10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
   101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs

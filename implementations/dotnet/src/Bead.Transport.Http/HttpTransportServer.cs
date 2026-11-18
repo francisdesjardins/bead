@@ -1265,9 +1265,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 // dropped
             }
         }
+        catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! its 2 seconds passed, its client still sending: its socket closed now, where Kestrel
+            // would read on a chunked body itself once the exchange returned, then reset it
+            context.Abort();
+        }
         catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or Microsoft.AspNetCore.Http.BadHttpRequestException)
         {
-            // its client gone, its 2 seconds passed, or its body no more to read
+            // its client gone, or its body no more to read
         }
     }
 

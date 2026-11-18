@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -392,6 +393,87 @@ public sealed partial class HttpTransportServerTests
         using var cancelled = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9)));
 
         Assert.Equal(204, (int)cancelled.StatusCode);
+    }
+
+    // spec 15.12; RFC 9112 §9.6
+    [Fact]
+    public async Task Closes_in_stages_a_refusal_of_a_body_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending_and_keeps_its_Bead_connection()
+    {
+        await Start(new HttpTransportServerOptions { MaximumBodyBytes = 1_024 });
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var more = ChunkOf(new byte[64]);
+
+        // each chunked, its body never whole: a refusal before its body, a body past its bound as it
+        // comes, and a prefix that is none
+        foreach (var (token, first, status, reason) in new (string Token, byte[] First, int Status, string Reason)[]
+        {
+            (new string('A', 22), more, 404, HttpRefusals.ConnectionUnknown),
+            (connectionToken, ChunkOf(EnvelopeOf(EnvelopeKind.Request, (1, 4_000))), 413, HttpRefusals.TooLarge),
+            (connectionToken, ChunkOf(Enumerable.Repeat((byte)0xff, 16).ToArray()), 400, HttpRefusals.Malformed),
+        })
+        {
+            var (head, closedWithin) = await RefusedAsItSends([.. Encoding.ASCII.GetBytes(PostHead(token, "Transfer-Encoding: chunked")), .. first], more);
+
+            // the refusal, which closes its connection, then its close within the linger's 2 s
+            Assert.Equal(
+                (status, (string?)reason, (string?)"close"),
+                (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("connection")));
+            Assert.True(closedWithin < TimeSpan.FromSeconds(4), $"{status} closed past 4 s: {closedWithin}");
+        }
+
+        // nothing of them handed on, and its Bead connection stands: a cancel on it ends 204
+        Assert.Empty(_messages);
+
+        using var cancelled = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9)));
+
+        Assert.Equal(204, (int)cancelled.StatusCode);
+        Assert.Empty(_closes);
+        Assert.Contains(connectionHandle, _server.ConnectionHandles);
+    }
+
+    // `first` written on a socket of its own, then `each` again every 20 ms while the socket lasts:
+    // the head of its answer, and how long its socket took to close once that came
+    private async Task<(Head Head, TimeSpan ClosedWithin)> RefusedAsItSends(byte[] first, byte[] each)
+    {
+        using var wire = await Wire.Open(_port);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+
+        await wire.Write(first);
+
+        // * its client sends on as it reads, until its socket closes
+        var sending = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        await wire.Write(each);
+                        await Task.Delay(TimeSpan.FromMilliseconds(20), TimeProvider.System, stop.Token);
+                    }
+                }
+                catch (Exception reason) when (reason is IOException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // its socket closed, or the test done
+                }
+            },
+            Cancelled);
+
+        try
+        {
+            var head = await wire.ReadHead();
+            var answered = TimeProvider.System.GetTimestamp();
+
+            Assert.True(await wire.IsClosed());
+
+            return (head, TimeProvider.System.GetElapsedTime(answered));
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await sending;
+        }
     }
 
     [Fact]
