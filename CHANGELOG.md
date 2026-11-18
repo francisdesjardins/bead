@@ -40,6 +40,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
+  branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
+  `git branch -d` to do by hand, rather than an `EPERM` alone.
 - The C# WebSocket server tells the close of a connection it paused and its own heartbeat dropped
   at once, while still paused, as the TypeScript and Rust sides do (spec 15.3, 15.12). Its
   request's abort tells the connection's read gate that its socket ended, so a peer's FIN or a reset
