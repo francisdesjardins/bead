@@ -1034,6 +1034,11 @@ against each server.
   reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
   where it stands by `// ! a detail of the side's own words: <why>` and counted by the tool. What
   another generator writes is left unread, what beadc writes read. Given files, those alone.
+- `node tools/check-byte-counts.mjs`: on every side, a count of bytes in a report, an error or a
+  refusal is written by the side's helper, `byteCountOf`, `FailureException.ByteCountOf` or
+  `byte_count_of`, which writes "1 byte" at 1; a count interpolated right before `bytes` fails but
+  for a constant above 1 the tool names. What another generator writes is left unread. Given
+  files, those alone.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says

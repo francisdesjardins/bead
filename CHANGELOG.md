@@ -25,7 +25,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `heldBytesBudget`, `minimumBodyBytesPerSecond`, `maximumBodyBytes`, a memory broker's
   `maximumMessageBytes`, a WebSocket's `maximumMessageBytes` and an MQTT Maximum Packet Size; a
   parcel's room; and the bounds and lengths an envelope, a header, a transfer or a chunk is refused
-  by.
+  by. `tools/check-byte-counts.mjs` holds every side to it in CI.
 
 ## [0.15.0] - 2026-11-17
 
