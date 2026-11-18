@@ -239,15 +239,33 @@ fn is_protocol_list(lines: &[&str]) -> bool {
             .all(|(index, element)| !elements.iter().take(index).any(|other| other == element))
 }
 
+// whether a `Transfer-Encoding`'s final coding, its last element across its lines but the empty
+// ones (RFC 9110 §5.6.1.2), is `chunked`, in any ASCII case (RFC 9112 §6.3 item 4)
+fn is_chunked_last(lines: &[&str]) -> bool {
+    elements_of(lines)
+        .into_iter()
+        .rfind(|element| !element.is_empty())
+        .is_some_and(|last| last.eq_ignore_ascii_case("chunked"))
+}
+
 // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-// `Transfer-Encoding`, or a `Content-Length` of one line of digits alone (RFC 9110 §8.6), or none
+// `Transfer-Encoding` alone whose final coding is `chunked`, or a `Content-Length` of one line of
+// digits alone (RFC 9110 §8.6), or neither
 fn is_framed(request: &HandshakeRequest<'_>) -> bool {
-    !lines_of(request, "transfer-encoding").is_empty()
-        || match lines_of(request, "content-length").as_slice() {
-            [] => true,
-            [length] => !length.is_empty() && length.bytes().all(|byte| byte.is_ascii_digit()),
-            [_, _, ..] => false,
-        }
+    let codings = lines_of(request, "transfer-encoding");
+    let lengths = lines_of(request, "content-length");
+
+    // ! a Content-Length beside a Transfer-Encoding, whatever it holds, is an error (RFC 9112 §6.3
+    // item 3), never a length the Transfer-Encoding overrides
+    if !codings.is_empty() {
+        return lengths.is_empty() && is_chunked_last(&codings);
+    }
+
+    match lengths.as_slice() {
+        [] => true,
+        [length] => !length.is_empty() && length.bytes().all(|byte| byte.is_ascii_digit()),
+        [_, _, ..] => false,
+    }
 }
 
 // whether a request has content: a `Content-Length` past 0, or a `Transfer-Encoding`
@@ -301,8 +319,9 @@ pub fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold {
 /// 1. what HTTP refuses of its own, a field value holding a control character but a tab or an
 ///    octet past ASCII (RFC 9110 §5.5), a target refused by spec 15.12's rule, a `Host` missing,
 ///    repeated or no host, a target in absolute-form that names none or another scheme (RFC 9112
-///    §3.2, §3.2.2), or, with no `Transfer-Encoding`, a `Content-Length` other than one line of
-///    digits alone (RFC 9112 §6.3; spec 15.12), 400 unmarked;
+///    §3.2, §3.2.2), a `Content-Length` other than one line of digits alone, one beside a
+///    `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked` (RFC 9112
+///    §6.3; spec 15.12), 400 unmarked;
 /// 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
 ///    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
 /// 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;
