@@ -3441,6 +3441,40 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+    // once all the same
+    [Fact]
+    public async Task Tells_the_close_of_a_connection_it_pauses_at_once_when_its_peer_ends_it_by_a_FIN_or_a_reset()
+    {
+        // * no heartbeat, never resumed: its socket's end alone tells its close
+        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+
+        foreach (var isReset in new[] { false, true })
+        {
+            var (tcp, _) = await Upgraded(UpgradeRequest());
+            var connectionHandle = await Next(_connections);
+
+            using (tcp)
+            {
+                _server.Pause(connectionHandle);
+                await Task.Delay(50, Cancelled);
+
+                if (isReset)
+                {
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    tcp.Client.LingerState = new LingerOption(true, 0);
+                    tcp.Client.Close();
+                }
+                else
+                {
+                    tcp.Client.Shutdown(SocketShutdown.Send);
+                }
+
+                Assert.Equal((false, connectionHandle), await Next(_closes));
+            }
+        }
+    }
+
     // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops
     // nothing of one not paused
     [Fact]

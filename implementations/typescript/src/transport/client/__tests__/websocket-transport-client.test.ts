@@ -2868,6 +2868,43 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     }
   });
 
+  // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+  // once all the same
+  test('tells its close at once when its server ends the connection while it is paused, by a FIN or a reset', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      // * no heartbeat, never resumed: its socket's end alone tells its close
+      const client = createWebSocketTransportClient({ heartbeat: Infinity, WebSocket: TrackedWs });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const socket = await upgraded;
+      const closed = nextEvent(client, 'close');
+
+      client.pause();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      drop(socket);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+      expect(client.isClosed()).toBe(true);
+    }
+  });
+
   test('tells a protocol error on its connection once, then its unclean close', async () => {
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ WebSocket: TrackedWs });

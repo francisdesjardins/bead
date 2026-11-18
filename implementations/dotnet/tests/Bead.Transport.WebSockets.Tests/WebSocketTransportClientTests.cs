@@ -2323,6 +2323,47 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+    // once all the same
+    [Fact]
+    public async Task Tells_its_close_at_once_when_its_server_ends_the_connection_while_it_is_paused_by_a_FIN_or_a_reset()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+
+        foreach (var isReset in new[] { false, true })
+        {
+            // * no heartbeat, never resumed: its socket's end alone tells its close
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+            var (told, closed) = EndOf(client);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                await Listener.Upgrade(peer, head);
+                await connecting.WaitAsync(Patience, Cancelled);
+                client.Pause();
+                await Task.Delay(50, Cancelled);
+
+                if (isReset)
+                {
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    peer.Client.LingerState = new LingerOption(true, 0);
+                    peer.Client.Close();
+                }
+                else
+                {
+                    peer.Client.Shutdown(SocketShutdown.Send);
+                }
+
+                await closed.WaitAsync(Patience, Cancelled);
+
+                Assert.Equal(new object[] { (false, false) }, Described(told));
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+            }
+        }
+    }
+
     [Fact]
     public async Task Tells_a_protocol_error_on_its_connection_once_then_its_unclean_close()
     {

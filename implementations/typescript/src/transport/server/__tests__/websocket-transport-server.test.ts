@@ -2614,6 +2614,46 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     }
   });
 
+  // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at once
+  // all the same
+  test('tells the close of a connection it pauses at once when its peer ends it, by a FIN or a reset', async () => {
+    // * no heartbeat, never resumed: its socket's end alone tells its close
+    await using started = await startDated({ heartbeat: Infinity });
+    const { port, server } = started;
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      const connection = nextServerEvent(server, 'connection');
+      const socket = await openTcp(port);
+
+      socket.on('error', () => {});
+      socket.write(upgradeRequest());
+
+      const [, connectionHandle] = await connection;
+      const closed = nextServerEvent(server, 'close');
+
+      try {
+        server.pause(connectionHandle);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+        drop(socket);
+
+        expect(await closed).toEqual([false, connectionHandle]);
+      } finally {
+        socket.destroy();
+      }
+    }
+  });
+
   // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops nothing of
   // one not paused
   test('delivers each of 300 messages its peer sends in one write with its close and its end, then tells its close clean', async () => {
