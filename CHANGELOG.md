@@ -41,6 +41,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gateway. `identity` twice is still an encoding.
 - Under `bearer-jwt`, a tab after `Bearer`'s spaces is answered 401 `invalid_request`, as one right
   after `Bearer` is, on every gateway, and the token is taken as it stands.
+- The TypeScript side's memory broker refuses a `maximumMessageBytes` or a `maximumQueuedMessages`
+  under 1, as the C# and Rust sides do.
 
 ## [0.15.0] - 2026-11-17
 

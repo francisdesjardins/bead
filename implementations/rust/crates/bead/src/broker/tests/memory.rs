@@ -654,6 +654,34 @@ async fn refuses_a_publication_given_up_on_before_it_goes() {
 }
 
 #[tokio::test]
+async fn refuses_a_maximum_message_bytes_or_a_maximum_queued_messages_of_0_in_its_bound_s_words() {
+    for (name, options) in [
+        (
+            "maximumMessageBytes",
+            MemoryBrokerOptions {
+                maximum_message_bytes: Some(0),
+                ..MemoryBrokerOptions::default()
+            },
+        ),
+        (
+            "maximumQueuedMessages",
+            MemoryBrokerOptions {
+                maximum_queued_messages: Some(0),
+                ..MemoryBrokerOptions::default()
+            },
+        ),
+    ] {
+        assert_eq!(
+            MemoryBroker::new(&options)
+                .err()
+                .map(|error| error.to_string()),
+            Some(format!("{name} is a whole number above 0, not 0")),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn writes_1_byte_for_a_maximum_message_bytes_of_1() {
     let (broker, _clock) = broker_on(&MemoryBrokerOptions {
         maximum_message_bytes: Some(1),

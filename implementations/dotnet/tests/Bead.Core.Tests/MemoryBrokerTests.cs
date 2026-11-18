@@ -364,6 +364,19 @@ public sealed class MemoryBrokerTests
     }
 
     [Fact]
+    public void Refuses_a_maximumMessageBytes_or_a_maximumQueuedMessages_of_0_in_its_bound_s_words()
+    {
+        Assert.Equal("MaximumMessageBytes is a whole number above 0, not 0 (Parameter 'MaximumMessageBytes')", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new MemoryBroker(new MemoryBrokerOptions { MaximumMessageBytes = 0 });
+        }).Message);
+        Assert.Equal("MaximumQueuedMessages is a whole number above 0, not 0 (Parameter 'MaximumQueuedMessages')", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new MemoryBroker(new MemoryBrokerOptions { MaximumQueuedMessages = 0 });
+        }).Message);
+    }
+
+    [Fact]
     public async Task Writes_1_byte_for_a_maximumMessageBytes_of_1()
     {
         var broker = new MemoryBroker(new MemoryBrokerOptions { MaximumMessageBytes = 1, Scheduler = new SerialScheduler() });
