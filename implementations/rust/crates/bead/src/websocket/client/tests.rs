@@ -3426,6 +3426,49 @@ async fn tells_a_server_that_drops_without_its_closing_handshake_by_a_fin_or_a_r
     }
 }
 
+// spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at once
+// all the same
+#[tokio::test]
+async fn tells_its_close_at_once_when_its_server_ends_the_connection_while_it_is_paused_by_a_fin_or_a_reset()
+ {
+    let mut server = raw().await;
+
+    for is_reset in [false, true] {
+        // * no heartbeat, never resumed: its socket's end alone tells its close
+        let client = client_of(&WebSocketTransportClientOptions {
+            heartbeat: Some(NEVER),
+            ..WebSocketTransportClientOptions::default()
+        });
+        let recorder = recorded(&client);
+
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+
+        client.pause();
+        crate::testing::rest(Duration::from_millis(50)).await;
+
+        if is_reset {
+            // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+            socket2::SockRef::from(&socket)
+                .set_linger(Some(Duration::ZERO))
+                .unwrap();
+            drop(socket);
+        } else {
+            socket.shutdown().await.unwrap();
+        }
+
+        closes_within(&recorder, 1).await;
+
+        assert_eq!(
+            told_of(&recorder),
+            ["close: false false"],
+            "its close alone"
+        );
+        assert!(is_state(&client, ReadyState::Closed), "closed");
+    }
+}
+
 // spec 15.1
 #[tokio::test]
 async fn tells_a_protocol_error_on_its_connection_once_then_its_unclean_close() {

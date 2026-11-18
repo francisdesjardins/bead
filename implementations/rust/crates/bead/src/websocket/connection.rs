@@ -73,6 +73,13 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub(crate) trait Wire: AsyncRead + AsyncWrite + Unpin + Send + 'static {
     /// Readies its drop: once dropped, its peer is reset rather than ended.
     fn abort(&self) {}
+
+    /// Ready once its socket ended, its peer's FIN or a reset, seen without reading it; pending
+    /// while it holds bytes to read, which keep that end behind them. A socket that cannot tell
+    /// never ends here.
+    fn poll_ended(&self, _context: &mut Context<'_>) -> Poll<()> {
+        Poll::Pending
+    }
 }
 
 impl Wire for tokio::net::TcpStream {
@@ -81,6 +88,24 @@ impl Wire for tokio::net::TcpStream {
         socket2::SockRef::from(self)
             .set_linger(Some(Duration::ZERO))
             .ok();
+    }
+
+    fn poll_ended(&self, context: &mut Context<'_>) -> Poll<()> {
+        ended_of(self, context)
+    }
+}
+
+/// Ready once `socket` ended, by a peek of one byte, which takes nothing from it: its FIN with no
+/// byte before it, or a reset, whatever it held.
+pub(crate) fn ended_of(socket: &tokio::net::TcpStream, context: &mut Context<'_>) -> Poll<()> {
+    let mut byte = [0_u8; 1];
+    let mut buffer = ReadBuf::new(&mut byte);
+
+    match socket.poll_peek(context, &mut buffer) {
+        Poll::Ready(Ok(0) | Err(_)) => Poll::Ready(()),
+        // ! a byte waits, its end behind it if it came: nothing wakes for it, or its owner would
+        // spin on a socket that stays readable
+        Poll::Ready(Ok(_)) | Poll::Pending => Poll::Pending,
     }
 }
 
@@ -522,8 +547,13 @@ impl<S: Wire> Connection<S> {
                 }
             }
             // * no message read while its router paused it but once this side closes, which
-            // reads on to its peer's close (spec 15.12)
-            Closing::No if self.shared.paused.load(Ordering::SeqCst) => Poll::Pending,
+            // reads on to its peer's close (spec 15.12); its socket's end, seen without reading
+            // it, ends it at once, what it held dropped with it
+            Closing::No if self.shared.paused.load(Ordering::SeqCst) => self
+                .socket
+                .get_ref()
+                .poll_ended(context)
+                .map(|()| Step::Read(None)),
             Closing::No | Closing::ByUs => Pin::new(&mut self.socket)
                 .poll_next(context)
                 .map(Step::Read),

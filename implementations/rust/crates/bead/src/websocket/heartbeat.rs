@@ -150,6 +150,11 @@ impl<S: Wire> Wire for Stamped<S> {
     fn abort(&self) {
         self.socket.abort();
     }
+
+    // ! never stamped: what it sees of its socket is no read
+    fn poll_ended(&self, context: &mut Context<'_>) -> Poll<()> {
+        self.socket.poll_ended(context)
+    }
 }
 
 /// What a heartbeat does of its connection: ping it, and drop it once a ping's echo did not come.

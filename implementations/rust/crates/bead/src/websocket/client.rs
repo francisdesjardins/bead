@@ -7,7 +7,7 @@
 use core::fmt;
 use core::future::{Future, poll_fn};
 use core::pin::{Pin, pin};
-use core::task::Poll;
+use core::task::{Context, Poll};
 use core::time::Duration;
 use std::collections::HashMap;
 use std::io;
@@ -43,7 +43,7 @@ use crate::transport::{
 };
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
-    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of,
+    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of, ended_of,
 };
 use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, Stamped, hold_heartbeat};
 
@@ -183,6 +183,14 @@ impl fmt::Debug for WebSocketTransportClientConnectOptions {
 impl Wire for ClientSocket {
     fn abort(&self) {
         self.reset_on_drop();
+    }
+
+    // its TCP socket's end, under TLS too: a TLS close_notify before a FIN is a byte that waits
+    fn poll_ended(&self, context: &mut Context<'_>) -> Poll<()> {
+        match self {
+            Self::Plain(socket) => ended_of(socket, context),
+            Self::Secured(socket) => ended_of(socket.get_ref().0, context),
+        }
     }
 }
 
