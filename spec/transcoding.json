@@ -8619,6 +8619,78 @@
       ]
     },
     {
+      "name": "a sec-fetch-site, a sec-fetch-mode or a sec-fetch-dest in upper case is read as absent",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: CROSS-SITE\r\nsec-fetch-mode: no-cors\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "35",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"operations/a\",\"done\":true}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: NAVIGATE\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: OBJECT\r\nconnection: close\r\n\r\n"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "35",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"operations/a\",\"done\":true}"
+          },
+          "on": "c"
+        }
+      ]
+    },
+    {
       "name": "a sec-fetch-dest in two lines, object first, is read as absent: a navigation from another site is taken",
       "clauses": [
         "10.1.5"

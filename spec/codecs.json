@@ -587,6 +587,28 @@
       "refused": "nested past 64"
     },
     {
+      "name": "a backslash and a quotation mark, then 65 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "5C 22 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a string whose quotation mark a backslash escapes, then 65 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "22 5C 22 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "not JSON"
+    },
+    {
       "name": "an array closed before any opens, then 65 opened",
       "encoding": "json",
       "clauses": [

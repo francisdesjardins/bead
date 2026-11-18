@@ -3910,6 +3910,18 @@ EXCHANGES = [
               send('GET', '/api/Transcoding/getOperation?name=operations/a',
                    ['sec-fetch-site: cross-site, cross-site', 'sec-fetch-mode: no-cors'], on='b'),
               answered(result('Operation', {'name': 'operations/a', 'done': True}), on='b')]),
+    # a value is compared as it came, in its case: Fetch Metadata's tokens are lower-case words, and one
+    # in upper case is none of them
+    exchange("a sec-fetch-site, a sec-fetch-mode or a sec-fetch-dest in upper case is read as absent", ['10.1.5'],
+             [send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: CROSS-SITE', 'sec-fetch-mode: no-cors'], on='a'),
+              answered(result('Operation', {'name': 'operations/a', 'done': True}), on='a'),
+              send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: NAVIGATE'], on='b'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='b'),
+              send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate', 'sec-fetch-dest: OBJECT'], on='c'),
+              answered(result('Operation', {'name': 'operations/a', 'done': True}), on='c')]),
     exchange("a sec-fetch-dest in two lines, object first, is read as absent: a navigation from another site is taken",
              ['10.1.5'],
              [send('GET', '/api/Transcoding/getOperation?name=operations/a',

@@ -886,6 +886,12 @@ PAYLOADS = [
     # item 7 states, the bytes, the depth, the grammar, then the fault the text meets first
     ('a byte order mark, then a byte not UTF-8', 'json', ['17.5', '17.5.1', '17.5.2'], BYTE_ORDER_MARK + bytes([0xFF])),
     ('a letter, then 65 arrays opened', 'json', ['17.5', '17.5.3', '17.5.7'], b'x' + b'[' * (DEPTH + 1)),
+    # a backslash escapes within a string alone: outside one, it leaves the quotation mark after it to
+    # open a string, which runs to the text's end and holds every bracket after it
+    ('a backslash and a quotation mark, then 65 arrays opened', 'json', ['17.5', '17.5.3', '17.5.7'],
+     b'\\"' + b'[' * (DEPTH + 1)),
+    ('a string whose quotation mark a backslash escapes, then 65 arrays opened', 'json', ['17.5', '17.5.3', '17.5.7'],
+     b'"\\"' + b'[' * (DEPTH + 1)),
     ('an array closed before any opens, then 65 opened', 'json', ['17.5', '17.5.3', '17.5.7'],
      b']' + b'[' * (DEPTH + 1)),
     ('a number past a double and a comma, then 70 arrays opened', 'json', ['17.5', '17.5.3', '17.5.6', '17.5.7'],
@@ -1305,7 +1311,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 182 and len(values) == 54
+assert len(payloads) == 184 and len(values) == 54
 
 
 
