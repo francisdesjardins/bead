@@ -433,14 +433,20 @@ export interface IServerSocketLike {
   on(event: 'close', listener: (code: number) => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'message', listener: (data: unknown, isBinary: boolean) => void): unknown;
-  on(event: 'pong', listener: () => void): unknown;
+  /** A pong read, and the data it carries (RFC 6455 §5.5.3). */
+  on(event: 'pong', listener: (data: Uint8Array) => void): unknown;
   once(event: 'close', listener: () => void): unknown;
   /** Stops reading its socket; what it parsed of the read under way it still emits. */
   pause?(): void;
-  ping(): void;
+  /** Sends a ping carrying `data`, ahead of what it was not handed yet. */
+  ping(data: Uint8Array): void;
   /** Reads its socket again. */
   resume?(): void;
-  send(data: Data): void;
+  /**
+   * Sends `data`, behind what it was handed before, calling `callback` once it is written out, as
+   * `ws` does: what wakes the transport's queue, while it holds a `bufferedAmount`.
+   */
+  send(data: Data, callback?: (error?: Error) => void): void;
   terminate(): void;
 }
 
@@ -458,6 +464,11 @@ export interface IIncomingMessageLike {
   readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
+    /**
+     * Each read of its socket once upgraded, what its heartbeat counts as read (spec 15.3); one
+     * without it counts each message and pong its WebSocket emits.
+     */
+    on?(event: 'data', listener: () => void): unknown;
   };
   /** Its target, which names its authority when it is in absolute-form. */
   readonly url?: string | undefined;
@@ -526,11 +537,12 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
    */
   headersTimeout?: number | undefined;
   /**
-   * Milliseconds between two pings of each connection, rounded to the nearest whole one, from 1 to
-   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a connection that has not answered one by the
-   * next is dropped, and its `close` says it was not clean. Defaults to
-   * {@link HEARTBEAT}. A heartbeat keeps nothing of a session alive: it tells a live connection
-   * from a dead one, and the session's own timers still count what the peer sends.
+   * Milliseconds a connection is silent before it is pinged, and a ping waits for its echo, rounded
+   * to the nearest whole one, from 1 to 2³¹ − 1, and `Infinity` for none; 0 is refused: a
+   * connection whose echo has not come within it is dropped, and its `close` says it was not clean
+   * (spec 15.3). Defaults to {@link HEARTBEAT}. A heartbeat keeps nothing of a session alive: it
+   * tells a live connection from a dead one, and the session's own timers still count what the peer
+   * sends.
    */
   heartbeat?: number | undefined;
   /**

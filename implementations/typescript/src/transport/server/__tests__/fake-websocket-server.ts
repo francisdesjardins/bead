@@ -58,10 +58,10 @@ export const createFakeSocket = (behaviour?: {
     once: (event: string, listener: () => void) => {
       return emitter.once(event, listener);
     },
-    ping: () => {
+    ping: (data) => {
       socket.pings += 1;
       if (behaviour?.onPing === 'answer') {
-        emitter.emit('pong');
+        emitter.emit('pong', data);
       }
     },
     pings: 0,

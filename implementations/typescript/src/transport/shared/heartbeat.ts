@@ -6,10 +6,15 @@ import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from './clock
 
 // interfaces
 
-/** One connection's heartbeat: told of each answer, and stopped when the connection ends. */
+/**
+ * One WebSocket connection's heartbeat: told of what is read of it and of each pong, and stopped as
+ * the connection ends.
+ */
 export interface IHeartbeat {
-  /** The peer answered a ping: the connection is alive. */
-  answer(): void;
+  /** A pong came: it answers the ping out when it echoes that ping's data, and nothing otherwise. */
+  answer(data: Uint8Array): void;
+  /** Something of the connection was read: its silence starts again, a ping out left unanswered. */
+  heard(): void;
   stop(): void;
 }
 
@@ -23,8 +28,8 @@ export interface ISilenceHeartbeat {
 // constants
 
 /**
- * How often, in milliseconds, a connection is pinged by default. A connection that has not answered
- * one ping by the next is dropped, so a dead one goes within two of these.
+ * How long, in milliseconds by default, a connection is silent before it is pinged, and how long its
+ * ping waits for its echo before the connection is dropped.
  */
 export const HEARTBEAT = 30_000;
 
@@ -40,52 +45,125 @@ export const assertHeartbeat = (heartbeat: number): number => {
 
 // definition
 
+// the data of a connection's `count`th ping: 8 bytes, the count big-endian, as .NET's keep-alive
+// writes its own
+const pingDataOf = (count: bigint): Uint8Array => {
+  const data = new Uint8Array(8);
+
+  new DataView(data.buffer).setBigUint64(0, count);
+
+  return data;
+};
+
+const isEcho = (data: Uint8Array, pinged: Uint8Array): boolean => {
+  return (
+    data.length === pinged.length &&
+    data.every((byte, index) => {
+      return byte === pinged[index];
+    })
+  );
+};
+
 /**
- * Pings a connection every `heartbeat` milliseconds, and drops it when the ping before went
- * unanswered; nothing at all for `Infinity`. It lives below the protocol: a WebSocket's own PING and
- * PONG frames (RFC 6455 §5.5.2), which a browser answers by itself. The timer keeps no process
- * alive: the connection does that.
+ * Pings a WebSocket connection once nothing of it has been read for `heartbeat` milliseconds, and
+ * drops it once the pong that echoes that ping's data has not come within `heartbeat` of the ping
+ * (spec 15.3, RFC 6455 §5.5.3): what is read restarts its silence, but no frame answers the ping
+ * other than its echo, and no other ping goes before. Each ping carries 8 bytes of its own, a count
+ * from 1, big-endian, as .NET's keep-alive writes its own. Nothing at all for `Infinity`. It lives
+ * below the protocol: a WebSocket's own PING and PONG frames (RFC 6455 §5.5.2), which a browser
+ * answers by itself. It runs on the platform's timer, never a clock given, as a ping plays in real
+ * time on every side (decision 0011), and keeps no process alive. Its unit tests may replace the
+ * platform clock through `clock`.
  *
  * @example
  * const heartbeat = createHeartbeat(30_000, {
  *   drop: () => socket.terminate(),
- *   ping: () => socket.ping(),
+ *   ping: (data) => socket.ping(data),
  * });
- * socket.on('pong', () => heartbeat.answer());
+ * rawSocket.on('data', () => heartbeat.heard());
+ * socket.on('pong', (data) => heartbeat.answer(data));
  * socket.on('close', () => heartbeat.stop());
  */
 export const createHeartbeat = (
   heartbeat: number,
-  { drop, ping }: { drop: () => void; ping: () => void }
+  { drop, ping }: { drop: () => void; ping: (data: Uint8Array) => void },
+  { clock = PLATFORM_CLOCK }: { clock?: IClock } = {}
 ): IHeartbeat => {
-  let isAnswered = true;
-
-  // the platform's own timers, never a clock given: a ping plays in real time on every side, as the
-  // platform under the other side's pings it (decision 0011)
-  const stop = (): void => {
-    // oxlint-disable-next-line no-restricted-properties -- a WebSocket's ping is the platform's
-    globalThis.clearInterval(timer);
+  const now = (): number => {
+    return clock.performance.now();
   };
-  const beat = (): void => {
-    if (!isAnswered) {
-      stop();
-      drop();
+  let lastHeard = now();
+  // the ping out, its data and when it went
+  let pinged: { at: number; data: Uint8Array } | undefined;
+  let count = 0n;
+  let timer: TimeoutId | undefined;
+  let isStopped = heartbeat === Infinity;
 
+  const stop = (): void => {
+    isStopped = true;
+    clock.clearTimeout(timer);
+    timer = undefined;
+  };
+  // * a ping out waits `heartbeat` for its echo; none out, the connection is pinged once silent for
+  // `heartbeat`; either armed again for what is left
+  const check = (): void => {
+    if (isStopped) {
       return;
     }
 
-    isAnswered = false;
-    ping();
-  };
-  // oxlint-disable-next-line no-restricted-properties -- a WebSocket's ping is the platform's
-  const timer = heartbeat === Infinity ? undefined : globalThis.setInterval(beat, heartbeat);
+    const at = now();
 
-  // a browser's timer has no `unref`
-  (timer as { unref?: () => unknown } | undefined)?.unref?.();
+    if (pinged !== undefined) {
+      const waited = at - pinged.at;
+
+      if (waited < heartbeat) {
+        return (arm(heartbeat - waited), undefined);
+      }
+
+      stop();
+      drop();
+
+      return undefined;
+    }
+
+    const silent = at - lastHeard;
+
+    if (silent < heartbeat) {
+      return (arm(heartbeat - silent), undefined);
+    }
+
+    count += 1n;
+    pinged = { at, data: pingDataOf(count) };
+    arm(heartbeat);
+    ping(pinged.data);
+
+    return undefined;
+  };
+  const arm = (delay: number): void => {
+    if (isStopped) {
+      return;
+    }
+
+    // ! a millisecond at least, counted whole: no timer is armed for less (decision 0011)
+    timer = clock.setTimeout(check, Math.max(1, Math.ceil(delay)));
+    // a browser's timer has no `unref`
+    (timer as { unref?: () => unknown }).unref?.();
+  };
+
+  if (!isStopped) {
+    arm(heartbeat);
+  }
 
   return {
-    answer: () => {
-      isAnswered = true;
+    answer: (data) => {
+      lastHeard = now();
+
+      if (pinged !== undefined && isEcho(data, pinged.data)) {
+        pinged = undefined;
+      }
+    },
+    heard: () => {
+      lastHeard = now();
     },
     stop,
   };
