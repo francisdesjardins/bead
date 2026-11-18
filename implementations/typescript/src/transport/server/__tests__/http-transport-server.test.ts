@@ -2400,6 +2400,79 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // spec 15.12; RFC 9112 §9.6
+  test('serves no request pipelined behind an answer that closes its connection, whatever closes it, and closes that connection', async () => {
+    await using started = await startTransport({ exchangeTimeout: 300, maximumBodyBytes: 16 });
+    const { connectionToken } = await connect(started.url, started.server);
+    const { connectionToken: dropped } = await connect(started.url, started.server);
+    const drawn = namesOf(started.events, 'connection').length;
+    const bead = `Content-Type: ${BEAD_MEDIA_TYPE}\r\n`;
+    const sendOn = (token: string, version: string): string => {
+      return `POST /bead ${version}\r\nHost: ${host}\r\n${bead}${CONNECTION_TOKEN_HEADER}: ${token}\r\n`;
+    };
+    const call = Buffer.from(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7 })).toString('latin1');
+    // * a connect pipelined behind each, in the same write
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\n${bead}Content-Length: 0\r\n\r\n`;
+
+    for (const [first, status] of [
+      // a refusal of a body that still comes, its connection closed in stages
+      [`POST /other HTTP/1.1\r\nHost: ${host}\r\nContent-Length: 4\r\n\r\nabcd`, 404],
+      // a body declared past maximumBodyBytes, then one past it as it comes
+      [`${sendOn(connectionToken, 'HTTP/1.1')}Content-Length: 17\r\n\r\n${'a'.repeat(17)}`, 413],
+      [
+        `${sendOn(connectionToken, 'HTTP/1.1')}Transfer-Encoding: chunked\r\n\r\n` +
+          `11\r\n${'a'.repeat(17)}\r\n0\r\n\r\n`,
+        413,
+      ],
+      // an HTTP/1.0 call kept alive, whose head Node closes for want of a length, then dropped past
+      // its exchangeTimeout
+      [
+        `${sendOn(dropped, 'HTTP/1.0')}Connection: keep-alive\r\n` +
+          `Content-Length: ${String(call.length)}\r\n\r\n${call}`,
+        200,
+      ],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(`${first}${pipelined}`, 'latin1');
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, which closes its connection
+      expect(read.text).toMatch(new RegExp(`^HTTP/1\\.1 ${String(status)} `, 'u'));
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+    }
+
+    // no pipelined connect drawn
+    expect(namesOf(started.events, 'connection')).toHaveLength(drawn);
+  });
+
+  // RFC 9112 §9.3
+  test('serves a request pipelined behind an answer that keeps its connection, in its turn', async () => {
+    await using started = await startTransport();
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    socket.write(
+      `POST /other HTTP/1.1\r\nHost: ${host}\r\nContent-Length: 0\r\n\r\n` +
+        `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`,
+      'latin1'
+    );
+    await expect
+      .poll(() => {
+        return read.text.split('HTTP/1.1 ').length;
+      })
+      .toBe(3);
+    socket.end();
+
+    // the refusal, then the connect it drew
+    expect(read.text).toMatch(/^HTTP\/1\.1 404 [^]*HTTP\/1\.1 201 /u);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
   test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
     const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });

@@ -3466,7 +3466,7 @@ src/transport/server/types.ts IHTTPRequestLike
     readonly rawHeaders: readonly string[]
     readonly readableDidRead?: boolean | undefined
     readonly readableEnded?: boolean | undefined
-    readonly socket: Partial<ILingeringSocketLike> & {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined}
+    readonly socket: Partial<ILingeringSocketLike> & {readonly destroyed?: boolean | undefined; readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined; readonly writableEnded?: boolean | undefined}
     readonly url?: string | undefined
     destroy(): unknown
     on(event: 'close' | 'end', listener: () => void): unknown
@@ -3482,6 +3482,8 @@ src/transport/server/types.ts IHTTPResponseLike
     end(data: Uint8Array): unknown
     flushHeaders?(): void
     on(event: 'close' | 'finish', listener: () => void): unknown
+    once?(event: 'socket', listener: () => void): unknown
+    readonly socket?: object | null | undefined
     readonly stream?: {close(code?: number): void} | undefined
     setHeader(name: string, value: string): unknown
     write(chunk: Uint8Array): unknown

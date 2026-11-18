@@ -712,8 +712,12 @@ export interface IHTTPRequestLike {
   readonly readableEnded?: boolean | undefined;
   /** Its socket's peer; over HTTP/1, Node's socket, which an answer written early closes in stages. */
   readonly socket: Partial<ILingeringSocketLike> & {
+    /** Whether it is gone; Node's has it. */
+    readonly destroyed?: boolean | undefined;
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
+    /** Whether its write side ended, its connection closing; Node's has it. */
+    readonly writableEnded?: boolean | undefined;
   };
   readonly url?: string | undefined;
   destroy(): unknown;
@@ -735,6 +739,13 @@ export interface IHTTPResponseLike {
   /** Sends the head now; HTTP/2's has it, though its type says nothing of it. */
   flushHeaders?(): void;
   on(event: 'close' | 'finish', listener: () => void): unknown;
+  /** Node's over HTTP/1: `socket` once it holds its socket, the answers before it ended. */
+  once?(event: 'socket', listener: () => void): unknown;
+  /**
+   * Its socket; over HTTP/1, Node's is `null` while an answer before it on that socket is under
+   * way, and stays so behind one that closes its connection.
+   */
+  readonly socket?: object | null | undefined;
   /** HTTP/2's stream, which a malformed request's reset closes with its error code. */
   readonly stream?: { close(code?: number): void } | undefined;
   /** Sets a field the head carries, which `writeHead` merges with its own. */

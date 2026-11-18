@@ -1,4 +1,4 @@
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind } from '../../../router/shared/constants';
@@ -18,12 +18,17 @@ import {
   countOf,
   hasBody,
   headerOf,
+  inTurn,
   isBeadBody,
   joinedOf,
   linesOf,
   listeningOf,
 } from '../http-server-fields';
-import type { TransportServerConnectionHandle } from '../types';
+import type {
+  IHTTPRequestLike,
+  IHTTPResponseLike,
+  TransportServerConnectionHandle,
+} from '../types';
 import {
   BEARER,
   PAGE,
@@ -1020,5 +1025,48 @@ test.describe('the fields a request carries', () => {
         return isBeadBody(requestLikeOf(fields as [string, string][]));
       })
     ).toEqual([true, true, false, false, false, false]);
+  });
+});
+
+test.describe('an exchange in its turn', () => {
+  // RFC 9112 §9.3, §9.6
+  test('serves an exchange at once over HTTP/2, over HTTP/1 once its answer holds its socket, and none on a socket whose write side ended', () => {
+    const served: string[] = [];
+    const exchangeOf = ({
+      held,
+      major = 1,
+      socket = {},
+    }: {
+      held: object | null;
+      major?: number;
+      socket?: IHTTPRequestLike['socket'];
+    }) => {
+      const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: major, socket };
+      const response = Object.assign(new EventEmitter(), { socket: held });
+
+      return { request, response: response as unknown as IHTTPResponseLike & EventEmitter };
+    };
+    const serving = (name: string, exchange: ReturnType<typeof exchangeOf>) => {
+      inTurn(exchange, () => {
+        served.push(name);
+      });
+
+      return exchange.response;
+    };
+
+    serving('HTTP/2', exchangeOf({ held: null, major: 2 }));
+    serving('held', exchangeOf({ held: {} }));
+
+    const waiting = serving('waiting', exchangeOf({ held: null }));
+
+    serving('ended', exchangeOf({ held: {}, socket: { writableEnded: true } }));
+    serving('destroyed', exchangeOf({ held: null, socket: { destroyed: true } }));
+
+    expect(served).toEqual(['HTTP/2', 'held']);
+
+    // * the answers before it ended, keeping its connection: Node hands it its socket
+    waiting.emit('socket');
+
+    expect(served).toEqual(['HTTP/2', 'held', 'waiting']);
   });
 });

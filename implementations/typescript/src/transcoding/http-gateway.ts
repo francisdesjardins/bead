@@ -48,6 +48,7 @@ import {
   isTakenHost,
   isTakenOrigin,
   isTransferEncodingFramed,
+  type IRequestTarget,
   isVisibleTarget,
   ownAuthorityOf,
   requestTargetOf,
@@ -63,7 +64,8 @@ import {
   authorityNamedBy,
   closingOf,
   headerOf,
-  isBehindRefusal,
+  type IExchangeIn,
+  inTurn,
   isUnencoded,
   joinedOf,
   linesOf,
@@ -239,6 +241,15 @@ interface IExchange {
   readonly response: IResponseLike;
   /** Whether its body was read whole, so an answer leaves no rest of it to drop. */
   isBodyRead: boolean;
+}
+
+/** What a request's target routes it to, judged before its turn. */
+interface IRouted {
+  readonly isDocument: boolean;
+  readonly matching: readonly IServedRoute[];
+  readonly methods: readonly string[];
+  readonly path: IRawPath | undefined;
+  readonly target: IRequestTarget | undefined;
 }
 
 // constants
@@ -1716,25 +1727,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     exchange.response.destroy();
   };
 
-  const route = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
-    // ! a request pipelined behind one refused is left unread, its socket closing behind that
-    // refusal: Node hands it on all the same
-    if (isBehindRefusal(request)) {
-      return true;
-    }
-
-    const target = requestTargetOf(request.url);
-    const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
-    const path = target === undefined ? undefined : rawPathOf(target.path);
-    const { matching, methods } = isDocument
-      ? { matching: [], methods: ['GET', 'HEAD'] }
-      : routesOf(path);
-
-    // a handler mounted on another server leaves it every path it serves none of
-    if (createServer === undefined && !isDocument && matching.length === 0) {
-      return false;
-    }
-
+  // judges an exchange the gateway takes, in its socket's turn, then serves it
+  const judge = (
+    { request, response }: IExchangeIn,
+    { isDocument, matching, methods, path, target }: IRouted
+  ): void => {
     const { remoteAddress } = request.socket;
     const forwarded = linesOf(request, 'x-forwarded-for');
     const address =
@@ -1766,7 +1763,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (named === undefined || target === undefined) {
       refuseMalformed({ request, response });
 
-      return true;
+      return;
     }
 
     // 2: its host
@@ -1777,7 +1774,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 403,
       });
 
-      return true;
+      return;
     }
 
     // 3: its path
@@ -1788,7 +1785,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 404,
       });
 
-      return true;
+      return;
     }
 
     // 4: its origin
@@ -1801,7 +1798,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 403,
       });
 
-      return true;
+      return;
     }
 
     if (isListedOrigin(origin, origins) && origin !== undefined) {
@@ -1830,7 +1827,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           status: 403,
         });
 
-        return true;
+        return;
       }
     }
 
@@ -1844,7 +1841,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
       answer(exchange, { fields: headers, status });
 
-      return true;
+      return;
     }
 
     // 7: its method
@@ -1853,7 +1850,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (isDocument) {
       serveDocument(exchange, method);
 
-      return true;
+      return;
     }
 
     const chosen = path === undefined ? undefined : chosenOf(path, method);
@@ -1866,29 +1863,50 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 405,
       });
 
-      return true;
+      return;
     }
 
     serve(exchange, { chosen, path, query: target.query }).catch((error: unknown) => {
       answerUnforeseen(exchange, error);
     });
-
-    return true;
   };
 
   // * a throw of its host's within its own turn, a refusal's writeHead, say, ends its exchange and
   // never reaches Node's `request` emit
   const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
-    try {
-      return route(request, response);
-    } catch (error) {
+    const unforeseen = (error: unknown): void => {
       answerUnforeseen(
         { address: 'local', isBodyRead: false, port: undefined, request, response },
         error
       );
+    };
 
-      return true;
+    try {
+      const target = requestTargetOf(request.url);
+      const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
+      const path = target === undefined ? undefined : rawPathOf(target.path);
+      const { matching, methods } = isDocument
+        ? { matching: [], methods: ['GET', 'HEAD'] }
+        : routesOf(path);
+
+      // a handler mounted on another server leaves it every path it serves none of, at once
+      if (createServer === undefined && !isDocument && matching.length === 0) {
+        return false;
+      }
+
+      // ! over HTTP/1, in its socket's turn, and none behind an answer that closes its connection
+      inTurn({ request, response }, () => {
+        try {
+          judge({ request, response }, { isDocument, matching, methods, path, target });
+        } catch (error) {
+          unforeseen(error);
+        }
+      });
+    } catch (error) {
+      unforeseen(error);
     }
+
+    return true;
   };
 
   /** Serves the document (11.1): `GET` and `HEAD`, its tag, and a 304 to a request that holds it. */
