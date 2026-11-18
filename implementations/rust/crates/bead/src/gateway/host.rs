@@ -1257,13 +1257,15 @@ impl Inner {
         };
         let target = fields.target();
 
-        // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, or a
-        // Content-Length that frames no body
+        // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a
+        // Content-Length that frames no body, or a Transfer-Encoding spec 15.12 refuses, its
+        // connection closed behind it
         let is_visible = fields
             .raw_fields()
             .is_some_and(|raw| has_visible_fields(&raw))
             && is_visible_target(Some(&target))
-            && fields.has_one_length();
+            && fields.has_one_length()
+            && fields.is_transfer_encoding_framed();
         let authority = is_visible.then(|| fields.authority(&target)).flatten();
         let named = request_target_of(Some(&target));
         let (Some(authority), Some(named)) = (authority, named) else {

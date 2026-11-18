@@ -1911,6 +1911,83 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; transcoding 10.1
+    [Fact]
+    public async Task Refuses_400_unmarked_an_HTTP_1_0_request_carrying_a_Transfer_Encoding_under_keep_alive_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        var started = await Started();
+
+        try
+        {
+            var port = started.Port;
+
+            foreach (var authority in new[] { $"127.0.0.1:{port}", "elsewhere.test" })
+            {
+                var came = await PipelinedOn(port, ("HTTP/1.0", authority, "transfer-encoding: chunked"));
+
+                // one answer, unmarked, its connection closed behind it
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1
+    [Fact]
+    public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_anything_after_its_first_chunked_in_one_line_or_two_an_empty_element_among_it_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        var started = await Started();
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            // ! Kestrel hands each on, the body read by its final chunked, which the gateway refuses
+            (string Authority, string Codings)[] requests =
+            [
+                (own, "transfer-encoding: chunked, chunked"),
+                (own, "transfer-encoding: chunked\r\ntransfer-encoding: chunked"),
+                (own, "transfer-encoding: Chunked, CHUNKED"),
+                (own, "transfer-encoding: chunked, gzip, chunked"),
+                (own, "transfer-encoding: chunked,"),
+                ("elsewhere.test", "transfer-encoding: chunked, chunked"),
+                ("elsewhere.test", "transfer-encoding: chunked ,  "),
+            ];
+
+            foreach (var (authority, codings) in requests)
+            {
+                var came = await PipelinedOn(started.Port, ("HTTP/1.1", authority, codings));
+
+                // one answer, unmarked, its connection closed behind it
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // what the gateway answers an echo of the version, the authority and the Transfer-Encoding given,
+    // on a socket it asks kept alive, a GET pipelined behind its chunked body: everything that came,
+    // to the socket's close
+    private static async Task<string> PipelinedOn(int port, (string Version, string Authority, string Codings) request)
+    {
+        var (version, authority, codings) = request;
+        var octets = $"POST /api/Transcoding/echo {version}\r\nhost: {authority}\r\ncontent-type: application/json\r\nconnection: keep-alive\r\n{codings}\r\n\r\n2\r\n{{}}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\n\r\n";
+
+        return Encoding.ASCII.GetString(await Received(port, Encoding.ASCII.GetBytes(octets)));
+    }
+
     // what the gateway answers an exchange over HTTP/2 of the target and the fields given: its status,
     // the code its stream was reset with, none when it was not, and its body
     private static async Task<(int Status, int? Reset, string Body)> Http2Of(HttpGateway gateway, (string Target, (string Name, string Value)[] Fields) request)

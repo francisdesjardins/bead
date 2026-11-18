@@ -9,7 +9,7 @@ use ::http::uri::Uri;
 
 use crate::judgement::hosts::{
     Authority, HOST_REFUSAL, HostRequest, ORIGIN_REFUSAL, RequestTarget, authority_of,
-    is_authority, request_target_of,
+    is_authority, is_transfer_encoding_framed, request_target_of,
 };
 use crate::judgement::items::{BareItem, parse_item};
 
@@ -274,6 +274,20 @@ impl Request<'_> {
             .iter()
             .nth(1)
             .is_none()
+    }
+
+    /// Whether its `Transfer-Encoding`, across its lines, frames its body as spec 15.12 takes it:
+    /// none, or one that ends in one `chunked`, over HTTP/1.1.
+    pub(crate) fn is_transfer_encoding_framed(&self) -> bool {
+        let version = match (self.is_http1, self.is_http11) {
+            (true, true) => "1.1",
+            (true, false) => "1.0",
+            (false, _) => "2.0",
+        };
+
+        // ! hyper refuses one over HTTP/1.0 itself, and `chunked,` with it, before the transport
+        // reads the request; it hands on another `chunked` after the first, its body read by the last
+        is_transfer_encoding_framed(version, &self.lines_of("transfer-encoding"))
     }
 
     /// The length its `Content-Length` declares, when it declares one.

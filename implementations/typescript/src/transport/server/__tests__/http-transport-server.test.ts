@@ -2316,6 +2316,90 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // spec 15.12
+  test('refuses 400 unmarked an HTTP/1.0 request carrying a Transfer-Encoding under keep-alive, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect pipelined behind the chunked body, on a socket the request asks kept alive
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+
+    for (const [authority, fields, chunks] of [
+      [
+        host,
+        `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n`,
+        `${cancel.length.toString(16)}\r\n${cancel}\r\n`,
+      ],
+      ['elsewhere.test', '', ''],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.0\r\nHost: ${authority}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n${fields}` +
+          `Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n${chunks}0\r\n\r\n${pipelined}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked, its connection closed behind it
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the pipelined connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
+  // spec 15.12
+  test('refuses 400 unmarked a request whose Transfer-Encoding lists anything after its first chunked, in one line or two, an empty element among it, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+
+    // ! Node's parser refuses each before the transport reads the request; this pins it, so that
+    // a Node that hands one on shows here
+    for (const [authority, codings] of [
+      [host, 'Transfer-Encoding: chunked, chunked'],
+      [host, 'Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked'],
+      [host, 'Transfer-Encoding: Chunked, CHUNKED'],
+      [host, 'Transfer-Encoding: chunked, gzip, chunked'],
+      [host, 'Transfer-Encoding: chunked,'],
+      ['elsewhere.test', 'Transfer-Encoding: chunked, chunked'],
+      ['elsewhere.test', 'Transfer-Encoding: chunked ,  '],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.1\r\nHost: ${authority}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n${codings}\r\n\r\n` +
+          `${cancel.length.toString(16)}\r\n${cancel}\r\n0\r\n\r\n${pipelined}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the pipelined connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
   test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
     const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });

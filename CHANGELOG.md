@@ -89,6 +89,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused alike. Over HTTP/2, the transport and the gateway reset the stream of a request that
   carries a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC
   9113 §8.2.2 makes malformed and Kestrel hands on, where they answered it.
+- The TypeScript gateway and the C# HTTP transport and gateway close the connection of an HTTP/1.0
+  request that carries a `Transfer-Encoding`, as RFC 9112 §6.1 requires: under
+  `Connection: keep-alive` they read it as chunked, kept its connection and served a request
+  pipelined behind its body. Each refuses it 400 unmarked with `connection: close`. A request Node's
+  parser hands on behind one the TypeScript transport or gateway refused that way is left unread,
+  where the transport drew its connection and the gateway served its route, unanswered.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.

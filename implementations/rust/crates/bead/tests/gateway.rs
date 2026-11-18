@@ -4909,6 +4909,92 @@ async fn serves_over_http_1_1_a_route_whose_request_carries_a_content_length_bes
     fixture.dispose().await.expect("disposed");
 }
 
+// what the gateway answers an echo of the version and the fields given, its host and its
+// Transfer-Encoding, on a socket it asks kept alive, a GET pipelined behind its chunked body:
+// everything that came, to the socket's close
+async fn pipelined_on(port: u16, (version, fields): (&str, &str)) -> String {
+    let octets = format!(
+        "POST /api/Transcoding/echo {version}\r\n{fields}\r\ncontent-type: application/json\r\nconnection: keep-alive\r\n\r\n2\r\n{{}}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: {HOST}:{port}\r\n\r\n"
+    );
+
+    text_on(sent(port, octets.as_bytes()).await).await
+}
+
+// spec 15.12; transcoding 10.1: hyper refuses an HTTP/1.0 request carrying a Transfer-Encoding
+// 400, unmarked, and closes its connection before the gateway reads it (`proto/h1/role.rs`,
+// 280-283)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_400_unmarked_an_http_1_0_request_carrying_a_transfer_encoding_under_keep_alive_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+
+    for authority in [format!("{HOST}:{port}"), "elsewhere.test".to_owned()] {
+        let came = pipelined_on(
+            port,
+            (
+                "HTTP/1.0",
+                &format!("host: {authority}\r\ntransfer-encoding: chunked"),
+            ),
+        )
+        .await;
+
+        // one answer, unmarked, its socket closed behind it
+        assert!(came.starts_with("HTTP/1.1 400 "), "{came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(
+            !came.to_ascii_lowercase().contains("bead-refusal"),
+            "{came}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 10.1: hyper hands each on, the body read by its final chunked, which the
+// gateway refuses but `chunked,` and `chunked ,  `, which hyper refuses itself
+// (`headers.rs:159`, `is_chunked_`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_after_its_first_chunked_in_one_line_or_two_an_empty_element_among_it_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let own = format!("{HOST}:{port}");
+
+    for (authority, codings) in [
+        (own.as_str(), "transfer-encoding: chunked, chunked"),
+        (
+            own.as_str(),
+            "transfer-encoding: chunked\r\ntransfer-encoding: chunked",
+        ),
+        (own.as_str(), "transfer-encoding: Chunked, CHUNKED"),
+        (own.as_str(), "transfer-encoding: chunked, gzip, chunked"),
+        (own.as_str(), "transfer-encoding: chunked,"),
+        ("elsewhere.test", "transfer-encoding: chunked, chunked"),
+        ("elsewhere.test", "transfer-encoding: chunked ,  "),
+    ] {
+        let came = pipelined_on(
+            port,
+            ("HTTP/1.1", &format!("host: {authority}\r\n{codings}")),
+        )
+        .await;
+
+        // one answer, unmarked, its socket closed behind it
+        assert!(came.starts_with("HTTP/1.1 400 "), "{codings}: {came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(
+            !came.to_ascii_lowercase().contains("bead-refusal"),
+            "{came}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_holds_an_octet_past_visible_ascii_protocol_error_nothing_written()
  {

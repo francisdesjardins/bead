@@ -32,6 +32,7 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  isTransferEncodingFramed,
   isVisibleTarget,
   originOf,
   ownAuthorityOf,
@@ -73,6 +74,7 @@ import {
   type IEnd,
   type IExchangeIn,
   isBeadBody,
+  isBehindRefusal,
   joinedOf,
   linesOf,
   listeningOf,
@@ -1021,10 +1023,21 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
+        // ! a request pipelined behind one refused is left unread, its socket closing behind that
+        // refusal: Node hands it on all the same
+        if (isBehindRefusal(request)) {
+          return undefined;
+        }
+
         // * a field or a target past visible ASCII, or a target holding a #, before anything else:
         // Node's parser answers a control character itself and hands a # on, nghttp2 in :path too,
         // and drops a padded field over HTTP/2 unless `strictFieldWhitespaceValidation` is false
-        if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
+        if (
+          !hasVisibleFields(request.rawHeaders) ||
+          !isVisibleTarget(request.url) ||
+          // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0
+          !isTransferEncodingFramed(request.httpVersion, linesOf(request, 'transfer-encoding'))
+        ) {
           return (refuseMalformed(exchange), undefined);
         }
 

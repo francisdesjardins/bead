@@ -90,6 +90,9 @@ const PREFLIGHT_MAX_AGE = '7200';
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
 
+// the sockets over HTTP/1 whose request HTTP refused, each closing once that answer is written
+const REFUSED_SOCKETS = new WeakSet<object>();
+
 // the 404 that tells a client its connection is gone
 export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
   reason: HTTP_REFUSALS.CONNECTION_UNKNOWN,
@@ -319,10 +322,18 @@ export const refuseMalformed = ({ request, response }: IExchangeIn): void => {
     return (reset(response), undefined);
   }
 
+  REFUSED_SOCKETS.add(request.socket);
   response.writeHead(400, { 'content-length': '0', connection: 'close' });
   response.end();
 
   return undefined;
+};
+
+// whether a request came pipelined behind one HTTP refused on its socket, which closes behind that
+// answer: Node's parser hands on every request a read holds, and none behind the refusal is served
+// (RFC 9112 §6.1, §9.6)
+export const isBehindRefusal = (request: IHTTPRequestLike): boolean => {
+  return REFUSED_SOCKETS.has(request.socket);
 };
 
 // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
