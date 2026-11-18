@@ -156,19 +156,9 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
-    // whether a Transfer-Encoding's final coding, its last element across its field lines but the
-    // empty ones (RFC 9110 §5.6.1.2), is chunked, in any ASCII case (RFC 9112 §6.3 item 4)
-    private static bool IsChunkedLast(StringValues lines)
-    {
-        return ElementsOf(lines).LastOrDefault((element) =>
-        {
-            return element.Length > 0;
-        }) is { } last && HostsAndOrigins.IsAsciiEqual(last, "chunked");
-    }
-
     // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-    // Transfer-Encoding alone whose final coding is chunked, or a Content-Length of one line of digits
-    // alone (RFC 9110 §8.6), or neither
+    // Transfer-Encoding alone that ends in one chunked, over HTTP/1.1, or a Content-Length of one line
+    // of digits alone (RFC 9110 §8.6), or neither
     private static bool IsFramed(HttpRequest request)
     {
         var headers = request.Headers;
@@ -183,7 +173,7 @@ internal static class WebSocketHandshake
 
             return lengths.Count == 0
                 && !(isHttp1 && RequestFields.HasLengthBesideTransferEncoding(headers.TransferEncoding, headers["X-Content-Length"]))
-                && IsChunkedLast(headers.TransferEncoding);
+                && RequestFields.IsTransferEncodingFramed(request.Protocol, headers.TransferEncoding);
         }
 
         return lengths.Count == 0
@@ -309,7 +299,9 @@ internal static class WebSocketHandshake
 
         // and a body HTTP cannot frame, judged alike: a Content-Length that frames no body, and a
         // Transfer-Encoding whose final coding is not chunked, which Kestrel refuses before the
-        // application runs, and a Content-Length beside a Transfer-Encoding, which it hands on
+        // application runs, a Content-Length beside a Transfer-Encoding, and a Transfer-Encoding that
+        // lists anything after its first chunked or that an HTTP/1.0 request carries, which it hands
+        // on
         if (!isVisible || !IsFramed(request))
         {
             return BadRequest;

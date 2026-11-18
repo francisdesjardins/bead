@@ -8,6 +8,7 @@ import {
   HOST_REFUSAL,
   isTakenHost,
   isTakenOrigin,
+  isTransferEncodingFramed,
   isVisibleTarget,
   ORIGIN_REFUSAL,
   originOf,
@@ -172,19 +173,9 @@ const isProtocolList = (lines: readonly string[]): boolean => {
   );
 };
 
-// whether a `Transfer-Encoding`'s final coding, its last element across its lines but the empty
-// ones (RFC 9110 §5.6.1.2), is `chunked`, in any ASCII case (RFC 9112 §6.3 item 4)
-const isChunkedLast = (lines: readonly string[]): boolean => {
-  const last = elementsOf(lines).findLast((element) => {
-    return element !== '';
-  });
-
-  return last !== undefined && hasToken([last], 'chunked');
-};
-
 // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-// `Transfer-Encoding` alone whose final coding is `chunked`, or a `Content-Length` of one line of
-// digits alone, or neither
+// `Transfer-Encoding` alone that ends in one `chunked`, over HTTP/1.1, or a `Content-Length` of one
+// line of digits alone, or neither
 const isFramed = (request: IHandshakeRequestLike): boolean => {
   const codings = linesOf(request, 'transfer-encoding');
   const lengths = linesOf(request, 'content-length');
@@ -192,7 +183,7 @@ const isFramed = (request: IHandshakeRequestLike): boolean => {
   // ! a Content-Length beside a Transfer-Encoding, whatever it holds, is an error (RFC 9112 §6.3
   // item 3), never a length the Transfer-Encoding overrides
   if (codings.length > 0) {
-    return lengths.length === 0 && isChunkedLast(codings);
+    return lengths.length === 0 && isTransferEncodingFramed(request.httpVersion, codings);
   }
 
   return lengths.length === 0 || (lengths.length === 1 && LENGTH.test(lengths[0] ?? ''));
@@ -256,7 +247,8 @@ export const toldOfHandshake = (
  *    path whose percent-decoding holds NUL (RFC 3986 §2), a `Host` missing, repeated or no host, a
  *    target in absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), a
  *    `Content-Length` other than one line of digits alone, one beside a `Transfer-Encoding`, or a
- *    `Transfer-Encoding` whose final coding is not `chunked` (RFC 9112 §6.3; spec 15.12), 400
+ *    `Transfer-Encoding` whose final coding is not `chunked` or that lists anything after its first
+ *    `chunked`, or one an HTTP/1.0 request carries (RFC 9112 §6.1, §6.3; spec 15.12), 400
  *    unmarked;
  * 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
  *    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
@@ -281,8 +273,9 @@ export const refusalOfHandshake = (
   const { httpVersion, method } = request;
 
   // * Node's parser answers a target's controls and octets past ASCII, a Content-Length it cannot
-  // frame by, and one beside a Transfer-Encoding; it hands on a field's octet past ASCII, a
-  // target's # or encoded NUL, and an upgrade's Transfer-Encoding whose final coding is not chunked
+  // frame by or beside a Transfer-Encoding, and anything after a first chunked; it hands on a
+  // field's octet past ASCII, a target's # or encoded NUL, an upgrade's final coding but chunked,
+  // and HTTP/1.0's Transfer-Encoding
   if (
     !hasVisibleFields(request.rawHeaders) ||
     !isVisibleTarget(request.url) ||

@@ -343,11 +343,12 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
-    public void Refuses_first_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_whatever_either_holds_or_a_Transfer_Encoding_whose_final_coding_is_not_chunked_whatever_else_the_request_holds()
+    public void Refuses_first_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_whatever_either_holds_or_a_Transfer_Encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_HTTP_1_0_request_carries_whatever_else_the_request_holds()
     {
         // the pair in either order, a Content-Length of no number among it, and over HTTP/1.x the
         // X-Content-Length Kestrel writes in its place, whoever wrote it; a final coding but chunked,
-        // across two lines among it, or none; from a host it does not take, under another method
+        // across two lines among it, or none; anything after the first chunked, an empty element
+        // among it; HTTP/1.0's; from a host it does not take, under another method
         (string Start, string[] Fields)[] requests =
         [
             ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Content-Length: 0"]),
@@ -361,8 +362,18 @@ public sealed class WebSocketHandshakeTests
             ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, gzip"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Transfer-Encoding: gzip"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: ,"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Transfer-Encoding: chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: Chunked, CHUNKED"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, gzip, chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, , chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked,"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked ,  "]),
+            ("GET / HTTP/1.0", ["Transfer-Encoding: chunked"]),
             ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: chunked", "Content-Length: 0"]),
             ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: gzip"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: chunked, chunked"]),
+            ("GET / HTTP/1.0", ["Host: elsewhere.test", "Transfer-Encoding: chunked"]),
             ("POST / HTTP/1.1", ["Transfer-Encoding: gzip", "Upgrade"]),
         ];
 
@@ -371,11 +382,13 @@ public sealed class WebSocketHandshakeTests
             Assert.Equal((400, (string?)null), AnswerOf(request, Options));
         });
 
-        // a final coding chunked, in any case, its empty elements ignored, is content, at step 6
+        // a final coding chunked and nothing after it, in any case, the empty elements before it
+        // ignored, is content, at step 6
         (string Start, string[] Fields)[] content =
         [
             ("GET / HTTP/1.1", ["Transfer-Encoding: Chunked"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: , chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, , chunked"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, chunked"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: gzip", "Transfer-Encoding: chunked"]),
         ];
