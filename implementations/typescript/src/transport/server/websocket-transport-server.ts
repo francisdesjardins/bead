@@ -27,6 +27,7 @@ import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { createHold, type IHold } from '../shared/hold';
 import { ReadyState } from '../shared/ready-state';
+import { bytesOf, createSendQueue, type ISendQueue } from '../shared/send-queue';
 import type { Data, ITransportMessage } from '../shared/types';
 import {
   assertHosts,
@@ -175,15 +176,6 @@ const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
   return lines.length === 0 ? undefined : lines.join(', ');
 };
 
-// the bytes an envelope handed to a socket holds: a text message's encoded, as it goes
-const bytesOf = (data: Data): number => {
-  if (typeof data === 'string') {
-    return Buffer.byteLength(data);
-  }
-
-  return data instanceof Blob ? data.size : data.byteLength;
-};
-
 // ! an upgrade that carries an `Origin` carries no credential: a page's browser writes its own
 // authentication on it (Fetch, credentials mode `include`), as the server's JSDoc says
 const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined => {
@@ -206,8 +198,10 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * other events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
  * ended or reset, emits no `error`: its unclean `close` tells it; nor does a peer its heartbeat
  * drops, nor its own drop of a peer that never answered a close within `closeTimeout`. Each
- * connection is pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone
- * without a word — a network cut, a machine asleep — ends in a `close` rather than never.
+ * connection is pinged once nothing of it has been read for `heartbeat`, its ping ahead of what it
+ * holds unsent, and dropped once the pong that echoes that ping has not come within `heartbeat`
+ * (spec 15.3): a peer gone without a word — a network cut, a machine asleep — ends in a `close`
+ * rather than never. A peer that keeps sending within each `heartbeat` is never pinged.
  *
  * An upgrade that carries no `Origin` carries one credential, its `Authorization`, as it came,
  * whole, its surrounding whitespace removed, none when empty or absent: every message of its
@@ -299,6 +293,9 @@ export const createWebSocketTransportServer = (
       const refusedBusy = new WeakSet<IIncomingMessageLike>();
       // what waits for each connection's socket, held to its pace
       const paces = new WeakMap<IServerSocketLike, ISendPace>();
+      // what each connection holds that its socket was not handed yet, so its ping goes ahead of
+      // it (spec 15.3)
+      const queues = new WeakMap<IServerSocketLike, ISendQueue>();
       // what each connection's socket still brought once its router paused it, one read at most,
       // its socket paused until it is handed on (spec 15.12, decision 0046)
       const holds = new WeakMap<IServerSocketLike, IHold<ITransportMessage>>();
@@ -307,6 +304,12 @@ export const createWebSocketTransportServer = (
 
       const heldBy = (address: string): number => {
         return perAddress.get(address) ?? 0;
+      };
+
+      // what waits for a connection's socket: what its queue holds, and what its socket was handed
+      // and has not taken yet (spec 15.12)
+      const unsentOf = (socket: IServerSocketLike): number => {
+        return (socket.bufferedAmount ?? 0) + (queues.get(socket)?.heldBytes ?? 0);
       };
 
       // what each upgrade that took a place keeps, by its raw socket: the place's return, once, and
@@ -426,6 +429,8 @@ export const createWebSocketTransportServer = (
           });
 
           try {
+            // what its queue holds goes ahead of its close
+            queues.get(socket)?.flush();
             socket.close(code);
           } catch (reason) {
             // ! what it threw is the connection's first error, a terminate's that throws after it
@@ -607,6 +612,7 @@ export const createWebSocketTransportServer = (
         };
 
         connections.set(connectionHandle, connection);
+        queues.set(socket, createSendQueue(socket));
         holds.set(
           socket,
           createHold(
@@ -631,7 +637,7 @@ export const createWebSocketTransportServer = (
                 drop(connection, lateOf(pace));
               },
               unsent: () => {
-                return socket.bufferedAmount ?? 0;
+                return unsentOf(socket);
               },
             },
             pace
@@ -640,20 +646,26 @@ export const createWebSocketTransportServer = (
 
         socket.binaryType = binaryType;
 
-        // a socket that is closing has its close handshake, bounded by `closeTimeout`, to end it
+        // a socket that is closing has its close handshake, bounded by `closeTimeout`, to end it;
+        // its ping goes to `ws` at once, ahead of what its queue holds (spec 15.3)
         const beating = createHeartbeat(heartbeat, {
           drop: () => {
             terminate(socket);
           },
-          ping: () => {
+          ping: (data) => {
             if (socket.readyState === ReadyState.OPEN) {
-              socket.ping();
+              socket.ping(data);
             }
           },
         });
 
-        socket.on('pong', () => {
-          beating.answer();
+        // * what is read of the connection: each read of its raw socket, a frame's part among it;
+        // a socket given without one, each message and pong it emits
+        request.socket.on?.('data', () => {
+          beating.heard();
+        });
+        socket.on('pong', (data) => {
+          beating.answer(data);
         });
 
         // * its end, once: its one error, then its close, unclean once it failed, what a listener of
@@ -669,6 +681,7 @@ export const createWebSocketTransportServer = (
           isEnded = true;
           beating.stop();
           paces.get(socket)?.stop();
+          queues.get(socket)?.clear();
           holds.get(socket)?.drop();
           // given back before its close is told, so a client that comes again on it is taken
           taken?.giveBack();
@@ -713,6 +726,7 @@ export const createWebSocketTransportServer = (
           }
 
           connection.lastActivity = server.clock.Date.now();
+          beating.heard();
 
           // a text frame arrives as bytes whatever `binaryType` says
           const delivered = isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView);
@@ -910,7 +924,7 @@ export const createWebSocketTransportServer = (
           let largestAddressConnections = 0;
 
           for (const { socket } of connections.values()) {
-            const unsent = socket.bufferedAmount ?? 0;
+            const unsent = unsentOf(socket);
 
             unsentBytes += unsent;
             largestUnsentBytes = Math.max(largestUnsentBytes, unsent);
@@ -943,9 +957,9 @@ export const createWebSocketTransportServer = (
 
             const bytes = bytesOf(data);
 
-            // ! the backstop judged before it goes: what the socket holds never passes it, and the
+            // ! the backstop judged before it goes: what waits for the socket never passes it, and the
             // envelope is one the transport had, lost with the connection (spec 15.12)
-            if ((socket.bufferedAmount ?? 0) + bytes > maximumUnsentBytes) {
+            if (unsentOf(socket) + bytes > maximumUnsentBytes) {
               drop(
                 connection,
                 `what waits for its socket would pass maximumUnsentBytes, ${byteCountOf(maximumUnsentBytes)}`
@@ -954,7 +968,8 @@ export const createWebSocketTransportServer = (
               return (resolve(), undefined);
             }
 
-            socket.send(data);
+            // behind what its queue holds, its ping going ahead of it (spec 15.3)
+            queues.get(socket)?.send(data, bytes);
             paces.get(socket)?.hand(bytes);
 
             return (resolve(), undefined);

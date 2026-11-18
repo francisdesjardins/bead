@@ -176,6 +176,7 @@ interface IStep {
   send?: IMessage | IRequest;
   stop?: true;
   until?: { gauge: string; is: number } | { timer: number };
+  wait?: number;
   wall?: number;
   within?: number;
 }
@@ -386,6 +387,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
   'send',
   'stop',
   'until',
+  'wait',
   'wall',
   'within',
 ]);
@@ -2092,6 +2094,11 @@ test.describe('the transports', () => {
 
           if (step.wall !== undefined) {
             clock.setSystemTime(clock.Date.now() + step.wall);
+          }
+
+          // on the real clock, which a case marked realTime plays on
+          if (step.wait !== undefined) {
+            await sleep(step.wait);
           }
 
           if (step.report !== undefined) {

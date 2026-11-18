@@ -112,8 +112,8 @@ pub(crate) struct ConnectionBounds {
 pub(crate) struct ConnectionHooks {
     /// A message whole: its bytes, and whether it came as text.
     pub(crate) deliver: Box<dyn FnMut(Bytes, bool) + Send>,
-    /// Its peer answered a ping.
-    pub(crate) answered: Box<dyn FnMut() + Send>,
+    /// A pong read, and the data it carries: its heartbeat's, which takes its ping's echo alone.
+    pub(crate) answered: Box<dyn FnMut(Bytes) + Send>,
 }
 
 /// How a connection ended.
@@ -152,7 +152,7 @@ pub(crate) enum Failed {
 
 enum Command {
     Send(Bytes),
-    Ping,
+    Ping(Bytes),
     Close(u16),
     Drop,
     Resume,
@@ -239,9 +239,10 @@ impl Commands {
         }
     }
 
-    /// Pings its peer, behind what was sent before, unless it closes.
-    pub(crate) fn ping(&self) {
-        self.sender.send(Command::Ping).ok();
+    /// Pings its peer with `data`, ahead of what it holds unsent, behind the message under way and
+    /// what its socket holds (spec 15.3), unless it closes.
+    pub(crate) fn ping(&self, data: Bytes) {
+        self.sender.send(Command::Ping(data)).ok();
     }
 
     /// Drops it at once, its close unclean, no error told: its heartbeat's word.
@@ -621,9 +622,10 @@ impl<S: Wire> Connection<S> {
                     self.taken(length);
                 }
             }
-            Command::Ping => {
+            // * ahead of what waits, as .NET's keep-alive sends its own between messages
+            Command::Ping(data) => {
                 if self.closing == Closing::No && self.writing != Writing::Broken {
-                    self.queue.push_back((Message::Ping(Bytes::new()), 0));
+                    self.queue.push_front((Message::Ping(data), 0));
                 }
             }
             Command::Close(code) => self.close(code),
@@ -710,7 +712,7 @@ impl<S: Wire> Connection<S> {
                     (hooks.deliver)(Bytes::from(text), true);
                 }
             }
-            Some(Ok(Message::Pong(_))) => (hooks.answered)(),
+            Some(Ok(Message::Pong(data))) => (hooks.answered)(data),
             // tungstenite answers it, and its close, of its own, flushed as it reads on
             Some(Ok(Message::Ping(_) | Message::Frame(_))) => {}
             // * its answer flushed by its next read, which ends it

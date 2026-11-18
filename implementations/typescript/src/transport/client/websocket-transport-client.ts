@@ -23,6 +23,7 @@ import {
   wrapReason,
 } from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
+import { bytesOf, createSendQueue, type ISendQueue } from '../shared/send-queue';
 import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
@@ -44,6 +45,7 @@ import {
   isFieldValue,
 } from './transport-client';
 import type {
+  IRawSocketLike,
   IUpgradeResponseLike,
   IWebSocketConstructor,
   IWebSocketLike,
@@ -58,6 +60,7 @@ export type { ITlsOptions } from '../shared/types';
 export type {
   ICloseEventLike,
   IMessageEventLike,
+  IRawSocketLike,
   IUpgradeResponseLike,
   IWebSocketConstructor,
   IWebSocketLike,
@@ -170,9 +173,11 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
 // definition
 
 /**
- * A transport client over one WebSocket. Over `ws`, it pings the server every `heartbeat`, and
- * closes when a ping went unanswered: a server gone without a word ends in a `close` rather than
- * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. Its
+ * A transport client over one WebSocket. Over `ws`, it pings the server once nothing of it has been
+ * read for `heartbeat`, its ping ahead of what it holds unsent, and closes once the pong that echoes
+ * that ping has not come within `heartbeat` (spec 15.3): a server gone without a word ends in a
+ * `close` rather than never. A browser's socket cannot ping; the server's pings, which it answers,
+ * stand for it. Its
  * connect's `credential`, or what its `credentialProvider` hands at each attempt, goes in its
  * upgrade's `Authorization`, over `ws` alone, and is what it carries beside every envelope of that
  * connection, compared in constant time: one given to `send` is not carried, and its router fails a
@@ -243,8 +248,10 @@ export const createWebSocketTransportClient = (
       let rejectConnect: ((reason: Error) => void) | undefined;
       // told whether a dispose dropped the socket, rather than its close handshake ending
       let resolveDisconnect: ((isDropped: boolean) => void) | undefined;
-      // the open socket's, when it can ping
+      // the open socket's, when it can ping, and what it holds that its socket was not handed yet,
+      // so its ping goes ahead of it (spec 15.3)
       let beating: IHeartbeat | undefined;
+      let queue: ISendQueue | undefined;
       // whether the URL of the last connect is secure
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
@@ -272,9 +279,10 @@ export const createWebSocketTransportClient = (
       );
 
       // a drop closes as a network does, and the open socket's `onclose` reports it; one that throws
-      // is handed to `thrown`, which ends the connection
+      // is handed to `thrown`, which ends the connection. What it reads is each read of `raw`, its
+      // raw socket, a frame's part among it; without one, each message and pong its socket emits
       const beatOf = (
-        socket: IWebSocketLike,
+        { raw, socket }: { raw: IRawSocketLike | undefined; socket: IWebSocketLike },
         thrown: (reason: unknown) => void
       ): IHeartbeat | undefined => {
         if (
@@ -293,15 +301,19 @@ export const createWebSocketTransportClient = (
               thrown(reason);
             }
           },
-          ping: () => {
+          // at once, ahead of what the queue holds
+          ping: (data) => {
             if (socket.readyState === WebSocket.OPEN) {
-              socket.ping?.();
+              socket.ping?.(data);
             }
           },
         });
 
-        socket.on('pong', () => {
-          beats.answer();
+        raw?.on?.('data', () => {
+          beats.heard();
+        });
+        socket.on('pong', (data) => {
+          beats.answer(data);
         });
 
         return beats;
@@ -310,6 +322,15 @@ export const createWebSocketTransportClient = (
       const stopBeating = (): void => {
         beating?.stop();
         beating = undefined;
+      };
+      // what the queue holds goes ahead of a close, or is dropped with its socket
+      const flushQueue = (): void => {
+        queue?.flush();
+        queue = undefined;
+      };
+      const dropQueue = (): void => {
+        queue?.clear();
+        queue = undefined;
       };
 
       return {
@@ -445,6 +466,12 @@ export const createWebSocketTransportClient = (
                   let lastError: unknown;
                   // the status and the mark of an upgrade the server refused, where it can be read
                   let refused: string | undefined;
+                  // its raw socket, which `ws` shows with the response to its upgrade
+                  let raw: IRawSocketLike | undefined;
+
+                  socket.on?.('upgrade', (response) => {
+                    raw = response.socket;
+                  });
 
                   // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever;
                   // a `terminate` that throws fails the connect here, its cause what it threw, since
@@ -530,6 +557,8 @@ export const createWebSocketTransportClient = (
                         return undefined;
                       }
 
+                      beating?.heard();
+
                       return (hold.offer({ credential: undefined, data: data as Data }), undefined);
                     };
 
@@ -547,6 +576,7 @@ export const createWebSocketTransportClient = (
 
                     const closed = (): void => {
                       stopBeating();
+                      dropQueue();
                       hold.drop();
 
                       // ! a reconnection's attempt closed before its connect ended: the connect
@@ -576,13 +606,14 @@ export const createWebSocketTransportClient = (
                     socket.onclose = closed;
                     // ! a heartbeat's drop that throws is the connection's error, and its end is
                     // told here, since that socket may never close: what it does after goes unheard
-                    beating = beatOf(socket, (reason) => {
+                    beating = beatOf({ raw, socket }, (reason) => {
                       failure ??= toError(reason);
                       socket.onerror = noop;
                       socket.onclose = noop;
                       socket.onmessage = noop;
                       closed();
                     });
+                    queue = beating === undefined ? undefined : createSendQueue(socket);
                     carried = written;
 
                     // * read no further until its connect ends, so nothing is heard before it, and
@@ -783,6 +814,7 @@ export const createWebSocketTransportClient = (
             };
 
             try {
+              flushQueue();
               socket.close(1000); // @see https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
             } catch (reason) {
               return (reject(wrapReason(ProgrammerError, reason)), undefined);
@@ -844,7 +876,12 @@ export const createWebSocketTransportClient = (
               return (reject(notOpenOf(getReadyState(client))), undefined);
             }
 
-            socket.send(data);
+            // behind what its queue holds, over `ws`, its ping going ahead of it (spec 15.3)
+            if (queue === undefined) {
+              socket.send(data);
+            } else {
+              queue.send(data, bytesOf(data));
+            }
 
             return (resolve(), undefined);
           });
@@ -870,15 +907,17 @@ export const createWebSocketTransportClient = (
           socket.onopen = noop;
 
           // a connecting socket is aborted rather than left to open; `close()` ends the handshake on
-          // both implementations
+          // both implementations, behind what its queue holds
           if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
             try {
+              flushQueue();
               socket.close();
             } catch {
               /* a close that throws changes nothing: the socket is dropped below either way */
             }
           }
 
+          dropQueue();
           client.socket = null;
         },
       };

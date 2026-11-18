@@ -42,7 +42,7 @@ import {
   reachedByLocalhost,
   sendRefusalOf,
   sockets,
-  spyIntervals,
+  spyTimeouts,
   startServer,
   stopServer,
   trapUncaught,
@@ -3353,7 +3353,7 @@ test.describe('WebSocketTransportClient, its close timeout', () => {
 });
 
 test.describe('WebSocketTransportClient, heartbeat', () => {
-  test('pings its server every heartbeat over a socket that can, and closes at the beat after a ping it left unanswered', async () => {
+  test('pings its server once silent for its heartbeat over a socket that can, and closes once its ping’s echo has not come within its heartbeat', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
     const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
@@ -3368,7 +3368,7 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     socket?.fireOpen();
     await connecting;
 
-    // dropped at the beat after, as a network drops it
+    // dropped a heartbeat past the ping it left unanswered, as a network drops it
     expect(await closed).toEqual([false, false]);
     expect([socket?.pings, socket?.wasTerminated]).toEqual([4, true]);
     expect(client.isClosed()).toBe(true);
@@ -3409,20 +3409,18 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     expect(told).toHaveLength(2);
   });
 
-  test('beats every HEARTBEAT when told nothing', async () => {
-    using timers = spyIntervals();
+  test('pings once silent for HEARTBEAT when told nothing', async () => {
+    using timeouts = spyTimeouts();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
     const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
+    // what is armed once open, its connect's own timeout armed before
+    const before = timeouts.delays.length;
 
     made[0]?.fireOpen();
     await connecting;
 
-    expect(
-      timers.armed.map(({ delay }) => {
-        return delay;
-      })
-    ).toEqual([HEARTBEAT]);
+    expect(timeouts.delays.slice(before)).toEqual([HEARTBEAT]);
     // asks for the root over ws within 30 seconds, and names no host nor port of its own
     expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
 

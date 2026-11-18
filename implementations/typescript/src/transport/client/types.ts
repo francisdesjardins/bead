@@ -342,9 +342,17 @@ export interface IMessageEventLike {
   data: unknown;
 }
 
-/** The response to an upgrade refused, as `ws` hands it over: Node's. */
+/** The raw socket under a WebSocket, as `ws` shows it with its upgrade's response. */
+export interface IRawSocketLike {
+  /** Each read of it, what a heartbeat counts as read (spec 15.3). */
+  on?(event: 'data', listener: () => void): unknown;
+}
+
+/** The response to an upgrade, as `ws` hands it over: Node's. */
 export interface IUpgradeResponseLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** The socket it came on, which the WebSocket keeps once upgraded. */
+  readonly socket?: IRawSocketLike | undefined;
   readonly statusCode?: number | undefined;
   /** Reads its body to its end, unread, so its socket is free to go. */
   resume?(): unknown;
@@ -353,6 +361,8 @@ export interface IUpgradeResponseLike {
 /** The part of a WebSocket this transport touches — met by the global `WebSocket` and by `ws`. */
 export interface IWebSocketLike {
   binaryType: string;
+  /** The bytes handed to it that its socket has not taken yet. */
+  readonly bufferedAmount?: number | undefined;
   /**
    * The subprotocol its upgrade took, empty for none, once open (WHATWG WebSockets §2.2): the
    * global `WebSocket` and `ws` carry it; an injected socket without it is not judged by it.
@@ -364,8 +374,13 @@ export interface IWebSocketLike {
   onmessage: Handler<IMessageEventLike> | null;
   onopen: Handler<unknown> | null;
   close(code?: number, reason?: string): void;
-  /** `ws`'s alone: a browser's socket cannot ping, and answers its server's pings by itself. */
-  on?(event: 'pong', listener: () => void): unknown;
+  /**
+   * `ws`'s alone: a pong read and the data it carries (RFC 6455 §5.5.3); a browser's socket cannot
+   * ping, and answers its server's pings by itself.
+   */
+  on?(event: 'pong', listener: (data: Uint8Array) => void): unknown;
+  /** As `on`: an upgrade answered 101, its response and the socket it came on. */
+  on?(event: 'upgrade', listener: (response: IUpgradeResponseLike) => void): unknown;
   /**
    * As `on`: an upgrade answered by any status but 101, its response readable (RFC 6455 §4.1),
    * which a browser's socket never shows.
@@ -379,11 +394,15 @@ export interface IWebSocketLike {
    * browser's socket has none.
    */
   pause?(): void;
-  /** As `on`. */
-  ping?(): void;
+  /** As `on`: a ping carrying `data`, ahead of what it was not handed yet. */
+  ping?(data: Uint8Array): void;
   /** As `pause`: reads its socket again. */
   resume?(): void;
-  send(data: Data): void;
+  /**
+   * Sends `data`; `ws`'s calls `callback` once it is written out, what wakes the transport's queue
+   * while it holds a `bufferedAmount`.
+   */
+  send(data: Data, callback?: (error?: Error) => void): void;
   /** As `on`: drops the socket without a close handshake. */
   terminate?(): void;
 }
@@ -465,10 +484,11 @@ export interface IWebSocketTransportClientOptions extends ITransportClientOption
    */
   closeTimeout?: number | undefined;
   /**
-   * Milliseconds between two pings of the server, rounded to the nearest whole one, from 1 to
-   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a server that has not answered one by the next
-   * is dropped, and the client closes. Defaults to {@link HEARTBEAT}. Only a socket that can ping
-   * beats — `ws`'s; a browser's cannot, and its server's pings stand for it.
+   * Milliseconds the server is silent before it is pinged, and a ping waits for its echo, rounded to
+   * the nearest whole one, from 1 to 2³¹ − 1, and `Infinity` for none; 0 is refused: a server whose
+   * echo has not come within it is dropped, and the client closes (spec 15.3). Defaults to
+   * {@link HEARTBEAT}. Only a socket that can ping beats — `ws`'s; a browser's cannot, and its
+   * server's pings stand for it.
    */
   heartbeat?: number | undefined;
   /**

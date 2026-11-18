@@ -224,6 +224,7 @@ ProcedureKind	ProcedureKind [choice]	ProcedureKind [choice]	ProcedureKind [choic
 ProcedureSeries	IProcedureSeries [record]	ProcedureSeries [record]	ProcedureSeries [record]	same
 ProgrammerError	ProgrammerError [record]	-	ProgrammerError [record]	same
 ProtocolCode	ProtocolCode [choice]	ProtocolCode [choice]	ProtocolCode [choice]	same
+RawSocketLike	IRawSocketLike [record]	-	-	own: the raw socket `ws` shows under a WebSocket, whose reads its heartbeat counts, where the other sides count them in their own stream (0007)
 ReadViolations	IReadViolations [record]	ReadViolations [record]	ReadViolations [record]	same
 ReadyState	ReadyState [choice]	ReadyState [choice]	ReadyState [choice]	same
 ReadyStateError	ReadyStateError [record]	ReadyStateException [record]	ReadyStateError [record]	rendered: error (0007, 0044)
