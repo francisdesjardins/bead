@@ -1235,6 +1235,133 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     started.stop().await;
 }
 
+// spec 15.12; RFC 9112 §9.6: hyper reads no request behind an answer that closes
+#[tokio::test]
+async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
+ {
+    let started = started(&HttpTransportServerOptions {
+        exchange_timeout: Some(Duration::from_millis(300)),
+        maximum_body_bytes: Some(16),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let (_, dropped) = connect(&started).await;
+    let drawn = started.recorder.told().connections.len();
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let send_on = |token: &str, version: &str| {
+        format!(
+            "POST /bead {version}\r\nHost: {HOST}:{port}\r\n{bead}\r\n{CONNECTION_TOKEN_HEADER}: {token}\r\n"
+        )
+    };
+    let call = envelope_of(REQUEST, (7, 0));
+    // * a connect pipelined behind each, in the same write
+    let pipelined = head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"]));
+    let filler = core::iter::repeat_n('a', 17).collect::<String>();
+    let mut called = format!(
+        "{}Connection: keep-alive\r\nContent-Length: {}\r\n\r\n",
+        send_on(&dropped, "HTTP/1.0"),
+        call.len()
+    )
+    .into_bytes();
+
+    called.extend_from_slice(&call);
+
+    for (first, status) in [
+        // a refusal of a body that still comes
+        (
+            format!("POST /other HTTP/1.1\r\nHost: {HOST}:{port}\r\nContent-Length: 4\r\n\r\nabcd")
+                .into_bytes(),
+            "404",
+        ),
+        // a body declared past maximum_body_bytes, then one past it as it comes
+        (
+            format!(
+                "{}Content-Length: 17\r\n\r\n{filler}",
+                send_on(&token, "HTTP/1.1")
+            )
+            .into_bytes(),
+            "413",
+        ),
+        (
+            format!(
+                "{}Transfer-Encoding: chunked\r\n\r\n11\r\n{filler}\r\n0\r\n\r\n",
+                send_on(&token, "HTTP/1.1")
+            )
+            .into_bytes(),
+            "413",
+        ),
+        // an HTTP/1.0 call kept alive, dropped past its exchange timeout
+        (called, "200"),
+    ] {
+        let mut request = first;
+
+        request.extend_from_slice(pipelined.as_bytes());
+
+        let answer = read_to_end_of(port, &request).await;
+
+        // one answer, which closes its connection
+        assert!(
+            answer.starts_with(&format!("HTTP/1.1 {status} "))
+                || answer.starts_with(&format!("HTTP/1.0 {status} ")),
+            "{answer}"
+        );
+        assert_eq!(answer.matches("HTTP/1.").count(), 1, "one answer: {answer}");
+    }
+
+    assert_eq!(
+        started.recorder.told().connections.len(),
+        drawn,
+        "no connect pipelined"
+    );
+    started.stop().await;
+}
+
+// RFC 9112 §9.3
+#[tokio::test]
+async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_in_its_turn() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+    let mut request =
+        format!("POST /other HTTP/1.1\r\nHost: {HOST}:{port}\r\nContent-Length: 0\r\n\r\n");
+
+    request.push_str(&head_of(
+        ("POST", "/bead"),
+        (port, &[&bead, "Content-Length: 0"]),
+    ));
+    socket.write_all(request.as_bytes()).await.unwrap();
+
+    let mut read = Vec::new();
+    let mut buffer = [0_u8; 4_096];
+
+    while text_of_latin1(&read).matches("HTTP/1.1 ").count() < 2 {
+        let count = patience(PATIENCE, socket.read(&mut buffer))
+            .await
+            .expect("read within patience")
+            .unwrap();
+
+        assert_ne!(count, 0, "kept: {}", text_of_latin1(&read));
+        read.extend_from_slice(&buffer[..count]);
+    }
+
+    let answer = text_of_latin1(&read);
+    let statuses = answer
+        .split("HTTP/1.1 ")
+        .skip(1)
+        .map(|each| each.get(..3).unwrap_or_default())
+        .collect::<Vec<_>>();
+
+    // the refusal, then the connect it drew
+    assert_eq!(statuses, ["404", "201"], "{answer}");
+    assert_eq!(started.server.clients().len(), 1, "the connect drawn");
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;

@@ -2140,6 +2140,84 @@ test('refuses 400 unmarked a request whose Transfer-Encoding lists anything afte
   expect(drawn).toBe(0);
 });
 
+// spec 15.12; transcoding 10.1; RFC 9112 §9.6
+test('serves no request pipelined behind an answer that closes its connection, whatever closes it, and closes that connection', async () => {
+  await using fixture = await startTranscoding({ maximumBodyBytes: 16 });
+  const { port } = fixture;
+  const own = `127.0.0.1:${String(port)}`;
+  const echo = `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n`;
+  const body = '{"aString":"0123"}';
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+
+  for (const [first, status, calls] of [
+    // a refusal of a body that still comes, its connection closed in stages
+    [
+      `POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\n` +
+        `content-length: 2\r\n\r\n{}`,
+      403,
+      0,
+    ],
+    // a body declared past maximumBodyBytes, then one past it as it comes
+    [`${echo}content-length: ${String(body.length)}\r\n\r\n${body}`, 413, 0],
+    [`${echo}transfer-encoding: chunked\r\n\r\n12\r\n${body}\r\n0\r\n\r\n`, 413, 0],
+    // a stream asked over HTTP/1.0 kept alive, its head ending it, which Node closes for want of a
+    // length
+    [
+      `HEAD /v1/watch HTTP/1.0\r\nhost: ${own}\r\naccept: text/event-stream\r\n` +
+        'connection: keep-alive\r\n\r\n',
+      200,
+      1,
+    ],
+  ] as const) {
+    drawn.length = 0;
+
+    const socket = opened(port, `${first}GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`);
+    const chunks: Buffer[] = [];
+
+    socket.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    await new Promise((resolve) => {
+      socket.on('close', resolve);
+    });
+
+    // one answer, which closes its connection, and the call it made alone
+    const came = Buffer.concat(chunks).toString('latin1');
+
+    expect(came).toMatch(new RegExp(`^HTTP/1\\.1 ${String(status)} `, 'u'));
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(drawn).toHaveLength(calls);
+  }
+});
+
+// RFC 9112 §9.3
+test('serves a request pipelined behind an answer that keeps its connection, in its turn', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const socket = opened(fixture.port, `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(2));
+  const chunks: Buffer[] = [];
+  const received = (): string => {
+    return Buffer.concat(chunks).toString('latin1');
+  };
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  await until(() => {
+    return received().split('HTTP/1.1 ').length === 3;
+  });
+  socket.destroy();
+
+  // the book, twice, each kept alive
+  expect(received()).toMatch(/^HTTP\/1\.1 200 [^]*HTTP\/1\.1 200 /u);
+  expect(received().toLowerCase()).not.toContain('connection: close');
+});
+
 test('resets over HTTP/2 the stream of a request whose target or a field holds an octet past visible ASCII, PROTOCOL_ERROR, nothing written', async () => {
   await using fixture = await startTranscoding();
   await using gateway = createHTTPGateway({

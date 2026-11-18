@@ -73,8 +73,8 @@ import {
   headerOf,
   type IEnd,
   type IExchangeIn,
+  inTurn,
   isBeadBody,
-  isBehindRefusal,
   joinedOf,
   linesOf,
   listeningOf,
@@ -1020,14 +1020,8 @@ export const createHTTPTransportServer = (
         { bodyGracePeriod, clock, maximumBodyBytes, minimumBodyBytesPerSecond }
       );
 
-      const onExchange: HTTPRequestListener = (request, response) => {
+      const serveExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
-
-        // ! a request pipelined behind one refused is left unread, its socket closing behind that
-        // refusal: Node hands it on all the same
-        if (isBehindRefusal(request)) {
-          return undefined;
-        }
 
         // * a field or a target past visible ASCII, or a target holding a #, before anything else:
         // Node's parser answers a control character itself and hands a # on, nghttp2 in :path too,
@@ -1133,6 +1127,13 @@ export const createHTTPTransportServer = (
         }
 
         return (receive(exchange, connection), undefined);
+      };
+
+      // ! over HTTP/1, an exchange in its socket's turn, and none behind an answer that closes
+      const onExchange: HTTPRequestListener = (request, response) => {
+        inTurn({ request, response }, () => {
+          serveExchange(request, response);
+        });
       };
 
       return {

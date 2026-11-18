@@ -1822,6 +1822,88 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_refusals);
     }
 
+    // spec 15.12; RFC 9112 §9.6: Kestrel reads no request behind an answer that closes
+    [Fact]
+    public async Task Serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
+    {
+        var exchangeTimeout = TimeSpan.FromMilliseconds(300);
+
+        await Start(new HttpTransportServerOptions { ExchangeTimeout = exchangeTimeout, MaximumBodyBytes = 16 });
+
+        var (connectionToken, _) = await Connect();
+        var (dropped, _) = await Connect();
+        var drawn = _connections.Count;
+        var bead = $"Content-Type: {HttpTransport.MediaType}\r\n";
+        var call = EnvelopeOf(EnvelopeKind.Request, 7);
+
+        // * a connect pipelined behind each, in the same write
+        var pipelined = Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\n{bead}Content-Length: 0\r\n\r\n");
+
+        string SendOn(string token, string version)
+        {
+            return $"POST /bead {version}\r\nHost: {Host}\r\n{bead}{HttpTransport.ConnectionTokenHeader}: {token}\r\n";
+        }
+
+        (byte[] First, int Status)[] requests =
+        [
+            // a refusal of a body that still comes
+            (Encoding.ASCII.GetBytes($"POST /other HTTP/1.1\r\nHost: {Host}\r\nContent-Length: 4\r\n\r\nabcd"), 404),
+            // a body declared past MaximumBodyBytes, then one past it as it comes
+            (Encoding.ASCII.GetBytes($"{SendOn(connectionToken, "HTTP/1.1")}Content-Length: 17\r\n\r\n{new string('a', 17)}"), 413),
+            (Encoding.ASCII.GetBytes($"{SendOn(connectionToken, "HTTP/1.1")}Transfer-Encoding: chunked\r\n\r\n11\r\n{new string('a', 17)}\r\n0\r\n\r\n"), 413),
+        ];
+
+        foreach (var (first, status) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. first, .. pipelined]);
+
+            var (head, _) = await wire.Read();
+
+            // one answer, which closes its connection
+            Assert.Equal((status, "close"), (head.Status, head.Headers["connection"]));
+            Assert.True(await wire.IsClosed());
+        }
+
+        // an HTTP/1.0 call kept alive, whose head Kestrel closes for want of a length, then dropped
+        // past its ExchangeTimeout
+        using (var wire = await Wire.Open(_port))
+        {
+            await wire.Write([.. Encoding.ASCII.GetBytes($"{SendOn(dropped, "HTTP/1.0")}Connection: keep-alive\r\nContent-Length: {call.Length}\r\n\r\n"), .. call, .. pipelined]);
+            await HeadsGo();
+
+            var head = await wire.ReadHead();
+
+            Assert.Equal((200, "close"), (head.Status, head.Headers["connection"]));
+
+            _time.Advance(exchangeTimeout - HeadDelay);
+
+            Assert.True(await wire.IsClosed());
+        }
+
+        // no pipelined connect drawn
+        Assert.Equal(drawn, _connections.Count);
+    }
+
+    // RFC 9112 §9.3
+    [Fact]
+    public async Task Serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_in_its_turn()
+    {
+        await Start();
+
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write($"POST /other HTTP/1.1\r\nHost: {Host}\r\nContent-Length: 0\r\n\r\nPOST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+        var (refused, _) = await wire.Read();
+        var (drawn, _) = await wire.Read();
+
+        // the refusal, then the connect it drew
+        Assert.Equal((404, 201), (refused.Status, drawn.Status));
+        Assert.Single(_server.Clients);
+    }
+
     // spec 15.12
     [Fact]
     public async Task Refuses_400_unmarked_a_client_s_own_X_Content_Length_beside_a_Transfer_Encoding_which_reads_as_the_one_Kestrel_writes_and_takes_one_with_no_Transfer_Encoding()
