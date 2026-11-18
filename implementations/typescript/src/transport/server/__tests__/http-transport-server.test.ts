@@ -1979,6 +1979,52 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(await answerOverHTTP2(session, { 'content-length': '0' })).toEqual([201, undefined]);
   });
 
+  // spec 15.12
+  test('resets over HTTP/2 the stream of a request carrying a connection-specific field, a transfer-encoding with a content-length beside it or none, a keep-alive, a proxy-connection or an upgrade', async () => {
+    await using started = await startSecure();
+    const { port, server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 resets each before the transport reads the request (RFC 9113 §8.2.2)
+    expect(
+      await Promise.all(
+        [
+          [['transfer-encoding', 'chunked']],
+          [
+            ['transfer-encoding', 'chunked'],
+            ['content-length', '0'],
+          ],
+          [
+            ['content-length', '0'],
+            ['transfer-encoding', 'chunked'],
+          ],
+          [['transfer-encoding', 'identity']],
+          [['keep-alive', 'timeout=5']],
+          [['proxy-connection', 'keep-alive']],
+          [['upgrade', 'websocket']],
+        ].map((fields) => {
+          return rawResetOverHTTP2(port, fields as [string, string][]);
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 7 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // none of them, a connect drawn
+    expect(await answerOverHTTP2(session, {})).toEqual([201, undefined]);
+  });
+
   test('resets over HTTP/2 the stream of a request whose target holds a #, PROTOCOL_ERROR, nothing written, and serves one that holds an encoded #', async () => {
     await using started = await startSecure();
     const { server, session } = started;
@@ -2230,6 +2276,46 @@ test.describe('createHTTPTransportServer, over TLS', () => {
 });
 
 test.describe('createHTTPTransportServer, its edges', () => {
+  // spec 15.12
+  test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding, in either order, over HTTP/1.0 too, and closes its connection before a request smuggled behind it is read', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect behind the chunked body, which the Content-Length covers and the
+    // Transfer-Encoding leaves to be read as the next request (RFC 9112 §11.2)
+    const smuggled = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+    const body = `${cancel.length.toString(16)}\r\n${cancel}\r\n0\r\n\r\n${smuggled}`;
+    const length = `Content-Length: ${String(body.length)}`;
+
+    for (const [version, framing] of [
+      ['HTTP/1.1', `Transfer-Encoding: chunked\r\n${length}`],
+      ['HTTP/1.1', `${length}\r\nTransfer-Encoding: chunked`],
+      ['HTTP/1.0', `Transfer-Encoding: chunked\r\n${length}`],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead ${version}\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n${framing}\r\n\r\n${body}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the smuggled connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
   test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
     const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });

@@ -1031,6 +1031,93 @@ async fn serves_over_http_1_1_a_request_whose_content_length_names_one_number_in
     started.stop().await;
 }
 
+// what `request` written raw on `port` is answered, read to its socket's end, its octets as text
+async fn read_to_end_of(port: u16, request: &[u8]) -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+    let mut read = Vec::new();
+
+    socket.write_all(request).await.unwrap();
+    patience(PATIENCE, socket.read_to_end(&mut read))
+        .await
+        .expect("its socket ended within patience")
+        .unwrap();
+    text_of_latin1(&read)
+}
+
+// spec 15.12: hyper drops a Content-Length beside a Transfer-Encoding in either order, reads the
+// body by its Transfer-Encoding alone (`proto/h1/role.rs`, 286 and 296-297), and closes the
+// connection once answered (359)
+#[tokio::test]
+async fn serves_over_http_1_1_a_request_carrying_a_content_length_beside_a_transfer_encoding_by_its_transfer_encoding_alone_its_connection_closed_as_hyper_hands_it_on()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let presented = format!("{CONNECTION_TOKEN_HEADER}: {token}");
+    let cancel = envelope_of(CANCEL, (5, 0));
+
+    // * a connect behind the chunked body, which the Content-Length covers and the
+    // Transfer-Encoding leaves to be read as the next request (RFC 9112 §11.2)
+    let mut body = format!("{:x}\r\n", cancel.len()).into_bytes();
+
+    body.extend_from_slice(&cancel);
+    body.extend_from_slice(b"\r\n0\r\n\r\n");
+    body.extend_from_slice(
+        head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"])).as_bytes(),
+    );
+
+    let length = format!("Content-Length: {}", body.len());
+    let mut answers = Vec::new();
+
+    for framing in [
+        ["Transfer-Encoding: chunked", length.as_str()],
+        [length.as_str(), "Transfer-Encoding: chunked"],
+    ] {
+        let mut request = head_of(
+            ("POST", "/bead"),
+            (port, &[&bead, &presented, framing[0], framing[1]]),
+        )
+        .into_bytes();
+
+        request.extend_from_slice(&body);
+        answers.push(read_to_end_of(port, &request).await);
+    }
+
+    // its cancel handed on, 204, one answer, its socket closed behind it
+    for answer in &answers {
+        assert!(answer.starts_with("HTTP/1.1 204 "), "{answer}");
+        assert_eq!(
+            answer.matches("HTTP/1.1 ").count(),
+            1,
+            "one answer: {answer}"
+        );
+    }
+
+    assert_eq!(started.server.clients().len(), 1, "no connect smuggled");
+
+    // a connect, which no Transfer-Encoding is, its own 400 malformed
+    let connect = head_of(
+        ("POST", "/bead"),
+        (
+            port,
+            &[&bead, "Transfer-Encoding: chunked", "Content-Length: 0"],
+        ),
+    );
+    let answer = read_to_end_of(port, format!("{connect}0\r\n\r\n").as_bytes()).await;
+
+    assert!(answer.starts_with("HTTP/1.1 400 "), "{answer}");
+    assert!(
+        answer
+            .to_ascii_lowercase()
+            .contains(&format!("{REFUSAL_HEADER}: malformed")),
+        "{answer}"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;
