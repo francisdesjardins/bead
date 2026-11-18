@@ -3328,9 +3328,84 @@ async fn drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartb
         "dropped"
     );
 
-    // told closed, unclean, while still paused (docs/support.md, "A paused connection its own
-    // heartbeat drops")
+    // told closed, unclean, while still paused
     assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let mut heard = heard_on(&mut peer, Duration::from_secs(2)).await;
+
+    assert!(
+        matches!(heard, Some(crate::testing::wire::Heard::Ping(_))),
+        "a ping"
+    );
+
+    // * paused once it pinged, outside the hand of a message, as a router pauses on another
+    // connection's turn: its read already waits on its peer, and reads nothing more of it
+    server.pause(&handle);
+
+    for _ in 0..20 {
+        let Some(crate::testing::wire::Heard::Ping(data)) = &heard else {
+            break;
+        };
+
+        peer.socket.write_all(&pong_of(data)).await.unwrap();
+        heard = heard_on(&mut peer, Duration::from_secs(2)).await;
+    }
+
+    assert_eq!(heard, Some(crate::testing::wire::Heard::End), "dropped");
+
+    // told closed, unclean, while still paused
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops nothing of
+// one not paused
+#[tokio::test]
+async fn delivers_each_of_300_messages_its_peer_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close_clean()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let payloads: Vec<[u8; 2]> = (0_u16..300).map(u16::to_be_bytes).collect();
+    let mut bytes: Vec<u8> = payloads
+        .iter()
+        .flat_map(|payload| masked_frame(0x2, (payload, true)))
+        .collect();
+
+    bytes.extend(masked_frame(0x8, (&[0x03, 0xe8], true)));
+    peer.socket.write_all(&bytes).await.unwrap();
+    peer.socket.shutdown().await.unwrap();
+
+    assert_eq!(recorder.closes(1).await, vec![(true, handle)], "clean");
+
+    let delivered: Vec<Vec<u8>> = recorder
+        .messages(300)
+        .await
+        .into_iter()
+        .map(|(message, _)| message.data.to_vec())
+        .collect();
+
+    assert_eq!(
+        delivered,
+        payloads
+            .iter()
+            .map(|payload| payload.to_vec())
+            .collect::<Vec<_>>(),
+        "each, in order"
+    );
     stopped(&server).await;
 }
 

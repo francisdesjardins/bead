@@ -3405,10 +3405,72 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
             Assert.Null(await FrameFrom(stream));
 
-            // ! told closed, unclean, only once resumed: its read loop waits in Resumed() while
-            // paused (docs/support.md, "A paused connection its own heartbeat drops")
-            _server.Resume(connectionHandle);
+            // told closed, unclean, while still paused
             Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var frame = await FrameFrom(stream);
+
+            // * paused once it pinged, outside the hand of a message, as a router pauses on another
+            // connection's turn: its read already waits on its peer, and reads nothing more of it
+            _server.Pause(connectionHandle);
+
+            for (var pings = 0; frame is { Opcode: 0x9 } ping && pings < 20; pings += 1)
+            {
+                await stream.WriteAsync(PongOf(ping.Payload), Cancelled);
+                frame = await FrameFrom(stream);
+            }
+
+            Assert.Null(frame);
+
+            // told closed, unclean, while still paused
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops
+    // nothing of one not paused
+    [Fact]
+    public async Task Delivers_each_of_300_messages_its_peer_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close_clean()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        var bytes = new List<byte>();
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            bytes.AddRange(FrameOf((0x82, [(byte)(index >> 8), (byte)index])));
+        }
+
+        bytes.AddRange(FrameOf((0x88, [0x03, 0xE8])));
+
+        using (tcp)
+        {
+            await tcp.GetStream().WriteAsync(bytes.ToArray(), Cancelled);
+            tcp.Client.Shutdown(SocketShutdown.Send);
+            Assert.Equal((true, connectionHandle), await Next(_closes));
+        }
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            var (message, _) = await Next(_messages);
+
+            Assert.Equal([(byte)(index >> 8), (byte)index], message.Bytes.ToArray());
         }
     }
 

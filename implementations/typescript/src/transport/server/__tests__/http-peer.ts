@@ -49,6 +49,8 @@ export interface IExchange {
   readonly localPort: number | undefined;
   readonly reader: IResponseReader;
   destroy(): void;
+  /** Ends its socket's writing, a FIN, what the server sends still heard. */
+  end(): void;
   /**
    * The next thing the server sends on its WebSocket, or none within `within` milliseconds; rejects
    * once a frame of a reserved opcode came, which ends the socket.
@@ -536,6 +538,9 @@ export const openExchange = (
     },
     destroy: () => {
       socket.destroy();
+    },
+    end: () => {
+      socket.end();
     },
     write: (bytes) => {
       socket.write(bytes);

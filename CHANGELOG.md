@@ -28,8 +28,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts its stream's reads and queues its ping at the front. The WebSocket cases of
   `spec/transports.json` take a `wait` step, and four cases more play the rule; the support matrix's
   open heartbeat row closes, a pong that waits behind a frame longer than `heartbeat` is a row of
-  its "Leveled down", a paused connection its own heartbeat drops is an open row, the C# side
-  telling its close only once the connection resumes, and `UNTESTED_OPEN` is 45.
+  its "Leveled down", and `UNTESTED_OPEN` is 44.
 - The spec, its transcoding and its companion say what holds where the 0.15.0 review found them
   short: `PAYLOAD_INVALID`'s detail as the one a requester reads (7.6); which of step 7's failed
   checks a detail names (5.2); a `localhost` name trusted without Secure Contexts' condition on its
@@ -41,6 +40,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# WebSocket server tells the close of a connection it paused and its own heartbeat dropped
+  at once, while still paused, as the TypeScript and Rust sides do (spec 15.3, 15.12). Its
+  request's abort tells the connection's read gate that its socket ended, so a peer's FIN or a reset
+  ends a paused connection as soon, what it held dropped with it; one not paused reads on and drops
+  nothing. A pause also holds against a read already waiting on the socket, each read of the
+  upgrade's stream passing the gate: a paused connection reads nothing more of its peer, whose
+  pongs no longer keep it open.
 - A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
   "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
   `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,

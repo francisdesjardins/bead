@@ -214,15 +214,18 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
 
 - **WebSocket.** The C# side's `WebSocketConnection.Read` awaits a gate of its connection at each
   message's boundary, before the `ReceiveAsync` that starts a message; a message partway when the
-  pause comes is read to its end and held, one envelope at most. The TypeScript side keeps `ws`'s
-  synchronous events: `pause` calls `ws`'s `pause()`, which stops the socket, and what `ws` still
-  emits from the read it parsed is held in order, one socket read at most, 64 KiB; on resume the
-  transport hands what it holds from a microtask, the router pausing it again at the bound, and
-  resumes `ws` once nothing is held, so at most the bound is handed per task. A WebSocket client
-  with no pause, a page's or Node's global one, hands one message per task, so the count never
-  reaches a bound and its platform paces it, reading on; it still implements the pair, holding
-  while paused. **A connection that closes reads on**: one this side closes, or one of a stop under
-  way, opens its gate and reads to its peer's Close, dropping what comes
+  pause comes is read to its end and held, one envelope at most. On its server, each read of the
+  upgrade's stream passes the same gate, so a `ReceiveAsync` already waiting as the pause comes
+  reads nothing more of the socket, and the request's abort lets every wait at it go, so a paused
+  connection its heartbeat drops, or whose peer ends it, ends at once, what it held dropped with it.
+  The TypeScript side keeps `ws`'s synchronous events: `pause` calls `ws`'s `pause()`, which stops
+  the socket, and what `ws` still emits from the read it parsed is held in order, one socket read at
+  most, 64 KiB; on resume the transport hands what it holds from a microtask, the router pausing it
+  again at the bound, and resumes `ws` once nothing is held, so at most the bound is handed per
+  task. A WebSocket client with no pause, a page's or Node's global one, hands one message per task,
+  so the count never reaches a bound and its platform paces it, reading on; it still implements the
+  pair, holding while paused. **A connection that closes reads on**: one this side closes, or one of
+  a stop under way, opens its gate and reads to its peer's Close, dropping what comes
   ([RFC 6455 §7.1.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.1),
   [§7.1.2](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.2)); what it held is dropped with
   the connection. TCP's window then paces the peer.

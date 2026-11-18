@@ -40,11 +40,9 @@ internal sealed class WebSocketConnection
     private bool _isEnded;
 
     // * its read's gate (spec 15.12, decision 0046): shut while its router paused it, what its read
-    // awaits then; opened for good once the connection closes, which reads on to its peer's Close
-    // (RFC 6455 §7.1.1); under the lock
-    private bool _isReadPaused;
-    private bool _isReadingOn;
-    private TaskCompletionSource? _resumed;
+    // awaits then, and on a server each read of its socket's stream; opened for good once the
+    // connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
+    private readonly ReadGate _read;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
         : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
@@ -57,6 +55,7 @@ internal sealed class WebSocketConnection
         Socket = socket;
         _bounds = (bounds.MaximumMessageBytes, bounds.CloseTimeout);
         _pace = bounds.Pace;
+        _read = bounds.Gate ?? new ReadGate();
         _sendPace = bounds.Pace is { } pace
             ? new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = pace.MinimumSendBytesPerSecond, SendGracePeriod = pace.SendGracePeriod })
             : null;
@@ -299,18 +298,13 @@ internal sealed class WebSocketConnection
 
     /// <summary>
     /// Reads no message more, its router behind (spec 15.12): a message partway is read to its end
-    /// and held, one at most, until <see cref="Resume"/>. Nothing once it closes, which reads on.
-    /// Idempotent; it takes this connection's lock alone, never held as it delivers.
+    /// and held, one at most, until <see cref="Resume"/>; on a server, a read already waiting on
+    /// its socket reads nothing more of it. Nothing once it closes, which reads on. Idempotent; it
+    /// takes its gate's lock alone, never held as it delivers.
     /// </summary>
     public void Pause()
     {
-        lock (_gate)
-        {
-            if (!_isReadingOn)
-            {
-                _isReadPaused = true;
-            }
-        }
+        _read.Pause();
     }
 
     /// <summary>
@@ -326,42 +320,19 @@ internal sealed class WebSocketConnection
     // its peer's Close
     private void OpenGate(bool isForGood)
     {
-        TaskCompletionSource? resumed;
-
-        lock (_gate)
-        {
-            _isReadingOn |= isForGood;
-            _isReadPaused = false;
-            resumed = _resumed;
-            _resumed = null;
-        }
-
-        resumed?.TrySetResult();
+        _read.Open(isForGood);
     }
 
     // whether its gate opened for good, this side closing it
     private bool IsReadingOn()
     {
-        lock (_gate)
-        {
-            return _isReadingOn;
-        }
+        return _read.IsReadingOn;
     }
 
     // settles once its read may go on: at once unless its router paused it
     private Task Resumed()
     {
-        lock (_gate)
-        {
-            if (!_isReadPaused)
-            {
-                return Task.CompletedTask;
-            }
-
-            _resumed ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            return _resumed.Task;
-        }
+        return _read.Resumed();
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
@@ -470,6 +441,9 @@ internal sealed class WebSocketConnection
 
                 message.Write(buffer.AsSpan(0, received.Count));
 
+                // a message partway is read to its end, paused or not
+                _read.Partway(!received.EndOfMessage);
+
                 if (!received.EndOfMessage)
                 {
                     continue;
@@ -480,10 +454,11 @@ internal sealed class WebSocketConnection
                 message.ResetWrittenCount();
 
                 // * a message read whole past a pause is held until resumed, one at most; one this
-                // side closed meanwhile is dropped with its connection
+                // side closed meanwhile, or whose socket ended while paused, is dropped with its
+                // connection
                 await Resumed();
 
-                if (Socket.State != WebSocketState.Open || IsReadingOn())
+                if (Socket.State != WebSocketState.Open || _read.IsDropping)
                 {
                     continue;
                 }
@@ -555,7 +530,10 @@ internal sealed class WebSocketConnection
         }
     }
 
-    /// <summary>What a connection reads and closes within, and what holds what waits for its socket, a server's.</summary>
+    /// <summary>
+    /// What a connection reads and closes within, what holds what waits for its socket, and the
+    /// gate its socket's stream is read through, a server's.
+    /// </summary>
     internal sealed record Bounds
     {
         public required int MaximumMessageBytes { get; init; }
@@ -563,6 +541,8 @@ internal sealed class WebSocketConnection
         public required TimeSpan CloseTimeout { get; init; }
 
         public Pacing? Pace { get; init; }
+
+        public ReadGate? Gate { get; init; }
     }
 
     /// <summary>
