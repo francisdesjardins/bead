@@ -4018,6 +4018,64 @@ async fn a_paused_connection_closes_cleanly() {
     client.dispose();
 }
 
+// pauses its client within the hand of each message, as a router at its intake's bound pauses
+struct PausingAtOnce {
+    client: Mutex<Option<WebSocketTransportClient>>,
+}
+
+impl ClientListener for PausingAtOnce {
+    fn on_message(&self, _message: TransportMessage) {
+        if let Some(client) = self.client.lock().unwrap().as_ref() {
+            client.pause();
+        }
+    }
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_paused_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+ {
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+    let pausing = Arc::new(PausingAtOnce {
+        client: Mutex::new(Some(client.clone())),
+    });
+
+    // * paused within the hand of a message: it reads nothing more of its server, the echo of its
+    // ping among it
+    client.listen(Arc::<PausingAtOnce>::clone(&pausing));
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    socket.write_all(&frame_of(0x2, &[1])).await.unwrap();
+
+    let Some((0x9, payload)) = patience(PATIENCE, frame_from(&mut socket)).await.unwrap() else {
+        panic!("a ping");
+    };
+
+    socket.write_all(&frame_of(0xa, &payload)).await.unwrap();
+
+    assert_eq!(
+        patience(PATIENCE, frame_from(&mut socket)).await.unwrap(),
+        None,
+        "dropped"
+    );
+
+    // told closed, unclean, while still paused, and nothing else
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "unclean"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
+    pausing.client.lock().unwrap().take();
+}
+
 // spec 15.3 and 15.12
 #[tokio::test]
 async fn drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()

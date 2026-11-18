@@ -2626,6 +2626,50 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
     // spec 15.3 and 15.12
     [Fact]
+    public async Task Drops_a_connection_paused_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+        var (told, closed) = EndOf(client);
+
+        // * paused within the hand of a message, as a router at its intake's bound pauses: it reads
+        // nothing more of its server, the echo of its ping among it
+        client.Message += (_) =>
+        {
+            client.Pause();
+        };
+
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = peer.GetStream();
+
+            // a message, unmasked as a server sends it
+            await stream.WriteAsync(new byte[] { 0x82, 0x01, 0x01 }, Cancelled);
+
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+
+            byte[] pong = [0x8A, (byte)ping!.Value.Payload.Length, .. ping.Value.Payload];
+
+            await stream.WriteAsync(pong, Cancelled);
+            Assert.Null(await FrameFrom(stream));
+
+            // told closed, unclean, while still paused, and nothing else
+            await closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(new object[] { (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
     public async Task Drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
     {
         using var listener = new Listener(IPAddress.Loopback);

@@ -3786,6 +3786,38 @@ test.describe('WebSocketTransportClient, paused by its router', () => {
   });
 
   // spec 15.3 and 15.12
+  test('drops a connection paused past twice its heartbeat by its own heartbeat, its server answering every ping', async () => {
+    const server = await startServer();
+    const client = createWebSocketTransportClient({ heartbeat: 200, WebSocket: TrackedWs });
+    const connection = nextConnection(server);
+    const told = toldBy(client);
+
+    // * paused within the hand of a message, as a router at its intake's bound pauses: it reads
+    // nothing more of its server, the echo of its ping among it
+    client.on('message', () => {
+      client.pause();
+    });
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const closed = nextEvent(client, 'close');
+
+      // its server's end answers every ping it reads
+      socket.send(Uint8Array.of(1));
+      await closed;
+
+      // told closed, unclean, while still paused, and nothing else
+      expect(told).toEqual([['close', false, false]]);
+      expect(client.isClosed()).toBe(true);
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+
+  // spec 15.3 and 15.12
   test('drops a connection paused between messages past twice its heartbeat by its own heartbeat, its server answering every ping', async () => {
     const server = await startServer();
     const client = createWebSocketTransportClient({ heartbeat: 200, WebSocket: TrackedWs });
