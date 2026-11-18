@@ -1408,7 +1408,8 @@ WebSocket's address in this order, and answers the first that applies:
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
    path whose percent-decoding holds NUL, a field that holds a control character or an octet past
-   US-ASCII, or a `Content-Length` that frames no body (section 15.12), its HTTP server answers,
+   US-ASCII, a `Content-Length` that frames no body or one beside a `Transfer-Encoding`, or a
+   `Transfer-Encoding` whose final coding is not `chunked` (section 15.12), its HTTP server answers,
    unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
@@ -1868,6 +1869,20 @@ or one that names two numbers, in one line or across its lines. So is one that n
 more than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or
 read as that number: every side refuses it, since not every platform's HTTP can read it
 (`docs/support.md`, "Leveled down").
+
+A request that carries a `Content-Length` beside a `Transfer-Encoding`, in either order and
+whatever its `Content-Length` holds, is answered alike, 400 unmarked over HTTP/1.1 and at a
+WebSocket's address, before anything else of it is judged, and its connection closes once
+answered: [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) asks that such a
+message be handled as an error, and [§6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1)
+lets a server refuse it and requires the close. So is a request whose `Transfer-Encoding` does not
+end in `chunked`, a `Content-Length` beside it or none, which
+[RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) item 4 makes HTTP's own
+refusal. One platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
+`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences"). Over
+HTTP/2 a `Transfer-Encoding` is malformed
+([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)), a `Content-Length`
+beside it or none: its stream is reset `PROTOCOL_ERROR`.
 
 A request's field in more than one field line is read with its lines joined in their order by
 `, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient

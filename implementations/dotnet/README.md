@@ -699,6 +699,13 @@ them unencoded (spec 15.12).
 So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
 over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
 strips it first (RFC 9110 §5.5).
+So is one that carries a `Content-Length` beside a `Transfer-Encoding` over HTTP/1.x, which Kestrel
+hands on with the `Content-Length` removed and its value kept in an `X-Content-Length`: both
+transports and the gateway read that field back beside a `Transfer-Encoding`, a client's own among
+it, and refuse the request with `connection: close`, so its connection closes on every 10.0 patch
+(RFC 9112 §6.1). Over HTTP/2, a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an
+`upgrade`, which RFC 9113 §8.2.2 calls malformed and Kestrel hands on, has its stream reset by the
+transport and the gateway.
 
 A request names its authority by its target when the target is in absolute-form, its `Host` judged
 as one field line alone, which an HTTP/1.0 request may leave out (RFC 9112 §3.2.2), for which both

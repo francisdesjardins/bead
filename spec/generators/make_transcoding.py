@@ -3604,11 +3604,16 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
-def framed_by(lengths, *, on='a'):
-    """A POST of {} to the echo route, its Content-Length the lines given, each written as it is."""
+def framed_by(fields, *, on='a'):
+    """A POST of {} to the echo route, framed by the field lines given, each a name and a value
+    written as it is, a Content-Length's value alone standing for its line; its body in one chunk
+    beside a Transfer-Encoding."""
+    lines = [field if isinstance(field, tuple) else ('content-length', field) for field in fields]
     head = 'POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\n'
-    head += ''.join(f'content-length: {length}\r\n' for length in lengths)
-    return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': hexadecimal(b'{}')}, 'on': on}
+    head += ''.join(f'{name}: {value}\r\n' for name, value in lines)
+    coded = any(name == 'transfer-encoding' for name, _ in lines)
+    body = hexadecimal(b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}')
+    return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': body}, 'on': on}
 
 
 def json_post(path, body, fields=(), *, on='a'):
@@ -3981,7 +3986,8 @@ EXCHANGES = [
                         'body': hexadecimal(b'zz\r\n{}\r\n0\r\n\r\n')}, 'on': 'a'},
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'a'},
-              *[step for on, lengths in (('b', ['abc']), ('c', ['2, 3']), ('d', ['2', '3']))
+              *[step for on, lengths in (('b', ['abc']), ('c', ['2, 3']), ('d', ['2', '3']),
+                                         ('e', ['abc', ('transfer-encoding', 'chunked')]))
                 for step in (framed_by(lengths, on=on),
                              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
                                          'body': ''}, 'on': on})]]),
@@ -3995,6 +4001,20 @@ EXCHANGES = [
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'a'}],
              differs=[{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1',
+                       'language': 'Rust'}]),
+    # ! an exchange of its own, so that the side whose HTTP reads a Content-Length beside a
+    # Transfer-Encoding by the Transfer-Encoding alone (hyper drops the Content-Length, the row A
+    # `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1) is excused by its differs from it
+    # alone (spec 15.12); its connection's close is each side's own test
+    exchange("a body whose Content-Length comes beside a Transfer-Encoding, in either order, refused as HTTP "
+             "refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, fields in (('a', [('transfer-encoding', 'chunked'), '2']),
+                                      ('b', ['2', ('transfer-encoding', 'chunked')]))
+              for step in (framed_by(fields, on=on),
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})],
+             differs=[{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1',
                        'language': 'Rust'}]),
     exchange("what HTTP refuses of its own, unmarked, its body empty", ['7.7', '10.1', '10.1.1'],
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),

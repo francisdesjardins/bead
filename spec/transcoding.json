@@ -9052,6 +9052,24 @@
             "body": ""
           },
           "on": "d"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: abc\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "e"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "e"
         }
       ]
     },
@@ -9086,6 +9104,58 @@
             "body": ""
           },
           "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a body whose Content-Length comes beside a Transfer-Encoding, in either order, refused as HTTP refuses it, unmarked, its body empty",
+      "clauses": [
+        "10.1",
+        "10.1.1",
+        "spec:15.12"
+      ],
+      "differs": [
+        {
+          "row": "A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "b"
         }
       ]
     },
