@@ -3441,6 +3441,39 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops
+    // nothing of one not paused
+    [Fact]
+    public async Task Delivers_each_of_300_messages_its_peer_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close_clean()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        var bytes = new List<byte>();
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            bytes.AddRange(FrameOf((0x82, [(byte)(index >> 8), (byte)index])));
+        }
+
+        bytes.AddRange(FrameOf((0x88, [0x03, 0xE8])));
+
+        using (tcp)
+        {
+            await tcp.GetStream().WriteAsync(bytes.ToArray(), Cancelled);
+            tcp.Client.Shutdown(SocketShutdown.Send);
+            Assert.Equal((true, connectionHandle), await Next(_closes));
+        }
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            var (message, _) = await Next(_messages);
+
+            Assert.Equal([(byte)(index >> 8), (byte)index], message.Bytes.ToArray());
+        }
+    }
+
     // spec 15.3
     [Fact]
     public async Task Pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_that_answers_with_an_empty_pong_or_an_earlier_ping_s_echo()

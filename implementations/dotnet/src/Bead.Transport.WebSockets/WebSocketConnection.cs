@@ -41,7 +41,7 @@ internal sealed class WebSocketConnection
 
     // * its read's gate (spec 15.12, decision 0046): shut while its router paused it, what its read
     // awaits then, and on a server each read of its socket's stream; opened for good once the
-    // connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1), or its socket ends
+    // connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
     private readonly ReadGate _read;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
@@ -323,7 +323,7 @@ internal sealed class WebSocketConnection
         _read.Open(isForGood);
     }
 
-    // whether its gate opened for good, this side closing it or its socket ended
+    // whether its gate opened for good, this side closing it
     private bool IsReadingOn()
     {
         return _read.IsReadingOn;
@@ -454,10 +454,11 @@ internal sealed class WebSocketConnection
                 message.ResetWrittenCount();
 
                 // * a message read whole past a pause is held until resumed, one at most; one this
-                // side closed meanwhile is dropped with its connection
+                // side closed meanwhile, or whose socket ended while paused, is dropped with its
+                // connection
                 await Resumed();
 
-                if (Socket.State != WebSocketState.Open || IsReadingOn())
+                if (Socket.State != WebSocketState.Open || _read.IsDropping)
                 {
                     continue;
                 }

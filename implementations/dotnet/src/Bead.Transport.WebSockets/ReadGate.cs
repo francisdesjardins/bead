@@ -6,9 +6,10 @@ namespace Bead.Transport.WebSockets;
 /// <summary>
 /// A connection's read gate (spec 15.12, decision 0046): shut while its router paused it, but
 /// for a message partway, which is read to its end; opened for good once the connection closes,
-/// which reads on to its peer's Close (RFC 6455 §7.1.1), or once its socket ends. On a server, each
-/// read of its socket's stream waits at it, so a read already pending as the pause comes reads
-/// nothing more of its peer. It takes its own lock alone, never held as it settles a wait.
+/// which reads on to its peer's Close (RFC 6455 §7.1.1). On a server, each read of its socket's
+/// stream waits at it, so a read already pending as the pause comes reads nothing more of its peer,
+/// and its socket's end lets every wait go, so a paused connection ends at once. It takes its own
+/// lock alone, never held as it settles a wait.
 /// </summary>
 internal sealed class ReadGate
 {
@@ -16,10 +17,11 @@ internal sealed class ReadGate
     private bool _isPaused;
     private bool _isReadingOn;
     private bool _isPartway;
+    private bool _isEnded;
     private TaskCompletionSource? _resumed;
     private TaskCompletionSource? _readable;
 
-    /// <summary>Whether it opened for good, its connection closing or its socket ended.</summary>
+    /// <summary>Whether it opened for good, its connection closing.</summary>
     public bool IsReadingOn
     {
         get
@@ -27,6 +29,21 @@ internal sealed class ReadGate
             lock (_lock)
             {
                 return _isReadingOn;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether what it read is dropped: its connection closing, or its socket ended while its
+    /// router paused it, what it held going with the connection.
+    /// </summary>
+    public bool IsDropping
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _isReadingOn || (_isEnded && _isPaused);
             }
         }
     }
@@ -43,7 +60,7 @@ internal sealed class ReadGate
         }
     }
 
-    /// <summary>Opens it: for a resume, or for good, its connection closing or its socket ended.</summary>
+    /// <summary>Opens it: for a resume, or for good, its connection closing.</summary>
     public void Open(bool isForGood)
     {
         TaskCompletionSource? resumed;
@@ -84,12 +101,37 @@ internal sealed class ReadGate
         readable?.TrySetResult();
     }
 
-    /// <summary>Settles once a message may be handed: at once unless its router paused it.</summary>
+    /// <summary>
+    /// Its socket ended: every wait goes, and its socket's reads meet that end, paused or not. A
+    /// connection its router did not pause reads on as before, nothing it read dropped. Idempotent.
+    /// </summary>
+    public void End()
+    {
+        TaskCompletionSource? resumed;
+        TaskCompletionSource? readable;
+
+        lock (_lock)
+        {
+            _isEnded = true;
+            resumed = _resumed;
+            readable = _readable;
+            _resumed = null;
+            _readable = null;
+        }
+
+        resumed?.TrySetResult();
+        readable?.TrySetResult();
+    }
+
+    /// <summary>
+    /// Settles once a message may be handed, or dropped: at once unless its router paused it and
+    /// its socket did not end.
+    /// </summary>
     public Task Resumed()
     {
         lock (_lock)
         {
-            if (!_isPaused)
+            if (!_isPaused || _isEnded)
             {
                 return Task.CompletedTask;
             }
@@ -102,13 +144,13 @@ internal sealed class ReadGate
 
     /// <summary>
     /// Settles once its socket may be read: at once unless its router paused it with no message
-    /// partway.
+    /// partway and its socket did not end.
     /// </summary>
     public Task Readable()
     {
         lock (_lock)
         {
-            if (!_isPaused || _isPartway)
+            if (!_isPaused || _isPartway || _isEnded)
             {
                 return Task.CompletedTask;
             }
@@ -122,7 +164,7 @@ internal sealed class ReadGate
     /// <summary>
     /// Gives an upgrade a gate of its own, ahead of ASP.NET Core's WebSocket middleware: its
     /// upgrade's stream read through the gate, the gate its <c>HttpContext</c>'s feature, and
-    /// opened for good once its request is aborted.
+    /// its socket's end told it once its request is aborted.
     /// </summary>
     public static async Task Gating(HttpContext context, RequestDelegate next)
     {
@@ -151,11 +193,11 @@ internal sealed class ReadGate
             features.Set<IHttpExtendedConnectFeature>(new GatedConnect(connect, gate));
         }
 
-        // ! its socket's end, as Kestrel tells it, opens it for good, so a paused read meets that
-        // end at once: .NET's keep-alive, dropping the connection, aborts its request
+        // ! its socket's end, as Kestrel tells it, a FIN or a reset, lets a paused read meet that
+        // end at once
         using var ending = context.RequestAborted.Register(() =>
         {
-            gate.Open(true);
+            gate.End();
         });
 
         await next(context);
@@ -338,12 +380,12 @@ internal sealed class ReadGate
             return _inner.FlushAsync(cancellationToken);
         }
 
-        // its socket gone, its gate opens for good: a read waiting at it meets the end
+        // its socket gone, as .NET's keep-alive drops it: a read waiting at its gate meets the end
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                _gate.Open(true);
+                _gate.End();
                 _inner.Dispose();
             }
 
