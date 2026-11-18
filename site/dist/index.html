@@ -3478,7 +3478,9 @@ message CountDownRequest {
   <p>
     A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
     <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
-    are enough. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
+    are enough. The loopback is judged by the host the client names, never by what it resolves to:
+    where a resolver sends a <code>localhost</code> name elsewhere, the credential crosses there in
+    the clear, and naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.
   </p>
@@ -5854,7 +5856,9 @@ message CountDownRequest {
   <p>
     Un justificatif porteur ne quitte la machine que sous TLS (RFC 6750 §5.3) : <code>wss</code>,
     <code>https</code>, ou un courtier que chaque pair joint sous TLS. Sur la machine, la boucle locale, un Web Worker ou un routeur du même
-    processus suffisent. Ailleurs, l’appel échoue avant de partir avec
+    processus suffisent. La boucle locale se juge à l’hôte que le client nomme, jamais à ce qu’il
+    résout : là où un résolveur envoie un nom <code>localhost</code> ailleurs, le justificatif y
+    passe en clair, et nommer <code>127.0.0.1</code> ou <code>[::1]</code> l’évite. Ailleurs, l’appel échoue avant de partir avec
     <code>DESTINATION_UNREACHABLE</code>, et le justificatif reste. Un serveur derrière un
     mandataire TLS se déclare sûr par l’option <code>secure</code>.
   </p>
