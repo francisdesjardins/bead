@@ -938,6 +938,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         WebSocketConnection connection;
         var attempt = new CancellationTokenSource();
 
+        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12)
+        var gate = new ReadGate();
+
         try
         {
             socket.Options.KeepAliveInterval = _options.Heartbeat;
@@ -968,7 +971,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 linked.Token.ThrowIfCancellationRequested();
-                var opening = socket.ConnectAsync(UriOf(options), InvokerOf(), linked.Token);
+                using var upgrading = gate.Upgrading(InvokerOf());
+                var opening = socket.ConnectAsync(UriOf(options), upgrading, linked.Token);
                 _ = opening.ContinueWith((completed) => { _ = completed.Exception; }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 await opening.WaitAsync(linked.Token);
             }
@@ -1022,7 +1026,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
                 _connecting = null;
                 _connectDisposed = null;
-                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, CloseTimeout));
+                _connection = connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+                {
+                    MaximumMessageBytes = MaximumMessageBytes,
+                    CloseTimeout = CloseTimeout,
+                    Gate = gate,
+                });
 
                 // a pause outlasts the connection it was made on
                 if (_isPaused)

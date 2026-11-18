@@ -40,8 +40,8 @@ internal sealed class WebSocketConnection
     private bool _isEnded;
 
     // * its read's gate (spec 15.12, decision 0046): shut while its router paused it, what its read
-    // awaits then, and on a server each read of its socket's stream; opened for good once the
-    // connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
+    // awaits then, and each read of its socket's stream where its side gated it; opened for good
+    // once the connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
     private readonly ReadGate _read;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
@@ -298,8 +298,8 @@ internal sealed class WebSocketConnection
 
     /// <summary>
     /// Reads no message more, its router behind (spec 15.12): a message partway is read to its end
-    /// and held, one at most, until <see cref="Resume"/>; on a server, a read already waiting on
-    /// its socket reads nothing more of it. Nothing once it closes, which reads on. Idempotent; it
+    /// and held, one at most, until <see cref="Resume"/>; a read already waiting on its socket's
+    /// gated stream reads nothing more of it. Nothing once it closes, which reads on. Idempotent; it
     /// takes its gate's lock alone, never held as it delivers.
     /// </summary>
     public void Pause()
@@ -531,8 +531,8 @@ internal sealed class WebSocketConnection
     }
 
     /// <summary>
-    /// What a connection reads and closes within, what holds what waits for its socket, and the
-    /// gate its socket's stream is read through, a server's.
+    /// What a connection reads and closes within, what holds what waits for its socket, a
+    /// server's, and the gate its socket's stream is read through.
     /// </summary>
     internal sealed record Bounds
     {
