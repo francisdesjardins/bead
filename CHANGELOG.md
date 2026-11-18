@@ -67,6 +67,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# HTTP transport and gateway close the connection of a request that carries a
+  `Content-Length` beside a `Transfer-Encoding` over HTTP/1.x on every 10.0 patch of ASP.NET Core:
+  on Kestrel 10.0.0 to 10.0.9, or under its switch `AllowKeepAliveAfterCLTE`, they served it by its
+  `Transfer-Encoding` and kept its connection, so a request smuggled behind its chunked body was
+  served too (RFC 9112 §6.1, §11.2). Each refuses it 400 unmarked by its own `connection: close`,
+  reading the `X-Content-Length` Kestrel leaves in place of the `Content-Length` it removes, and so
+  does the WebSocket server; a client's own `X-Content-Length` beside a `Transfer-Encoding` is
+  refused alike. Over HTTP/2, the transport and the gateway reset the stream of a request that
+  carries a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC
+  9113 §8.2.2 makes malformed and Kestrel hands on, where they answered it.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.

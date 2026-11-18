@@ -1359,8 +1359,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // them, and takes a control character, or a value with a space or a tab at either end over
         // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
         // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own; and so a
-        // target past visible ASCII, which Kestrel takes as it takes a control character in a field
-        if (!HttpServerFields.HasVisibleFields(request) || !HttpServerFields.IsVisibleTarget(context))
+        // target past visible ASCII, which Kestrel takes as it takes a control character in a field,
+        // a Content-Length beside a Transfer-Encoding, its connection closed behind it over HTTP/1.x,
+        // and a connection-specific field over HTTP/2, which Kestrel hands on
+        if (!HttpServerFields.HasVisibleFields(request)
+            || !HttpServerFields.IsVisibleTarget(context)
+            || HttpServerFields.IsLengthBesideTransferEncoding(request)
+            || HttpServerFields.HasConnectionSpecificFields(request))
         {
             if (HttpServerFields.ResetMalformedFields(context))
             {
