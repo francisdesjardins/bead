@@ -152,8 +152,9 @@ By hand:
    looked at and found sound, and gives each finding its evidence (file and line, or a probe run and
    its output), a severity and a remedy. A blocker stops the version; a major ships only fixed or
    declared, as a row of the matrix or an open point; a minor is the rest.
-2. A second reader reruns each proof and gives it a verdict, confirmed, in part or refuted, and its
-   own severity. What does not reproduce is refuted.
+2. A second reader puts each finding to the code and gives it a verdict, confirmed, in part or
+   refuted, and its own severity. It reruns the proof of a blocker and a major, and of a minor only
+   where reading cannot settle it. What does not reproduce is refuted.
 3. One synthesis merges the duplicates, states whether the version can ship and under what
    conditions, and lists the work by severity.
 
