@@ -539,6 +539,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             });
             application = builder.Build();
             Built?.Invoke(application);
+
+            // * ahead of the WebSocket middleware, so each upgrade's stream is read through its gate
+            application.Use(ReadGate.Gating);
             application.UseWebSockets(new WebSocketOptions
             {
                 KeepAliveInterval = _options.Heartbeat,
@@ -902,6 +905,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 SendGracePeriod = _options.SendGracePeriod,
                 MaximumUnsentBytes = MaximumUnsentBytes,
             },
+            Gate = context.Features.Get<ReadGate>(),
         });
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held

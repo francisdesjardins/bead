@@ -3405,9 +3405,38 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
             Assert.Null(await FrameFrom(stream));
 
-            // ! told closed, unclean, only once resumed: its read loop waits in Resumed() while
-            // paused (docs/support.md, "A paused connection its own heartbeat drops")
-            _server.Resume(connectionHandle);
+            // told closed, unclean, while still paused
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var frame = await FrameFrom(stream);
+
+            // * paused once it pinged, outside the hand of a message, as a router pauses on another
+            // connection's turn: its read already waits on its peer, and reads nothing more of it
+            _server.Pause(connectionHandle);
+
+            for (var pings = 0; frame is { Opcode: 0x9 } ping && pings < 20; pings += 1)
+            {
+                await stream.WriteAsync(PongOf(ping.Payload), Cancelled);
+                frame = await FrameFrom(stream);
+            }
+
+            Assert.Null(frame);
+
+            // told closed, unclean, while still paused
             Assert.Equal((false, connectionHandle), await Next(_closes));
         }
     }
