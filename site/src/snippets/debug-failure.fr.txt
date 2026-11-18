@@ -21,7 +21,7 @@ FailureError {
   …
 }
 
-// une notification : ni aller, ni options, ni durée ; son début, quand elle arrive
+// une notification entendue : une étape qui entre, ni options, ni durée ; son début, quand elle arrive
 null, {
   direction: 'rx',
   duration: undefined,
