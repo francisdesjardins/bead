@@ -488,7 +488,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
+    public void Pings_once_silent_for_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
     {
         var options = new WebSocketTransportClientOptions();
         var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = 80 };

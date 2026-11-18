@@ -2226,7 +2226,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing()
+    public async Task Listens_on_localhost_port_80_and_pings_once_silent_for_30_seconds_when_told_nothing()
     {
         var start = new TransportServerStartOptions();
         var options = new WebSocketTransportServerOptions();
@@ -3311,6 +3311,194 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // the next frame the server sends on `stream`, its opcode and its payload, unmasked as a
+    // server's is; none once its socket ended or was reset
+    private static async Task<(int Opcode, byte[] Payload)?> FrameFrom(NetworkStream stream)
+    {
+        try
+        {
+            var head = new byte[2];
+
+            await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            var length = (long)(head[1] & 0x7F);
+
+            if (length >= 126)
+            {
+                var extended = new byte[length == 126 ? 2 : 8];
+
+                await stream.ReadExactlyAsync(extended, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                length = extended.Aggregate(0L, (sum, octet) =>
+                {
+                    return (sum << 8) | octet;
+                });
+            }
+
+            var payload = new byte[length];
+
+            await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            return (head[0] & 0x0F, payload);
+        }
+        catch (Exception reason) when (reason is EndOfStreamException or IOException)
+        {
+            return null;
+        }
+    }
+
+    // a masked pong carrying `payload`, as a client sends one
+    private static byte[] PongOf(byte[] payload)
+    {
+        return FrameOf((0x8A, payload));
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        // * paused within the hand of a message, as a router at its bound pauses: it reads nothing
+        // more of its peer, the echo of its ping among it
+        _server.Message += (_, handle) =>
+        {
+            _server.Pause(handle);
+        };
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(FrameOf((0x82, [1])), Cancelled);
+
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+            await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
+            Assert.Null(await FrameFrom(stream));
+
+            // told closed, unclean, once its router resumes it at the latest
+            _server.Resume(connectionHandle);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3
+    [Fact]
+    public async Task Pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_that_answers_with_an_empty_pong_or_an_earlier_ping_s_echo()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        byte[] first = [0, 0, 0, 0, 0, 0, 0, 1];
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+            Assert.Equal(first, ping!.Value.Payload);
+            await stream.WriteAsync(PongOf(first), Cancelled);
+            ping = await FrameFrom(stream);
+            Assert.Equal(0x9, ping?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 2], ping!.Value.Payload);
+            await stream.WriteAsync(PongOf([]), Cancelled);
+            await stream.WriteAsync(PongOf(first), Cancelled);
+            Assert.Null(await FrameFrom(stream));
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3: the ping goes behind what its socket holds alone, so the 400 messages of 64 KiB the
+    // transport holds pass what any loopback's buffers hold
+    [Fact]
+    public async Task Pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(500), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        var order = new List<int>();
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+
+            // it reads nothing, and is handed the backlog
+            for (var index = 0; index < 400; index += 1)
+            {
+                _ = _server.Send(new TransportMessage(new byte[65_536], false), connectionHandle);
+            }
+
+            // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
+            await Task.Delay(600, Cancelled);
+
+            while (order.Count < 401)
+            {
+                var frame = await FrameFrom(stream);
+
+                Assert.NotNull(frame);
+                order.Add(frame.Value.Opcode);
+
+                if (frame.Value.Opcode == 0x9)
+                {
+                    await stream.WriteAsync(PongOf(frame.Value.Payload), Cancelled);
+                }
+            }
+
+            Assert.InRange(order.IndexOf(0x9), 0, 399);
+
+            // its echo read within its heartbeat: kept
+            await Task.Delay(600, Cancelled);
+            Assert.Equal(0, _closes.Reader.Count);
+        }
+    }
+
+    // docs/support.md, "Leveled down": every side takes the echo alone, which waits behind the frame
+    [Fact]
+    public async Task Drops_a_peer_whose_echo_waits_behind_a_frame_longer_than_its_heartbeat_the_echo_alone_answering_its_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(300) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+
+            // a frame of 4,096 bytes in 16 parts, one every 30 ms, past its heartbeat, its echo after it
+            byte[] frame = [0x82, 0x80 | 126, 0x10, 0x00, 0, 0, 0, 0, .. new byte[4_096]];
+            var part = (frame.Length + 15) / 16;
+
+            try
+            {
+                for (var at = 0; at < frame.Length; at += part)
+                {
+                    await stream.WriteAsync(frame.AsMemory(at, Math.Min(part, frame.Length - at)), Cancelled);
+                    await Task.Delay(30, Cancelled);
+                }
+
+                await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
+            }
+            catch (IOException)
+            {
+                // dropped as it wrote
+            }
+
+            Assert.Null(await FrameFrom(stream));
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
     // an upgrade from behind a proxy that writes the client's address, as a socket of its own
     private static byte[] UpgradeFrom(string forwarded)
     {
@@ -4025,7 +4213,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Beats_every_HEARTBEAT_when_told_nothing()
+    public void Pings_once_silent_for_HEARTBEAT_when_told_nothing()
     {
         Assert.Equal(TimeSpan.FromSeconds(30), new WebSocketTransportServerOptions().Heartbeat);
     }
