@@ -146,6 +146,22 @@ export const joinedOf = (request: IHTTPRequestLike, name: string): string | unde
   return lines.length === 0 ? undefined : lines.join(', ');
 };
 
+// whether a body is sent as it is (spec 15.12): a Content-Encoding that lists no coding, or
+// `identity` once in any case, its empty elements ignored (RFC 9110 §5.6.1.2), as an absent one
+export const isUnencoded = (request: IHTTPRequestLike): boolean => {
+  const codings = linesOf(request, 'content-encoding')
+    .join(',')
+    .split(',')
+    .map((coding) => {
+      return coding.replace(/^[\t ]+|[\t ]+$/gu, '');
+    })
+    .filter((coding) => {
+      return coding !== '';
+    });
+
+  return codings.length === 0 || (codings.length === 1 && codings[0]?.toLowerCase() === 'identity');
+};
+
 // a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
 // 9110 §5.3): its bare item, its parameters ignored (§2.3); `null` when the request carries none,
 // `undefined` when it does not parse, two lines of it among them
@@ -219,15 +235,13 @@ export const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefi
   });
 };
 
-// a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
-// Content-Encoding, or one whose lines joined are `identity` (spec 15.12)
+// a body of Bead's media type, parameters aside, in one field line, and sent as it is (spec 15.12)
 export const isBeadBody = (request: IHTTPRequestLike): boolean => {
   // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
   const types = linesOf(request, 'content-type');
   const type = types.length === 1 ? types[0]?.split(';')[0]?.trim().toLowerCase() : undefined;
-  const encoding = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
 
-  return type === BEAD_MEDIA_TYPE && (encoding === undefined || encoding === 'identity');
+  return type === BEAD_MEDIA_TYPE && isUnencoded(request);
 };
 
 // writes an exchange's end, once: its status and headers, marked when it is a refusal

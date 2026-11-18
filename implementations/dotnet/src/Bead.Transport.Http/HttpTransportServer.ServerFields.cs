@@ -20,16 +20,15 @@ public sealed partial class HttpTransportServer
             return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
         }
 
-        // a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
-        // Content-Encoding, or one whose lines joined are identity (spec 15.12)
+        // a body of Bead's media type, parameters aside, in one field line, and sent as it is (spec
+        // 15.12)
         internal static bool IsBeadBody(HttpRequest request)
         {
             // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
             var types = request.Headers.ContentType;
             var type = (types.Count == 1 ? types[0] : null)?.Split(';')[0].Trim().ToLowerInvariant();
-            var encoding = HeaderOf(request, HeaderNames.ContentEncoding)?.Trim().ToLowerInvariant();
 
-            return type == HttpTransport.MediaType && encoding is null or "identity";
+            return type == HttpTransport.MediaType && FieldLines.IsUnencoded(request.Headers.ContentEncoding);
         }
 
         // whether a connect says its client listens: an Item whose bare item is a Boolean, its

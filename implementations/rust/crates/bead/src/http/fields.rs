@@ -203,6 +203,25 @@ impl Request<'_> {
         (!lines.is_empty()).then(|| lines.join(", "))
     }
 
+    /// Whether its body is sent as it is (spec 15.12): its `Content-Encoding` a list of no coding,
+    /// or of `identity` once, in any case; its lines joined, each element trimmed of its
+    /// whitespace, an empty one ignored (RFC 9110 §5.6.1.2), so an absent field and an empty one
+    /// list nothing.
+    pub(crate) fn is_unencoded(&self) -> bool {
+        let lines = self.lines_of("content-encoding");
+        let mut codings = lines
+            .iter()
+            .flat_map(|line| line.split(','))
+            .map(|coding| coding.trim_matches([' ', '\t']))
+            .filter(|coding| !coding.is_empty());
+
+        match (codings.next(), codings.next()) {
+            (None, _) => true,
+            (Some(coding), None) => coding.eq_ignore_ascii_case("identity"),
+            (Some(_), Some(_)) => false,
+        }
+    }
+
     /// Its fields, each name then its value, as `has_visible_fields` reads them; none when a value
     /// holds an octet that is not visible ASCII, SP or HTAB.
     pub(crate) fn raw_fields(&self) -> Option<Vec<&str>> {
@@ -251,7 +270,7 @@ impl Request<'_> {
     }
 
     /// Whether its body is of Bead's media type, parameters aside, in one field line, and sent as
-    /// it is: no `Content-Encoding`, or one whose lines joined are `identity` (spec 15.12).
+    /// it is (spec 15.12).
     pub(crate) fn is_bead_body(&self) -> bool {
         // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
         let [line] = self.lines_of("content-type")[..] else {
@@ -264,10 +283,7 @@ impl Request<'_> {
             .trim()
             .to_ascii_lowercase();
 
-        media_type == BEAD_MEDIA_TYPE
-            && self
-                .joined_of("content-encoding")
-                .is_none_or(|coding| coding.trim().eq_ignore_ascii_case("identity"))
+        media_type == BEAD_MEDIA_TYPE && self.is_unencoded()
     }
 
     /// Its authority (spec 15.12): over HTTP/1, as `authority_of` reads its `Host` and `target`;

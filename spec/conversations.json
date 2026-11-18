@@ -5959,6 +5959,7 @@
     {
       "name": "a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id",
       "clauses": [
+        "2.3",
         "9.6",
         "9.6.2"
       ],
@@ -5973,7 +5974,8 @@
             "failure": {
               "code": 2,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "0xA1"
             }
           }
         }

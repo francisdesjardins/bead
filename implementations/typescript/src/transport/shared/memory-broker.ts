@@ -18,6 +18,7 @@ import type {
   IBrokerStart,
   IBrokerSubscription,
 } from './types';
+import { assertCount } from '../server/server-bounds';
 
 export { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_BROKER } from './constants';
 export type {
@@ -147,6 +148,11 @@ const keyOf = (topic: BrokerTopic): string => {
   return topic.join('/');
 };
 
+// a bound given, held to a whole number above 0; none where it is not given
+const boundOf = (name: string, value: number | undefined): number => {
+  return value === undefined ? Infinity : assertCount(name, { value });
+};
+
 // definition
 
 /**
@@ -157,7 +163,8 @@ const keyOf = (topic: BrokerTopic): string => {
  * group. A subscription is let go once what it queued to it before was handed on. A subscriber's
  * queue drops a message past `maximumQueuedMessages`; a message past its `expiresAfter` on the clock
  * is deleted; a will is published as a link is lost or taken over, never at a stop.
- * Its handles' type is `BROKER`, and it never leaves the process, so its every leg is secure.
+ * Its handles' type is `BROKER`, and it never leaves the process, so its every leg is secure. A
+ * bound given that is not a whole number above 0 is a `ProgrammerError`.
  *
  * @example
  * const broker = createMemoryBroker();
@@ -166,12 +173,10 @@ const keyOf = (topic: BrokerTopic): string => {
  * await adapter.subscribe(['bead', 'i', 'ada']);
  */
 export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroker => {
-  const {
-    clock = PLATFORM_CLOCK,
-    delivery: brokerDelivery = BROKER_DELIVERIES.AT_LEAST_ONCE,
-    maximumMessageBytes = Infinity,
-    maximumQueuedMessages = Infinity,
-  } = options ?? {};
+  const { clock = PLATFORM_CLOCK, delivery: brokerDelivery = BROKER_DELIVERIES.AT_LEAST_ONCE } =
+    options ?? {};
+  const maximumMessageBytes = boundOf('maximumMessageBytes', options?.maximumMessageBytes);
+  const maximumQueuedMessages = boundOf('maximumQueuedMessages', options?.maximumQueuedMessages);
   const links = new Map<IMemoryBrokerAdapter, ILink>();
   const ids = new Set<string>();
   // each group's turn, by its topic and its name

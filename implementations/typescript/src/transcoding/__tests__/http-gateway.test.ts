@@ -544,12 +544,16 @@ test('answers 401 to a tab after Bearer, its separator one or more spaces', asyn
   await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
 
-  expect(
-    await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer\ta.b.c' } })
-  ).toMatchObject({
-    headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
-    status: 401,
-  });
+  // right after Bearer, or after its spaces
+  for (const authorization of ['Bearer\ta.b.c', 'Bearer \ta.b.c']) {
+    expect(
+      await send(jwt.port, { ...whoAmI, headers: { authorization } }),
+      authorization
+    ).toMatchObject({
+      headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+      status: 401,
+    });
+  }
   // two spaces present the token, which a server with no JWT verifier refuses
   expect(
     (await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer  a.b.c' } })).status

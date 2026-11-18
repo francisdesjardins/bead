@@ -388,6 +388,14 @@ test.describe('memory broker', () => {
     expect(heard).toEqual([]);
   });
 
+  test('refuses a maximumMessageBytes or a maximumQueuedMessages of 0, in its bound’s words', () => {
+    for (const name of ['maximumMessageBytes', 'maximumQueuedMessages']) {
+      expect(() => {
+        return createMemoryBroker({ [name]: 0 });
+      }, name).toThrow(new ProgrammerError(`${name} is a whole number above 0, not 0`));
+    }
+  });
+
   test('writes 1 byte for a maximumMessageBytes of 1', async () => {
     const bob = createMemoryBroker({ maximumMessageBytes: 1 }).adapter({ id: 'bob' });
 
