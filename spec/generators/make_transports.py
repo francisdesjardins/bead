@@ -999,7 +999,7 @@ cases += relayed_over_http()
 # RFC 6455 §1.3's own key, and the accept it gives
 KEY, ACCEPT = 'dGhlIHNhbXBsZSBub25jZQ==', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
 SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
-CONTINUATION, TEXT, BINARY = 0x0, 0x1, 0x2
+CONTINUATION, TEXT, BINARY, PONG = 0x0, 0x1, 0x2, 0xA
 NORMAL, GOING_AWAY, INVALID_PAYLOAD, TOO_BIG = 1000, 1001, 1007, 1009
 
 
@@ -1054,6 +1054,26 @@ def heard(on, within=None, **received):
 
 
 ECHO_HEADER, ECHO_PAYLOAD = ECHO.split(' | ')
+
+# an unsolicited pong's data, and a pong's that echoes no ping: "beat" and "other" in ASCII
+BEAT, OTHER = '62 65 61 74', '6F 74 68 65 72'
+
+
+def beat(on):
+    """An unsolicited pong the peer sends, which nothing reports: a frame read, that a ping's floor
+    counts from (spec 15.3)."""
+    return message(on, frames=[{'opcode': PONG, 'fin': True, 'payload': BEAT}])
+
+
+def waits(milliseconds):
+    return {'wait': milliseconds}
+
+
+def pinged(on, within):
+    """A ping, no sooner than 50 ms short of a heartbeat of 200 past its step's start: no side pings
+    early, and the server reads the frame before it after that step began."""
+    return {'expect': {'ping': True}, 'on': on, 'after': 150, 'within': within}
+
 
 websocket = [
     ('a binary message is one envelope, and its answer one binary message', ['15.2'], {}, [
@@ -1391,12 +1411,41 @@ websocket = [
      ['15.2.1', '15.12', '15.12.14'], {'options': {'headersTimeout': HEAD_TIMEOUT}, 'realTime': True}, [
          {'send': {'head': 'GET / HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
          {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
-    # played on the real clock: no clock given reaches the ping the C# side's platform times
-    ('a side pings its peer every heartbeat', ['15.3'], {'options': {'heartbeat': 200}, 'realTime': True}, [
-        *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=1000, ping=True)]),
+    # played on the real clock: no clock given reaches the ping the C# side's platform times. A side
+    # pings once nothing of the connection was read for its heartbeat, so each ping's floor counts
+    # from a frame the peer sent, an unsolicited pong, never from the 101: the server's silence starts
+    # before its 101 reaches the peer (spec 15.3)
+    ('a side pings a peer silent for its heartbeat, again after each echo', ['15.3'],
+     {'options': {'heartbeat': 200}, 'realTime': True}, [
+         *upgrade(), beat('socket'), pinged('socket', within=1000), pinged('socket', within=1000)]),
     ('a peer that leaves a ping unanswered is dropped', ['15.3'],
      {'options': {'heartbeat': 200}, 'realTime': True, 'answersPings': False}, [
-         *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=2000, end=True)]),
+         *upgrade(), beat('socket'), pinged('socket', within=1000), heard('socket', within=2000, end=True)]),
+    # 15.3: only the pong that echoes the ping's data answers it (RFC 6455 §5.5.3), and no other ping
+    # goes before it; a pong of other data, or of none, counts as read all the same
+    ('a peer whose pong carries other data, or none, is dropped', ['15.3'],
+     {'options': {'heartbeat': 200}, 'realTime': True, 'answersPings': False}, [
+         *upgrade(), beat('socket'), pinged('socket', within=1000),
+         message('socket', frames=[{'opcode': PONG, 'fin': True, 'payload': ''},
+                                   {'opcode': PONG, 'fin': True, 'payload': OTHER}]),
+         heard('socket', within=1000, end=True)]),
+    ('a peer that, once pinged, sends a message but no echo is dropped', ['15.3'],
+     {'options': {'heartbeat': 200}, 'realTime': True, 'answersPings': False}, [
+         *upgrade(), beat('socket'), pinged('socket', within=1000),
+         message('socket', text='x'), {'report': 1, 'on': 'socket'}, heard('socket', within=1000, end=True)]),
+    # 15.3: what is read restarts the silence, so a peer heard from within each heartbeat is never
+    # pinged: an unsolicited pong counts, and so does each fragment of a message, read as it comes
+    ('a peer that sends an unsolicited pong within each heartbeat is never pinged', ['15.3'],
+     {'options': {'heartbeat': 400}, 'realTime': True}, [
+         *upgrade(), *[step for _ in range(12) for step in (beat('socket'), waits(100))],
+         message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
+    ('a peer whose message comes in fragments over several heartbeats is never pinged', ['15.3'],
+     {'options': {'heartbeat': 400}, 'realTime': True}, [
+         *upgrade(), message('socket', frames=[{'opcode': TEXT, 'fin': False, 'payload': '78'}]),
+         *[step for _ in range(12)
+           for step in (waits(100), message('socket', frames=[{'opcode': CONTINUATION, 'fin': False, 'payload': '78'}]))],
+         message('socket', frames=[{'opcode': CONTINUATION, 'fin': True, 'payload': '78'}]),
+         {'report': 1, 'on': 'socket'}, message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
     # 13.7: a session's timeouts, which login gives, on the clock the server is given
     ('a session idle past its session timeout ends, its connection staying, its subscriptions with it',
      ['11.7.2', '13.6', '13.7'], {}, [
@@ -1591,9 +1640,6 @@ def closed(clean, on=None):
     of its one connection in the client role."""
     return {'expect': {'closed': {'clean': clean}}, **({'on': on} if on else {})}
 
-
-def waits(milliseconds):
-    return {'wait': milliseconds}
 
 
 def lose(participant):
@@ -2738,9 +2784,9 @@ document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
+        'A step is what the test does — send, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
-        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
+        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',

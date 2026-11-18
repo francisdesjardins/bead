@@ -1794,7 +1794,7 @@
   <p>
     WebSocket fait tout ce que Bead demande à un transport : il délimite les messages, porte les
     deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, envoie un PING
-    sur une connexion restée silencieuse 30 s et la coupe si aucune réponse ne vient : un pair
+    sur une connexion restée silencieuse 30 s et la coupe si le PONG qui lui fait écho ne vient pas : un pair
     parti sans un mot est coupé, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455).

@@ -1465,15 +1465,22 @@ unclean whatever code the peer answers with; a side reports it, naming the bound
 has not answered by then is dropped, and a server tells its
 close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
 close as its platform does. A side MUST, where its platform can send a ping, ping a connection once
-nothing has come of it for `heartbeat` — 30 seconds by default, or never — and drop the connection
-once that ping has gone unanswered for `heartbeat`, its close unclean (section 15.1), so a peer
-gone without a word is dropped; each comes at that time or within a further `heartbeat`, as its
-platform's timer runs. Whether it pings besides while frames come, and drops a connection that
-leaves such a ping unanswered, and whether any pong answers its ping or only the one that echoes
-its data ([RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.3)), are its
-platform's ([`docs/support.md`](../docs/support.md), "Differences"). A page's `WebSocket` sends
-none, and the server's pings, which it answers, stand for its own. What waits for a server's socket
-is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+nothing of it has been read for `heartbeat` — 30 seconds by default, or never — a part of a frame as
+its platform reads it, a control frame and an unsolicited pong each counting. Its ping carries data
+of its own, never empty and never an earlier ping's on that connection, and goes ahead of what the
+side holds unsent, behind the message under way and what its socket holds. Once the pong that echoes
+that data ([RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.3)) has not been
+read within `heartbeat` of the ping, it drops the connection, its close unclean (section 15.1): no
+other frame answers the ping, and no other ping goes before
+([`docs/support.md`](../docs/support.md), "Leveled down"). Each comes at that time or within a
+further `heartbeat`, as its platform's timer runs. So a peer gone without a word is dropped, as is
+one that reads nothing and sends nothing, or that sends once pinged but does not read; a peer that
+keeps sending within each `heartbeat`, unsolicited pongs among it, is never pinged, and what waits
+for it is held as section 15.12 says on a server, and is its application's on a client. A side's
+heartbeat counts what it reads, so a connection it pauses past about twice `heartbeat` is dropped by
+its own heartbeat (section 15.12). A page's `WebSocket` sends none: its browser answers the server's
+pings with their data, and the server's heartbeat drops a page gone without a word. What waits for a
+server's socket is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
 each connection it holds, one whose opening handshake completes as its stop begins among them. A
 close with 1000 is the clean one.
 
@@ -1744,8 +1751,8 @@ answer — so a paused connection resumes with nothing more of it read
 its own — a timer, a resolution, its dispose, a turn it defers — is no envelope handed, and waits
 for no bound. A side that ends resumes each connection it paused. A pause is a reader that stops:
 its peer loses the connection past its own bounds — a server's send pace and
-`maximumUnsentBytes`, an outbox's bound (section 15.9), and, while nothing comes of it, the
-heartbeat — as it loses any reader
+`maximumUnsentBytes`, an outbox's bound (section 15.9), and, while nothing of it is read, the
+heartbeat, its own as its peer's — as it loses any reader
 that stops. So, beyond one read of its socket or one batch, no connection's envelope waits behind
 more than these bounds of another's on a transport that hands many in one step, and a peer over a
 socket is paced by its transport's own window

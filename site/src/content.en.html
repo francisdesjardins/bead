@@ -1723,7 +1723,7 @@
   <p>
     WebSocket does all that Bead asks of a transport: it delimits messages, carries both directions
     and delivers in order. Each end, where its platform lets it, sends a PING on a connection silent
-    for 30 s and drops it if no answer comes: a peer gone without a word is dropped, instead of
+    for 30 s and drops it if the pong echoing it does not come: a peer gone without a word is dropped, instead of
     staying open forever. The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
   </p>

@@ -330,6 +330,28 @@ export const spyIntervals = () => {
 };
 
 /**
+ * The delays of the timeouts armed on the platform's timers from now on, each armed all the same,
+ * until disposed: what a WebSocket's heartbeat arms, which runs on them (decision 0011).
+ */
+export const spyTimeouts = () => {
+  const delays: (number | undefined)[] = [];
+  const { setTimeout: realSet } = globalThis;
+
+  globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+    delays.push(delay);
+
+    return realSet(callback, delay);
+  }) as unknown as typeof realSet;
+
+  return {
+    delays,
+    [Symbol.dispose]: () => {
+      globalThis.setTimeout = realSet;
+    },
+  };
+};
+
+/**
  * The loopback addresses a client reaches by `localhost` here, as the C# side's `Addresses` reads
  * them: `::1` only where the name resolves to it under `ADDRCONFIG`, as a connect resolves it, which
  * a host or a container with no IPv6 address configured drops.

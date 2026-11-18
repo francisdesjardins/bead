@@ -35,7 +35,7 @@ export const createFakeWebSocket = ({ canPing = false }: { canPing?: boolean } =
 
   // a function rather than an arrow, since the transport calls it with `new`
   const construct = function () {
-    const pongs: (() => void)[] = [];
+    const pongs: ((data: Uint8Array) => void)[] = [];
     const socket: IFakeWebSocket = {
       answeredPings: 0,
       binaryType: 'blob',
@@ -83,19 +83,19 @@ export const createFakeWebSocket = ({ canPing = false }: { canPing?: boolean } =
     return canPing
       ? Object.assign(socket, {
           // a pong's listener alone: the fake never refuses an upgrade
-          on: (event: string, listener: () => void) => {
+          on: (event: string, listener: (data: Uint8Array) => void) => {
             if (event === 'pong') {
               pongs.push(listener);
             }
           },
-          ping: () => {
+          ping: (data: Uint8Array) => {
             socket.pings += 1;
 
             if (socket.answeredPings > 0) {
               socket.answeredPings -= 1;
 
               for (const listener of pongs) {
-                listener();
+                listener(data);
               }
             }
           },

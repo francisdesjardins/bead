@@ -49,11 +49,13 @@ fails the connect, the platform's error its cause. The certificate authenticates
 terminates TLS, and the credential authenticates its calls to the router: the client takes both, and
 binds neither to the other.
 
-Each WebSocket end beats: every `heartbeat` milliseconds — 30,000 by default, `Infinity` for none —
-it sends WebSocket's own PING control frame (RFC 6455 §5.5.2), and drops a connection that left the
-one before unanswered, whose `close` then says it was not clean. A peer gone without a word — a
-cable pulled, a machine asleep, a NAT that forgot — ends in a `close` within two beats rather than
-never. A browser's socket cannot ping, but answers the server's pings by itself, so the server's
+Each WebSocket end beats: once nothing of a connection has been read for `heartbeat` milliseconds —
+30,000 by default, `Infinity` for none — it sends WebSocket's own PING control frame (RFC 6455
+§5.5.2), 8 bytes of a count of its own, ahead of what it holds unsent, and drops the connection once
+the pong that echoes them has not come within `heartbeat`; its `close` then says it was not clean. A
+peer gone without a word — a cable pulled, a machine asleep, a NAT that forgot — ends in a `close`
+within two heartbeats rather than never; one that keeps sending within each heartbeat is never
+pinged. A browser's socket cannot ping, but answers the server's pings by itself, so the server's
 heartbeat covers it; the client beats over `ws`. A heartbeat keeps nothing of a session alive: a
 session's timers count what the peer says, not that it answers. Bead has no ping of its own: whether
 a connection is alive is its transport's to know.

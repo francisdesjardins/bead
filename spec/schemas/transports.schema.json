@@ -278,7 +278,7 @@
       "pattern": "^[a-z][a-z0-9]*$"
     },
     "step": {
-      "description": "What the test does — send, close, until, stop — or what the server under test does next — expect, report: one of them, on the exchange it names, where it has one.",
+      "description": "What the test does — send, close, until, stop, wait — or what the server under test does next — expect, report: one of them, on the exchange it names, where it has one.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -289,7 +289,8 @@
         { "required": ["report"] },
         { "required": ["stop"] },
         { "required": ["advance"] },
-        { "required": ["wall"] }
+        { "required": ["wall"] },
+        { "required": ["wait"] }
       ],
       "dependentRequired": { "after": ["expect"] },
       "properties": {
@@ -309,6 +310,11 @@
         "close": { "const": true },
         "advance": { "$ref": "common.schema.json#/$defs/advance" },
         "wall": { "$ref": "common.schema.json#/$defs/wall" },
+        "wait": {
+          "description": "Milliseconds waited on the real clock, in a case marked realTime.",
+          "type": "integer",
+          "minimum": 1
+        },
         "until": {
           "description": "A gauge of the transport, which both sides name alike, and the value it waits for; or a timer armed on the side's given clock.",
           "type": "object",

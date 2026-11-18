@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../errors';
 import { assertHeartbeat, createHeartbeat, createSilenceHeartbeat, HEARTBEAT } from '../heartbeat';
-import { createTestClock, spyIntervals } from './fixtures';
+import { createTestClock } from './fixtures';
 
 // helpers
 
@@ -112,49 +112,125 @@ test.describe('heartbeat', () => {
     expect(HEARTBEAT).toBe(30_000);
   });
 
-  test('pings at each beat while the peer answers, and drops it at the beat after a ping it left unanswered', () => {
-    using timers = spyIntervals();
+  test('pings once nothing was read for its heartbeat, again after each echo, and drops its connection once a ping’s echo has not come within its heartbeat', async () => {
+    const clock = createTestClock();
     const heard: string[] = [];
-    const heartbeat = createHeartbeat(250, {
-      drop: () => {
-        heard.push('drop');
+    const pings: Uint8Array[] = [];
+    const heartbeat = createHeartbeat(
+      250,
+      {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: (data) => {
+          heard.push('ping');
+          pings.push(data);
+        },
       },
-      ping: () => {
-        heard.push('ping');
+      { clock }
+    );
+
+    try {
+      // what is read within each heartbeat keeps it from a ping
+      for (let read = 0; read < 4; read += 1) {
+        await clock.tickAsync(200);
+        heartbeat.heard();
+      }
+
+      expect(heard).toEqual([]);
+
+      // silent for its heartbeat: pinged, and kept by the echo, a timer that keeps no process alive
+      await clock.tickAsync(250);
+      expect(heard).toEqual(['ping']);
+      expect(clock.armed.at(-1)?.delay).toBe(250);
+      heartbeat.answer(pings[0] ?? new Uint8Array());
+
+      // silent again for its heartbeat after the echo: pinged again; what is read, the echo of
+      // none, answers nothing, and it is dropped a heartbeat past its ping
+      await clock.tickAsync(250);
+      expect(heard).toEqual(['ping', 'ping']);
+      await clock.tickAsync(100);
+      heartbeat.heard();
+      await clock.tickAsync(149);
+      expect(heard).toEqual(['ping', 'ping']);
+      await clock.tickAsync(1);
+      expect(heard).toEqual(['ping', 'ping', 'drop']);
+
+      // dropped, it beats no more
+      await clock.tickAsync(1_000);
+      expect(heard).toEqual(['ping', 'ping', 'drop']);
+      expect(clock.timers?.size ?? 0).toBe(0);
+    } finally {
+      heartbeat.stop();
+    }
+  });
+
+  test('takes only the pong that echoes its ping, 8 bytes of a count from 1, never an empty one, another’s or an earlier ping’s', async () => {
+    const clock = createTestClock();
+    const heard: string[] = [];
+    const pings: Uint8Array[] = [];
+    const heartbeat = createHeartbeat(
+      100,
+      {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: (data) => {
+          heard.push('ping');
+          pings.push(data);
+        },
       },
-    });
-    const [timer] = timers.armed;
+      { clock }
+    );
+    const countOf = (count: number): Uint8Array => {
+      return Uint8Array.of(0, 0, 0, 0, 0, 0, 0, count);
+    };
 
-    // a timer that keeps no process alive
-    expect(timer?.delay).toBe(250);
-    expect(timer?.unrefs).toBe(1);
+    try {
+      await clock.tickAsync(100);
+      heartbeat.answer(countOf(1));
+      await clock.tickAsync(100);
 
-    timer?.beat();
-    heartbeat.answer();
-    timer?.beat();
-    timer?.beat();
+      // a new count at each ping
+      expect(pings).toEqual([countOf(1), countOf(2)]);
 
-    expect(heard).toEqual(['ping', 'ping', 'drop']);
-    // dropped, it beats no more
-    expect(timers.cleared).toEqual([timer]);
+      // an empty pong, another's and the first ping's echo answer nothing
+      heartbeat.answer(new Uint8Array());
+      heartbeat.answer(Uint8Array.of(0x6f, 0x74, 0x68, 0x65, 0x72));
+      heartbeat.answer(countOf(1));
+      await clock.tickAsync(100);
+
+      expect(heard).toEqual(['ping', 'ping', 'drop']);
+    } finally {
+      heartbeat.stop();
+    }
   });
 
   test('arms nothing for Infinity, and a stop clears the timer', () => {
-    using timers = spyIntervals();
+    const clock = createTestClock();
 
-    createHeartbeat(Infinity, {
-      drop: () => {},
-      ping: () => {},
-    }).stop();
+    createHeartbeat(
+      Infinity,
+      {
+        drop: () => {},
+        ping: () => {},
+      },
+      { clock }
+    ).stop();
 
-    expect(timers.armed).toEqual([]);
+    expect(clock.armed).toEqual([]);
 
-    createHeartbeat(1_000, {
-      drop: () => {},
-      ping: () => {},
-    }).stop();
+    createHeartbeat(
+      1_000,
+      {
+        drop: () => {},
+        ping: () => {},
+      },
+      { clock }
+    ).stop();
 
-    expect(timers.cleared.at(-1)).toBe(timers.armed[0]);
+    expect(clock.armed).toHaveLength(1);
+    expect(clock.cleared).toEqual([clock.armed[0]?.handle]);
   });
   test('pings a connection silent for its heartbeat on the platform’s timer, and drops one that answered nothing by the next', async () => {
     const heard: string[] = [];

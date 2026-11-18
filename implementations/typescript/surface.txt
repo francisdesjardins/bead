@@ -1184,6 +1184,7 @@
   HEARTBEAT	src/transport/shared/heartbeat.ts
   ICloseEventLike	src/transport/client/types.ts
   IMessageEventLike	src/transport/client/types.ts
+  IRawSocketLike	src/transport/client/types.ts
   ITlsOptions	src/transport/shared/types.ts
   IUpgradeResponseLike	src/transport/client/types.ts
   IWebSocketConstructor	src/transport/client/types.ts
@@ -3119,6 +3120,9 @@ src/transport/client/types.ts IMemoryTransportClientOptions
 src/transport/client/types.ts IMessageEventLike
   interface IMessageEventLike
     data: unknown
+src/transport/client/types.ts IRawSocketLike
+  interface IRawSocketLike
+    on?(event: 'data', listener: () => void): unknown
 src/transport/client/types.ts ITransportClient
   interface ITransportClient<Socket extends object = object, ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions> extends IReadyStateMethods
     readonly clock: IClock
@@ -3213,6 +3217,7 @@ src/transport/client/types.ts ITransportClientReconnectOptions
 src/transport/client/types.ts IUpgradeResponseLike
   interface IUpgradeResponseLike
     readonly headers: Readonly<Record<string, string | string[] | undefined>>
+    readonly socket?: IRawSocketLike | undefined
     readonly statusCode?: number | undefined
     resume?(): unknown
 src/transport/client/types.ts IWebSocketConstructor
@@ -3223,6 +3228,7 @@ src/transport/client/types.ts IWebSocketConstructor
 src/transport/client/types.ts IWebSocketLike
   interface IWebSocketLike
     binaryType: string
+    readonly bufferedAmount?: number | undefined
     readonly protocol?: string
     readonly readyState: number
     onclose: Handler<ICloseEventLike> | null
@@ -3230,12 +3236,13 @@ src/transport/client/types.ts IWebSocketLike
     onmessage: Handler<IMessageEventLike> | null
     onopen: Handler<unknown> | null
     close(code?: number, reason?: string): void
-    on?(event: 'pong', listener: () => void): unknown
+    on?(event: 'pong', listener: (data: Uint8Array) => void): unknown
+    on?(event: 'upgrade', listener: (response: IUpgradeResponseLike) => void): unknown
     on?(event: 'unexpected-response', listener: (request: unknown, response: IUpgradeResponseLike) => void): unknown
     pause?(): void
-    ping?(): void
+    ping?(data: Uint8Array): void
     resume?(): void
-    send(data: Data): void
+    send(data: Data, callback?: (error?: Error) => void): void
     terminate?(): void
 src/transport/client/types.ts IWebSocketTransportClientConnectOptions
   interface IWebSocketTransportClientConnectOptions extends ITransportClientAddressOptions
@@ -3522,7 +3529,7 @@ src/transport/server/types.ts IIncomingMessageLike
     readonly httpVersion: string
     readonly method?: string | undefined
     readonly rawHeaders: readonly string[]
-    readonly socket: {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined}
+    readonly socket: {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined; on?(event: 'data', listener: () => void): unknown}
     readonly url?: string | undefined
 src/transport/server/types.ts IJoinableTransportServer
   interface IJoinableTransportServer
@@ -3572,12 +3579,12 @@ src/transport/server/types.ts IServerSocketLike
     on(event: 'close', listener: (code: number) => void): unknown
     on(event: 'error', listener: (error: Error) => void): unknown
     on(event: 'message', listener: (data: unknown, isBinary: boolean) => void): unknown
-    on(event: 'pong', listener: () => void): unknown
+    on(event: 'pong', listener: (data: Uint8Array) => void): unknown
     once(event: 'close', listener: () => void): unknown
     pause?(): void
-    ping(): void
+    ping(data: Uint8Array): void
     resume?(): void
-    send(data: Data): void
+    send(data: Data, callback?: (error?: Error) => void): void
     terminate(): void
 src/transport/server/types.ts ITransportServer
   interface ITransportServer<Socket extends object = object, Request = unknown> extends IReadyStateMethods

@@ -3746,7 +3746,7 @@ async fn waits_on_its_server_without_end_for_a_close_timeout_of_infinity_closing
 // ── Its heartbeat ────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_the_beat_after_a_ping_it_left_unanswered()
+async fn pings_its_server_once_silent_for_its_heartbeat_over_a_socket_that_can_and_closes_once_its_ping_s_echo_has_not_come_within_its_heartbeat()
  {
     let mut server = raw().await;
     let platform = stepping();
@@ -3784,7 +3784,7 @@ async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_t
         }
     }
 
-    // dropped at the beat after, as a network drops it
+    // dropped a heartbeat past the ping it left unanswered, as a network drops it
     platform.advance(Duration::from_millis(20)).await;
 
     assert_eq!(
@@ -3798,7 +3798,7 @@ async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_t
 }
 
 #[tokio::test]
-async fn beats_every_heartbeat_when_told_nothing() {
+async fn pings_once_silent_for_heartbeat_when_told_nothing() {
     let server = hearing(None).await;
     let platform = stepping();
     let client = on_platform(&platform, &WebSocketTransportClientOptions::default());
@@ -4360,7 +4360,8 @@ async fn a_connect_cancelled_before_its_handshake_changes_nothing_and_one_cancel
 }
 
 #[tokio::test]
-async fn beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing() {
+async fn pings_once_silent_for_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
+ {
     let options = WebSocketTransportClientOptions::default();
     assert!(options.clock.is_none(), "no supplied clock");
     assert!(
