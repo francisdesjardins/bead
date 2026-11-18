@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 
@@ -6,10 +7,10 @@ namespace Bead.Transport.WebSockets;
 /// <summary>
 /// A connection's read gate (spec 15.12, decision 0046): shut while its router paused it, but
 /// for a message partway, which is read to its end; opened for good once the connection closes,
-/// which reads on to its peer's Close (RFC 6455 §7.1.1). On a server, each read of its socket's
-/// stream waits at it, so a read already pending as the pause comes reads nothing more of its peer,
-/// and its socket's end lets every wait go, so a paused connection ends at once. It takes its own
-/// lock alone, never held as it settles a wait.
+/// which reads on to its peer's Close (RFC 6455 §7.1.1). Each read of its socket's stream waits at
+/// it, a server's and a client's, so a read already pending as the pause comes reads nothing more
+/// of its peer, and its socket's end lets every wait go, so a paused connection ends at once. It
+/// takes its own lock alone, never held as it settles a wait.
 /// </summary>
 internal sealed class ReadGate
 {
@@ -201,6 +202,99 @@ internal sealed class ReadGate
         });
 
         await next(context);
+    }
+
+    /// <summary>
+    /// What sends a client's opening handshake through <paramref name="invoker"/>, the stream of its
+    /// upgrade read through this gate: a <c>ClientWebSocket</c> reads the content of the answer to
+    /// its upgrade, which this hands it gated. Its socket's end, as .NET's keep-alive drops it,
+    /// disposes that stream, which tells the gate.
+    /// </summary>
+    public HttpMessageInvoker Upgrading(HttpMessageInvoker invoker)
+    {
+        return new HttpMessageInvoker(new GatedHandler(invoker, this));
+    }
+
+    // a client's handshake sent through the invoker it was given, never disposed here, its answer's
+    // content read through its gate
+    private sealed class GatedHandler : HttpMessageHandler
+    {
+        private readonly HttpMessageInvoker _invoker;
+        private readonly ReadGate _gate;
+
+        public GatedHandler(HttpMessageInvoker invoker, ReadGate gate)
+        {
+            _invoker = invoker;
+            _gate = gate;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // ! nothing posted to its caller's context: a connect's own end is its first post
+            var response = await _invoker.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+            response.Content = new GatedContent(response.Content, _gate);
+
+            return response;
+        }
+    }
+
+    // the content of a client's upgrade answered, its stream read through its gate; it disposes the
+    // content it wraps
+    private sealed class GatedContent : HttpContent
+    {
+        private readonly HttpContent _inner;
+        private readonly ReadGate _gate;
+
+        public GatedContent(HttpContent inner, ReadGate gate)
+        {
+            _inner = inner;
+            _gate = gate;
+
+            foreach (var (name, values) in inner.Headers)
+            {
+                Headers.TryAddWithoutValidation(name, values);
+            }
+        }
+
+        protected override Stream CreateContentReadStream(CancellationToken cancellationToken)
+        {
+            return new GatedStream(_inner.ReadAsStream(cancellationToken), _gate);
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync()
+        {
+            return CreateContentReadStreamAsync(CancellationToken.None);
+        }
+
+        protected override async Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken)
+        {
+            return new GatedStream(await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), _gate);
+        }
+
+        // ! never what a WebSocket reads, which is its read stream: copied whole, it would read past
+        // the gate
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            return _inner.CopyToAsync(stream, context);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     // an HTTP/1.1 upgrade whose stream is read through its gate
