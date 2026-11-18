@@ -880,10 +880,12 @@ public sealed class HttpGateway : IAsyncDisposable
             }
             else
             {
+                // RFC 6750 §2.1: "Bearer" 1*SP b64token, spaces alone between the two, so a tab after
+                // them is no separator; the token as it stands after them
                 var space = given.IndexOf(' ', StringComparison.Ordinal);
-                var token = space < 0 ? "" : given[(space + 1)..].Trim();
+                var token = space < 0 ? "" : given[(space + 1)..].TrimStart(' ');
 
-                if (space < 0 || !given[..space].Equals("Bearer", StringComparison.OrdinalIgnoreCase) || token.Length == 0)
+                if (space < 0 || !given[..space].Equals("Bearer", StringComparison.OrdinalIgnoreCase) || token.Length == 0 || token[0] == '\t')
                 {
                     await Answer(context, HttpProblems.Own(OwnFailure.Scheme, "an auth-scheme but Bearer", new OwnProblemOptions { Challenge = _options.Challenge }));
 

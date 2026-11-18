@@ -7707,6 +7707,40 @@
       ]
     },
     {
+      "name": "under bearer-jwt, a tab after Bearer's space: 401, invalid_request",
+      "clauses": [
+        "2.4.2",
+        "7.6.26"
+      ],
+      "options": {
+        "authorization": "bearer-jwt"
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer \ta.b.c\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer error=\"invalid_request\""
+            },
+            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
       "name": "under bearer-jwt, two spaces after Bearer present the token",
       "clauses": [
         "2.4",

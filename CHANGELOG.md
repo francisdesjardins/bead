@@ -39,6 +39,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A `Content-Encoding` is read as the list RFC 9110 makes it, its empty elements ignored: an empty
   field, `identity,` or `, identity` sends a body as it is, on every side, at the transport and the
   gateway. `identity` twice is still an encoding.
+- Under `bearer-jwt`, a tab after `Bearer`'s spaces is answered 401 `invalid_request`, as one right
+  after `Bearer` is, on every gateway, and the token is taken as it stands.
 
 ## [0.15.0] - 2026-11-17
 

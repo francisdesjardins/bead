@@ -3802,6 +3802,15 @@ EXCHANGES = [
                                                     'www-authenticate': 'Bearer error="invalid_request"'},
                           'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
              options={'authorization': 'bearer-jwt'}),
+    # one or more spaces and nothing else separate Bearer from its token (RFC 6750 §2.1's 1*SP): a tab
+    # after them is no separator, and no b64token starts with one
+    exchange("under bearer-jwt, a tab after Bearer's space: 401, invalid_request", ['2.4.2', '7.6.26'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer \ta.b.c']),
+              {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': None,
+                                                    'www-authenticate': 'Bearer error="invalid_request"'},
+                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
+             options={'authorization': 'bearer-jwt'}),
     exchange("under bearer-jwt, two spaces after Bearer present the token", ['2.4', '2.4.2', '7.5.3', '7.6.11'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer  a.b.c']),
               call_failed({'code': 36, 'arose': 'server', 'detail': 'OPAQUE, ELSEWHERE'})],

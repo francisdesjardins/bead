@@ -287,8 +287,9 @@ const RESULT_MEDIA_TYPES: Readonly<Record<Encoding, string>> = Object.freeze({
   text: 'text/plain;charset=utf-8',
 });
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`, spaces alone between the two
-const BEARER = /^bearer[ ]+([^ ].*)$/iu;
+// RFC 6750 §2.1: `"Bearer" 1*SP b64token`, spaces alone between the two, so a tab after them is no
+// separator; the token as it stands after them
+const BEARER = /^bearer[ ]+([^\t ].*)$/iu;
 
 // a weight as RFC 9110 §12.4.2's qvalue writes it
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
@@ -1003,7 +1004,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return { credential: { carried: value, scheme: CredentialScheme.ELSEWHERE } };
     }
 
-    const token = BEARER.exec(value)?.[1]?.trim();
+    const token = BEARER.exec(value)?.[1];
 
     if (token === undefined) {
       return {

@@ -450,9 +450,13 @@ public sealed class HttpGatewayTests
 
         try
         {
-            using var tab = await jwt.Client.SendAsync(WhoAmI("Bearer\ta.b.c"), Cancelled);
+            // right after Bearer, or after its spaces
+            foreach (var authorization in new[] { "Bearer\ta.b.c", "Bearer \ta.b.c" })
+            {
+                using var tab = await jwt.Client.SendAsync(WhoAmI(authorization), Cancelled);
 
-            Assert.Equal((HttpStatusCode.Unauthorized, "Bearer error=\"invalid_request\""), (tab.StatusCode, tab.Headers.WwwAuthenticate.ToString()));
+                Assert.Equal((HttpStatusCode.Unauthorized, "Bearer error=\"invalid_request\""), (tab.StatusCode, tab.Headers.WwwAuthenticate.ToString()));
+            }
 
             // two spaces present the token, which a server with no JWT verifier refuses
             using var spaces = await jwt.Client.SendAsync(WhoAmI("Bearer  a.b.c"), Cancelled);
