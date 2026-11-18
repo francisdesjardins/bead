@@ -206,16 +206,8 @@ test.describe("the check of a proto payload's records", () => {
       '1A 0B 20 80 80 80 80 80 80 80 80 80 7F',
     ];
 
-    for (const hex of payloads) {
-      const refusal = thrownBy(bytesOf(hex));
-
-      // * the check's refusal, where protobuf-es would drop the bits past the 64th: its reason
-      // 17.2's words, the record it refused in its cause
-      expect(reasonOf(refusal), hex).toEqual([SyntaxError, 'not its message']);
-      expect(((refusal as Error).cause as Error).message, hex).toBe(
-        'the proto payload holds a varint past 64 bits'
-      );
-    }
+    // * the check's refusal, where protobuf-es would drop the bits past the 64th
+    expectRefused(payloads);
 
     // a 10th byte of 0x01 is the 64th bit, within
     for (const hex of ['10 FF FF FF FF FF FF FF FF FF 01', '48 80 80 80 80 80 80 80 80 80 01']) {
@@ -317,6 +309,86 @@ test.describe("the check of a proto payload's records", () => {
       // a child's field
       '1A 02 08 61',
     ]);
+  });
+
+  test('says the record it refused in its cause, each case in its own words', () => {
+    // * one row a case, in the same words on every side: its payloads, its reason, its cause
+    const cases = [
+      [
+        ['90'],
+        'not its message',
+        'a proto payload holds a tag cut short, or past the end of its message',
+      ],
+      [
+        ['90 80 80 80 80 00 07', '90 80 80 80 40 07'],
+        'not its message',
+        'a proto payload holds a tag of more than 5 bytes, or past 32 bits',
+      ],
+      [['00 01'], 'not its message', 'a proto payload holds field number 0'],
+      [
+        ['24', '6B 0A 01 61 74'],
+        'not its message',
+        'a proto payload holds an end group that closes no group open',
+      ],
+      [['23', '6B 0A 01 61'], 'not its message', 'a proto payload holds a group never closed'],
+      [
+        ['62 05 0A 00 1A 01 7A'],
+        'not its message',
+        "a proto payload holds a map's entry with a field other than its key and its value",
+      ],
+      [
+        ['08 61'],
+        'not its message',
+        'a proto payload holds field 1 at a wire type its type does not take',
+      ],
+      [['A6 06'], 'not its message', 'a proto payload holds the wire type 6'],
+      [['A7 06'], 'not its message', 'a proto payload holds the wire type 7'],
+      [
+        ['10 80', '1A 02 20 80 01', '52 01 81'],
+        'not its message',
+        'a proto payload holds a varint cut short, or past the end of its message',
+      ],
+      [
+        ['10 FF FF FF FF FF FF FF FF FF 02', '52 0A FF FF FF FF FF FF FF FF FF 02'],
+        'not its message',
+        'a proto payload holds a varint past 64 bits',
+      ],
+      [
+        ['10 80 80 80 80 80 80 80 80 80 80 00'],
+        'not its message',
+        'a proto payload holds a varint of more than 10 bytes',
+      ],
+      [
+        ['5D 01 00'],
+        'not its message',
+        'a proto payload holds a record past the end of its message',
+      ],
+      [
+        ['0A 05 61', '1A 02 0A 03 61 62 63'],
+        'not its message',
+        'a proto payload holds a length past the bytes that follow it',
+      ],
+      [
+        ['5A 05 01 00 00 00 02'],
+        'not its message',
+        'a proto payload holds a packed record whose values do not end at its length',
+      ],
+      [
+        [childrenDeep(101)],
+        'nested past 100',
+        'a proto payload nests a message more than 100 deep below the top one',
+      ],
+    ] as const;
+
+    for (const [payloads, reason, cause] of cases) {
+      for (const payload of payloads) {
+        const refusal = thrownBy(typeof payload === 'string' ? bytesOf(payload) : payload);
+        const said = typeof payload === 'string' ? payload : cause;
+
+        expect(reasonOf(refusal), said).toEqual([SyntaxError, reason]);
+        expect(((refusal as Error).cause as Error).message, said).toBe(cause);
+      }
+    }
   });
 
   test("refuses a map's entry with a field it does not declare", () => {
