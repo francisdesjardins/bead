@@ -17,21 +17,25 @@
   <section id="statut" class="status" data-toc="Where Bead stands">
     <h2 id="methode-h">Where Bead stands</h2>
     <p>
-      Bead is one person’s project, kept at its author’s pace. It is before 1.0.0, and a minor
-      release may still break what an earlier one built. Nothing is published to npm, NuGet or
-      crates.io: a team builds from a commit it pins. Bead has not run in production.
+      Bead is one person’s project, kept at its author’s pace, before 1.0.0, and it has not run in
+      production. It is not offered as a product to depend on: it is a vision of a company’s own
+      protocol, one typed contract from a device to a service to a page. A team takes it whole and
+      makes it its own, the protocol included: it changes the specification to its needs, and the
+      conformance files and <a href="{{blob path="docs/maintaining.md"}}">the method</a> keep its
+      implementations in step as it does. That method, its gates,
+      <a href="{{tree path=".claude/workflows"}}">its workflows</a> and its agents’ instructions, is
+      in the repository, so a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
       The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
       written by AI agents under the repository’s gates: the other implementations, the generator,
       and many of the spec’s readings of standards. The idioms of the other languages, and those
       readings, were checked by the tests, the design rounds and the agents’ reviews, not by a
-      specialist.
+      specialist. Bead’s core, its security and its reading of the standards it follows have not
+      been reviewed by independent experts; a team that takes it reviews it as its own code.
     </p>
     <p id="methode">
-      Bead’s core, its security and its reading of the standards it follows have not yet been
-      reviewed by independent experts, and they should be before anyone builds on it. How Bead is
-      made, and what that method does not prove, is on
+      How Bead is made, and what that method does not prove, is on
       <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>.
     </p>
   </section>
@@ -126,9 +130,8 @@
   <p class="space">
     The architecture guide sets Bead
     <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. Before choosing Bead, weigh what it
-    lacks: it is unpublished, it has no production use, it speaks three languages, and it has one
-    maintainer.
+    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: it is
+    unpublished, it has no production use, it speaks three languages, and it has one maintainer.
   </p>
 </section>
 

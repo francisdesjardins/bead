@@ -48,9 +48,8 @@ This repository holds the protocol and its implementations, side by side:
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   each other side's generated HTTP client calls.
 
-**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
-build on a commit, pinned. Publication is ahead. Bead has not run in production, and before 1.0.0 a
-minor may break.
+**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry.
+Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may break.
 
 ## At a glance
 

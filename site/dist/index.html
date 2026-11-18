@@ -1780,21 +1780,25 @@ footer {
   <section id="statut" class="status">
     <h2 id="methode-h">Where Bead stands</h2>
     <p>
-      Bead is one person’s project, kept at its author’s pace. It is before 1.0.0, and a minor
-      release may still break what an earlier one built. Nothing is published to npm, NuGet or
-      crates.io: a team builds from a commit it pins. Bead has not run in production.
+      Bead is one person’s project, kept at its author’s pace, before 1.0.0, and it has not run in
+      production. It is not offered as a product to depend on: it is a vision of a company’s own
+      protocol, one typed contract from a device to a service to a page. A team takes it whole and
+      makes it its own, the protocol included: it changes the specification to its needs, and the
+      conformance files and <a href="https://github.com/francisdesjardins/bead/blob/main/docs/maintaining.md">the method</a> keep its
+      implementations in step as it does. That method, its gates,
+      <a href="https://github.com/francisdesjardins/bead/tree/main/.claude/workflows">its workflows</a> and its agents’ instructions, is
+      in the repository, so a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
       The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
       written by AI agents under the repository’s gates: the other implementations, the generator,
       and many of the spec’s readings of standards. The idioms of the other languages, and those
       readings, were checked by the tests, the design rounds and the agents’ reviews, not by a
-      specialist.
+      specialist. Bead’s core, its security and its reading of the standards it follows have not
+      been reviewed by independent experts; a team that takes it reviews it as its own code.
     </p>
     <p id="methode">
-      Bead’s core, its security and its reading of the standards it follows have not yet been
-      reviewed by independent experts, and they should be before anyone builds on it. How Bead is
-      made, and what that method does not prove, is on
+      How Bead is made, and what that method does not prove, is on
       <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>.
     </p>
   </section>
@@ -1918,9 +1922,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   <p class="space">
     The architecture guide sets Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. Before choosing Bead, weigh what it
-    lacks: it is unpublished, it has no production use, it speaks three languages, and it has one
-    maintainer.
+    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: it is
+    unpublished, it has no production use, it speaks three languages, and it has one maintainer.
   </p>
 </section>
 
@@ -4095,22 +4098,27 @@ offerHello(server);
   <section id="statut" class="status">
     <h2 id="methode-h">Où en est Bead</h2>
     <p>
-      Bead est le projet d’une personne, mené au rythme de son auteur. Il est avant 1.0.0, et une
-      version mineure peut encore casser ce qu’une précédente a bâti. Rien n’est publié sur npm,
-      NuGet ou crates.io : une équipe construit à partir d’un commit qu’elle épingle. Bead n’a pas
-      tourné en production.
+      Bead est le projet d’une personne, mené au rythme de son auteur, avant 1.0.0, et il n’a pas
+      tourné en production. Il n’est pas offert comme un produit dont dépendre : c’est une vision du
+      protocole propre à une entreprise, un seul contrat typé d’un appareil à un service, puis à
+      une page. Une équipe le reprend en entier et le fait sien, protocole compris : elle change la
+      spécification selon ses besoins, et les fichiers de conformance et
+      <a href="https://github.com/francisdesjardins/bead/blob/main/docs/maintaining.md">la méthode</a> tiennent ses implantations à un même
+      comportement pendant qu’elle le fait. Cette méthode, ses portes,
+      <a href="https://github.com/francisdesjardins/bead/tree/main/.claude/workflows">ses workflows</a> et les consignes de ses agents,
+      est dans le dépôt, si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
       Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
       du reste a été écrite par des agents d’IA sous les portes du dépôt : les autres implantations,
       le générateur, et bien des lectures que la spécification fait des normes. Les idiomes des
       autres langages, et ces lectures, ont été vérifiés par les tests, les rondes de conception et
-      les revues des agents, pas par un spécialiste.
+      les revues des agents, pas par un spécialiste. Le cœur de Bead, sa sécurité et sa lecture des
+      normes qu’il suit n’ont pas été revus par des experts indépendants ; une équipe qui le reprend
+      le revoit comme son propre code.
     </p>
     <p id="methode">
-      Le cœur de Bead, sa sécurité et sa lecture des normes qu’il suit n’ont pas encore été revus par
-      des experts indépendants, et ils devraient l’être avant que quiconque bâtisse dessus. Comment
-      Bead se fait, et ce que cette méthode ne prouve pas, se lit sur
+      Comment Bead se fait, et ce que cette méthode ne prouve pas, se lit sur
       <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>.
     </p>
   </section>
@@ -4243,9 +4251,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   <p class="space">
     Le guide d’architecture place Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
-    Les cases des autres projets citent ou résument leurs propres pages. Avant de choisir Bead,
-    pesez ce qui lui
-    manque : il n’est pas publié, il n’a pas d’usage en production, il parle trois langages, et il a
+    Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
+    d’eux : il n’est pas publié, il n’a pas d’usage en production, il parle trois langages, et il a
     un seul mainteneur.
   </p>
 </section>

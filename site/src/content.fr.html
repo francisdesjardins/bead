@@ -18,22 +18,27 @@
   <section id="statut" class="status" data-toc="Où en est Bead">
     <h2 id="methode-h">Où en est Bead</h2>
     <p>
-      Bead est le projet d’une personne, mené au rythme de son auteur. Il est avant 1.0.0, et une
-      version mineure peut encore casser ce qu’une précédente a bâti. Rien n’est publié sur npm,
-      NuGet ou crates.io : une équipe construit à partir d’un commit qu’elle épingle. Bead n’a pas
-      tourné en production.
+      Bead est le projet d’une personne, mené au rythme de son auteur, avant 1.0.0, et il n’a pas
+      tourné en production. Il n’est pas offert comme un produit dont dépendre : c’est une vision du
+      protocole propre à une entreprise, un seul contrat typé d’un appareil à un service, puis à
+      une page. Une équipe le reprend en entier et le fait sien, protocole compris : elle change la
+      spécification selon ses besoins, et les fichiers de conformance et
+      <a href="{{blob path="docs/maintaining.md"}}">la méthode</a> tiennent ses implantations à un même
+      comportement pendant qu’elle le fait. Cette méthode, ses portes,
+      <a href="{{tree path=".claude/workflows"}}">ses workflows</a> et les consignes de ses agents,
+      est dans le dépôt, si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
       Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
       du reste a été écrite par des agents d’IA sous les portes du dépôt : les autres implantations,
       le générateur, et bien des lectures que la spécification fait des normes. Les idiomes des
       autres langages, et ces lectures, ont été vérifiés par les tests, les rondes de conception et
-      les revues des agents, pas par un spécialiste.
+      les revues des agents, pas par un spécialiste. Le cœur de Bead, sa sécurité et sa lecture des
+      normes qu’il suit n’ont pas été revus par des experts indépendants ; une équipe qui le reprend
+      le revoit comme son propre code.
     </p>
     <p id="methode">
-      Le cœur de Bead, sa sécurité et sa lecture des normes qu’il suit n’ont pas encore été revus par
-      des experts indépendants, et ils devraient l’être avant que quiconque bâtisse dessus. Comment
-      Bead se fait, et ce que cette méthode ne prouve pas, se lit sur
+      Comment Bead se fait, et ce que cette méthode ne prouve pas, se lit sur
       <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>.
     </p>
   </section>
@@ -137,9 +142,8 @@
   <p class="space">
     Le guide d’architecture place Bead
     <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
-    Les cases des autres projets citent ou résument leurs propres pages. Avant de choisir Bead,
-    pesez ce qui lui
-    manque : il n’est pas publié, il n’a pas d’usage en production, il parle trois langages, et il a
+    Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
+    d’eux : il n’est pas publié, il n’a pas d’usage en production, il parle trois langages, et il a
     un seul mainteneur.
   </p>
 </section>
