@@ -2184,7 +2184,8 @@ first.
 ## The DevTools extension
 
 `devtools/` is Bead's DevTools extension, Chrome's first
-([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
+([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)),
+installed from the [Chrome Web Store](https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
 `chrome://extensions`, its developer mode on, by "Load unpacked"; `yarn devtools:package` zips that
 build for the Chrome Web Store, into `devtools/release/`, the same bytes for the same commit. Its
