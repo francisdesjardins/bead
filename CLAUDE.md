@@ -199,11 +199,12 @@ see the README's "The page".
 
 ## The agents' effort
 
-Each workflow sets the effort of each agent.
+Each workflow sets the effort of each agent. A step of a process is never left out to save its
+cost; its cost is lowered by its effort, its model or how it runs, serially say.
 
 | Effort     | For what                                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **medium** | The verifiable mechanics: copying, re-pointing paths, renaming, configuring, the CI                                                                            |
 | **high**   | Implementation and tests, interop, the demo and its build, verifying a layer, fixes                                                                            |
 | **xhigh**  | What is hard to undo: the builder's design, the spec's identity rules, the audit before the first commit, the concurrent core of a new language, the Tenth Man |
-| **max**    | The adversarial review before a freeze: the `.proto` options v1, a version of the spec                                                                         |
+| **max**    | The adversarial review before a freeze that cannot be revised: the `.proto` options v1, the spec's 1.0                                                         |
