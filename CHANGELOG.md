@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The DevTools extension is on the Chrome Web Store, and the page and the TypeScript side's README
+  link its listing.
 - The `bead-adversarial-review` workflow reviews the code's lenses at xhigh and the spec's and its
   companion's at max, and its verifier reruns the proof of a blocker and a major, a minor's only
   where reading cannot settle it.
