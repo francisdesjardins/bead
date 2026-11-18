@@ -55,6 +55,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Kestrel reads as its number. Three cases of `spec/transports.json`, an exchange of
   `spec/transcoding.json` and three steps of another play the rule, and the transports'
   generator's `send` takes a list of lengths.
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request that carries a `Content-Length` beside a
+  `Transfer-Encoding`, in either order and whatever the `Content-Length` holds, is answered as RFC
+  9112 §6.3 asks, 400 unmarked over HTTP/1.1 and at a WebSocket's address, before anything else of
+  it is judged, and its connection closes once answered (§6.1); so is a request whose
+  `Transfer-Encoding` does not end in `chunked` (§6.3 item 4). Over HTTP/2 a `Transfer-Encoding`
+  resets its stream `PROTOCOL_ERROR` (RFC 9113 §8.2.2). Every side's WebSocket judgement refuses
+  both at its step 1, where the TypeScript and Rust sides marked an upgrade whose final coding is
+  not `chunked` `malformed`. A platform row of the support matrix's differences says the rest: the
+  Rust side over HTTP/1.1, whose hyper drops the `Content-Length`, reads the body by its
+  `Transfer-Encoding` alone and closes. Five cases of `spec/transports.json`, one of them on a
+  socket that asks no close, an exchange and a step of `spec/transcoding.json` play the rule, and
+  the transports' generator's `send` takes `close`.
 - The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
   `check_proto_records`, says the record it refused in one set of words on every side: its cause is
   "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause
@@ -67,6 +79,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# HTTP transport and gateway close the connection of a request that carries a
+  `Content-Length` beside a `Transfer-Encoding` over HTTP/1.x on every 10.0 patch of ASP.NET Core:
+  on Kestrel 10.0.0 to 10.0.9, or under its switch `AllowKeepAliveAfterCLTE`, they served it by its
+  `Transfer-Encoding` and kept its connection, so a request smuggled behind its chunked body was
+  served too (RFC 9112 §6.1, §11.2). Each refuses it 400 unmarked by its own `connection: close`,
+  reading the `X-Content-Length` Kestrel leaves in place of the `Content-Length` it removes, and so
+  does the WebSocket server; a client's own `X-Content-Length` beside a `Transfer-Encoding` is
+  refused alike. Over HTTP/2, the transport and the gateway reset the stream of a request that
+  carries a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC
+  9113 §8.2.2 makes malformed and Kestrel hands on, where they answered it.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.

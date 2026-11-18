@@ -486,6 +486,69 @@ fn refuses_first_unmarked_a_content_length_other_than_one_line_of_digits_alone_i
 }
 
 #[test]
+fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_order_whatever_either_holds_or_a_transfer_encoding_whose_final_coding_is_not_chunked_whatever_else_the_request_holds()
+ {
+    // the pair in either order, a Content-Length of no number among it; a final coding but
+    // chunked, across two lines among it, or none; from a host it does not take, under another
+    // method
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "0")]),
+            plain(&[("Content-Length", "0"), ("Transfer-Encoding", "chunked")]),
+            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "abc")]),
+            plain(&[
+                ("Transfer-Encoding", "gzip, chunked"),
+                ("Content-Length", "0")
+            ]),
+            plain(&[("Transfer-Encoding", "gzip")]),
+            plain(&[("Transfer-Encoding", "identity")]),
+            plain(&[("Transfer-Encoding", "chunked, gzip")]),
+            plain(&[
+                ("Transfer-Encoding", "chunked"),
+                ("Transfer-Encoding", "gzip")
+            ]),
+            plain(&[("Transfer-Encoding", ",")]),
+            without(
+                &[
+                    ("Host", "elsewhere.test"),
+                    ("Transfer-Encoding", "chunked"),
+                    ("Content-Length", "0")
+                ],
+                &["host"]
+            ),
+            without(
+                &[("Host", "elsewhere.test"), ("Transfer-Encoding", "gzip")],
+                &["host"]
+            ),
+            request_of(
+                &[("Transfer-Encoding", "gzip")],
+                Shape {
+                    method: Some("POST"),
+                    without: &["upgrade"],
+                    ..Shape::default()
+                }
+            ),
+        ]),
+        each(HOST, 12),
+        "each refused unmarked"
+    );
+    // a final coding chunked, in any case, its empty elements ignored, is content, at step 6
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Transfer-Encoding", "Chunked")]),
+            plain(&[("Transfer-Encoding", ", chunked")]),
+            plain(&[("Transfer-Encoding", "gzip, chunked")]),
+            plain(&[
+                ("Transfer-Encoding", "gzip"),
+                ("Transfer-Encoding", "chunked")
+            ]),
+        ]),
+        each(MALFORMED, 4),
+        "content"
+    );
+}
+
+#[test]
 fn refuses_a_host_it_does_not_take_before_anything_else_of_the_request_is_read() {
     let elsewhere = ("Host", "elsewhere.test");
     let shaped = |fields: &[(&str, &str)], shape: Shape<'_>| request_of(fields, shape);
@@ -718,9 +781,6 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
             plain(&[("Sec-WebSocket-Protocol", "bead/1")]),
             plain(&[("Content-Length", "5")]),
             plain(&[("Transfer-Encoding", "chunked")]),
-            // ! beside a Transfer-Encoding, a Content-Length is not judged at step 1: content all
-            // the same
-            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "abc")]),
             without(
                 &[
                     ("Sec-WebSocket-Key", "dGVzdA=="),
@@ -729,7 +789,7 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
                 &["sec-websocket-key"]
             ),
         ]),
-        each(MALFORMED, 20),
+        each(MALFORMED, 19),
         "each refused malformed"
     );
 }

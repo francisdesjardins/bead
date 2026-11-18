@@ -285,8 +285,14 @@ public sealed class HttpGateway : IAsyncDisposable
         var request = context.Request;
 
         // 1. what HTTP refuses of its own, unmarked (spec 15.12): a field or a target past visible
-        // ASCII, which Kestrel takes, over HTTP/2 its stream reset
-        if (!HasVisibleFields(request) || !IsVisibleTarget(context) || !IsTakenTarget(context))
+        // ASCII, which Kestrel takes, a Content-Length beside a Transfer-Encoding, its connection
+        // closed behind it over HTTP/1.x, and a connection-specific field over HTTP/2, which Kestrel
+        // hands on; over HTTP/2 its stream reset
+        if (!HasVisibleFields(request)
+            || !IsVisibleTarget(context)
+            || !IsTakenTarget(context)
+            || IsLengthBesideTransferEncoding(request)
+            || HasConnectionSpecificFields(request))
         {
             if (!ResetMalformed(context))
             {
@@ -1626,6 +1632,19 @@ public sealed class HttpGateway : IAsyncDisposable
     private static bool IsHttp1(HttpRequest request)
     {
         return HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+    }
+
+    // a Content-Length beside a Transfer-Encoding over HTTP/1.x, which Kestrel hands on as an
+    // X-Content-Length
+    private static bool IsLengthBesideTransferEncoding(HttpRequest request)
+    {
+        return IsHttp1(request) && RequestFields.HasLengthBesideTransferEncoding(request.Headers.TransferEncoding, request.Headers["X-Content-Length"]);
+    }
+
+    // a connection-specific field over HTTP/2, which makes a request malformed (RFC 9113 §8.2.2)
+    private static bool HasConnectionSpecificFields(HttpRequest request)
+    {
+        return HttpProtocol.IsHttp2(request.Protocol) && RequestFields.ConnectionSpecific.Any(request.Headers.ContainsKey);
     }
 
     private static bool IsVisibleTarget(HttpContext context)

@@ -138,6 +138,22 @@ public sealed partial class HttpTransportServer
             });
         }
 
+        // whether a request over HTTP/1.x carried a Content-Length beside its Transfer-Encoding, which
+        // Kestrel hands on as an X-Content-Length (spec 15.12)
+        internal static bool IsLengthBesideTransferEncoding(HttpRequest request)
+        {
+            return (HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol))
+                && RequestFields.HasLengthBesideTransferEncoding(request.Headers.TransferEncoding, request.Headers["X-Content-Length"]);
+        }
+
+        // whether a request over HTTP/2 carries a connection-specific field Kestrel hands on, which
+        // makes it malformed (RFC 9113 §8.2.2): a transfer-encoding, a keep-alive, a proxy-connection
+        // or an upgrade
+        internal static bool HasConnectionSpecificFields(HttpRequest request)
+        {
+            return HttpProtocol.IsHttp2(request.Protocol) && RequestFields.ConnectionSpecific.Any(request.Headers.ContainsKey);
+        }
+
         // whether an exchange's end leaves its body still to come behind a close: over HTTP/1, its
         // socket then closes in stages, its server reading on behind its end (RFC 9112 §9.6)
         internal static bool IsLingering(HttpContext context)

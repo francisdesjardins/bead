@@ -86,11 +86,13 @@ def lines_of(name, value):
     return [f'{name}: {each}' for each in values]
 
 
-def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None, http='HTTP/1.1'):
+def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None, http='HTTP/1.1',
+         close=True):
     """A request, of HTTP/1.1 unless told otherwise, rendered to its octets: its line, its target as
     given, in absolute-form among them, its fields in their order — its host, or none, or several,
     those given, its body's length when it has one or posts, or the length given, written as it is,
-    a line a value when a list —, and a socket closed once answered."""
+    a line a value when a list —, and a socket it asks closed once answered, unless `close` is false,
+    so that a case shows the server close it of its own."""
     lines = [f'{method} {target} {http}', *lines_of('host', host)]
     lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
@@ -101,7 +103,9 @@ def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', l
     elif body is not None or method in ('POST', 'DELETE'):
         lines.append(f'content-length: {length_of(body or "")}')
 
-    lines.append('connection: close')
+    if close:
+        lines.append('connection: close')
+
     return {'send': {'head': '\r\n'.join(lines) + '\r\n\r\n', **({'body': body} if body else {})}, 'on': on}
 
 
@@ -231,8 +235,10 @@ def tick(call_id, value):
 # (hyper's Uri cuts a target at its # before the Rust side's HTTP address reads it), a scheme in
 # upper case (Kestrel reads absolute-form by a scheme in lower case alone), 15.6's method as it
 # came (Node's parser refuses a method not in its table, upper case alone, before the TypeScript
-# side reads it), and a Content-Length of one number in two lines (hyper keeps the first and drops
-# the other before the Rust side's HTTP address reads it)
+# side reads it), a Content-Length of one number in two lines (hyper keeps the first and drops the
+# other before the Rust side's HTTP address reads it), and a Content-Length beside a
+# Transfer-Encoding (hyper drops the Content-Length and reads the body by the Transfer-Encoding
+# alone, closing the connection once answered)
 HASH = "a target holding a # anywhere is answered 400 unmarked before its host, its path or its origin is judged; %23 is a character of its path or its query"
 SCHEME_CASE = "a target in absolute-form is read whatever its scheme's case, HTTP:// as http://"
 UPGRADE_SCHEME_CASE = "an upgrade whose target is in absolute-form is read whatever its scheme's case"
@@ -243,6 +249,12 @@ UPGRADE_METHOD_CASE = ("a request at a WebSocket's address of a method not in up
 LENGTHS_CASE = "a request whose Content-Length names one number in two lines is answered 400 unmarked, as section 15.12 levels it"
 HASHES = [{'row': 'A # in a target', 'language': 'Rust'}]
 LENGTHS = [{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1', 'language': 'Rust'}]
+CL_TE_CASE = ("a request carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, "
+              "before its host is judged, and its connection closed")
+CL_TE = [{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1', 'language': 'Rust'}]
+# a chunked body's last chunk, and a CANCEL of call 5 in one chunk before it
+LAST_CHUNK = text('0\r\n\r\n')
+CHUNKED_CANCEL = ' '.join([text('8\r\n'), cancel(5), text('\r\n0\r\n\r\n')])
 SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'language': 'C#'}]
 METHODS_CASE = [{'row': "A method Node's HTTP parser does not know", 'language': 'TypeScript'}]
 # a 405 over HTTP names the methods its path takes (RFC 9110 §15.5.6)
@@ -491,6 +503,47 @@ cases = [
         send('exchange', 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD)],
              length=['0', '00']),
         unmarked('exchange')]),
+    # 15.12: what every platform's parser refuses beside a Transfer-Encoding, a Content-Length that
+    # frames no body before it, and a Transfer-Encoding whose final coding is not chunked (RFC 9112
+    # §6.3 item 4), answered as HTTP answers it, before hosts is read
+    ('a request whose Content-Length frames no body before a Transfer-Encoding, or whose Transfer-Encoding\'s final coding is not chunked beside a Content-Length, is answered 400 unmarked, before its host is judged',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         step
+         for on, framing in (('word', [('content-length', 'abc'), ('transfer-encoding', 'chunked')]),
+                             ('numbers', [('content-length', '0'), ('content-length', '1'),
+                                          ('transfer-encoding', 'chunked')]),
+                             ('gzipped', [('transfer-encoding', 'chunked, gzip'), ('content-length', '0')]),
+                             ('identity', [('transfer-encoding', 'identity'), ('content-length', '0')]))
+         for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD), *framing], length=[],
+                           body=LAST_CHUNK),
+                      unmarked(on))]),
+    # 15.12: a Content-Length beside a Transfer-Encoding, whatever it holds, refused as RFC 9112 §6.3
+    # asks, before hosts is read, and its connection closed once answered (§6.1), on a socket that
+    # asks no close; a case of its own, since its differs excuses a whole case
+    (CL_TE_CASE, ['15.12'], {'hosts': ['bead.test']}, [
+        *drawn('drawn'),
+        *[step
+          for on, fields, body in (
+              ('connect', [('content-type', BEAD), ('transfer-encoding', 'chunked'), ('content-length', '0')],
+               LAST_CHUNK),
+              ('exchange', [('bead-connection-token', '{token}'), ('content-type', BEAD), ('content-length', '8'),
+                            ('transfer-encoding', 'chunked')], CHUNKED_CANCEL),
+              ('word', [('content-type', BEAD), ('transfer-encoding', 'chunked'), ('content-length', 'abc')],
+               LAST_CHUNK),
+              ('gzipped', [('content-type', BEAD), ('transfer-encoding', 'gzip, chunked'), ('content-length', '0')],
+               LAST_CHUNK))
+          for step in (send(on, 'POST', host='elsewhere.test' if on == 'word' else '{host}', fields=fields, length=[],
+                            body=body, close=False),
+                       unmarked(on), {'expect': {'end': True}, 'on': on})]]),
+    # 15.12: an HTTP/1.0 request, which RFC 9112 §6.1 names among them, in either order
+    ('an HTTP/1.0 request carrying a Content-Length beside a Transfer-Encoding is answered 400 unmarked, before its host is judged',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         step
+         for on, framing in (('coded', [('transfer-encoding', 'chunked'), ('content-length', '0')]),
+                             ('counted', [('content-length', '0'), ('transfer-encoding', 'chunked')]))
+         for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD), *framing], length=[],
+                           body=LAST_CHUNK, http='HTTP/1.0'),
+                      unmarked(on))]),
     # 15.12: a field value of visible ASCII, spaces and tabs, as both HTTP servers take it; the
     # escape, the bell and the delete are the octets themselves, and so is the one past ASCII
     ('a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
@@ -1179,6 +1232,21 @@ websocket = [
                              ('twice', ['0', '0']), ('padded', ['0', '00']))
          for step in (handshake(on, [('content-length', length) for length in lengths], host='elsewhere.test'),
                       unmarked(on))]),
+    # 15.2, step 1, and 15.12: a Content-Length beside a Transfer-Encoding, whatever it holds, and a
+    # Transfer-Encoding whose final coding is not chunked (RFC 9112 §6.3 items 3 and 4), judged before
+    # hosts is read
+    ('an upgrade carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         step
+         for on, fields in (('coded', [('transfer-encoding', 'chunked'), ('content-length', '0')]),
+                            ('counted', [('content-length', '0'), ('transfer-encoding', 'chunked')]),
+                            ('word', [('transfer-encoding', 'chunked'), ('content-length', 'abc')]))
+         for step in (handshake(on, fields, host='elsewhere.test'), unmarked(on))]),
+    ('an upgrade whose Transfer-Encoding\'s final coding is not chunked is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         step
+         for on, coding in (('gzip', 'gzip'), ('identity', 'identity'), ('last', 'chunked, gzip'))
+         for step in (handshake(on, [('transfer-encoding', coding)], host='elsewhere.test'), unmarked(on))]),
     ('a request at a WebSocket\'s address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
      ['15.1', '15.2', '15.2.1', '15.12'], {}, [
          handshake('escape', {'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),
@@ -2802,7 +2870,8 @@ def amqp_broker():
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
-HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS}
+HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS,
+                CL_TE_CASE: CL_TE}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:

@@ -1826,29 +1826,94 @@ public sealed class HttpGatewayTests
         // an exchange over HTTP/2 as Kestrel hands it on, its :path its target as it came: a control
         // character, é, a NUL percent-encoded in its path, a path no route matches among them, and a
         // field past ASCII, each reset before its path is matched
-        (string Target, string? Field)[] requests =
+        (string Target, (string, string)[] Fields)[] requests =
         [
-            ("/v1/books/a\u0001b", null),
-            ("/v1/books/é", null),
-            ("/v1/books/a%00b", null),
-            ("/nowhere%00", null),
-            ("/v1/books/2", "café"),
+            ("/v1/books/a\u0001b", []),
+            ("/v1/books/é", []),
+            ("/v1/books/a%00b", []),
+            ("/nowhere%00", []),
+            ("/v1/books/2", [("x-other", "café")]),
         ];
 
-        foreach (var (target, field) in requests)
+        foreach (var request in requests)
         {
-            var (status, reset, body) = await Http2Of(gateway, (target, field));
+            var (status, reset, body) = await Http2Of(gateway, request);
 
             Assert.Equal((StatusCodes.Status200OK, 0x1, ""), (status, reset, body));
         }
 
         // what its target percent-encodes is no octet of it
-        Assert.Equal((StatusCodes.Status200OK, (int?)null, "{\"name\":\"a\\u0001b\",\"title\":\"A tale\"}"), await Http2Of(gateway, ("/v1/books/a%01b", null)));
+        Assert.Equal((StatusCodes.Status200OK, (int?)null, "{\"name\":\"a\\u0001b\",\"title\":\"A tale\"}"), await Http2Of(gateway, ("/v1/books/a%01b", [])));
     }
 
-    // what the gateway answers an exchange over HTTP/2 of the target and the field given: its status,
+    // spec 15.12
+    [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_carrying_a_connection_specific_field_a_transfer_encoding_with_a_content_length_beside_it_or_none_a_keep_alive_a_proxy_connection_or_an_upgrade()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+
+        // ! as Kestrel hands each on, which the gateway resets before its path is matched,
+        // PROTOCOL_ERROR (RFC 9113 §8.2.2)
+        (string, string)[][] carried =
+        [
+            [("transfer-encoding", "chunked")],
+            [("transfer-encoding", "chunked"), ("content-length", "0")],
+            [("transfer-encoding", "identity")],
+            [("keep-alive", "timeout=5")],
+            [("proxy-connection", "keep-alive")],
+            [("upgrade", "websocket")],
+        ];
+
+        foreach (var fields in carried)
+        {
+            Assert.Equal((StatusCodes.Status200OK, 0x1, ""), await Http2Of(gateway, ("/nowhere", fields)));
+        }
+
+        // none of them, a route served
+        Assert.Equal((StatusCodes.Status200OK, (int?)null, "{\"name\":\"2\",\"title\":\"A tale\"}"), await Http2Of(gateway, ("/v1/books/2", [])));
+    }
+
+    // spec 15.12; transcoding 10.1
+    [Fact]
+    public async Task Refuses_400_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_over_HTTP_1_0_too_and_closes_its_connection_before_a_request_smuggled_behind_it_is_read()
+    {
+        var started = await Started();
+
+        try
+        {
+            var port = started.Port;
+
+            // * a GET behind the chunked body, which the Content-Length covers and the
+            // Transfer-Encoding leaves to be read as the next request (RFC 9112 §11.2)
+            var body = $"2\r\n{{}}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\n\r\n";
+            (string Version, string Framing)[] requests =
+            [
+                ("HTTP/1.1", $"transfer-encoding: chunked\r\ncontent-length: {body.Length}"),
+                ("HTTP/1.1", $"content-length: {body.Length}\r\ntransfer-encoding: chunked"),
+                ("HTTP/1.0", $"transfer-encoding: chunked\r\ncontent-length: {body.Length}"),
+            ];
+
+            foreach (var (version, framing) in requests)
+            {
+                var came = Encoding.ASCII.GetString(await Received(port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo {version}\r\nhost: 127.0.0.1:{port}\r\ncontent-type: application/json\r\n{framing}\r\n\r\n{body}")));
+
+                // one answer, its connection closed behind it
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // what the gateway answers an exchange over HTTP/2 of the target and the fields given: its status,
     // the code its stream was reset with, none when it was not, and its body
-    private static async Task<(int Status, int? Reset, string Body)> Http2Of(HttpGateway gateway, (string Target, string? Field) request)
+    private static async Task<(int Status, int? Reset, string Body)> Http2Of(HttpGateway gateway, (string Target, (string Name, string Value)[] Fields) request)
     {
         var context = new DefaultHttpContext();
         var reset = new ResetFeature();
@@ -1861,9 +1926,9 @@ public sealed class HttpGatewayTests
         context.Features.Set<IHttpResetFeature>(reset);
         context.Response.Body = body;
 
-        if (request.Field is { } field)
+        foreach (var (name, value) in request.Fields)
         {
-            context.Request.Headers["x-other"] = field;
+            context.Request.Headers.Append(name, value);
         }
 
         await gateway.Answer(context);

@@ -307,6 +307,75 @@ test.describe('refusalOfHandshake', () => {
     ).toEqual(['taken', MALFORMED]);
   });
 
+  test('refuses first, unmarked, a Content-Length beside a Transfer-Encoding, in either order, whatever either holds, or a Transfer-Encoding whose final coding is not chunked, whatever else the request holds', () => {
+    // the pair in either order, a Content-Length of no number among it; a final coding but chunked,
+    // across two lines among it, or none; from a host it does not take, under another method
+    expect(
+      [
+        requestOf([
+          ['Transfer-Encoding', 'chunked'],
+          ['Content-Length', '0'],
+        ]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Transfer-Encoding', 'chunked'],
+        ]),
+        requestOf([
+          ['Transfer-Encoding', 'chunked'],
+          ['Content-Length', 'abc'],
+        ]),
+        requestOf([
+          ['Transfer-Encoding', 'gzip, chunked'],
+          ['Content-Length', '0'],
+        ]),
+        requestOf([['Transfer-Encoding', 'gzip']]),
+        requestOf([['Transfer-Encoding', 'identity']]),
+        requestOf([['Transfer-Encoding', 'chunked, gzip']]),
+        requestOf([
+          ['Transfer-Encoding', 'chunked'],
+          ['Transfer-Encoding', 'gzip'],
+        ]),
+        requestOf([['Transfer-Encoding', ',']]),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', 'chunked'],
+            ['Content-Length', '0'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', 'gzip'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf([['Transfer-Encoding', 'gzip']], { method: 'POST', without: ['upgrade'] }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 12 }, () => {
+        return HOST;
+      })
+    );
+    // a final coding chunked, in any case, its empty elements ignored, is content, at step 6
+    expect(
+      [
+        requestOf([['Transfer-Encoding', 'Chunked']]),
+        requestOf([['Transfer-Encoding', ', chunked']]),
+        requestOf([['Transfer-Encoding', 'gzip, chunked']]),
+        requestOf([
+          ['Transfer-Encoding', 'gzip'],
+          ['Transfer-Encoding', 'chunked'],
+        ]),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 4 }, () => {
+        return MALFORMED;
+      })
+    );
+  });
+
   test('refuses a host it does not take before anything else of the request is read', () => {
     const elsewhere = [['Host', 'elsewhere.test']] as const;
 
@@ -471,11 +540,6 @@ test.describe('refusalOfHandshake', () => {
         requestOf([['Sec-WebSocket-Protocol', 'bead/1']]),
         requestOf([['Content-Length', '5']]),
         requestOf([['Transfer-Encoding', 'chunked']]),
-        // ! beside a Transfer-Encoding, a Content-Length is not judged at step 1: content all the same
-        requestOf([
-          ['Transfer-Encoding', 'chunked'],
-          ['Content-Length', 'abc'],
-        ]),
         requestOf(
           [
             ['Sec-WebSocket-Key', 'dGVzdA=='],
@@ -485,7 +549,7 @@ test.describe('refusalOfHandshake', () => {
         ),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 20 }, () => {
+      Array.from({ length: 19 }, () => {
         return MALFORMED;
       })
     );
