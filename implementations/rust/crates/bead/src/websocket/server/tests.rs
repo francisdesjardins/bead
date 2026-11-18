@@ -3160,7 +3160,7 @@ async fn a_websocket_server_transport_takes_the_procedures_it_is_given() {
 }
 
 #[tokio::test]
-async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_unanswered_or_could_not_be_sent_one()
+async fn pings_each_connection_silent_for_its_heartbeat_with_data_of_its_own_keeps_one_that_echoes_it_and_drops_one_that_left_it_unanswered_or_could_not_be_sent_one()
  {
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let (server, recorder, port) = started_on(
@@ -3178,14 +3178,18 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
     // a beat: each pinged
     stepping.tick(Duration::from_millis(20));
 
-    let mut ping = [0_u8; 2];
+    let mut ping = [0_u8; 10];
 
     patience(PATIENCE, silent.read_exact(&mut ping))
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(ping, [0x89, 0x00], "an empty ping");
+    assert_eq!(
+        ping,
+        [0x89, 0x08, 0, 0, 0, 0, 0, 0, 0, 1],
+        "a ping of 8 bytes, a count from 1"
+    );
 
     // the answering one's pong read before the next beat
     rest(Duration::from_millis(200)).await;
@@ -3200,6 +3204,233 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
     assert_eq!(server.clients().len(), 1, "the answering one kept");
     stopped(&server).await;
     answering.await.unwrap();
+}
+
+// a raw socket upgraded, and what it heard of its server that no step took yet
+struct Peer {
+    socket: TcpStream,
+    reader: crate::testing::wire::FrameReader,
+    heard: std::collections::VecDeque<crate::testing::wire::Heard>,
+}
+
+async fn peer_of(port: u16) -> Peer {
+    let (socket, _) = upgraded(port).await;
+
+    Peer {
+        socket,
+        reader: crate::testing::wire::FrameReader::new(),
+        heard: std::collections::VecDeque::new(),
+    }
+}
+
+// the next thing its server sends on `peer`'s socket within `within`: the end once its socket
+// ends or is reset, none in time
+async fn heard_on(peer: &mut Peer, within: Duration) -> Option<crate::testing::wire::Heard> {
+    patience(within, async {
+        let mut bytes = vec![0_u8; 65_536];
+
+        loop {
+            if let Some(heard) = peer.heard.pop_front() {
+                return heard;
+            }
+
+            match peer.socket.read(&mut bytes).await {
+                Ok(0) | Err(_) => return crate::testing::wire::Heard::End,
+                Ok(read) => peer.heard.extend(
+                    peer.reader
+                        .feed(&bytes[..read])
+                        .unwrap()
+                        .into_iter()
+                        .map(|(heard, _)| heard),
+                ),
+            }
+        }
+    })
+    .await
+    .ok()
+}
+
+fn pong_of(payload: &[u8]) -> Vec<u8> {
+    crate::testing::wire::Frame::whole(0xA, payload.to_vec()).masked()
+}
+
+// a listener that pauses each connection within the hand of its first message
+struct PausingAtOnce {
+    server: Mutex<Option<WebSocketTransportServer>>,
+}
+
+impl ServerListener for PausingAtOnce {
+    fn on_message(&self, _message: TransportMessage, connection_handle: &ConnectionHandle) {
+        if let Some(server) = self.server.lock().unwrap().as_ref() {
+            server.pause(connection_handle);
+        }
+    }
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    // * paused within the hand of a message, as a router at its bound pauses: it reads nothing more
+    // of its peer, the echo of its ping among it
+    server.listen(Arc::new(PausingAtOnce {
+        server: Mutex::new(Some(server.clone())),
+    }));
+    peer.socket
+        .write_all(&masked_frame(0x2, (&[1], true)))
+        .await
+        .unwrap();
+
+    let Some(crate::testing::wire::Heard::Ping(data)) =
+        heard_on(&mut peer, Duration::from_secs(2)).await
+    else {
+        panic!("a ping");
+    };
+
+    peer.socket.write_all(&pong_of(&data)).await.unwrap();
+
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_secs(2)).await,
+        Some(crate::testing::wire::Heard::End),
+        "dropped"
+    );
+
+    // told closed, unclean, once its router resumes it at the latest
+    server.resume(&handle);
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_that_answers_with_an_empty_pong_or_an_earlier_ping_s_echo()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let first = [0, 0, 0, 0, 0, 0, 0, 1];
+
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_secs(2)).await,
+        Some(crate::testing::wire::Heard::Ping(first.to_vec())),
+        "its first ping"
+    );
+    peer.socket.write_all(&pong_of(&first)).await.unwrap();
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_secs(2)).await,
+        Some(crate::testing::wire::Heard::Ping(vec![
+            0, 0, 0, 0, 0, 0, 0, 2
+        ])),
+        "its second, a new count"
+    );
+    peer.socket.write_all(&pong_of(&[])).await.unwrap();
+    peer.socket.write_all(&pong_of(&first)).await.unwrap();
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_secs(2)).await,
+        Some(crate::testing::wire::Heard::End),
+        "dropped"
+    );
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// spec 15.3: the ping goes behind what its socket holds alone, so the 400 messages of 64 KiB the
+// transport holds pass what any loopback's buffers hold
+#[tokio::test]
+async fn pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(500)),
+        maximum_unsent_bytes: Some(67_108_864),
+        minimum_send_bytes_per_second: Some(0),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let mut order: Vec<&str> = Vec::new();
+
+    // it reads nothing, and is handed the backlog
+    for _ in 0..400 {
+        server.send(message_of(vec![0; 65_536]), &handle).unwrap();
+    }
+
+    // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
+    rest(Duration::from_millis(600)).await;
+
+    while order.len() < 401 {
+        match heard_on(&mut peer, Duration::from_secs(10)).await {
+            Some(crate::testing::wire::Heard::Ping(data)) => {
+                order.push("ping");
+                peer.socket.write_all(&pong_of(&data)).await.unwrap();
+            }
+            Some(crate::testing::wire::Heard::Binary(_)) => order.push("binary"),
+            other => panic!("{other:?} after {} read", order.len()),
+        }
+    }
+
+    let ping = order.iter().position(|heard| *heard == "ping");
+
+    assert!(
+        ping.is_some_and(|at| at < 400),
+        "its ping before the backlog's end: {ping:?}"
+    );
+
+    // its echo read within its heartbeat: kept
+    rest(Duration::from_millis(600)).await;
+    assert!(recorder.told.lock().unwrap().closes.is_empty(), "kept");
+    stopped(&server).await;
+}
+
+// docs/support.md, "Leveled down": every side takes the echo alone, which waits behind the frame
+#[tokio::test]
+async fn drops_a_peer_whose_echo_waits_behind_a_frame_longer_than_its_heartbeat_the_echo_alone_answering_its_ping()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(300)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let Some(crate::testing::wire::Heard::Ping(data)) =
+        heard_on(&mut peer, Duration::from_secs(2)).await
+    else {
+        panic!("a ping");
+    };
+
+    // a frame of 4,096 bytes in 16 parts, one every 30 ms, past its heartbeat, its echo after it
+    let frame = crate::testing::wire::Frame::whole(0x2, vec![0; 4_096]).masked();
+
+    for part in frame.chunks(frame.len().div_ceil(16)) {
+        if peer.socket.write_all(part).await.is_err() {
+            break;
+        }
+
+        rest(Duration::from_millis(30)).await;
+    }
+
+    peer.socket.write_all(&pong_of(&data)).await.ok();
+
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_secs(2)).await,
+        Some(crate::testing::wire::Heard::End),
+        "dropped"
+    );
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
 }
 
 async fn compares_answered_and_unanswered_pings() {
@@ -3255,7 +3486,7 @@ async fn compares_answered_and_unanswered_pings() {
 }
 
 #[tokio::test]
-async fn beats_every_heartbeat_when_told_nothing() {
+async fn pings_once_silent_for_heartbeat_when_told_nothing() {
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let (server, recorder, port) =
         started_on(Arc::<SteppingClock>::clone(&stepping), &briefly_closing()).await;
@@ -3270,9 +3501,9 @@ async fn beats_every_heartbeat_when_told_nothing() {
 }
 
 // * told nothing: on localhost, both loopbacks, port 80 when no port is drawn, each connection
-// pinged every 30 seconds, a close waiting 5 seconds, a message bound an envelope's limit
+// pinged once silent for 30 seconds, a close waiting 5 seconds, a message bound an envelope's limit
 #[tokio::test]
-async fn listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing() {
+async fn listens_on_localhost_port_80_and_pings_once_silent_for_30_seconds_when_told_nothing() {
     let start = TransportServerStartOptions::default();
     let options = WebSocketTransportServerOptions::default();
 
@@ -3296,7 +3527,8 @@ async fn listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothi
         "its defaults"
     );
 
-    // started told nothing but a port to draw, a connection it takes is pinged every 30 seconds
+    // started told nothing but a port to draw, a connection it takes is pinged once silent for 30
+    // seconds
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let runtime = platform::runtime_of(None, "a test").unwrap();
     let server = WebSocketTransportServer::on_platform(

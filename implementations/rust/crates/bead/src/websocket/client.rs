@@ -44,7 +44,7 @@ use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
     GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of,
 };
-use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, hold_heartbeat};
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, Stamped, hold_heartbeat};
 
 #[cfg(test)]
 mod tests;
@@ -87,8 +87,9 @@ pub struct WebSocketTransportClientOptions {
     /// How long a close it begins waits for its server's answer before it drops the socket:
     /// [`CLOSE_TIMEOUT`] when none; [`crate::NEVER`] waits without end, arming no timer.
     pub close_timeout: Option<Duration>,
-    /// How often its connection is pinged, past which one that left a ping unanswered is dropped:
-    /// [`HEARTBEAT`] when none; [`crate::NEVER`] beats none.
+    /// How long its connection is silent before it is pinged, and a ping waits for its echo, past
+    /// which the connection is dropped (spec 15.3): [`HEARTBEAT`] when none; [`crate::NEVER`] beats
+    /// none.
     pub heartbeat: Option<Duration>,
     /// The largest message it reads, past which it fails its connection with 1009 (spec 15.3):
     /// [`MAXIMUM_MESSAGE_BYTES`] when none.
@@ -259,9 +260,10 @@ pub(crate) struct ClientInner {
     pending: Mutex<(u64, HashMap<usize, Pending>)>,
 }
 
-// a connection opened, its credential with it
+// a connection opened, its credential with it, and what is read of it
 struct Opened {
-    socket: WebSocketStream<ClientSocket>,
+    socket: WebSocketStream<Stamped<ClientSocket>>,
+    reads: Arc<Reads>,
     credential: Option<String>,
 }
 
@@ -287,13 +289,14 @@ struct Opened {
 /// UTF-8 is reported alike, failed with 1007 (spec 15.3), and any other protocol error, failed with
 /// 1002. A server gone without its closing handshake tells its unclean close alone.
 ///
-/// Its connection is pinged every `heartbeat` on the platform's clock, and dropped, its close
-/// unclean and no error told, at the beat after a ping it left unanswered. Its disconnect closes
-/// with 1000 and waits on its server's answer `close_timeout` at most, then drops the socket, its
-/// close told as the disconnect said. Paused by its router, it reads no more of its socket, so
-/// TCP's window paces its server, a pause outlasting its connection; a close it begins reads on to
-/// its server's Close (spec 15.12). Its reconnection connects again with the options of its last
-/// connect, replacing an open connection without a close.
+/// Its connection is pinged once nothing of it has been read for `heartbeat`, on the platform's
+/// clock, its ping ahead of what it holds unsent, and dropped, its close unclean and no error told,
+/// once the pong that echoes that ping has not come within `heartbeat` (spec 15.3). Its disconnect
+/// closes with 1000 and waits on its server's answer `close_timeout` at most, then drops the
+/// socket, its close told as the disconnect said. Paused by its router, it reads no more of its
+/// socket, so TCP's window paces its server, a pause outlasting its connection; a close it begins
+/// reads on to its server's Close (spec 15.12). Its reconnection connects again with the options of
+/// its last connect, replacing an open connection without a close.
 #[derive(Clone)]
 pub struct WebSocketTransportClient {
     inner: Arc<ClientInner>,
@@ -585,10 +588,12 @@ impl ClientInner {
         let socket = dial((&bare, options.port), (&self.racing, tls.as_ref()))
             .await
             .map_err(connect_error)?;
+        // each read of its socket stamped, what its heartbeat counts its silence from (spec 15.3)
+        let reads = Reads::new(Arc::clone(&self.platform));
         // ! no redirect followed: tungstenite fails an upgrade answered with anything but 101
         let (socket, response) = tokio_tungstenite::client_async_with_config(
             request,
-            socket,
+            Stamped::new(socket, Arc::clone(&reads)),
             Some(config_of(self.settings.maximum_message_bytes, None)),
         )
         .await
@@ -616,7 +621,11 @@ impl ClientInner {
             )));
         }
 
-        Ok(Opened { socket, credential })
+        Ok(Opened {
+            socket,
+            reads,
+            credential,
+        })
     }
 
     // an attempt run to its end: open, or failed, timed out, cancelled or given up, whichever comes
@@ -704,7 +713,11 @@ impl ClientInner {
                 drop(state);
                 reply.send(Err(reason)).ok();
             }
-            Ok(Opened { socket, credential }) => {
+            Ok(Opened {
+                socket,
+                reads,
+                credential,
+            }) => {
                 state.serial = state.serial.saturating_add(1);
 
                 let serial = state.serial;
@@ -725,10 +738,10 @@ impl ClientInner {
                 let (pinging, dropping) = (commands.clone(), commands.clone());
                 let heartbeat = Heartbeat::new(
                     HeartbeatHooks {
-                        ping: Box::new(move || pinging.ping()),
+                        ping: Box::new(move |data| pinging.ping(data)),
                         drop: Box::new(move || dropping.drop_now()),
                     },
-                    (self.settings.heartbeat, &self.platform),
+                    (self.settings.heartbeat, &reads),
                 );
                 let answering = heartbeat.clone();
 
@@ -751,7 +764,7 @@ impl ClientInner {
                                 inner.deliver(serial, (data, is_text));
                             }
                         }),
-                        answered: Box::new(move || answering.answer()),
+                        answered: Box::new(move |data: Bytes| answering.answer(&data)),
                     };
                     let ended = connection.run(hooks).await;
 
