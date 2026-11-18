@@ -273,7 +273,8 @@ internal static class WebSocketHandshake
     /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
     /// a <c>Content-Length</c> other than one line of digits alone, one beside a
     /// <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
-    /// <c>chunked</c>, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// <c>chunked</c> or that lists anything after its first <c>chunked</c>, or one an HTTP/1.0
+    /// request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
     /// <c>Authorization</c> lines and content, a <c>Content-Length</c> past 0 or a
     /// <c>Transfer-Encoding</c>, among it, 400; an origin not taken, 403.

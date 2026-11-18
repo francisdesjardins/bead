@@ -79,8 +79,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `is_transfer_encoding_framed`, at its HTTP transport, its gateway and its WebSocket judgement,
   where the C# and Rust sides took another `chunked` and every side marked one `malformed` or
   answered an HTTP/1.0 upgrade 426. Four cases of `spec/transports.json`, two of them on a socket
-  that asks it kept alive, and four steps of an exchange of `spec/transcoding.json` play the rule,
-  and the transcoding's generator's `framed_by` takes `http`.
+  that asks no close, the HTTP/1.0 one kept alive, and four steps of an exchange of
+  `spec/transcoding.json` play the rule, and the transcoding's generator's `framed_by` takes `http`.
 - The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
   `check_proto_records`, says the record it refused in one set of words on every side: its cause is
   "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause
