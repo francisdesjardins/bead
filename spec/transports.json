@@ -2,9 +2,9 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
+    "A step is what the test does — send, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
     "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
-    "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
+    "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
@@ -13376,7 +13376,7 @@
       ]
     },
     {
-      "name": "a side pings its peer every heartbeat",
+      "name": "a side pings a peer silent for its heartbeat, again after each echo",
       "clauses": [
         "15.3"
       ],
@@ -13403,10 +13403,23 @@
           "on": "socket"
         },
         {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
           "expect": {
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         },
         {
@@ -13414,6 +13427,7 @@
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         }
       ]
@@ -13447,10 +13461,23 @@
           "on": "socket"
         },
         {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
           "expect": {
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         },
         {
@@ -13459,6 +13486,617 @@
           },
           "on": "socket",
           "within": 2000
+        }
+      ]
+    },
+    {
+      "name": "a peer whose pong carries other data, or none, is dropped",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "answersPings": false,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "after": 150,
+          "within": 1000
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": ""
+              },
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "6F 74 68 65 72"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "socket",
+          "within": 1000
+        }
+      ]
+    },
+    {
+      "name": "a peer that, once pinged, sends a message but no echo is dropped",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "answersPings": false,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "after": 150,
+          "within": 1000
+        },
+        {
+          "send": {
+            "text": "x"
+          },
+          "on": "socket"
+        },
+        {
+          "report": 1,
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "socket",
+          "within": 1000
+        }
+      ]
+    },
+    {
+      "name": "a peer that sends an unsolicited pong within each heartbeat is never pinged",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 400
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a peer whose message comes in fragments over several heartbeats is never pinged",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 400
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 1,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": true,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "report": 1,
+          "on": "socket"
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
         }
       ]
     },
