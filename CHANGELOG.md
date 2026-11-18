@@ -33,11 +33,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - The C# WebSocket server tells the close of a connection it paused and its own heartbeat dropped
-  at once, while still paused, as the TypeScript and Rust sides do (spec 15.3, 15.12): its
-  request's abort opens the connection's read gate, so a peer's FIN or a reset ends it as soon. A
-  pause also holds against a read already waiting on the socket, each read of the upgrade's stream
-  passing the gate: a paused connection reads nothing more of its peer, whose pongs no longer keep
-  it open.
+  at once, while still paused, as the TypeScript and Rust sides do (spec 15.3, 15.12). Its
+  request's abort tells the connection's read gate that its socket ended, so a peer's FIN or a reset
+  ends a paused connection as soon, what it held dropped with it; one not paused reads on and drops
+  nothing. A pause also holds against a read already waiting on the socket, each read of the
+  upgrade's stream passing the gate: a paused connection reads nothing more of its peer, whose
+  pongs no longer keep it open.
 - A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
   "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
   `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,
