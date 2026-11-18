@@ -4018,6 +4018,87 @@ async fn a_paused_connection_closes_cleanly() {
     client.dispose();
 }
 
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+ {
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut frame = patience(PATIENCE, frame_from(&mut socket)).await.unwrap();
+
+    assert!(matches!(frame, Some((0x9, _))), "a ping");
+
+    // * paused once it pinged, outside the hand of a message, as a router pauses on its intake's
+    // bound: its read already waits on its server, and reads nothing more of it
+    client.pause();
+
+    for _ in 0..20 {
+        let Some((0x9, payload)) = &frame else {
+            break;
+        };
+
+        socket.write_all(&frame_of(0xa, payload)).await.unwrap();
+        frame = patience(PATIENCE, frame_from(&mut socket)).await.unwrap();
+    }
+
+    assert_eq!(frame, None, "dropped");
+
+    // told closed, unclean, while still paused, and nothing else
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "unclean"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+}
+
+// spec 15.1 and 15.12: its socket's end, which ends a paused connection, drops nothing of one not
+// paused; a close its server made is told unclean (spec 15.3)
+#[tokio::test]
+async fn delivers_each_of_300_messages_its_server_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close()
+ {
+    let mut server = raw().await;
+    let client = client();
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let payloads: Vec<[u8; 2]> = (0_u16..300).map(u16::to_be_bytes).collect();
+    let mut bytes: Vec<u8> = payloads
+        .iter()
+        .flat_map(|payload| frame_of(0x2, payload))
+        .collect();
+
+    bytes.extend(close_frame(1000));
+    socket.write_all(&bytes).await.unwrap();
+    socket.shutdown().await.unwrap();
+
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "its server's"
+    );
+    assert_eq!(
+        recorder.messages(),
+        payloads
+            .iter()
+            .map(|payload| Bytes::copy_from_slice(payload))
+            .collect::<Vec<_>>(),
+        "each, in order"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
+}
+
 // ── Its runtime ──────────────────────────────────────────────────────────────────────────────
 
 // this side's own, as its server's: a client built outside any runtime runs on the one it is given,

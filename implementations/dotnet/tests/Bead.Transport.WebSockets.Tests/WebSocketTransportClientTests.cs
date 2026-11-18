@@ -2582,6 +2582,134 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // the next frame the client sends on `stream`, its opcode and its payload unmasked; none once
+    // its socket ended or was reset
+    private static async Task<(int Opcode, byte[] Payload)?> FrameFrom(NetworkStream stream)
+    {
+        try
+        {
+            var head = new byte[2];
+
+            await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            var length = (long)(head[1] & 0x7F);
+
+            if (length >= 126)
+            {
+                var extended = new byte[length == 126 ? 2 : 8];
+
+                await stream.ReadExactlyAsync(extended, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                length = extended.Aggregate(0L, (sum, octet) =>
+                {
+                    return (sum << 8) | octet;
+                });
+            }
+
+            var mask = new byte[4];
+            var payload = new byte[length];
+
+            await stream.ReadExactlyAsync(mask, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            for (var index = 0; index < payload.Length; index += 1)
+            {
+                payload[index] ^= mask[index % 4];
+            }
+
+            return (head[0] & 0x0F, payload);
+        }
+        catch (Exception reason) when (reason is EndOfStreamException or IOException)
+        {
+            return null;
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = peer.GetStream();
+            var frame = await FrameFrom(stream);
+
+            Assert.Equal(0x9, frame?.Opcode);
+
+            // * paused once it pinged, outside the hand of a message, as a router pauses on its
+            // intake's bound: its read already waits on its server, and reads nothing more of it
+            client.Pause();
+
+            for (var pings = 0; frame is { Opcode: 0x9 } ping && pings < 20; pings += 1)
+            {
+                // a pong, unmasked as a server sends one
+                byte[] pong = [0x8A, (byte)ping.Payload.Length, .. ping.Payload];
+
+                await stream.WriteAsync(pong, Cancelled);
+                frame = await FrameFrom(stream);
+            }
+
+            Assert.Null(frame);
+
+            // told closed, unclean, while still paused, and nothing else
+            await closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(new object[] { (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.1 and 15.12: its socket's end, which ends a paused connection, drops nothing of one
+    // not paused; a close its server made is told unclean (spec 15.3)
+    [Fact]
+    public async Task Delivers_each_of_300_messages_its_server_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient();
+        var (told, closed) = EndOf(client);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+
+        client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+        var bytes = new List<byte>();
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            // unmasked, as a server sends them
+            bytes.AddRange([0x82, 0x02, (byte)(index >> 8), (byte)index]);
+        }
+
+        bytes.AddRange([0x88, 0x02, 0x03, 0xE8]);
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+            await peer.GetStream().WriteAsync(bytes.ToArray(), Cancelled);
+            peer.Client.Shutdown(SocketShutdown.Send);
+            await closed.WaitAsync(Patience, Cancelled);
+        }
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            Assert.Equal([(byte)(index >> 8), (byte)index], (await Next(messages)).Bytes.ToArray());
+        }
+
+        Assert.Equal(new object[] { (false, false) }, Described(told));
+    }
+
     // spec 15.2
     [Fact]
     public async Task Emits_what_the_server_sends_text_as_text_binary_as_bytes()
