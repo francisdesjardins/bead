@@ -1977,6 +1977,77 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; transcoding 10.1; RFC 9112 §9.6: Kestrel reads no request behind an answer that
+    // closes
+    [Fact]
+    public async Task Serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
+    {
+        var started = await Started((options) =>
+        {
+            return options with { MaximumBodyBytes = 16 };
+        });
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var body = "{\"aString\":\"0123\"}";
+
+            // ! a body past MaximumBodyBytes as it comes: Kestrel reads a body that came whole on, and
+            // keeps its connection behind a refusal of it, and behind a HEAD over HTTP/1.0
+            var came = Encoding.ASCII.GetString(await Received(started.Port, Encoding.ASCII.GetBytes(
+                $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n" +
+                $"12\r\n{body}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n")));
+
+            // one answer, which closes its connection, and no call made
+            Assert.StartsWith("HTTP/1.1 413 ", came, StringComparison.Ordinal);
+            Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+            Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // RFC 9112 §9.3
+    [Fact]
+    public async Task Serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_in_its_turn()
+    {
+        var started = await Started();
+
+        try
+        {
+            var asked = $"GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\n\r\n";
+
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(asked + asked));
+            var came = new StringBuilder();
+            var buffer = new byte[65_536];
+
+            while (came.ToString().Split("HTTP/1.1 ").Length < 3 || !came.ToString().EndsWith('}'))
+            {
+                var count = await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                Assert.NotEqual(0, count);
+                came.Append(Encoding.ASCII.GetString(buffer, 0, count));
+            }
+
+            // the book, twice, each kept alive
+            Assert.Equal(["200", "200"], came.ToString().Split("HTTP/1.1 ").Skip(1).Select((answer) =>
+            {
+                return answer[..3];
+            }));
+            Assert.DoesNotContain("connection: close", came.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // what the gateway answers an echo of the version, the authority and the Transfer-Encoding given,
     // on a socket it asks kept alive, a GET pipelined behind its chunked body: everything that came,
     // to the socket's close

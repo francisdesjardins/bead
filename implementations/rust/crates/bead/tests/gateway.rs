@@ -4995,6 +4995,82 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     fixture.dispose().await.expect("disposed");
 }
 
+// spec 15.12; transcoding 10.1; RFC 9112 §9.6: hyper reads no request behind an answer that closes
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
+ {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.maximum_body_bytes = Some(16);
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let own = format!("{HOST}:{port}");
+    let echo = format!(
+        "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\n"
+    );
+    let body = r#"{"aString":"0123"}"#;
+
+    // ! hyper keeps its connection behind a HEAD over HTTP/1.0, a stream's head among it
+    for (first, status) in [
+        // a refusal of a body that still comes
+        (
+            "POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}".to_owned(),
+            403,
+        ),
+        // a body declared past maximum_body_bytes, then one past it as it comes
+        (
+            format!("{echo}content-length: {}\r\n\r\n{body}", body.len()),
+            413,
+        ),
+        (
+            format!("{echo}transfer-encoding: chunked\r\n\r\n12\r\n{body}\r\n0\r\n\r\n"),
+            413,
+        ),
+    ] {
+        let octets = format!("{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n");
+        let came = text_on(sent(port, octets.as_bytes()).await).await;
+
+        // one answer, which closes its connection
+        assert!(came.starts_with(&format!("HTTP/1.1 {status} ")), "{came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(
+            came.to_ascii_lowercase().contains("\r\nconnection: close\r\n"),
+            "{came}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
+// RFC 9112 §9.3
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_in_its_turn() {
+    let fixture = started().await;
+    let port = fixture.port;
+    let asked = format!("GET /v1/books/2 HTTP/1.1\r\nhost: {HOST}:{port}\r\n\r\n");
+    let mut socket = sent(port, format!("{asked}{asked}").as_bytes()).await;
+    let mut came = read_until(&mut socket, "A tale").await;
+
+    if came.matches("A tale").count() < 2 {
+        came.push_str(&read_until(&mut socket, "A tale").await);
+    }
+
+    // the book, twice, each kept alive
+    assert!(came.starts_with("HTTP/1.1 200 "), "{came}");
+    assert_eq!(came.matches("HTTP/1.1 200 ").count(), 2, "{came}");
+    assert!(
+        !came.to_ascii_lowercase().contains("connection: close"),
+        "{came}"
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_holds_an_octet_past_visible_ascii_protocol_error_nothing_written()
  {
