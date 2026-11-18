@@ -664,8 +664,8 @@ _Transcoding: `spec/transcoding.json`._
 10.1. A gateway MUST judge a request in this order, by the gates and the options of section 15.12 of
 `spec.md`, and answer the first that applies:
 
-1. what HTTP refuses of its own, unmarked (section 15.12), a body HTTP cannot frame among it,
-   whenever it comes;
+1. what HTTP refuses of its own, unmarked (section 15.12), a body HTTP cannot frame, or a
+   `Content-Length` section 15.12 refuses, among it, whenever it comes;
 2. a host it does not take, 403 `host-refused` (`hosts`);
 3. a path no route matches, 404 `path-unknown` (section 3.10);
 4. an `origin` neither its own nor one `origins` names, its lines joined as section 15.12 of

@@ -89,14 +89,15 @@ def lines_of(name, value):
 def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None, http='HTTP/1.1'):
     """A request, of HTTP/1.1 unless told otherwise, rendered to its octets: its line, its target as
     given, in absolute-form among them, its fields in their order — its host, or none, or several,
-    those given, its body's length when it has one or posts, or the length given, written as it is —
-    and a socket closed once answered."""
+    those given, its body's length when it has one or posts, or the length given, written as it is,
+    a line a value when a list —, and a socket closed once answered."""
     lines = [f'{method} {target} {http}', *lines_of('host', host)]
     lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
-    # ! a length given takes the place of the one counted: two would be refused by HTTP itself
+    # ! the length given, a line a value when a list, takes the place of the one counted: a case
+    # that sends two lines writes both
     if length is not None:
-        lines.append(f'content-length: {length}')
+        lines += lines_of('content-length', length)
     elif body is not None or method in ('POST', 'DELETE'):
         lines.append(f'content-length: {length_of(body or "")}')
 
@@ -228,9 +229,10 @@ def tick(call_id, value):
 
 # 15.12's cases that a row of docs/support.md excuses a side from, by their names: a # in a target
 # (hyper's Uri cuts a target at its # before the Rust side's HTTP address reads it), a scheme in
-# upper case (Kestrel reads absolute-form by a scheme in lower case alone), and 15.6's method as it
+# upper case (Kestrel reads absolute-form by a scheme in lower case alone), 15.6's method as it
 # came (Node's parser refuses a method not in its table, upper case alone, before the TypeScript
-# side reads it)
+# side reads it), and a Content-Length of one number in two lines (hyper keeps the first and drops
+# the other before the Rust side's HTTP address reads it)
 HASH = "a target holding a # anywhere is answered 400 unmarked before its host, its path or its origin is judged; %23 is a character of its path or its query"
 SCHEME_CASE = "a target in absolute-form is read whatever its scheme's case, HTTP:// as http://"
 UPGRADE_SCHEME_CASE = "an upgrade whose target is in absolute-form is read whatever its scheme's case"
@@ -238,7 +240,9 @@ METHOD_CASE = ("a method is compared as it came: get, post and BEAD are refused 
                "its Allow naming them, in section 15.6's place, after the path and the origin; an options asking a preflight is none")
 UPGRADE_METHOD_CASE = ("a request at a WebSocket's address of a method not in upper case, get and head among them, or of one "
                        "unknown, BEAD, is refused 405 as any method but GET or HEAD, its Allow naming both, after its host")
+LENGTHS_CASE = "a request whose Content-Length names one number in two lines is answered 400 unmarked, as section 15.12 levels it"
 HASHES = [{'row': 'A # in a target', 'language': 'Rust'}]
+LENGTHS = [{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1', 'language': 'Rust'}]
 SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'language': 'C#'}]
 METHODS_CASE = [{'row': "A method Node's HTTP parser does not know", 'language': 'TypeScript'}]
 # a 405 over HTTP names the methods its path takes (RFC 9110 §15.5.6)
@@ -469,6 +473,24 @@ cases = [
          connect('parameter', host='a;b=c'), unmarked('parameter'),
          connect('future', host='[v1.bead]'), unmarked('future'),
          connect('portless', host='localhost:'), unmarked('portless')]),
+    # 15.12: a body framed as HTTP frames it (RFC 9112 §6.3), a Content-Length digits alone (RFC 9110
+    # §8.6) in one line, answered as HTTP answers it, before hosts is read
+    ('a request whose Content-Length frames no body — a word, nothing, two numbers in one line or in two, one number twice in one line — is answered 400 unmarked, before its host is judged',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         step
+         for on, length in (('word', 'abc'), ('empty', ''), ('listed', '0, 1'), ('numbers', ['0', '1']),
+                            ('twice', '0, 0'))
+         for step in (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length),
+                      unmarked(on))]),
+    # 15.12: one number in two lines, which RFC 9110 §8.6 lets a recipient read as that number, refused
+    # on every side as Node's and Kestrel's parsers refuse it; a case of its own, since its differs
+    # excuses a whole case
+    (LENGTHS_CASE, ['15.12'], None, [
+        *drawn('drawn'),
+        send('connect', 'POST', fields={'content-type': BEAD}, length=['0', '0']), unmarked('connect'),
+        send('exchange', 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD)],
+             length=['0', '00']),
+        unmarked('exchange')]),
     # 15.12: a field value of visible ASCII, spaces and tabs, as both HTTP servers take it; the
     # escape, the bell and the delete are the octets themselves, and so is the one past ASCII
     ('a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
@@ -1148,6 +1170,15 @@ websocket = [
          asked('parameter', host='a;b=c'), unmarked('parameter'),
          asked('future', host='[v1.bead]'), unmarked('future'),
          asked('portless', host='localhost:'), unmarked('portless')]),
+    # 15.2, step 1, and 15.12: a Content-Length that frames no body, one number twice among it, which
+    # every side refuses as Node's and Kestrel's parsers refuse it, judged before hosts is read
+    ('an upgrade whose Content-Length frames no body — a word, nothing, two numbers — or names one number twice, in one line or in two, is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         step
+         for on, lengths in (('word', ['abc']), ('empty', ['']), ('numbers', ['0', '1']), ('listed', ['0, 0']),
+                             ('twice', ['0', '0']), ('padded', ['0', '00']))
+         for step in (handshake(on, [('content-length', length) for length in lengths], host='elsewhere.test'),
+                      unmarked(on))]),
     ('a request at a WebSocket\'s address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
      ['15.1', '15.2', '15.2.1', '15.12'], {}, [
          handshake('escape', {'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),
@@ -2771,7 +2802,7 @@ def amqp_broker():
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
-HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE}
+HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:

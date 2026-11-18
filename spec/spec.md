@@ -1409,8 +1409,9 @@ WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
-   path whose percent-decoding holds NUL, or a field that holds a control character or an octet
-   past US-ASCII (section 15.12), its HTTP server answers, unmarked.
+   path whose percent-decoding holds NUL, a field that holds a control character or an octet past
+   US-ASCII, or a `Content-Length` that frames no body (section 15.12), its HTTP server answers,
+   unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1432,7 +1433,8 @@ WebSocket's address in this order, and answers the first that applies:
 6. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose `Sec-WebSocket-Key` is
    not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a list of distinct
    tokens, that carries more than one `Authorization` field line, which is no list to combine
-   ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or that has content
+   ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or that has content, a
+   `Content-Length` past 0 or a `Transfer-Encoding`
    ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)).
 7. An upgrade that carries an `Origin` neither its own nor among those it takes is then refused 403,
    `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
@@ -1855,6 +1857,19 @@ policy; and any other scheme, an extension's or a `blob:` URL's among them. A se
 `null`: it is what every page that has no origin of its own sends, a sandboxed frame of any site
 among them, so no `origins` names it. A request without an `Origin` comes from no page, and is
 taken.
+
+A request's body is framed as HTTP frames it
+([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)). In a request without a
+`Transfer-Encoding`, a `Content-Length` that frames no body is answered as HTTP answers it, 400
+unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields every response on the
+path carries, and its stream reset `PROTOCOL_ERROR` over HTTP/2, a stream error
+([RFC 9113 §5.4.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.2)), before anything else of
+the request is judged. That is a `Content-Length` that is not digits alone
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), an empty one among them,
+or one that names two numbers, in one line or across its lines. So is one that names one number
+more than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or
+read as that number: every side refuses it, since not every platform's HTTP can read it
+(`docs/support.md`, "Leveled down").
 
 A request's field in more than one field line is read with its lines joined in their order by
 `, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient
