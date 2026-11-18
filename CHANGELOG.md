@@ -122,6 +122,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP's own 400 among them. Node's parser hands such a request on, and the transport drew its
   connection or the gateway served its route, its answer never written. Over HTTP/1, each now serves
   a request once Node gives its answer the socket, the answers before it ended.
+- The C# gateway closes, in stages, the connection of a refusal of its own of a request that
+  declares a body: it kept it, and Kestrel read the refused body on with no bound, a declared 413's
+  among it, then reset the connection 6 to 7 seconds later, no `connection: close` telling its
+  client to stop. Every answer it writes before its body is whole, a 413 by count, a 408 and a 503
+  on the body budget among them, is flushed, then what still comes is read and dropped until its
+  client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
+  a body on and reset it.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.
