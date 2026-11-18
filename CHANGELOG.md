@@ -50,6 +50,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing. A pause also holds against a read already waiting on the socket, each read of the
   upgrade's stream passing the gate: a paused connection reads nothing more of its peer, whose
   pongs no longer keep it open.
+- The Rust WebSocket client and server tell the close of a connection they paused at once when its
+  peer ends it by a FIN or a reset, while still paused, as the TypeScript and C# sides do (spec
+  15.3, 15.12), rather than on its resume or when their heartbeat drops it. The paused connection
+  peeks one byte of its TCP socket, which reads nothing of it; an end behind bytes that wait is met
+  once resumed.
 - A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
   "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
   `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,
