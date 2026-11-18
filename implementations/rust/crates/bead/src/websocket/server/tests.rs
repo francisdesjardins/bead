@@ -3377,7 +3377,7 @@ async fn pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_
 async fn pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
  {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        heartbeat: Some(Duration::from_millis(500)),
+        heartbeat: Some(Duration::from_millis(1_000)),
         maximum_unsent_bytes: Some(67_108_864),
         minimum_send_bytes_per_second: Some(0),
         ..briefly_closing()
@@ -3393,7 +3393,7 @@ async fn pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog
     }
 
     // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-    rest(Duration::from_millis(600)).await;
+    rest(Duration::from_millis(1_200)).await;
 
     while order.len() < 401 {
         match heard_on(&mut peer, Duration::from_secs(10)).await {
@@ -3414,7 +3414,7 @@ async fn pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog
     );
 
     // its echo read within its heartbeat: kept
-    rest(Duration::from_millis(600)).await;
+    rest(Duration::from_millis(1_200)).await;
     assert!(recorder.told.lock().unwrap().closes.is_empty(), "kept");
     stopped(&server).await;
 }

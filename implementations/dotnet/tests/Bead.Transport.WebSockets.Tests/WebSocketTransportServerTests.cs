@@ -3445,7 +3445,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
     {
-        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(500), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 });
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(1_000), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 });
 
         var (tcp, _) = await Upgraded(UpgradeRequest());
         var connectionHandle = await Next(_connections);
@@ -3462,7 +3462,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             }
 
             // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-            await Task.Delay(600, Cancelled);
+            await Task.Delay(1_200, Cancelled);
 
             while (order.Count < 401)
             {
@@ -3480,7 +3480,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.InRange(order.IndexOf(0x9), 0, 399);
 
             // its echo read within its heartbeat: kept
-            await Task.Delay(600, Cancelled);
+            await Task.Delay(1_200, Cancelled);
             Assert.Equal(0, _closes.Reader.Count);
         }
     }

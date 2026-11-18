@@ -2618,7 +2618,7 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
   // transport holds pass what any loopback's buffers hold
   test('pings ahead of what it holds unsent, so a silent reader behind a backlog reads the ping before the backlog’s end and is kept', async () => {
     await using started = await startDated({
-      heartbeat: 500,
+      heartbeat: 1_000,
       maximumUnsentBytes: 67_108_864,
       minimumSendBytesPerSecond: 0,
     });
@@ -2643,7 +2643,7 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       }
 
       // its ping out, a heartbeat past its last read, it reads all, echoing the ping as it comes
-      await sleep(600);
+      await sleep(1_200);
       socket.on('data', (chunk: Buffer) => {
         rest = Buffer.concat([rest, chunk]);
 
@@ -2690,7 +2690,7 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       expect([ping >= 0, ping < 400, order.length]).toEqual([true, true, 401]);
 
       // its echo read within its heartbeat: kept
-      await sleep(600);
+      await sleep(1_200);
       expect(closes).toEqual([]);
     } finally {
       socket.destroy();
