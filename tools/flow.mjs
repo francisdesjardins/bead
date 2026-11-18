@@ -174,13 +174,19 @@ const nodeModulesUnder = (folder) => {
 
 // ! git's own removal fails on Windows where a path runs past MAX_PATH, as node_modules' do; Node's
 // removal does not, so the node_modules folders go first, and the folder by Node where git refused
+// ! a folder a process still holds, a shell's or an editor's, refuses its removal (EPERM on Windows):
+// the removal is left as it stands, and its caller says what is left to do
 const removeWorktree = (root, path) => {
   const folders = nodeModulesUnder(path);
-  for (const folder of folders) {
-    rmSync(folder, { recursive: true, force: true, maxRetries: 10 });
-  }
-  if (gitRun(root, ['worktree', 'remove', path]).status !== 0) {
-    rmSync(path, { recursive: true, force: true, maxRetries: 10 });
+  try {
+    for (const folder of folders) {
+      rmSync(folder, { recursive: true, force: true, maxRetries: 10 });
+    }
+    if (gitRun(root, ['worktree', 'remove', path]).status !== 0) {
+      rmSync(path, { recursive: true, force: true, maxRetries: 10 });
+    }
+  } catch {
+    // the folder stays, and finish names it
   }
   git(root, ['worktree', 'prune']);
   return folders.length;
@@ -536,7 +542,11 @@ export const finish = async (root, options) => {
     }
     const count = removeWorktree(root, worktree.path);
     if (existsSync(worktree.path)) {
-      throw new Error(`the worktree ${worktree.path} is still there: remove it by hand`);
+      throw new Error(
+        `merged, pushed and ${REMOTE}'s ${branch} deleted, but the worktree ${worktree.path} is ` +
+          `still there, something running in it holding it: once nothing does, remove the folder, ` +
+          `then git worktree prune and git branch -d ${branch}`
+      );
     }
     log(`removed: the worktree ${worktree.path}, ${count} node_modules folders first`);
   }
