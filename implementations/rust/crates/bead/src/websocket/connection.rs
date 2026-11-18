@@ -95,8 +95,8 @@ impl Wire for tokio::net::TcpStream {
     }
 }
 
-/// Ready once `socket` ended, by a peek of one byte, which takes nothing from it: its FIN with no
-/// byte before it, or a reset, whatever it held.
+/// Ready once `socket` ended, by a peek of one byte, which takes nothing from it: its FIN or a
+/// reset, with no byte before it.
 pub(crate) fn ended_of(socket: &tokio::net::TcpStream, context: &mut Context<'_>) -> Poll<()> {
     let mut byte = [0_u8; 1];
     let mut buffer = ReadBuf::new(&mut byte);
