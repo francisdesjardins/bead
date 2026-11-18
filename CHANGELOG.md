@@ -82,6 +82,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already waiting reads nothing more of its server, pongs among it, and its heartbeat drops a
   connection paused past about twice `heartbeat`, its close told at once, while still paused, as
   the TypeScript and Rust clients do.
+- The C# WebSocket client tells what its socket throws as it drops a server that never answered its
+  disconnect within its close timeout as the connection's error, then its close, unclean (spec
+  15.1), as it does for a drop after its answer to the server's close, rather than its close as the
+  disconnect asked, what the socket threw dropped.
 - The Rust WebSocket client and server tell the close of a connection they paused at once when its
   peer ends it by a FIN or a reset, while still paused, as the TypeScript and C# sides do (spec
   15.3, 15.12), rather than on its resume or when their heartbeat drops it. The paused connection

@@ -246,8 +246,14 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         public void Arm()
         {
-            Volatile.Write(ref _refusesDrop, 1);
+            ArmDrop();
             Volatile.Write(ref _isArmed, 1);
+        }
+
+        // its first dispose alone throws, each write going through
+        public void ArmDrop()
+        {
+            Volatile.Write(ref _refusesDrop, 1);
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -2777,6 +2783,44 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await peer.GetStream().WriteAsync(new byte[] { 0x88, 0x02, 0x03, 0xE8 }, Cancelled);
             await closed.WaitAsync(Patience, Cancelled);
 
+            Assert.Equal(1, stream.Drops);
+            Assert.Equal(new object[] { "InvalidOperationException: abort refused", (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+            // its socket, which the abort left open, ends after the connection: nothing more is told
+            await stream.Inner.DisposeAsync();
+
+            Assert.True(await IsClosed(peer));
+            Assert.Equal(2, Described(told).Length);
+        }
+    }
+
+    // spec 15.1: what its socket throws as its transport drops a server that never answered its
+    // disconnect within its close timeout is the connection's error, and its close is unclean
+    [Fact]
+    public async Task Ends_a_connection_whose_drop_throws_at_its_close_timeout_after_a_disconnect_telling_what_it_threw_once_and_its_close_unclean()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        using var handler = new RefusedDrops();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = Timeout.InfiniteTimeSpan, CloseTimeout = TimeSpan.FromMilliseconds(200), Handler = handler });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = await handler.Stream.Task.WaitAsync(Patience, Cancelled);
+
+            // its close goes out, the server never answers it, and its socket's abort throws, its
+            // socket left open
+            stream.ArmDrop();
+            await client.CloseConnection().WaitAsync(Patience, Cancelled);
+            await closed.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1000, await CloseCodeOf(peer.GetStream()));
             Assert.Equal(1, stream.Drops);
             Assert.Equal(new object[] { "InvalidOperationException: abort refused", (false, false) }, Described(told));
             Assert.Equal(ReadyState.Closed, client.ReadyState);
