@@ -55,6 +55,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already waiting reads nothing more of its server, pongs among it, and its heartbeat drops a
   connection paused past about twice `heartbeat`, its close told at once, while still paused, as
   the TypeScript and Rust clients do.
+- The Rust WebSocket client and server tell the close of a connection they paused at once when its
+  peer ends it by a FIN or a reset, while still paused, as the TypeScript and C# sides do (spec
+  15.3, 15.12), rather than on its resume or when their heartbeat drops it. The paused connection
+  peeks one byte of its TCP socket, which reads nothing of it; an end behind bytes that wait is met
+  once resumed.
 - A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
   "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
   `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,

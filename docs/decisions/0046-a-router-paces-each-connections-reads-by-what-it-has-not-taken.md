@@ -225,10 +225,14 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
   the socket, and what `ws` still emits from the read it parsed is held in order, one socket read at
   most, 64 KiB; on resume the transport hands what it holds from a microtask, the router pausing it
   again at the bound, and resumes `ws` once nothing is held, so at most the bound is handed per
-  task. A WebSocket client with no pause, a page's or Node's global one, hands one message per task,
-  so the count never reaches a bound and its platform paces it, reading on; it still implements the
-  pair, holding while paused. **A connection that closes reads on**: one this side closes, or one of
-  a stop under way, opens its gate and reads to its peer's Close, dropping what comes
+  task. The Rust side's connection, one task's, polls no frame while paused, but peeks one byte of
+  its TCP socket, which takes nothing from it: a FIN with nothing before it, or a reset, ends it at
+  once, on a server and a client, what it held dropped with it. An end behind bytes that wait is
+  met once resumed, as on the TypeScript side. A WebSocket client with no pause, a page's or
+  Node's global one, hands one message per task, so the count never reaches a bound and its
+  platform paces it, reading on; it still implements the pair, holding while paused. **A
+  connection that closes reads on**: one this side closes, or one of a stop under way, opens its
+  gate and reads to its peer's Close, dropping what comes
   ([RFC 6455 §7.1.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.1),
   [§7.1.2](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.2)); what it held is dropped with
   the connection. TCP's window then paces the peer.

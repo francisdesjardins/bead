@@ -3371,6 +3371,45 @@ async fn drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_
     stopped(&server).await;
 }
 
+// spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at once
+// all the same
+#[tokio::test]
+async fn tells_the_close_of_a_connection_it_pauses_at_once_when_its_peer_ends_it_by_a_fin_or_a_reset()
+ {
+    // * no heartbeat, never resumed: its socket's end alone tells its close
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(NEVER),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+
+    for (index, is_reset) in [false, true].into_iter().enumerate() {
+        let mut peer = peer_of(port).await;
+        let handle = recorder.connections(index + 1).await.remove(index);
+
+        server.pause(&handle);
+        rest(Duration::from_millis(50)).await;
+
+        if is_reset {
+            // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+            socket2::SockRef::from(&peer.socket)
+                .set_linger(Some(Duration::ZERO))
+                .unwrap();
+            drop(peer);
+        } else {
+            peer.socket.shutdown().await.unwrap();
+        }
+
+        assert_eq!(
+            recorder.closes(index + 1).await.remove(index),
+            (false, handle),
+            "unclean"
+        );
+    }
+
+    stopped(&server).await;
+}
+
 // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops nothing of
 // one not paused
 #[tokio::test]
