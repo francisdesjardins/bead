@@ -111,7 +111,7 @@ internal sealed partial class RouterCore
                     throw LocalOf(
                         ProtocolFailureOf(
                             ProtocolCode.PayloadTooLarge,
-                            $"an envelope is {_options.Limits.MaximumEnvelopeBytes} bytes at most, not {bytes.Length}"),
+                            $"an envelope is {FailureException.ByteCountOf(_options.Limits.MaximumEnvelopeBytes)} at most, not {bytes.Length}"),
                         (_side, envelope.Header));
                 }
 

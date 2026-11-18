@@ -983,7 +983,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         return (
           lose({
             code: CloseCode.LOST,
-            reason: `what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, ${String(heldBound)} bytes`,
+            reason: `what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, ${byteCountOf(heldBound)}`,
           }),
           undefined
         );

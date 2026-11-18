@@ -4585,6 +4585,22 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([(false, connectionHandle)], _closes);
     }
 
+    [Fact]
+    public async Task Writes_1_byte_for_a_maximumOutboxBytes_of_1()
+    {
+        await Start(new HttpTransportServerOptions { MaximumOutboxBytes = 1 });
+
+        var reported = new ConcurrentQueue<(string Reason, string ConnectionHandle)>();
+        var (_, connectionHandle) = await Connect(true);
+
+        _server.Error += (reason, handle) =>
+        {
+            reported.Enqueue((reason.Message, handle));
+        };
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Notification, (1, 2)), false), connectionHandle).WaitAsync(Patience, Cancelled);
+        Assert.Equal([($"{connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 1 byte", connectionHandle)], reported);
+    }
+
     // spec 15.1
     [Fact]
     public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()

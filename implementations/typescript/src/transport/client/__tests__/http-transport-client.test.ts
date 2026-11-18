@@ -2135,6 +2135,39 @@ test.describe('createHTTPTransportClient, listening', () => {
     expect(toldOf).toEqual([pastOf(16), pastOf(16), [['close', false, false]], pastOf(24)]);
   });
 
+  test('writes 1 byte for a maximumBodyBytes of 1', async () => {
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({
+      fetch: fake.fetch,
+      isListening: false,
+      maximumBodyBytes: 1,
+    });
+    const connecting = client.connect({ host, port: 80 });
+
+    fake.calls[0]?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    const told = endOf(client);
+    const closed = nextEvent(client, 'close');
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+    fake.calls[1]?.answer({
+      body: new Uint8Array(2),
+      headers: { 'content-length': '2', 'content-type': BEAD_MEDIA_TYPE },
+      status: 200,
+    });
+    await sending;
+    await closed;
+
+    expect(told).toEqual([
+      ['error', 'the connection is closed: an envelope past its maximumBodyBytes, 1 byte'],
+      ['close', false, false],
+    ]);
+  });
+
   // spec 15.1
   test('tells a batch that does not read on error before its close, saying what of it does not, and a refusal of its listen by its close alone', async () => {
     const envelope = envelopeOf(0x13, { callId: 1 });

@@ -6,6 +6,7 @@
 
 // dependencies
 
+import { byteCountOf } from './errors';
 import type { BrokerTopic } from './types';
 
 // constants
@@ -126,7 +127,7 @@ export const encodeMessage = (
 
   if (address.length > LONGEST_ADDRESS) {
     throw new RangeError(
-      `an address of ${String(address.length)} bytes, past ${String(LONGEST_ADDRESS)}`
+      `an address of ${byteCountOf(address.length)}, past ${String(LONGEST_ADDRESS)}`
     );
   }
 

@@ -389,7 +389,7 @@ internal sealed partial class RouterCore : IDisposable
             throw LocalOf(
                 ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a subscription's result goes in one envelope, of {_placement.WholeBytes} bytes at most"),
+                    $"a subscription's result goes in one envelope, of {FailureException.ByteCountOf(_placement.WholeBytes)} at most"),
                 (_side, going.Header));
         }
 

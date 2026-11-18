@@ -29,7 +29,7 @@ use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::hold_finite;
 use crate::errors::ProgrammerError;
-use crate::failure::ProcedureAddress;
+use crate::failure::{ProcedureAddress, byte_count_of};
 use crate::identity::procedures_taken_of;
 use crate::life::Life;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
@@ -1052,7 +1052,8 @@ impl ServerTransport for BrokerTransportServer {
         // byte of the envelope (spec 15.20)
         if !fits((room, None)) {
             return Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
-                "a parcel of {room} bytes leaves no byte of an envelope beside its credential"
+                "a parcel of {} leaves no byte of an envelope beside its credential",
+                byte_count_of(room)
             )))));
         }
 

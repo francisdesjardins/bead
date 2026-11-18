@@ -1074,7 +1074,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // * dropped, its client behind, then reported naming its bound and its value (spec 15.9)
         if (overflowing is not null)
         {
-            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {_options.MaximumOutboxBytes} bytes")));
+            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {FailureException.ByteCountOf(_options.MaximumOutboxBytes)}")));
         }
 
         // its body still coming: its answer goes now, and it is never handed on

@@ -170,6 +170,59 @@ async fn reassembles_an_envelope_from_its_parts_and_loses_the_connection_past_it
     assert!(clock.dues().is_empty(), "its timer disarmed");
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_bound_a_budget_and_a_rate_of_1() {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let bounds = Arc::new(PartsBounds {
+        maximum_envelope_parts_bytes: 1,
+        minimum_body_bytes_per_second: 1,
+        body_grace_period: Duration::from_secs(5),
+        budget: Arc::new(Budget::new(1)),
+        clock: shared,
+    });
+
+    // past its participant's budget, which another connection's part holds whole
+    let mut other = Parts::new(Arc::clone(&bounds), Arc::new(|| {}));
+
+    other.take((part(&[0]), true, None));
+    assert_eq!(
+        Parts::new(Arc::clone(&bounds), Arc::new(|| {})).take((part(&[0]), true, None)),
+        PartTaking::Lost(
+            4_000,
+            "a part would pass its participant's heldBytesBudget, 1 byte".to_owned()
+        ),
+        "past its participant's budget"
+    );
+    other.stop();
+
+    // past its bound
+    let mut bounded = Parts::new(Arc::clone(&bounds), Arc::new(|| {}));
+
+    bounded.take((part(&[0]), true, None));
+    assert_eq!(
+        bounded.take((part(&[0]), true, None)),
+        PartTaking::Lost(
+            1_009,
+            "an envelope's parts would pass maximumEnvelopePartsBytes, 1 byte".to_owned()
+        ),
+        "past its bound"
+    );
+
+    // slower than its rate once its grace passed
+    let mut slow = Parts::new(Arc::clone(&bounds), Arc::new(|| {}));
+
+    slow.take((part(&[0]), true, None));
+    clock.advance(Duration::from_secs(5)).await;
+    assert!(slow.is_late(), "late at its deadline");
+    assert_eq!(
+        slow.late_of(),
+        "an envelope's parts came slower than minimumBodyBytesPerSecond, 1 byte a second, past bodyGracePeriod, 5000 ms",
+        "its lateness named"
+    );
+    slow.stop();
+}
+
 #[test]
 fn keeps_no_room_for_an_envelope_s_parts_once_its_envelope_is_whole_or_its_parts_let_go() {
     let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);

@@ -100,7 +100,7 @@ internal sealed class WebSocketConnection
     /// </summary>
     public InvalidDataException TooBigOf(string subject)
     {
-        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with 1009: a message past its maximumMessageBytes, {_bounds.MaximumMessageBytes} bytes"));
+        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with 1009: a message past its maximumMessageBytes, {FailureException.ByteCountOf(_bounds.MaximumMessageBytes)}"));
     }
 
     /// <summary>

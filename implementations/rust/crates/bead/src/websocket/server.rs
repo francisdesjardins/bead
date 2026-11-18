@@ -21,7 +21,7 @@ use tungstenite::protocol::Role;
 use crate::clock::{SharedClock, SystemClock};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
-use crate::failure::ProcedureAddress;
+use crate::failure::{ProcedureAddress, byte_count_of};
 use crate::identity::procedures_taken_of;
 use crate::judgement::handshake::{
     HandshakeRefusal, HandshakeRequest, HandshakeTaken, busy_handshake, refusal_of_handshake,
@@ -726,7 +726,8 @@ impl ServerInner {
         if let Some(failure) = &ended.failure {
             let error = match failure {
                 Failed::TooBig(maximum) => RouterError::Other(Arc::new(io::Error::other(format!(
-                    "{handle} is closed with 1009: a message past its maximumMessageBytes, {maximum} bytes"
+                    "{handle} is closed with 1009: a message past its maximumMessageBytes, {}",
+                    byte_count_of(*maximum)
                 )))),
                 Failed::Protocol(why) => RouterError::Other(Arc::new(io::Error::other(format!(
                     "{handle} is closed with 1002: {why}"

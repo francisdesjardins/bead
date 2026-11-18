@@ -18,6 +18,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   number whole and with its unit by no-break spaces. How Bead is made moves to
   francisdesjardins.ca, and README's "Why Bead" drops the two paragraphs the page dropped.
 
+### Fixed
+
+- Every report, error and refusal that counts bytes says "1 byte" at 1, on every side: past
+  `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`, `maximumEnvelopePartsBytes`, a participant's
+  `heldBytesBudget`, `minimumBodyBytesPerSecond`, `maximumBodyBytes`, a memory broker's
+  `maximumMessageBytes`, a WebSocket's `maximumMessageBytes` and an MQTT Maximum Packet Size; a
+  parcel's room; and the bounds and lengths an envelope, a header, a transfer or a chunk is refused
+  by.
+
 ## [0.15.0] - 2026-11-17
 
 ### Added

@@ -277,8 +277,8 @@ export const createIncomingTransfer = (
       if (isLast ? bytes.length > payloadBytesPerChunk : bytes.length !== payloadBytesPerChunk) {
         return invalid(
           isLast
-            ? `a last chunk carries ${String(payloadBytesPerChunk)} bytes at most, not ${String(bytes.length)}`
-            : `a chunk before the last carries ${String(payloadBytesPerChunk)} bytes, not ${String(bytes.length)}`
+            ? `a last chunk carries ${byteCountOf(payloadBytesPerChunk)} at most, not ${String(bytes.length)}`
+            : `a chunk before the last carries ${byteCountOf(payloadBytesPerChunk)}, not ${String(bytes.length)}`
         );
       }
 

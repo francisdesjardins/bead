@@ -350,7 +350,7 @@ internal static partial class EnvelopeCodec
             {
                 throw MalformedOf(
                     side,
-                    $"a {HexadecimalOf((int)kind)} header of {headerBytes} bytes runs past its message of {bytes.Length}");
+                    $"a {HexadecimalOf((int)kind)} header of {FailureException.ByteCountOf(headerBytes)} runs past its message of {bytes.Length}");
             }
 
             // ! the block's head states the block's length: a header that does not hold the head is
@@ -359,7 +359,7 @@ internal static partial class EnvelopeCodec
             {
                 throw MalformedOf(
                     side,
-                    $"a {HexadecimalOf((int)kind)} header of flags {HexadecimalOf((int)flags)} holds its credential's head: {expected + Credential.HeadBytes} bytes at least, not {headerBytes}");
+                    $"a {HexadecimalOf((int)kind)} header of flags {HexadecimalOf((int)flags)} holds its credential's head: {FailureException.ByteCountOf(expected + Credential.HeadBytes)} at least, not {headerBytes}");
             }
 
             expected += BlockBytesOf(BinaryPrimitives.ReadUInt16BigEndian(bytes[(expected + 2)..]));
@@ -369,7 +369,7 @@ internal static partial class EnvelopeCodec
         {
             throw MalformedOf(
                 side,
-                $"a {HexadecimalOf((int)kind)} header of flags {HexadecimalOf((int)flags)} is {expected} bytes, not {headerBytes} of {bytes.Length}");
+                $"a {HexadecimalOf((int)kind)} header of flags {HexadecimalOf((int)flags)} is {FailureException.ByteCountOf(expected)}, not {headerBytes} of {bytes.Length}");
         }
 
         return (flags, headerBytes);
@@ -627,7 +627,7 @@ internal static partial class EnvelopeCodec
         if (bytes.Length < headerBytes)
         {
             throw new ArgumentException(
-                $"a {headerBytes}-byte header does not fit in {bytes.Length} bytes",
+                $"a {headerBytes}-byte header does not fit in {FailureException.ByteCountOf(bytes.Length)}",
                 nameof(bytes));
         }
 

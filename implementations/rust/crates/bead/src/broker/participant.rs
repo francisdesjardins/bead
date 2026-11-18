@@ -1709,7 +1709,8 @@ impl ParticipantState {
             }
             Some(_) | None => {
                 let why = format!(
-                    "what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {bound} bytes"
+                    "what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {}",
+                    byte_count_of(bound)
                 );
 
                 self.lose(pair, (codes::LOST, why));

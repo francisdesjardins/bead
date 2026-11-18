@@ -17,6 +17,7 @@ use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 use crate::errors::ProgrammerError;
+use crate::failure::byte_count_of;
 use crate::router::types::BoxFuture;
 
 /// What an adapter's broker gives its publications (spec 15.19).
@@ -184,7 +185,10 @@ impl fmt::Debug for BrokerMessage {
         formatter
             .debug_struct("BrokerMessage")
             .field("topic", &self.topic)
-            .field("payload", &format_args!("{} bytes", self.payload.len()))
+            .field(
+                "payload",
+                &format_args!("{}", byte_count_of(self.payload.len())),
+            )
             .field("is_retained", &self.is_retained)
             .finish_non_exhaustive()
     }

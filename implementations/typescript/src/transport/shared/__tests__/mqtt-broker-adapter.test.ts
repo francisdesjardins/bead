@@ -1565,6 +1565,16 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('writes 1 byte for a CONNACK’s Maximum Packet Size of 1', async () => {
+    const adapter = adapterOf(script);
+
+    await linkUp({ adapter, script }, { properties: { maximumPacketSize: 1 } });
+    await expect(adapter.publish({ payload: new Uint8Array(), topic: INBOX })).rejects.toThrow(
+      /, past its broker's Maximum Packet Size, 1 byte$/u
+    );
+    await adapter.stop();
+  });
+
   test('reports no payload room where its CONNACK’s Maximum Packet Size cannot hold a PUBLISH to the topic, and refuses even an empty publication (spec 15.28)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script }, { properties: { maximumPacketSize: 16 } });

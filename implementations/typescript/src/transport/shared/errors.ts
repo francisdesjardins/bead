@@ -5,7 +5,10 @@ import { thrownMessage } from './thrown-message';
 
 // helpers
 
-/** A count of bytes as a failure's detail writes it: `1 byte`, or `0 bytes`, `2 bytes`. */
+/**
+ * A count of bytes as a report, an error or a failure's detail writes it: `1 byte`, or `0 bytes`,
+ * `2 bytes`.
+ */
 export const byteCountOf = (count: number): string => {
   return `${String(count)} ${count === 1 ? 'byte' : 'bytes'}`;
 };
@@ -64,7 +67,7 @@ export const tooBigOf = (
   { cause, maximumMessageBytes }: { cause: unknown; maximumMessageBytes: number }
 ): GenericError => {
   return new GenericError(
-    `${subject} is closed with 1009: a message past its maximumMessageBytes, ${String(maximumMessageBytes)} bytes`,
+    `${subject} is closed with 1009: a message past its maximumMessageBytes, ${byteCountOf(maximumMessageBytes)}`,
     { cause }
   );
 };

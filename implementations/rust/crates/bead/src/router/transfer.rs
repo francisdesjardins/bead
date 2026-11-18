@@ -300,9 +300,15 @@ impl IncomingTransfer {
             length != per_chunk
         } {
             return Err(invalid(if is_last {
-                format!("a last chunk carries {per_chunk} bytes at most, not {length}")
+                format!(
+                    "a last chunk carries {} at most, not {length}",
+                    byte_count_of(per_chunk)
+                )
             } else {
-                format!("a chunk before the last carries {per_chunk} bytes, not {length}")
+                format!(
+                    "a chunk before the last carries {}, not {length}",
+                    byte_count_of(per_chunk)
+                )
             }));
         }
 

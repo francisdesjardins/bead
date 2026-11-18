@@ -2627,6 +2627,33 @@ async fn reports_no_payload_room_where_its_connacks_maximum_packet_size_cannot_h
     adapter.stop().await;
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_connacks_maximum_packet_size_of_1() {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let _link = link_up(
+        (&adapter, &script),
+        (
+            &Connack {
+                maximum_packet_size: Some(1),
+                ..Connack::default()
+            },
+            None,
+        ),
+    )
+    .await;
+    let refused = adapter
+        .publish(BrokerPublication::new(inbox(), Bytes::new()))
+        .await
+        .unwrap_err();
+
+    assert!(
+        message_of(&refused).ends_with(", past its broker's Maximum Packet Size, 1 byte"),
+        "{refused}"
+    );
+    adapter.stop().await;
+}
+
 // spec 15.30
 #[tokio::test]
 async fn tells_its_link_up_once_its_connack_came_and_bounds_what_it_publishes_by_that_connacks_maximum_packet_size_the_last_links_while_it_is_down()

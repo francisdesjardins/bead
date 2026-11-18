@@ -28,7 +28,7 @@ use crate::envelope::{
     read_prefix, write_envelope,
 };
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
-use crate::failure::{Failure, ProcedureAddress};
+use crate::failure::{Failure, ProcedureAddress, byte_count_of};
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
 use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
@@ -887,8 +887,8 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
                 return Err(CallError::Failure(
                     Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, limits_side(state))
                         .saying(format!(
-                            "an envelope is {} bytes at most, not {length}",
-                            limits.maximum_envelope_bytes
+                            "an envelope is {} at most, not {length}",
+                            byte_count_of(limits.maximum_envelope_bytes)
                         ))
                         .about(&envelope.header()),
                 ));
@@ -1696,8 +1696,8 @@ fn answer_call<S: Side>(state: &mut S, (made, is_in_place): (CallAnswer<S>, bool
                         let failure = core
                             .failure(ProtocolCode::PAYLOAD_TOO_LARGE)
                             .saying(format!(
-                                "a subscription's result goes in one envelope, of {} bytes at most",
-                                core.placement.whole_bytes
+                                "a subscription's result goes in one envelope, of {} at most",
+                                byte_count_of(core.placement.whole_bytes)
                             ))
                             .about(&EnvelopeHeader::Result(result_header));
 
@@ -2254,7 +2254,8 @@ fn wait_for_budget<S: Side>(state: &mut S, (transfer, total): (u64, u64)) {
         let failure = core
             .failure(ProtocolCode::CAPACITY_EXCEEDED)
             .saying(format!(
-                "a total of {total} bytes waited {} milliseconds for the budget",
+                "a total of {} waited {} milliseconds for the budget",
+                byte_count_of(total),
                 wait.as_millis()
             ));
 
