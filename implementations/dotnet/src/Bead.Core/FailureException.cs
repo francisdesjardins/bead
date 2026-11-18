@@ -169,7 +169,8 @@ public sealed class FailureException : Exception
     }
 
     /// <summary>
-    /// A count of bytes as a failure's detail writes it: <c>1 byte</c>, or <c>0 bytes</c>, <c>2 bytes</c>.
+    /// A count of bytes as a report, an error or a failure's detail writes it: <c>1 byte</c>, or
+    /// <c>0 bytes</c>, <c>2 bytes</c>.
     /// </summary>
     internal static string ByteCountOf(long count)
     {

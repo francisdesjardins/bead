@@ -224,7 +224,7 @@ export const readEnvelope = (
 
     throw new FailureError({
       ...failures.envelopeTooLarge,
-      detail: `${what} is ${String(bound)} bytes at most, not ${String(bytes.length)}`,
+      detail: `${what} is ${byteCountOf(bound)} at most, not ${String(bytes.length)}`,
     });
   }
 

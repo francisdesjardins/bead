@@ -4343,6 +4343,26 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     await server.stop();
   });
 
+  test('writes 1 byte for a maximumOutboxBytes of 1', async () => {
+    const { connectScripted, events, server } = await startScripted({ maximumOutboxBytes: 1 });
+    const { connectionHandle } = connectScripted({ isListening: true });
+
+    await server.send({ data: envelopeOf(NOTIFICATION, { callId: 2 }) }, connectionHandle);
+
+    expect(
+      events.filter(([name]) => {
+        return name === 'error';
+      })
+    ).toEqual([
+      [
+        'error',
+        `${connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 1 byte`,
+        connectionHandle,
+      ],
+    ]);
+    await server.stop();
+  });
+
   // spec 15.1
   test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same and dropping what it threw', async () => {
     using uncaught = trapUncaught();

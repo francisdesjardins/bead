@@ -1555,6 +1555,26 @@ public sealed class BrokerParticipantTests
         await peer.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Writes_1_byte_for_a_maximumHeldEnvelopeBytes_of_1()
+    {
+        var (connections, peer) = await HeldConnectionsOf((new BrokerParticipantOptions { MaximumHeldEnvelopeBytes = 1 }, 1));
+        var held = connections[0];
+
+        held.Client.Pause();
+        await held.Send(DataOf(1, 2));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !held.Closes.IsEmpty;
+            },
+            "the held connection lost");
+
+        Assert.Equal(["the connection to acceptor is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 1 byte"], held.Reported);
+
+        await peer.DisposeAsync();
+    }
+
     // spec 15.12.17, 15.23.5
     [Fact]
     public async Task A_resume_with_a_hand_already_queued_keeps_the_order_of_what_is_held()

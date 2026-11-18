@@ -14,6 +14,8 @@
 
 use bytes::Bytes;
 
+use crate::failure::byte_count_of;
+
 #[cfg(test)]
 mod tests;
 
@@ -152,7 +154,9 @@ impl core::fmt::Display for MqttRefusal {
         match self {
             Self::PastMaximum { size, maximum } => write!(
                 formatter,
-                "a packet of {size} bytes, past its Maximum Packet Size, {maximum} bytes"
+                "a packet of {}, past its Maximum Packet Size, {}",
+                byte_count_of(*size),
+                byte_count_of(*maximum)
             ),
             Self::Malformed(why) => write!(formatter, "a malformed packet: {why}"),
         }

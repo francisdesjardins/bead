@@ -1,6 +1,6 @@
 // dependencies
 
-import { ProgrammerError } from '../../transport/shared/errors';
+import { byteCountOf, ProgrammerError } from '../../transport/shared/errors';
 import {
   CredentialScheme,
   EnvelopeFlag,
@@ -518,7 +518,7 @@ const checkLength = (
   const lengthOf = (expected: number): FailureError => {
     return malformedOf(
       failures,
-      `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} is ${String(expected)} bytes, not ${String(headerBytes)} of ${String(bytes.length)}`
+      `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} is ${byteCountOf(expected)}, not ${String(headerBytes)} of ${String(bytes.length)}`
     );
   };
 
@@ -530,7 +530,7 @@ const checkLength = (
     if (headerBytes > bytes.length) {
       throw malformedOf(
         failures,
-        `a ${hexadecimalOf(kind)} header of ${String(headerBytes)} bytes runs past its message of ${String(bytes.length)}`
+        `a ${hexadecimalOf(kind)} header of ${byteCountOf(headerBytes)} runs past its message of ${String(bytes.length)}`
       );
     }
 
@@ -538,7 +538,7 @@ const checkLength = (
     if (headerBytes < fixedBytes + CREDENTIAL_HEAD_BYTES) {
       throw malformedOf(
         failures,
-        `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} holds its credential's head: ${String(fixedBytes + CREDENTIAL_HEAD_BYTES)} bytes at least, not ${String(headerBytes)}`
+        `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} holds its credential's head: ${byteCountOf(fixedBytes + CREDENTIAL_HEAD_BYTES)} at least, not ${String(headerBytes)}`
       );
     }
 
@@ -829,7 +829,7 @@ export const writeHeader = (header: EnvelopeHeader, bytes: Uint8Array): number =
 
   if (bytes.length < headerBytes) {
     throw new ProgrammerError(
-      `a ${String(headerBytes)}-byte header does not fit in ${String(bytes.length)} bytes`
+      `a ${String(headerBytes)}-byte header does not fit in ${byteCountOf(bytes.length)}`
     );
   }
 

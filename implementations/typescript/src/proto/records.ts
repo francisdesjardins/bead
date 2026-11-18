@@ -9,6 +9,7 @@
 
 import type { DescField, DescMessage, ScalarType } from '@bufbuild/protobuf';
 import type { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
+import { byteCountOf } from '../transport/shared/errors';
 
 // interfaces
 
@@ -537,7 +538,7 @@ const skipPacked = (reader: IReader, packs: number): void => {
 
   if (packs !== VARINTS) {
     if (length % packs !== 0) {
-      refuse(`holds a packed record of ${String(length)} bytes, no multiple of ${String(packs)}`);
+      refuse(`holds a packed record of ${byteCountOf(length)}, no multiple of ${String(packs)}`);
     }
 
     reader.at += length;

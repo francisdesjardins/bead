@@ -17,7 +17,7 @@ use crate::constants::{CredentialScheme, FailureScope, ProtocolCode, RouterSide}
 use crate::duration::{NEVER, hold};
 use crate::envelope::{Credential, EnvelopeHeader, RequestHeader, header_bytes_of};
 use crate::errors::{CallError, ProgrammerError, ResolverError};
-use crate::failure::{Failure, FailureOrigin};
+use crate::failure::{Failure, FailureOrigin, byte_count_of};
 use crate::identity::Procedure;
 use crate::jwt_verifier::{audiences_of, read_jwt};
 use crate::owner::WeakOwner;
@@ -621,8 +621,10 @@ impl Route {
         let limit = self.payload_limit_of(credential);
 
         (length > limit).then(|| {
-            Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, self.relay.side)
-                .saying(format!("a payload is {limit} bytes at most, not {length}"))
+            Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, self.relay.side).saying(format!(
+                "a payload is {} at most, not {length}",
+                byte_count_of(limit)
+            ))
         })
     }
 

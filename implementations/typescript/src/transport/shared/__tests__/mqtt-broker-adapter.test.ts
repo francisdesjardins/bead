@@ -1565,6 +1565,16 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('writes 1 byte for a CONNACK’s Maximum Packet Size of 1', async () => {
+    const adapter = adapterOf(script);
+
+    await linkUp({ adapter, script }, { properties: { maximumPacketSize: 1 } });
+    await expect(adapter.publish({ payload: new Uint8Array(), topic: INBOX })).rejects.toThrow(
+      /, past its broker's Maximum Packet Size, 1 byte$/u
+    );
+    await adapter.stop();
+  });
+
   test('reports no payload room where its CONNACK’s Maximum Packet Size cannot hold a PUBLISH to the topic, and refuses even an empty publication (spec 15.28)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script }, { properties: { maximumPacketSize: 16 } });
@@ -1738,6 +1748,19 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
     expect(messages).toEqual([]);
     expect(adapter.isLinked).toBe(false);
+  });
+
+  test('writes 1 byte for its own Maximum Packet Size of 1', async () => {
+    const adapter = adapterOf(script, { maximumPacketSize: 1 });
+    const starting = failureOf(adapter.start());
+    const link = await script.link();
+
+    // a CONNACK of 5 bytes, past it
+    link.write(Uint8Array.of(0x20, 0x03, 0x00, 0x00, 0x00));
+    expect(await starting).toMatchObject({
+      message: expect.stringMatching(/, past its Maximum Packet Size, 1 byte$/u),
+    });
+    expect(await closedWithin(link)).toBe(true);
   });
 
   test('loses its link, no DISCONNECT, on a packet its client cannot read (spec 15.29)', async () => {

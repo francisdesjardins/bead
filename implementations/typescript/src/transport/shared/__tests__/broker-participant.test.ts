@@ -952,6 +952,31 @@ test.describe('broker participant', () => {
     await participant.stop();
   });
 
+  test('writes 1 byte for a maximumHeldEnvelopeBytes of 1', async () => {
+    const { connections, participant, reported } = await heldConnections(
+      { maximumHeldEnvelopeBytes: 1 },
+      { count: 1 }
+    );
+    const [held] = connections;
+
+    if (held === undefined) {
+      throw new Error('one connection');
+    }
+
+    held.client.pause();
+    await held.send(dataOf(1, 2));
+    await settled();
+
+    expect([held.closes, reported]).toEqual([
+      [false],
+      [
+        'the connection to acceptor is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 1 byte',
+      ],
+    ]);
+
+    await participant.stop();
+  });
+
   // spec 15.12.17, 15.23.5
   test('a resume with a hand already queued keeps the order of what is held', async () => {
     const { connections, participant } = await heldConnections({}, { count: 1 });

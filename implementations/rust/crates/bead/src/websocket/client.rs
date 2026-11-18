@@ -27,6 +27,7 @@ use crate::HEARTBEAT;
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
+use crate::failure::byte_count_of;
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
@@ -375,7 +376,8 @@ fn connect_error(error: io::Error) -> TransportError {
 fn failure_of(failed: &Failed) -> RouterError {
     let message = match failed {
         Failed::TooBig(maximum) => format!(
-            "the connection is closed with 1009: a message past its maximumMessageBytes, {maximum} bytes"
+            "the connection is closed with 1009: a message past its maximumMessageBytes, {}",
+            byte_count_of(*maximum)
         ),
         Failed::Protocol(why) => format!("the connection is closed with 1002: {why}"),
         Failed::InvalidPayload(why) => format!("the connection is closed with 1007: {why}"),

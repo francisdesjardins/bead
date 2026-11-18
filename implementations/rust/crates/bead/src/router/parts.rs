@@ -105,8 +105,10 @@ impl Placement {
 
     /// The failure of a payload of `length` bytes, past `limit`.
     pub(crate) fn too_large_of(&self, length: u64, limit: u64) -> Failure {
-        Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, self.side)
-            .saying(format!("a payload is {limit} bytes at most, not {length}"))
+        Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, self.side).saying(format!(
+            "a payload is {} at most, not {length}",
+            byte_count_of(limit)
+        ))
     }
 
     /// The bytes of its payload a transfer's opening carries after `opening`, its header with its
@@ -182,15 +184,17 @@ impl Placement {
         // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
         if opening_header_bytes > count_of(MAXIMUM_HEADER_BYTES) {
             return Err(too_large(format!(
-                "a payload of {} goes as a transfer, whose opening's header of {opening_header_bytes} bytes passes {MAXIMUM_HEADER_BYTES}",
-                byte_count_of(length)
+                "a payload of {} goes as a transfer, whose opening's header of {} passes {MAXIMUM_HEADER_BYTES}",
+                byte_count_of(length),
+                byte_count_of(opening_header_bytes)
             )));
         }
 
         if opening_bytes < 1 {
             return Err(too_large(format!(
-                "a payload of {} goes as a transfer, whose opening's header of {opening_header_bytes} bytes leaves it no byte within {}",
+                "a payload of {} goes as a transfer, whose opening's header of {} leaves it no byte within {}",
                 byte_count_of(length),
+                byte_count_of(opening_header_bytes),
                 self.whole_bytes
             )));
         }
@@ -534,8 +538,8 @@ impl ReceivingTransfers {
 
         if total > self.limits.maximum_payload_bytes {
             return Err(too_large(format!(
-                "a payload is {} bytes at most, not {total}",
-                self.limits.maximum_payload_bytes
+                "a payload is {} at most, not {total}",
+                byte_count_of(self.limits.maximum_payload_bytes)
             )));
         }
 
@@ -563,7 +567,8 @@ impl ReceivingTransfers {
         if carried != opening_bytes {
             return Err(
                 Failure::protocol(ProtocolCode::CHUNK_INVALID, side).saying(format!(
-                    "an opening carries {opening_bytes} bytes of its payload, not {carried}"
+                    "an opening carries {} of its payload, not {carried}",
+                    byte_count_of(opening_bytes)
                 )),
             );
         }
@@ -574,7 +579,8 @@ impl ReceivingTransfers {
 
         if !admitted && wait.is_zero() {
             return Err(exceeded(format!(
-                "a total of {total} bytes waited {} milliseconds for the budget",
+                "a total of {} waited {} milliseconds for the budget",
+                byte_count_of(total),
                 wait.as_millis()
             )));
         }

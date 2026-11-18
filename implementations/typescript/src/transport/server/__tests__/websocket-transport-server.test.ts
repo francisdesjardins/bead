@@ -1033,6 +1033,33 @@ test.describe('WebSocketTransportServer, on the wire', () => {
   });
 
   // spec 15.3
+  test('writes 1 byte for a socket’s maximumMessageBytes of 1', async () => {
+    await server.stop();
+    server = createWebSocketTransportServer({ maxPayload: 1, WebSocketServer });
+    ({ port } = await server.start({ address: host, findOpenPort: true }));
+
+    const told: string[] = [];
+    const connection = nextServerEvent(server, 'connection');
+    const closed = nextServerEvent(server, 'close');
+    const socket = await openTcp(port);
+
+    server.on('error', (error) => {
+      told.push(error.message);
+    });
+    socket.write(upgradeRequest());
+
+    const [, connectionHandle] = await connection;
+
+    socket.write(maskedFrame(0x2, new Uint8Array(2)));
+    socket.end();
+    await closed;
+
+    expect(told).toEqual([
+      `${connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 1 byte`,
+    ]);
+    socket.destroy();
+  });
+
   test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when the peer answers 1000', async () => {
     await server.stop();
     server = createWebSocketTransportServer({ maxPayload: 64, WebSocketServer });

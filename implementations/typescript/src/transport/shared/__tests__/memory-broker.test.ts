@@ -388,6 +388,15 @@ test.describe('memory broker', () => {
     expect(heard).toEqual([]);
   });
 
+  test('writes 1 byte for a maximumMessageBytes of 1', async () => {
+    const bob = createMemoryBroker({ maximumMessageBytes: 1 }).adapter({ id: 'bob' });
+
+    await bob.start();
+    await expect(bob.publish({ payload: bytesOf('xy'), topic: INBOX })).rejects.toThrow(
+      /^a payload of 2 bytes, past the broker's maximumMessageBytes, 1 byte$/u
+    );
+  });
+
   test('refuses a start of a link up already, and a publication past maximumMessageBytes or of a link not up; drops what a link lost held, and a loss of a link not up does nothing', async () => {
     const broker = createMemoryBroker({ maximumMessageBytes: 4 });
     const ada = broker.adapter({ id: 'ada' });

@@ -4,7 +4,7 @@
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { assertHeld } from '../../transport/shared/clock';
-import { ProgrammerError, toError } from '../../transport/shared/errors';
+import { byteCountOf, ProgrammerError, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
@@ -434,7 +434,7 @@ export const createRelay = ({
     return length > limit
       ? {
           ...failures.payloadTooLarge,
-          detail: `a payload is ${String(limit)} bytes at most, not ${String(length)}`,
+          detail: `a payload is ${byteCountOf(limit)} at most, not ${String(length)}`,
         }
       : undefined;
   };

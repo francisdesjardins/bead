@@ -18,6 +18,7 @@ import {
 import { assertHeld, assertHeldDelay, LONGEST_TIMER, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
+  byteCountOf,
   ConnectError,
   GenericError,
   ProgrammerError,
@@ -220,7 +221,7 @@ const isFollowed = (response: IFetchResponseLike): boolean => {
 // (spec 15.1): an envelope past its bound, named with its value, as a WebSocket's 1009 is
 const pastBoundOf = (maximumBodyBytes: number): GenericError => {
   return new GenericError(
-    `the connection is closed: an envelope past its maximumBodyBytes, ${String(maximumBodyBytes)} bytes`
+    `the connection is closed: an envelope past its maximumBodyBytes, ${byteCountOf(maximumBodyBytes)}`
   );
 };
 

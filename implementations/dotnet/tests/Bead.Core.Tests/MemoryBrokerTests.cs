@@ -364,6 +364,18 @@ public sealed class MemoryBrokerTests
     }
 
     [Fact]
+    public async Task Writes_1_byte_for_a_maximumMessageBytes_of_1()
+    {
+        var broker = new MemoryBroker(new MemoryBrokerOptions { MaximumMessageBytes = 1, Scheduler = new SerialScheduler() });
+        var (bob, _) = await LinkedOf((broker, "bob"));
+
+        Assert.Equal("a payload of 2 bytes, past the broker's maximumMessageBytes, 1 byte (Parameter 'published')", (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return bob.Publish(new BrokerPublication { Topic = Topic, Payload = "xy"u8.ToArray() });
+        })).Message);
+    }
+
+    [Fact]
     public async Task Refuses_a_start_of_a_link_up_already_and_a_publication_past_maximumMessageBytes_or_of_a_link_not_up_drops_what_a_link_lost_held_and_a_loss_of_a_link_not_up_does_nothing()
     {
         var scheduler = new SerialScheduler();

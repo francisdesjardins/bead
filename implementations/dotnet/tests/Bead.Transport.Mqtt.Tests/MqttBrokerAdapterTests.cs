@@ -1198,6 +1198,22 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Writes_1_byte_for_a_CONNACK_s_Maximum_Packet_Size_of_1()
+    {
+        await using var adapter = AdapterOf();
+        var answer = ScriptedLink.ConnAck();
+
+        answer.MaximumPacketSize = 1;
+        await LinkUp((adapter, _script), (answer, null));
+
+        Assert.EndsWith(", past its broker's Maximum Packet Size, 1 byte (Parameter 'publication')", Assert.IsType<ArgumentException>(await FailureOf(() =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = Array.Empty<byte>() });
+        })).Message, StringComparison.Ordinal);
+        await adapter.Stop();
+    }
+
+    [Fact]
     public async Task Tells_its_link_up_once_its_CONNACK_came_and_bounds_what_it_publishes_by_that_CONNACK_s_Maximum_Packet_Size_the_last_link_s_while_it_is_down_spec_15_30()
     {
         await using var adapter = AdapterOf();
@@ -1371,6 +1387,25 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
         Assert.Empty(messages);
         Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Writes_1_byte_for_its_own_Maximum_Packet_Size_of_1()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1 };
+        });
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // a CONNACK of 5 bytes, past it
+        await link.Write([0x20, 0x03, 0x00, 0x00, 0x00]);
+        Assert.EndsWith(", past its Maximum Packet Size, 1 byte", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message, StringComparison.Ordinal);
+        await link.Closed.WaitAsync(Patience, Cancelled);
     }
 
     [Fact]

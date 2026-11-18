@@ -16,7 +16,7 @@ use crate::envelope::{
     CancelHeader, ChunkHeader, Credential, Envelope, EnvelopeHeader, RequestHeader, header_bytes_of,
 };
 use crate::errors::{CallError, ProgrammerError};
-use crate::failure::{Failure, ProcedureAddress};
+use crate::failure::{Failure, ProcedureAddress, byte_count_of};
 use crate::metrics::{CallEnding, ProcedureSeries};
 use crate::router::core::{
     Answer, Deliver, Side, admit, deliver, microseconds_of, receive_unplaced, reported,
@@ -354,7 +354,8 @@ fn wait_for_budget<S: Side>(
         let failure = core
             .failure(ProtocolCode::CAPACITY_EXCEEDED)
             .saying(format!(
-                "a total of {total} bytes waited {} milliseconds for the budget",
+                "a total of {} waited {} milliseconds for the budget",
+                byte_count_of(total),
                 wait.as_millis()
             ))
             .of_call(Some(request.procedure), request.destination_id)

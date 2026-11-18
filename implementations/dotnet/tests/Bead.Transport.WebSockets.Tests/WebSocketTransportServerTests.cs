@@ -1682,6 +1682,31 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Writes_1_byte_for_a_socket_s_maximumMessageBytes_of_1()
+    {
+        await Start(new WebSocketTransportServerOptions { MaximumMessageBytes = 1 });
+
+        var told = Told();
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync(new byte[2], WebSocketMessageType.Binary, true, Cancelled);
+            await ReceiveOf(client);
+            await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            await Until(() =>
+            {
+                return told.Count == 2;
+            });
+
+            Assert.Equal(
+                $"{connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 1 byte",
+                Assert.IsType<InvalidDataException>(told.First().Reason).Message);
+        }
+    }
+
     // spec 15.3
     [Fact]
     public async Task Fails_with_1009_a_peer_that_never_answers_telling_one_error_then_an_unclean_close_once_its_close_timeout_passed()

@@ -639,9 +639,10 @@ fn check_length(
         malformed(
             side,
             format!(
-                "a {} header of flags {} is {expected} bytes, not {header_bytes} of {}",
+                "a {} header of flags {} is {}, not {header_bytes} of {}",
                 hexadecimal_of(kind.byte()),
                 hexadecimal_of(flags),
+                byte_count_of(expected),
                 bytes.len()
             ),
         )
@@ -659,8 +660,9 @@ fn check_length(
         return Err(malformed(
             side,
             format!(
-                "a {} header of {header_bytes} bytes runs past its message of {}",
+                "a {} header of {} runs past its message of {}",
                 hexadecimal_of(kind.byte()),
+                byte_count_of(header_bytes),
                 bytes.len()
             ),
         ));
@@ -673,9 +675,10 @@ fn check_length(
         return Err(malformed(
             side,
             format!(
-                "a {} header of flags {} holds its credential's head: {head_end} bytes at least, not {header_bytes}",
+                "a {} header of flags {} holds its credential's head: {} at least, not {header_bytes}",
                 hexadecimal_of(kind.byte()),
-                hexadecimal_of(flags)
+                hexadecimal_of(flags),
+                byte_count_of(head_end)
             ),
         ));
     }
@@ -1022,7 +1025,8 @@ pub fn read_envelope(
     if bytes.len() > bound {
         return Err(
             Failure::protocol(ProtocolCode::ENVELOPE_TOO_LARGE, side).saying(format!(
-                "{what} is {bound} bytes at most, not {}",
+                "{what} is {} at most, not {}",
+                byte_count_of(bound),
                 bytes.len()
             )),
         );

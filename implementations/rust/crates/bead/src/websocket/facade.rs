@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::client::{Client, ClientOptions};
 use crate::errors::{ProgrammerError, TransportError};
+use crate::failure::byte_count_of;
 use crate::managers::service::{ServiceManagerClient, ServiceManagerServer};
 use crate::platform::{self, Handle};
 use crate::router::client::RouterClient;
@@ -48,8 +49,8 @@ fn message_bytes_of(given: Option<u64>, limits: &RouterLimits) -> Result<u64, Pr
 
     if maximum_message_bytes < limits.maximum_envelope_bytes {
         return Err(ProgrammerError::new(format!(
-            "maximumMessageBytes is an envelope's limit at least, {} bytes, not {maximum_message_bytes}",
-            limits.maximum_envelope_bytes
+            "maximumMessageBytes is an envelope's limit at least, {}, not {maximum_message_bytes}",
+            byte_count_of(limits.maximum_envelope_bytes)
         )));
     }
 

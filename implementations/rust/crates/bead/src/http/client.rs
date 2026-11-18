@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 use crate::clock::{HyperTimer, Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER, hold, hold_delay};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
+use crate::failure::byte_count_of;
 use crate::http::fields::{
     AFTER_HEADER, BEAD_BATCH_MEDIA_TYPE, BEAD_MEDIA_TYPE, CONNECTION_TOKEN_HEADER, HTTP_REFUSALS,
     LISTEN_HEADER, REFUSAL_HEADER, REQUEST, SEQUENCE_HEADER, WAIT_HEADER,
@@ -437,7 +438,8 @@ fn millis_of(duration: Duration) -> u128 {
 // (spec 15.1): an envelope past its bound, named with its value
 fn past_bound_of(maximum_body_bytes: u64) -> RouterError {
     RouterError::Other(Arc::new(io::Error::other(format!(
-        "the connection is closed: an envelope past its maximumBodyBytes, {maximum_body_bytes} bytes"
+        "the connection is closed: an envelope past its maximumBodyBytes, {}",
+        byte_count_of(maximum_body_bytes)
     ))))
 }
 
