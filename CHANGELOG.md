@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The `bead-adversarial-review` workflow reviews the code's lenses at xhigh and the spec's and its
+  companion's at max, and its verifier reruns the proof of a blocker and a major, a minor's only
+  where reading cannot settle it.
 - The page beadproto.dev serves, in English and in French, answers a team's questions in order: one
   contract for every team, the teams that do not speak Bead, evolving without breaking, the
   transports, the same behaviour on every side, debugging and observing, and security. Where Bead

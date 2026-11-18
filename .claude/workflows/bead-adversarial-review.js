@@ -15,8 +15,9 @@ export const meta = {
 // - scope: what is reviewed, in full: the ref and its commit, the versions, what is out of scope;
 // - slug: the folder under `scratch`, `review` by default;
 // - lenses: [{ key, focus, effort? }], the five below by default, each at `effort` but where it
-//   names its own: a lens on the wording asks less than one on the concurrent core;
-// - effort: the reviewers', 'max' by default, as before a freeze (CLAUDE.md, the agents' effort);
+//   names its own: the two on the spec and its companion at max, as a version of the spec asks
+//   (CLAUDE.md, the agents' effort), the three on the code at xhigh;
+// - effort: the reviewers' where a lens names none, 'max' by default;
 // - model: the model of the stages at xhigh or max, when it is not the session's ('fable', say),
 //   none by default: the user asks for it, or a session proposes it with its reason;
 // - serial: one agent at a time, each lens reviewed then verified before the next, where the quota
@@ -49,16 +50,19 @@ const LENSES = args.lenses || [
   },
   {
     key: 'wire-and-calls',
+    effort: 'xhigh',
     focus:
       'the envelope, the codecs, the calls, the errors, the transfers and the timeouts: each side against the text and against the other, by differential probes over both codecs and both routers, the order of each check, what a peer sees on the wire',
   },
   {
     key: 'sessions-relays-transports',
+    effort: 'xhigh',
     focus:
       'sessions and credentials (JWT, ELSEWHERE), admission, relays, and the transports (HTTP, WebSocket, a Web Worker), origins and hosts: what a deployment relies on for its security, what an attacker on the wire or in a page can reach, the refusals and their order',
   },
   {
     key: 'conformance',
+    effort: 'xhigh',
     focus:
       'the conformance files, their generators and the tests that play them on each side: a unit no case tests, a case that passes for the wrong reason, a twin missing on one side, a row of `docs/support.md` without the test that shows it, a generator that does not reproduce its file byte for byte',
   },
@@ -95,7 +99,7 @@ const verify = (summary, lens) => {
   return agent(
     `${COMMON}
 # Your task: verify one lens's findings (effort xhigh)
-Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites, and rerun its proof under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return at most ten lines: the counts by verdict and by severity, and that path.
+Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites; rerun the proof of each the reviewer calls a blocker or a major, and of a minor only where reading the code cannot settle it, under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return at most ten lines: the counts by verdict and by severity, and that path.
 The reviewer's summary:
 ${summary || '(no summary)'}`,
     { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh', ...modelOf('xhigh') }
