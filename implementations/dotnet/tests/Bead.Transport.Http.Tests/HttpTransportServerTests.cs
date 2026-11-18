@@ -2769,11 +2769,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var own = (":authority", $"{Host}:{_port}");
         var bead = ("content-type", HttpTransport.MediaType);
 
-        // ! Kestrel refuses of its own one number in two lines, a list, and two numbers, ending the
-        // session where the spec resets the stream (RFC 9113 §5.4.1 lets it)
-        foreach (var (first, second) in (ValueTuple<string, string>[])[("0", "0"), ("0", "00"), ("0, 0", "0"), ("0", "1")])
+        // ! Kestrel refuses of its own one number in two lines, a list in one line, and two numbers,
+        // ending the session where the spec resets the stream (RFC 9113 §5.4.1 lets it)
+        foreach (var lengths in (string[][])[["0", "0"], ["0", "00"], ["0, 0"], ["0", "1"]])
         {
-            Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of(own, bead, ("content-length", first), ("content-length", second)));
+            (string, string)[] fields = [own, bead, .. lengths.Select((length) =>
+            {
+                return ("content-length", length);
+            })];
+
+            Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of(fields));
         }
 
         Assert.Empty(_refusals);

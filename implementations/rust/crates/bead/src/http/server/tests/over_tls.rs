@@ -587,19 +587,14 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_o
     let bead = ("content-type", BEAD_MEDIA_TYPE);
 
     // * h2 keeps every line of one number, and the transport resets the stream (spec 15.12); h2
-    // resets that of a list or of two numbers itself, PROTOCOL_ERROR, nothing written
-    for lengths in [["0", "0"], ["0", "00"], ["0, 0", "0"], ["0", "1"]] {
+    // resets that of a list in one line itself, and two numbers are reset alike, PROTOCOL_ERROR,
+    // nothing written
+    for lengths in [&["0", "0"][..], &["0", "00"], &["0, 0"], &["0", "1"]] {
+        let mut fields = vec![own, bead];
+
+        fields.extend(lengths.iter().map(|length| ("content-length", *length)));
         assert_eq!(
-            http2_of(
-                port,
-                &[
-                    own,
-                    bead,
-                    ("content-length", lengths[0]),
-                    ("content-length", lengths[1])
-                ]
-            )
-            .await,
+            http2_of(port, &fields).await,
             TlsAnswer::reset(PROTOCOL_ERROR),
             "{lengths:?}"
         );

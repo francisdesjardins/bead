@@ -1498,7 +1498,7 @@ const frameOf = (
   return Buffer.concat([head, payload]);
 };
 
-// a field as a literal never indexed nor Huffman-coded (RFC 7541 §6.2.2), its name and its value
+// a field as a literal never indexed nor Huffman-coded (RFC 7541 §6.2.3), its name and its value
 // shorter than 127 octets
 const literalOf = ([name, value]: readonly [string, string]) => {
   return Buffer.concat([
@@ -1956,19 +1956,16 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     });
 
     // ! nghttp2 resets the stream before the transport reads the request, of one number in two
-    // lines, of a list, and of two numbers
+    // lines, of a list in one line, and of two numbers
     expect(
       await Promise.all(
-        [
-          ['0', '0'],
-          ['0', '00'],
-          ['0, 0', '0'],
-          ['0', '1'],
-        ].map(([first = '', second = '']) => {
-          return rawResetOverHTTP2(port, [
-            ['content-length', first],
-            ['content-length', second],
-          ]);
+        [['0', '0'], ['0', '00'], ['0, 0'], ['0', '1']].map((lengths) => {
+          return rawResetOverHTTP2(
+            port,
+            lengths.map((length) => {
+              return ['content-length', length] as const;
+            })
+          );
         })
       )
     ).toEqual(
