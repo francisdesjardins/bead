@@ -9,6 +9,7 @@ import {
 } from 'node:http2';
 import { request as requestHTTPS } from 'node:https';
 import { connect as connectTcp } from 'node:net';
+import { connect as connectTLS } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createRouterServer } from '../../../router/server/router-server';
@@ -1478,6 +1479,96 @@ const resetOf = async (session: ClientHttp2Session, headers: Record<string, stri
   return typeof answer === 'number' ? answer : undefined;
 };
 
+// an HTTP/2 frame (RFC 9113 §4.1): its type, its flags, its stream and its payload
+const frameOf = (
+  type: number,
+  {
+    flags = 0,
+    payload = Buffer.alloc(0),
+    stream = 0,
+  }: { flags?: number; payload?: Buffer; stream?: number }
+) => {
+  const head = Buffer.alloc(9);
+
+  head.writeUIntBE(payload.length, 0, 3);
+  head.writeUInt8(type, 3);
+  head.writeUInt8(flags, 4);
+  head.writeUInt32BE(stream, 5);
+
+  return Buffer.concat([head, payload]);
+};
+
+// a field as a literal never indexed nor Huffman-coded (RFC 7541 §6.2.2), its name and its value
+// shorter than 127 octets
+const literalOf = ([name, value]: readonly [string, string]) => {
+  return Buffer.concat([
+    Buffer.from([0x10, name.length]),
+    Buffer.from(name, 'latin1'),
+    Buffer.from([value.length]),
+    Buffer.from(value, 'latin1'),
+  ]);
+};
+
+/**
+ * How the server ends a `POST` over HTTP/2 of the fields given, each written as it is, so that a
+ * field may come in two lines where Node's client sends one: the code its stream was reset with,
+ * or none when it answered.
+ */
+const rawResetOverHTTP2 = (port: number, fields: readonly (readonly [string, string])[]) => {
+  return new Promise<number | undefined>((resolve, reject) => {
+    const socket = connectTLS({
+      ALPNProtocols: ['h2'],
+      ca: TLS_FIXTURE.cert,
+      host,
+      port,
+      servername: 'localhost',
+    });
+    let read = Buffer.alloc(0);
+    const end = (code: number | undefined) => {
+      socket.destroy();
+      resolve(code);
+    };
+
+    socket.once('error', reject);
+    socket.once('secureConnect', () => {
+      const request = [
+        [':method', 'POST'],
+        [':scheme', 'https'],
+        [':authority', `${host}:${String(port)}`],
+        [':path', '/bead'],
+        ['content-type', BEAD_MEDIA_TYPE],
+        ...fields,
+      ] as const;
+
+      // its preface, its SETTINGS, then its HEADERS, END_STREAM and END_HEADERS (RFC 9113 §3.4)
+      socket.write('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
+      socket.write(frameOf(0x4, {}));
+      socket.write(
+        frameOf(0x1, { flags: 0x5, payload: Buffer.concat(request.map(literalOf)), stream: 1 })
+      );
+    });
+    socket.on('data', (chunk: Buffer) => {
+      read = Buffer.concat([read, chunk]);
+
+      while (read.length >= 9 && read.length >= 9 + read.readUIntBE(0, 3)) {
+        const length = read.readUIntBE(0, 3);
+        const [type, flags] = [read.readUInt8(3), read.readUInt8(4)];
+        const payload = read.subarray(9, 9 + length);
+
+        read = read.subarray(9 + length);
+
+        if (type === 0x4 && flags === 0) {
+          socket.write(frameOf(0x4, { flags: 0x1 }));
+        } else if (type === 0x3) {
+          end(payload.readUInt32BE(0));
+        } else if (type === 0x1 || type === 0x7) {
+          end(undefined);
+        }
+      }
+    });
+  });
+};
+
 /** A transport server under TLS, HTTP/2 and HTTP/1.1 on one port, and a session to it. */
 const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) => {
   const server = createHTTPTransportServer({
@@ -1848,6 +1939,47 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       201,
       undefined,
     ]);
+  });
+
+  // spec 15.12
+  test('resets over HTTP/2 the stream of a request whose Content-Length names one number twice', async () => {
+    await using started = await startSecure();
+    const { port, server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 resets the stream before the transport reads the request, of one number in two
+    // lines, of a list, and of two numbers
+    expect(
+      await Promise.all(
+        [
+          ['0', '0'],
+          ['0', '00'],
+          ['0, 0', '0'],
+          ['0', '1'],
+        ].map(([first = '', second = '']) => {
+          return rawResetOverHTTP2(port, [
+            ['content-length', first],
+            ['content-length', second],
+          ]);
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 4 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // one line is a length
+    expect(await answerOverHTTP2(session, { 'content-length': '0' })).toEqual([201, undefined]);
   });
 
   test('resets over HTTP/2 the stream of a request whose target holds a #, PROTOCOL_ERROR, nothing written, and serves one that holds an encoded #', async () => {
