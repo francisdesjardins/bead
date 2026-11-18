@@ -62,7 +62,9 @@ same conformance files and proves against the others in the interop. Where a lan
 or its platform cannot have it at all, the difference is a row of the support matrix,
 `docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
-- A test missing on one side is added to the others.
+- A test missing on one side is added to the others. `tools/check-twins.mjs` holds it in CI: every
+  TypeScript and C# test has a Rust twin under its title's key, or a row of `tools/twins.tsv` gives
+  its class and why; `--write` adds a new one as `pending`, for a reader to classify.
 - A term renamed on one side is renamed on every side, wherever it applies.
 - No implementation is the reference: the set evolves together, wherever it can. Where one does Y
   and another can do Y and Z, every one does Y: the second keeps to Y, or comes back to it, and Z
