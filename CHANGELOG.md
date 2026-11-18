@@ -61,6 +61,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "a proto payload nests a message more than 100 deep below the top one". The TypeScript side reads
   a tag as a varint of 5 bytes at most, as the C# and Rust sides do, so every input reaches the same
   case; no payload's outcome moves (decision 0028).
+- The companion's 1.2 points to the spec for what a constrained profile conforms to, in place of a
+  list of its sections, and the spec's 9.2, step 3, drops its comparison with two HTTP/2 servers,
+  the bound and Rapid Reset's CVE unchanged.
 
 ### Fixed
 

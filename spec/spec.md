@@ -418,15 +418,13 @@ first that applies:
    place there, which sections 11.3, 11.10 and 12.9 bound. A call's resolver, or its verifier
    while its credential resolves, _outlives_ the call when it still runs once the call ended,
    answered or cancelled, a subscription's among them, and counts on its connection until it
-   settles, as Go's HTTP/2 server counts a handler until it returns and Kestrel tracks a stream
-   until its request's processing ends, against HTTP/2's Rapid Reset (CVE-2023-44487): a peer
-   that sends a request then its cancel, again and again, has no more resolvers run on a
-   connection than twice the bound. A call whose resolver outlives it holds no call id and is
-   answered nothing. A receiver that answers `CAPACITY_EXCEEDED` past the second count to twice
-   `maximumAnsweringCalls` requests in a row on a connection, none admitted between them,
-   closes that connection once the last refusal is handed to its transport, and reports
-   it, as an HTTP/2 endpoint MAY treat activity that is suspicious as a connection error of type
-   `ENHANCE_YOUR_CALM`
+   settles, against HTTP/2's Rapid Reset (CVE-2023-44487): a peer that sends a request then its
+   cancel, again and again, has no more resolvers run on a connection than twice the bound. A
+   call whose resolver outlives it holds no call id and is answered nothing. A receiver that
+   answers `CAPACITY_EXCEEDED` past the second count to twice `maximumAnsweringCalls` requests in
+   a row on a connection, none admitted between them, closes that connection once the last
+   refusal is handed to its transport, and reports it, as an HTTP/2 endpoint MAY treat activity
+   that is suspicious as a connection error of type `ENHANCE_YOUR_CALM`
    ([RFC 9113 §10.5](https://www.rfc-editor.org/rfc/rfc9113#section-10.5)).
 4. A destination, named to a receiver that relays nothing (section 14.1): answered with
    `DESTINATION_UNKNOWN`.

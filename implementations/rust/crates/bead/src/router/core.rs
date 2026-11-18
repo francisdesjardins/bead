@@ -2016,7 +2016,7 @@ fn dispatch_to<S: Side>(
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
     let resolving = async move {
         // ! its turn and its call's end race: a call that ended before its turn hands it nothing,
-        // as Go's server starts no handler for a stream reset before its turn (spec 9.2, step 9)
+        // and its resolver never starts (spec 9.2, step 9)
         if !run.start() {
             return Ok(());
         }

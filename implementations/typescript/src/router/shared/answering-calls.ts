@@ -150,12 +150,11 @@ export interface IAnsweringCalls<
  * its connection is abandoned by none.
  *
  * A resolver marked running whose call ends, answered or cancelled, outlives it: it keeps a place
- * on its connection until it settles, as Go's HTTP/2 server counts a handler until it returns, so
- * a peer that cancels each request it sends has no more resolvers run on a connection than twice
- * `maximumAnsweringCalls` (spec 9.2, step 3). What its call received then outlives it with it:
- * `onOutlive` hears it in place of `onRemove`, and `onSettle` once that resolver settles. Once its
- * connection closes, it counts among the resolvers of connections closed, by no connection, until
- * it settles.
+ * on its connection until it settles, so a peer that cancels each request it sends has no more
+ * resolvers run on a connection than twice `maximumAnsweringCalls` (spec 9.2, step 3). What its
+ * call received then outlives it with it: `onOutlive` hears it in place of `onRemove`, and
+ * `onSettle` once that resolver settles. Once its connection closes, it counts among the resolvers
+ * of connections closed, by no connection, until it settles.
  */
 export const createAnsweringCalls = <
   Handle extends string,
@@ -412,7 +411,7 @@ export const createAnsweringCalls = <
       return run;
     },
     // ! checked and marked in one step, at the head of the later turn: a call that ended before it
-    // hands its resolver nothing, as Go's HTTP/2 server starts no handler for a stream reset first
+    // hands its resolver nothing
     run: (controller) => {
       if (!opened.has(controller)) {
         return false;

@@ -616,8 +616,8 @@ internal sealed partial class RouterCore : IDisposable
                 () =>
                 {
                     // ! the turn that starts it races its call's end, off the core's scheduler: the
-                    // call's own swap decides, as Go's HTTP/2 server starts no handler for a stream
-                    // reset before its turn
+                    // call's own swap decides, and a call that ended before its turn starts no
+                    // resolver
                     if (!AnsweringCalls.Run(answering))
                     {
                         return Task.CompletedTask;
