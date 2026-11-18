@@ -214,7 +214,10 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
 
 - **WebSocket.** The C# side's `WebSocketConnection.Read` awaits a gate of its connection at each
   message's boundary, before the `ReceiveAsync` that starts a message; a message partway when the
-  pause comes is read to its end and held, one envelope at most. The TypeScript side keeps `ws`'s
+  pause comes is read to its end and held, one envelope at most. On its server, each read of the
+  upgrade's stream passes the same gate, so a `ReceiveAsync` already waiting as the pause comes
+  reads nothing more of the socket, and the request's abort opens it for good, so a connection its
+  heartbeat drops ends at once. The TypeScript side keeps `ws`'s
   synchronous events: `pause` calls `ws`'s `pause()`, which stops the socket, and what `ws` still
   emits from the read it parsed is held in order, one socket read at most, 64 KiB; on resume the
   transport hands what it holds from a microtask, the router pausing it again at the bound, and
