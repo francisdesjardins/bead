@@ -4696,23 +4696,30 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_o
     fixture.dispose().await.expect("disposed");
 }
 
+// an HTTP/2 frame's type, its flags and its stream (RFC 9113 §4.1)
+struct FrameHead {
+    kind: u8,
+    flags: u8,
+    stream: u32,
+}
+
+// an HTTP/2 frame: its head, then its payload
+fn framed(head: &FrameHead, payload: &[u8]) -> Vec<u8> {
+    let length = u32::try_from(payload.len())
+        .expect("a short frame")
+        .to_be_bytes();
+    let mut frame = vec![length[1], length[2], length[3], head.kind, head.flags];
+
+    frame.extend_from_slice(&head.stream.to_be_bytes());
+    frame.extend_from_slice(payload);
+    frame
+}
+
 // how the gateway on `port`, under the fixture's TLS, ends a GET over HTTP/2 of the fields given,
 // each written as it is, where h2's client refuses to send a connection-specific one: the code its
 // stream was reset with, or none when it answered
 async fn reset_over_http_2_of(port: u16, fields: &[(&str, &str)]) -> Option<u32> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-
-    // an HTTP/2 frame (RFC 9113 §4.1): its type, its flags, its stream and its payload
-    fn framed((kind, flags, stream): (u8, u8, u32), payload: &[u8]) -> Vec<u8> {
-        let length = u32::try_from(payload.len())
-            .expect("a short frame")
-            .to_be_bytes();
-        let mut frame = vec![length[1], length[2], length[3], kind, flags];
-
-        frame.extend_from_slice(&stream.to_be_bytes());
-        frame.extend_from_slice(payload);
-        frame
-    }
 
     let mut config = rustls::ClientConfig::clone(
         &bead::testing::tls::client_config().expect("the client's config"),
@@ -4754,8 +4761,22 @@ async fn reset_over_http_2_of(port: u16, fields: &[(&str, &str)]) -> Option<u32>
     // its preface, its SETTINGS, then its HEADERS, END_STREAM and END_HEADERS (RFC 9113 §3.4)
     let mut sent = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".to_vec();
 
-    sent.extend(framed((0x4, 0, 0), &[]));
-    sent.extend(framed((0x1, 0x5, 1), &block));
+    sent.extend(framed(
+        &FrameHead {
+            kind: 0x4,
+            flags: 0,
+            stream: 0,
+        },
+        &[],
+    ));
+    sent.extend(framed(
+        &FrameHead {
+            kind: 0x1,
+            flags: 0x5,
+            stream: 1,
+        },
+        &block,
+    ));
     secured.write_all(&sent).await.expect("its request written");
 
     patience(PATIENCE, async {
@@ -4775,7 +4796,14 @@ async fn reset_over_http_2_of(port: u16, fields: &[(&str, &str)]) -> Option<u32>
 
                 match (kind, flags) {
                     (0x4, 0) => secured
-                        .write_all(&framed((0x4, 0x1, 0), &[]))
+                        .write_all(&framed(
+                            &FrameHead {
+                                kind: 0x4,
+                                flags: 0x1,
+                                stream: 0,
+                            },
+                            &[],
+                        ))
                         .await
                         .expect("its SETTINGS acknowledged"),
                     (0x3, _) => {
