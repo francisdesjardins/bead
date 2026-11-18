@@ -2576,8 +2576,38 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       expect(await exchange.next(2_000)).toEqual({ ping: expect.any(Uint8Array) as unknown });
       expect(await exchange.next(2_000)).toEqual({ end: true });
 
-      // told closed, unclean, while still paused (docs/support.md, "A paused connection its own
-      // heartbeat drops")
+      // told closed, unclean, while still paused
+      expect(await closed).toEqual([false, connectionHandle]);
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  // spec 15.3 and 15.12
+  test('drops a connection it pauses between messages past twice its heartbeat by its own heartbeat, its peer answering every ping', async () => {
+    await using started = await startDated({ heartbeat: 200 });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange({ host, port }, encoder.encode(upgradeRequest()));
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+
+    try {
+      let heard = await exchange.next(2_000);
+
+      expect(heard).toEqual({ ping: expect.any(Uint8Array) as unknown });
+
+      // * paused once it pinged, outside the hand of a message, as a router pauses on another
+      // connection's turn: its read already waits on its peer, and reads nothing more of it
+      server.pause(connectionHandle);
+
+      for (let pings = 0; heard !== undefined && 'ping' in heard && pings < 20; pings += 1) {
+        heard = await exchange.next(2_000);
+      }
+
+      expect(heard).toEqual({ end: true });
+
+      // told closed, unclean, while still paused
       expect(await closed).toEqual([false, connectionHandle]);
     } finally {
       exchange.destroy();

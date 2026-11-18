@@ -3328,8 +3328,45 @@ async fn drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartb
         "dropped"
     );
 
-    // told closed, unclean, while still paused (docs/support.md, "A paused connection its own
-    // heartbeat drops")
+    // told closed, unclean, while still paused
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let mut heard = heard_on(&mut peer, Duration::from_secs(2)).await;
+
+    assert!(
+        matches!(heard, Some(crate::testing::wire::Heard::Ping(_))),
+        "a ping"
+    );
+
+    // * paused once it pinged, outside the hand of a message, as a router pauses on another
+    // connection's turn: its read already waits on its peer, and reads nothing more of it
+    server.pause(&handle);
+
+    for _ in 0..20 {
+        let Some(crate::testing::wire::Heard::Ping(data)) = &heard else {
+            break;
+        };
+
+        peer.socket.write_all(&pong_of(data)).await.unwrap();
+        heard = heard_on(&mut peer, Duration::from_secs(2)).await;
+    }
+
+    assert_eq!(heard, Some(crate::testing::wire::Heard::End), "dropped");
+
+    // told closed, unclean, while still paused
     assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
     stopped(&server).await;
 }
