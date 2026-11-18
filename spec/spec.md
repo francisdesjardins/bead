@@ -278,7 +278,8 @@ _Vectors: `headerRefusals`, `envelopeRefusals`, `reads`._
    block's own length give; else `ENVELOPE_MALFORMED`.
 
 5.2. Within step 7 every check refuses with the same code. Its detail says which check failed
-(section 7.6), and section 4.4 orders a `CREDENTIAL` block's checks.
+(section 7.6). Where more than one fails, which one it names is the reader's own, but within a
+`CREDENTIAL` block, whose checks section 4.4 orders.
 
 ## 6. What follows the header
 
@@ -320,9 +321,13 @@ lone surrogate as U+FFFD.
 a failure is deduced, never sent: a failure received with no relay is the peer's.
 
 7.6. A failure's detail is for a person: its requester acts on its code alone
-([RFC 9457 §3.1.4](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.4)). Where this document gives
-a detail's words, a side MUST write them as given. Where it gives none, the words are the side's
-own, and every side writes those its conformance files give.
+([RFC 9457 §3.1.4](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.4)), but for
+`PAYLOAD_INVALID`'s. A failure's record has no place but its detail for a request's violations, so
+section 18.6 writes them there, for a reader to read as section 18.7 does. A gateway carries them
+apart from its problem's `detail`, in its `errors` (`transcoding.md` section 7.4), as RFC 9457
+§3.1.4 recommends. Where this document gives a detail's words, a side MUST write them as given.
+Where it gives none, the words are the side's own, and every side writes those its conformance
+files give.
 
 ## 8. The protocol's codes
 
@@ -865,28 +870,29 @@ the credential it presents — a WebSocket whose upgrade carried other bytes, or
 a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket, in
 memory or over a broker (sections 15.9, 15.2, 15.13, 15.22) — and for one that presents a `JWT` or
 an `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential
-crosses only TLS off the
-machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged
-by what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
+crosses only TLS off the machine
+([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a resolver sends a
+`localhost` name elsewhere (below). A transport is judged by what it is given, never by what a name
+resolves to. It is secure under TLS, its scheme `wss` or
 `https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
 in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
 `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
-`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
+potentially trustworthy, without its condition that the user agent keep such a name on the
+loopback; a server by the address it listens on (section 15.12), in 127.0.0.0/8, `::1`, or
+`localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
 transport or a router called in process. A broker's transport is secure while its own leg and its
 peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
 which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
 space among them, is not, nor is `localhost.`, which it keeps as given. A client judges a
 `localhost` name by the name alone, and connects it through its platform's resolver, as
 [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets application software do
-(item 2). Secure Contexts trusts such a name only where its user agent keeps it on the loopback. A
-resolver that sends a name under `.localhost` on to its DNS server, as glibc's and musl's do,
-connects it wherever that server answers, and a credential judged secure crosses there in the clear.
-An application whose platform resolves so names the loopback by its address, `127.0.0.1` or `[::1]`,
-which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
+(item 2). A resolver that sends a name under `.localhost` on to its DNS server, as glibc's and
+musl's do, connects it wherever that server answers, and a credential judged secure crosses there
+in the clear. An application whose platform resolves so names the loopback by its address,
+`127.0.0.1` or `[::1]`, which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
 what stands in front of it: its application MAY say so, and is then believed whatever the server
 listens on — TLS terminated before it, which makes it secure, or a proxy that serves the network in
 the clear, which leaves it in the clear.
@@ -1363,9 +1369,13 @@ byte for byte ([WHATWG WebSockets §2.2](https://websockets.spec.whatwg.org/#web
 [§11.3.4](https://www.rfc-editor.org/rfc/rfc6455#section-11.3.4)); one that offered none fails a
 101 that carries the field at all, an empty one included. A page's `WebSocket` judges the 101 as
 its browser does, and a client over it fails besides a socket whose `protocol` is none it offered
-([`docs/support.md`](../docs/support.md), "Differences"). A WebSocket
-upgrade that carries no `Origin` carries one credential,
-toward its server alone: its `Authorization` field
+([`docs/support.md`](../docs/support.md), "Differences"). A client offers no extension, and fails a
+101 that names one it did not offer
+([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1), item 5), but over the
+[WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)'s `WebSocket`, a page's among
+them, whose user agent offers and judges its own. Since a server selects none, a connection to one
+is never compressed. A WebSocket upgrade that carries no `Origin` carries one credential, toward its
+server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
 auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.
@@ -1839,20 +1849,23 @@ policy; and any other scheme, an extension's or a `blob:` URL's among them. A se
 among them, so no `origins` names it. A request without an `Origin` comes from no page, and is
 taken.
 
-A field in more than one field line is read with its lines joined in their order by `, `, as
-[RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient combine them,
-so that two lines are judged as the one line a proxy may make of them. So are read an `Origin`, on
-an exchange and on an upgrade alike (section 15.2, step 7), a `bead-connection-token` and a
-`Content-Encoding`. An `Origin` so joined is no serialized origin, since a browser sends one at most
-([RFC 6454 §7.3](https://www.rfc-editor.org/rfc/rfc6454#section-7.3)): it is none of the server's
-own, and none `origins` lists, refused 403 `origin-refused`. A token so joined is one of another
-form, refused 400 `malformed`. `Content-Encoding` is a list
-([RFC 9110 §8.4](https://www.rfc-editor.org/rfc/rfc9110#section-8.4)): a body is sent as it is when
-the field is absent or its lines joined are `identity`, in any case, and is encoded otherwise,
-`identity` in two lines among it. A `Content-Type`, a singleton field
-([RFC 9110 §8.3](https://www.rfc-editor.org/rfc/rfc9110#section-8.3)), is refused 415 `type-refused`
-in more than one field line wherever a type is judged. An `Authorization` is refused in more than
-one as section 15.5 says, and a `Host` as HTTP refuses it.
+A request's field in more than one field line is read with its lines joined in their order by
+`, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient
+combine them, so that two lines are judged as the one line a proxy may make of them. So are read an
+`Origin`, on an exchange and on an upgrade alike (section 15.2, step 7), a `bead-connection-token`
+and a `Content-Encoding`. An `Origin` so joined is no serialized origin, since a browser sends one
+at most ([RFC 6454 §7.3](https://www.rfc-editor.org/rfc/rfc6454#section-7.3)): it is none of the
+server's own, and none `origins` lists, refused 403 `origin-refused`. A token so joined is one of
+another form, refused 400 `malformed`. `Content-Encoding` is a list
+([RFC 9110 §8.4](https://www.rfc-editor.org/rfc/rfc9110#section-8.4)), and its empty elements are
+ignored ([§5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2)). A body is sent as it
+is when the field is absent, lists nothing, an empty field among it, or lists `identity` once and
+nothing else, in any case. It is encoded otherwise, `identity` twice among it. A field this document
+reads by its lines is never joined: a `Content-Type`, a singleton field
+([RFC 9110 §8.3](https://www.rfc-editor.org/rfc/rfc9110#section-8.3)), refused 415 `type-refused`
+in more than one field line wherever a type is judged; an `Authorization`, refused in more than one
+as section 15.5 says; a `Host`, as HTTP refuses it; and a `Sec-WebSocket-Version` and a
+`Sec-WebSocket-Key`, which section 15.2 refuses in more than one (steps 5 and 6).
 
 An HTTP server answers the CORS protocol
 ([Fetch Standard §3.3](https://fetch.spec.whatwg.org/#http-cors-protocol)) to the origins `origins`
@@ -2767,9 +2780,9 @@ literal. A reader MUST refuse:
 A reader that finds more than one of these refuses with the first in this order: item 1; item 2;
 item 7, counted over the whole text before anything of it is read, each `[` and `{` outside a
 string one level in and each `]` and `}` one level out, the count free to fall below 0, a string
-running from its quotation mark to the next one that no backslash escapes, a backslash escaping
-the character after it, or to the text's end; item 3, of the whole text, as an I-JSON message is
-a JSON text first (RFC 7493 §2); then, of items 4, 5 and 6, the one the text meets first,
+running from its quotation mark to the next one that no backslash escapes, or to the text's end, a
+backslash escaping the character after it within a string alone; item 3, of the whole text, as an
+I-JSON message is a JSON text first (RFC 7493 §2); then, of items 4, 5 and 6, the one the text meets first,
 reading from its start: a name or a string holding a surrogate alone at that name or string, a
 name its object gave before at that name, a number past a double at that number.
 

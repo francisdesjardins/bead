@@ -17,6 +17,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and held to the support matrix's Transports, as the implementations' is; the French page keeps a
   number whole and with its unit by no-break spaces. How Bead is made moves to
   francisdesjardins.ca, and README's "Why Bead" drops the two paragraphs the page dropped.
+- The spec, its transcoding and its companion say what holds where the 0.15.0 review found them
+  short: `PAYLOAD_INVALID`'s detail as the one a requester reads (7.6); which of step 7's failed
+  checks a detail names (5.2); a `localhost` name trusted without Secure Contexts' condition on its
+  user agent (13.4); a WebSocket client's extensions (15.2); which request fields are read with
+  their lines joined, and which never are (15.12); a backslash that escapes within a string alone
+  (17.5); a gateway's `Bearer` separator (2.4), its `content-encoding` (5.1), the order of its
+  `proto` reader's refusals (5.2.1) and a `sec-fetch-*` value compared in its case (10.1); and a
+  whole debug filter's patterns (6.4, 6.8).
 
 ### Fixed
 
