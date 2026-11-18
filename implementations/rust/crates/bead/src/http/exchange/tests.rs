@@ -617,6 +617,164 @@ async fn closes_in_stages_every_answer_written_before_its_body_is_whole_so_a_cli
     started.stop().await;
 }
 
+// spec 15.12; RFC 9112 §9.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closes_in_stages_a_refusal_of_a_body_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending_and_keeps_its_bead_connection()
+ {
+    let started = started(&HttpTransportServerOptions {
+        maximum_body_bytes: Some(1_024),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let (handle, token) = connect(&started).await;
+    // a token of its form that names no connection
+    let unknown = "AAAAAAAAAAAAAAAAAAAAAA";
+    let more = chunk_of(&[0; 64]);
+
+    // each chunked, its body never whole: a refusal before its body, a body past its bound as it
+    // comes, and a prefix that is none
+    for (token, first, status, reason) in [
+        (unknown, more.clone(), 404, HTTP_REFUSALS.connection_unknown),
+        (
+            token.as_str(),
+            chunk_of(&envelope_of(REQUEST, (1, 4_000))),
+            413,
+            HTTP_REFUSALS.too_large,
+        ),
+        (
+            token.as_str(),
+            chunk_of(&[0xFF; 16]),
+            400,
+            HTTP_REFUSALS.malformed,
+        ),
+    ] {
+        let mut head = chunked_head_of(port, token).into_bytes();
+
+        head.extend_from_slice(&first);
+
+        let (came, closed_within) = refused_as_it_sends(port, (&head, &more)).await;
+
+        // the refusal, which closes its connection, then its close within the linger's 2 s
+        assert_eq!(
+            (refusal_of(&came), came.fields.get("connection").cloned()),
+            ((status, Some(reason.to_owned())), Some("close".to_owned())),
+            "refused {status}"
+        );
+        assert!(
+            closed_within < Duration::from_secs(4),
+            "{status} closed past 4 s: {closed_within:?}"
+        );
+    }
+
+    // nothing of them handed on, and its Bead connection stands: a cancel on it ends 204
+    assert!(
+        started.recorder.told().messages.is_empty(),
+        "nothing handed on"
+    );
+
+    let cancelled = posted(
+        port,
+        &Post {
+            token: Some(&token),
+            body: envelope_of(CANCEL, (9, 0)),
+            ..Post::default()
+        },
+    )
+    .await;
+
+    assert_eq!(cancelled.head.status, 204, "its connection stands");
+    assert!(started.recorder.told().closes.is_empty(), "none closed");
+    assert!(
+        started
+            .server
+            .clients()
+            .iter()
+            .any(|client| client.connection_handle == handle),
+        "its connection held"
+    );
+    started.stop().await;
+}
+
+// `first` written on a socket of its own, then `each` again every 20 ms while the socket lasts:
+// the head of its answer, and how long its socket took to close once that came
+async fn refused_as_it_sends(
+    port: u16,
+    (first, each): (&[u8], &[u8]),
+) -> (crate::testing::wire::ResponseHead, Duration) {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut socket = RawSocket::on(port).await;
+
+    socket.write(first).await.unwrap();
+
+    let (reading, mut writing) = socket.socket.into_split();
+    let again = each.to_vec();
+    // * its client sends on as it reads, until its socket closes
+    let sending = crate::testing::spawn(async move {
+        while writing.write_all(&again).await.is_ok() {
+            crate::testing::rest(Duration::from_millis(20)).await;
+        }
+    });
+    let mut reading = RawRead::of(reading);
+    let head = reading.head().await;
+    let answered = crate::testing::Instant::now();
+    let ended = reading.ended().await;
+
+    sending.abort();
+    assert!(ended, "its socket ended");
+
+    (head, answered.elapsed())
+}
+
+// what a socket reads, until its response's head or its end
+struct RawRead {
+    reading: tokio::net::tcp::OwnedReadHalf,
+    reader: crate::testing::wire::ResponseReader,
+    is_closed: bool,
+}
+
+impl RawRead {
+    fn of(reading: tokio::net::tcp::OwnedReadHalf) -> Self {
+        Self {
+            reading,
+            reader: crate::testing::wire::ResponseReader::new(),
+            is_closed: false,
+        }
+    }
+
+    async fn read_until<F: Fn(&Self) -> bool + Send + Sync>(&mut self, done: F) {
+        use tokio::io::AsyncReadExt as _;
+
+        let mut chunk = [0_u8; 4_096];
+
+        crate::testing::patience(PATIENCE, async {
+            while !done(self) && !self.is_closed {
+                match self.reading.read(&mut chunk).await {
+                    Ok(0) | Err(_) => {
+                        self.is_closed = true;
+                        self.reader.end();
+                    }
+                    Ok(count) => self.reader.feed(&chunk[..count]),
+                }
+            }
+        })
+        .await
+        .ok();
+    }
+
+    async fn head(&mut self) -> crate::testing::wire::ResponseHead {
+        self.read_until(|read: &Self| read.reader.head().is_some())
+            .await;
+        self.reader.head().cloned().expect("its refusal's head")
+    }
+
+    async fn ended(&mut self) -> bool {
+        self.read_until(|_: &Self| false).await;
+        self.is_closed
+    }
+}
+
 #[tokio::test]
 async fn answers_a_body_whose_read_fails_a_malformed_chunked_one_the_status_of_its_failure_unmarked_its_connection_closed_never_200_and_empty()
  {

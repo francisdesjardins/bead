@@ -129,6 +129,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the body budget among them, is flushed, then what still comes is read and dropped until its
   client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
   a body on and reset it.
+- The C# HTTP transport closes the socket of an answer written before its body is whole once its 2
+  seconds of reading on pass, its client still sending, as its gateway does: it stopped reading and
+  left Kestrel to read a chunked body on, then reset the connection about 8 seconds after the
+  answer. Kestrel's connection has no half-close, and a shutdown of its socket races the answer
+  Kestrel still sends, so the C# side ends such a socket's write side with its close rather than
+  first, a row of the support matrix. New twins hold a refusal of a chunked body still coming, read
+  whole by its client as it goes on sending, on every side.
 - The TypeScript gateway keeps the connection of a refusal of a request that declares no body,
   wherever the request stands on its socket: it closed one that came first, judging by whether
   Node's parser had reached the request's end.

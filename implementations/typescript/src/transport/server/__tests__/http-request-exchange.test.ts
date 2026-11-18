@@ -504,6 +504,98 @@ test.describe('createHTTPTransportServer, a body as it comes', () => {
       .toBe(true);
   });
 
+  // spec 15.12; RFC 9112 §9.6
+  test('closes in stages a refusal of a body still coming, its client reading the refusal as it goes on sending, and keeps its Bead connection', async () => {
+    await using started = await startTransport({ maximumBodyBytes: 1_024 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const chunkOf = (bytes: Uint8Array): Buffer => {
+      return Buffer.concat([
+        Buffer.from(`${bytes.length.toString(16)}\r\n`, 'latin1'),
+        bytes,
+        Buffer.from('\r\n', 'latin1'),
+      ]);
+    };
+    const chunkedHeadOf = (token: string): Buffer => {
+      return Buffer.from(
+        `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${token}\r\nTransfer-Encoding: chunked\r\n\r\n`,
+        'latin1'
+      );
+    };
+    const more = chunkOf(new Uint8Array(64));
+
+    // each chunked, its body never whole: a refusal before its body, a body past its bound as it
+    // comes, and a prefix that is none
+    for (const [token, first, status, reason] of [
+      ['A'.repeat(22), more, '404 Not Found', HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [
+        connectionToken,
+        chunkOf(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 4_000 })),
+        '413 Payload Too Large',
+        HTTP_REFUSALS.TOO_LARGE,
+      ],
+      [
+        connectionToken,
+        chunkOf(new Uint8Array(16).fill(0xff)),
+        '400 Bad Request',
+        HTTP_REFUSALS.MALFORMED,
+      ],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(url));
+
+      socket.write(Buffer.concat([chunkedHeadOf(token), first]));
+
+      // * its client sends on as it reads, until its socket closes
+      const sending = setInterval(() => {
+        if (!socket.destroyed) {
+          socket.write(more);
+        }
+      }, 20);
+
+      try {
+        expect(await statusOf(read)).toBe(`HTTP/1.1 ${status}`);
+
+        const answered = performance.now();
+
+        await expect
+          .poll(
+            () => {
+              return read.isClosed;
+            },
+            { timeout: 10_000 }
+          )
+          .toBe(true);
+
+        // the refusal, which closes its connection, then its close within the linger's 2 s
+        expect([
+          carries(read, `${REFUSAL_HEADER}: ${reason}`),
+          carries(read, 'connection: close'),
+        ]).toEqual([true, true]);
+        expect(performance.now() - answered).toBeLessThan(4_000);
+      } finally {
+        clearInterval(sending);
+        socket.destroy();
+      }
+    }
+
+    // nothing of them handed on, and its Bead connection stands: a cancel on it ends 204
+    expect(namesOf(events, 'message')).toEqual([]);
+
+    const cancelled = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 9 }),
+      connectionToken,
+    });
+
+    expect(cancelled.status).toBe(204);
+    expect(namesOf(events, 'close')).toEqual([]);
+    expect(
+      server.clients.map((client) => {
+        return client.connectionHandle;
+      })
+    ).toContain(connectionHandle);
+  });
+
   test('answers a body whose read fails, a malformed chunked one, the status of its failure, unmarked, its connection closed, never 200 and empty', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
