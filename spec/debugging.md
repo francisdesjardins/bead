@@ -45,11 +45,10 @@ trace its calls and its envelopes, filter both, and count its calls and its noti
 document states, and trace the parcels of its participants where it carries a broker transport.
 
 1.2. A constrained profile MAY leave out, at build time, the trace and the filter, or the metrics,
-or both, as section 3.5's switches do. It conforms to `spec.md` either way, its wire by sections 1
-to 15, what it declares by section 16 and its codecs by section 17, and to this document for what it
-builds: what it leaves out is a row of the support matrix, not a difference of the protocol. A side
-built without the metrics plays `spec/debug-filters.json` alone, one built without the trace
-`spec/metrics.json` alone.
+or both, as section 3.5's switches do. It conforms to `spec.md` either way, and to this document
+for what it builds: what it leaves out is a row of the support matrix, not a difference of the
+protocol. A side built without the metrics plays `spec/debug-filters.json` alone, one built without
+the trace `spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
 3.1 and its codes by section 8. A code that `spec.md` section 8 gains adds a value to `code`
