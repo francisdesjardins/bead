@@ -1390,6 +1390,25 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Writes_1_byte_for_its_own_Maximum_Packet_Size_of_1()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1 };
+        });
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // a CONNACK of 5 bytes, past it
+        await link.Write([0x20, 0x03, 0x00, 0x00, 0x00]);
+        Assert.EndsWith(", past its Maximum Packet Size, 1 byte", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message, StringComparison.Ordinal);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
     public async Task Loses_its_link_no_DISCONNECT_on_a_packet_its_client_cannot_read_spec_15_29()
     {
         await using var adapter = AdapterOf();

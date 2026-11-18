@@ -2820,6 +2820,29 @@ async fn drops_a_message_whose_retain_is_1_acknowledging_it() {
     );
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_its_own_maximum_packet_size_of_1() {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.maximum_packet_size = Some(1);
+
+    let adapter = adapter_of(&options);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+
+    // a CONNACK of 5 bytes, past it
+    link.send(vec![0x20, 0x03, 0x00, 0x00, 0x00]);
+
+    let failed = starting.await.unwrap_err();
+
+    assert!(
+        message_of(&failed).ends_with(", past its Maximum Packet Size, 1 byte"),
+        "{failed}"
+    );
+    assert!(link.closed(PATIENCE).await, "closed before its CONNACK");
+}
+
 // spec 15.29
 #[tokio::test]
 async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_size_read_at_its_length()

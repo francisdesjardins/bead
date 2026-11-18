@@ -377,6 +377,29 @@ fn chunked() -> RouterLimitsOptions {
     }
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_procedure_s_maximum_payload_bytes_of_1() {
+    let served = Served::new(&RouterServerOptions::default());
+    let command = Procedure {
+        procedure_kind: Some(ProcedureKind::Command),
+        maximum_payload_bytes: Some(1),
+        ..echo()
+    };
+
+    served.transport.open(&first(), true);
+
+    let refused = answered(command_of(
+        &served,
+        (&command, &first(), Bytes::from_static(&[1, 2])),
+    ))
+    .await;
+
+    assert!(
+        matches!(&refused, Err(CallError::Failure(failure)) if failure.code() == ProtocolCode::PAYLOAD_TOO_LARGE.get() && failure.detail() == "a payload is 1 byte at most, not 2"),
+        "refused as it is sent: {refused:?}"
+    );
+}
+
 // spec 12.10
 #[tokio::test]
 async fn ends_the_transfers_it_sends_on_a_connection_that_goes_and_on_a_router_disposed_sending_nothing_more()

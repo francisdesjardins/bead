@@ -20,12 +20,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Every report, error and refusal that counts bytes says "1 byte" at 1, on every side: past
-  `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`, `maximumEnvelopePartsBytes`, a participant's
-  `heldBytesBudget`, `minimumBodyBytesPerSecond`, `maximumBodyBytes`, a memory broker's
-  `maximumMessageBytes`, a WebSocket's `maximumMessageBytes` and an MQTT Maximum Packet Size; a
-  parcel's room; and the bounds and lengths an envelope, a header, a transfer or a chunk is refused
-  by. `tools/check-byte-counts.mjs` holds every side to it in CI.
+- A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
+  "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
+  `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,
+  `maximumBodyBytes`, a memory broker's `maximumMessageBytes`, a WebSocket's `maximumMessageBytes`,
+  `maximumPayloadBytes`, and an MQTT Maximum Packet Size, its broker's or its own; a parcel's room;
+  and the bounds and lengths an envelope, a header, a transfer or a chunk is refused by.
+  protovalidate's messages keep their own words. `tools/check-byte-counts.mjs` holds every side to
+  it in CI.
 
 ## [0.15.0] - 2026-11-17
 

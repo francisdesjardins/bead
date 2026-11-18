@@ -1879,6 +1879,31 @@ async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_m
     stopped(&server).await;
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_sockets_maximum_message_bytes_of_1() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_message_bytes: Some(1),
+        ..briefly_closing()
+    })
+    .await;
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    client.send(binary(&[0; 2])).await.unwrap();
+
+    while let Some(Ok(_)) = next_of(&mut client).await {}
+
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!("{handle} is closed with 1009: a message past its maximumMessageBytes, 1 byte"),
+            Some(handle)
+        )],
+        "one error, naming its bound"
+    );
+    stopped(&server).await;
+}
+
 async fn checks_the_default_envelope_limit() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;

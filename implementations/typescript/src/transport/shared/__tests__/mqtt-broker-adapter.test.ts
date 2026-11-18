@@ -1750,6 +1750,19 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(adapter.isLinked).toBe(false);
   });
 
+  test('writes 1 byte for its own Maximum Packet Size of 1', async () => {
+    const adapter = adapterOf(script, { maximumPacketSize: 1 });
+    const starting = failureOf(adapter.start());
+    const link = await script.link();
+
+    // a CONNACK of 5 bytes, past it
+    link.write(Uint8Array.of(0x20, 0x03, 0x00, 0x00, 0x00));
+    expect(await starting).toMatchObject({
+      message: expect.stringMatching(/, past its Maximum Packet Size, 1 byte$/u),
+    });
+    expect(await closedWithin(link)).toBe(true);
+  });
+
   test('loses its link, no DISCONNECT, on a packet its client cannot read (spec 15.29)', async () => {
     const adapter = adapterOf(script);
     const { downs, messages } = heardOf(adapter);
