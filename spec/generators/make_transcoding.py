@@ -3604,12 +3604,12 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
-def framed_by(fields, *, on='a'):
-    """A POST of {} to the echo route, framed by the field lines given, each a name and a value
-    written as it is, a Content-Length's value alone standing for its line; its body in one chunk
-    beside a Transfer-Encoding."""
+def framed_by(fields, *, on='a', http='HTTP/1.1'):
+    """A POST of {} to the echo route, of HTTP/1.1 unless told otherwise, framed by the field lines
+    given, each a name and a value written as it is, a Content-Length's value alone standing for its
+    line; its body in one chunk beside a Transfer-Encoding."""
     lines = [field if isinstance(field, tuple) else ('content-length', field) for field in fields]
-    head = 'POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\n'
+    head = f'POST /api/Transcoding/echo {http}\r\nhost: {{host}}\r\ncontent-type: application/json\r\n'
     head += ''.join(f'{name}: {value}\r\n' for name, value in lines)
     coded = any(name == 'transfer-encoding' for name, _ in lines)
     body = hexadecimal(b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}')
@@ -3977,7 +3977,8 @@ EXCHANGES = [
     exchange("a command has no route", ['3.1', '3.10'],
              [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown', 'a path no route matches')]),
     # * a chunk's size that is no number, then a Content-Length spec 15.12 refuses: a word, two numbers
-    # in one line or in two
+    # in one line or in two; then a Transfer-Encoding it refuses: one that lists anything after its
+    # first chunked, in one line or in two, and one an HTTP/1.0 request carries
     exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
              ['10.1', '10.1.1', 'spec:15.12'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
@@ -3987,10 +3988,16 @@ EXCHANGES = [
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'a'},
               *[step for on, lengths in (('b', ['abc']), ('c', ['2, 3']), ('d', ['2', '3']),
-                                         ('e', ['abc', ('transfer-encoding', 'chunked')]))
+                                         ('e', ['abc', ('transfer-encoding', 'chunked')]),
+                                         ('f', [('transfer-encoding', 'chunked, chunked')]),
+                                         ('g', [('transfer-encoding', 'chunked'), ('transfer-encoding', 'chunked')]),
+                                         ('h', [('transfer-encoding', 'chunked,')]))
                 for step in (framed_by(lengths, on=on),
                              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
-                                         'body': ''}, 'on': on})]]),
+                                         'body': ''}, 'on': on})],
+              framed_by([('transfer-encoding', 'chunked')], on='i', http='HTTP/1.0'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'i'}]),
     # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
     # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
     # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)

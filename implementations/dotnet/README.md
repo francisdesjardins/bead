@@ -703,7 +703,12 @@ So is one that carries a `Content-Length` beside a `Transfer-Encoding` over HTTP
 hands on with the `Content-Length` removed and its value kept in an `X-Content-Length`: both
 transports and the gateway read that field back beside a `Transfer-Encoding`, a client's own among
 it, and refuse the request with `connection: close`, so its connection closes on every 10.0 patch
-(RFC 9112 §6.1). Over HTTP/2, a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an
+(RFC 9112 §6.1). So is one whose `Transfer-Encoding` lists anything after its first `chunked`, in
+one line or across its lines, which Kestrel hands on and reads by its final `chunked`, and one an
+HTTP/1.0 request carries, which Kestrel reads as chunked and keeps its connection open under
+`Connection: keep-alive`: `RequestFields.IsTransferEncodingFramed` refuses both at the HTTP
+transport, at the gateway and in the WebSocket judgement, 400 unmarked with `connection: close`, so
+no request pipelined behind either is read (RFC 9112 §6.1). Over HTTP/2, a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an
 `upgrade`, which RFC 9113 §8.2.2 calls malformed and Kestrel hands on, has its stream reset by the
 transport and the gateway.
 

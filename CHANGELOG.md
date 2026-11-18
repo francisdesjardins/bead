@@ -67,6 +67,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Transfer-Encoding` alone and closes. Five cases of `spec/transports.json`, one of them on a
   socket that asks no close, an exchange and a step of `spec/transcoding.json` play the rule, and
   the transports' generator's `send` takes `close`.
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request whose `Transfer-Encoding` lists anything
+  after its first `chunked`, in one line or across its lines, is answered 400 unmarked over HTTP/1.1
+  and at a WebSocket's address, before anything else of it is judged, and its connection closes once
+  answered: another `chunked` is one a sender never applies (RFC 9112 §6.1), and a recipient cannot
+  tell how a body that names it twice was coded. An empty element after it is refused alike, a row
+  of the support matrix's "Leveled down", since Node's parser and hyper refuse it where RFC 9110
+  §5.6.1.2 has a recipient ignore it. So is an HTTP/1.0 request that carries a `Transfer-Encoding`,
+  whose framing §6.1 calls faulty, at every address. Each side judges both by one predicate,
+  `isTransferEncodingFramed`, `RequestFields.IsTransferEncodingFramed` and
+  `is_transfer_encoding_framed`, at its HTTP transport, its gateway and its WebSocket judgement,
+  where the C# and Rust sides took another `chunked` and every side marked one `malformed` or
+  answered an HTTP/1.0 upgrade 426. Four cases of `spec/transports.json`, two of them on a socket
+  that asks it kept alive, and four steps of an exchange of `spec/transcoding.json` play the rule,
+  and the transcoding's generator's `framed_by` takes `http`.
 - The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
   `check_proto_records`, says the record it refused in one set of words on every side: its cause is
   "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause
