@@ -90,6 +90,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The companion's 1.2 points to the spec for what a constrained profile conforms to, in place of a
   list of its sections, and the spec's 9.2, step 3, drops its comparison with two HTTP/2 servers,
   the bound and Rapid Reset's CVE unchanged.
+- Spec 15.12 says when a server closes over HTTP/1: a refusal of its own of a request that declares
+  a body carries `connection: close`, whatever of the body was read, and closes in stages; one of a
+  request that declares none carries no `connection: close` of its own over HTTP/1.1 (RFC 9112
+  §9.5); what HTTP refuses of its own closes. A server answers a connection's requests in their
+  order and serves none behind an answer that closes it, none judged, handed on or told (§9.3.2,
+  §9.6), so it serves a request once the answers before it ended. The transcoding's 10.2 holds a
+  gateway to it. The gateways' twins carry the same closing cases on every side, and new twins hold
+  a bodiless refusal that keeps its connection, a refusal of a body still coming closed in stages,
+  and a stream asked over HTTP/1.0 closed for want of a length, nothing served behind it.
 
 ### Fixed
 
