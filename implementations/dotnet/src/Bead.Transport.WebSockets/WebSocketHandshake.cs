@@ -156,22 +156,28 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
-    // no content: each Content-Length line is zeros alone, as written, never a length the platform
-    // read from it, which a line it cannot read leaves absent
-    private static bool IsNoContent(StringValues lines)
+    // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
+    // Transfer-Encoding, or a Content-Length of one line of digits alone (RFC 9110 §8.6), or none
+    private static bool IsFramed(IHeaderDictionary headers)
     {
-        foreach (var line in lines)
+        var lengths = headers["Content-Length"];
+
+        return headers.TransferEncoding.Count > 0
+            || lengths.Count == 0
+            || (lengths.Count == 1 && ValueOf(lengths[0]) is { Length: > 0 } length && length.All(char.IsAsciiDigit));
+    }
+
+    // whether a request has content: a Content-Length past 0, as written, never a length the
+    // platform read from it, or a Transfer-Encoding
+    private static bool HasContent(IHeaderDictionary headers)
+    {
+        return headers.TransferEncoding.Count > 0 || headers["Content-Length"].Any((line) =>
         {
-            if (string.IsNullOrEmpty(line) || line.Any((digit) =>
+            return ValueOf(line).Any((digit) =>
             {
                 return digit != '0';
-            }))
-            {
-                return false;
-            }
-        }
-
-        return true;
+            });
+        });
     }
 
     // whether a Sec-WebSocket-Key is one field line of 16 bytes in base64 (RFC 6455 §4.2.1 item 5,
@@ -220,8 +226,7 @@ internal static class WebSocketHandshake
         return IsKey(headers.SecWebSocketKey)
             && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
             && headers.Authorization.Count <= 1
-            && IsNoContent(headers["Content-Length"])
-            && headers.TransferEncoding.Count == 0;
+            && !HasContent(headers);
     }
 
     // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
@@ -252,10 +257,12 @@ internal static class WebSocketHandshake
     /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
     /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
     /// character past ASCII, a target that holds an octet other than visible ASCII or a path whose
-    /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, or an authority that is no
-    /// host, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
+    /// or, with no <c>Transfer-Encoding</c>, a <c>Content-Length</c> other than one line of digits
+    /// alone, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
-    /// <c>Authorization</c> lines among it, 400; an origin not taken, 403.
+    /// <c>Authorization</c> lines and content, a <c>Content-Length</c> past 0 or a
+    /// <c>Transfer-Encoding</c>, among it, 400; an origin not taken, 403.
     /// </summary>
     public static HandshakeRefusal? RefusalOf(HttpRequest request, WebSocketTransportServerOptions options)
     {
@@ -276,7 +283,9 @@ internal static class WebSocketHandshake
             });
         });
 
-        if (!isVisible)
+        // and a Content-Length that frames no body, which Kestrel refuses before the application
+        // runs, judged alike
+        if (!isVisible || !IsFramed(headers))
         {
             return BadRequest;
         }

@@ -158,9 +158,10 @@ public sealed class WebSocketHandshakeTests
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,,chat"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 5"]),
-        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: abc"]),
-        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Transfer-Encoding: chunked"]),
+
+        // ! beside a Transfer-Encoding, a Content-Length is not judged at step 1: content all the same
+        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Content-Length: abc"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"]),
 
         // 6: an origin neither its own nor among those it takes, last
@@ -311,6 +312,37 @@ public sealed class WebSocketHandshakeTests
 
         // what a target percent-encodes is no octet of it, NUL in a query among them
         Assert.Equal((101, (string?)null), AnswerOf(("GET /?a%01%00 HTTP/1.1", []), Options));
+    }
+
+    [Fact]
+    public void Refuses_first_unmarked_a_Content_Length_other_than_one_line_of_digits_alone_in_a_request_with_no_Transfer_Encoding_whatever_else_the_request_holds()
+    {
+        // a word, a sign, a space, a list, one number twice in one line or in two, two numbers; from a
+        // host it does not take, under another method, with no upgrade; an empty one the wire's cases
+        // hold, a request no socket carries dropping an empty field
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET / HTTP/1.1", ["Content-Length: abc"]),
+            ("GET / HTTP/1.1", ["Content-Length: +0"]),
+            ("GET / HTTP/1.1", ["Content-Length: -0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0, 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0, 1"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 00"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Content-Length: abc"]),
+            ("POST / HTTP/1.1", ["Content-Length: abc", "Upgrade"]),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // one line of digits alone is a length, read as the number it is
+        Assert.Equal((101, (string?)null), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 000"]), Options));
+        Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 7"]), Options));
     }
 
     [Fact]
