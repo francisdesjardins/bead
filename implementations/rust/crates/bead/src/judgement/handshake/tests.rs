@@ -516,6 +516,10 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
                 ],
                 &["host"]
             ),
+            without(
+                &[("Host", "elsewhere.test"), ("Transfer-Encoding", "gzip")],
+                &["host"]
+            ),
             request_of(
                 &[("Transfer-Encoding", "gzip")],
                 Shape {
@@ -525,7 +529,7 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
                 }
             ),
         ]),
-        each(HOST, 11),
+        each(HOST, 12),
         "each refused unmarked"
     );
     // a final coding chunked, in any case, its empty elements ignored, is content, at step 6

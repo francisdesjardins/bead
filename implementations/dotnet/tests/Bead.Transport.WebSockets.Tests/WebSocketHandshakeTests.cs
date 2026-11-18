@@ -362,6 +362,7 @@ public sealed class WebSocketHandshakeTests
             ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Transfer-Encoding: gzip"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: ,"]),
             ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: chunked", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: gzip"]),
             ("POST / HTTP/1.1", ["Transfer-Encoding: gzip", "Upgrade"]),
         ];
 

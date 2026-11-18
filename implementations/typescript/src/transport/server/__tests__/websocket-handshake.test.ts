@@ -344,10 +344,17 @@ test.describe('refusalOfHandshake', () => {
           ],
           { without: ['host'] }
         ),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', 'gzip'],
+          ],
+          { without: ['host'] }
+        ),
         requestOf([['Transfer-Encoding', 'gzip']], { method: 'POST', without: ['upgrade'] }),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 11 }, () => {
+      Array.from({ length: 12 }, () => {
         return HOST;
       })
     );
