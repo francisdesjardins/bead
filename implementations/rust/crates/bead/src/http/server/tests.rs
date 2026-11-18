@@ -982,6 +982,55 @@ async fn serves_a_target_that_holds_a_hash_cut_at_it_as_hyper_hands_it_on() {
     started.stop().await;
 }
 
+// ! the row "A `Content-Length` naming one number in several lines, over HTTP/1.1" of
+// docs/support.md: hyper keeps the first of the lines that name one number, drops the others
+// before the transport reads the request, and refuses the rest of what spec 15.12 refuses
+#[tokio::test]
+async fn serves_over_http_1_1_a_request_whose_content_length_names_one_number_in_two_lines_read_as_that_number_as_hyper_hands_it_on()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let mut answers = Vec::new();
+
+    for lengths in [["0", "0"], ["0", "00"], ["0", "1"]] {
+        let (first, second) = (
+            format!("Content-Length: {}", lengths[0]),
+            format!("Content-Length: {}", lengths[1]),
+        );
+        let head = head_of(("POST", "/bead"), (port, &[&bead, &first, &second]));
+        let answer = raw_answer_of(port, head.as_bytes()).await;
+
+        answers.push((answer.status, answer.refusal));
+    }
+
+    assert_eq!(
+        answers,
+        [(201, None), (201, None), (400, None)],
+        "one number drawn, two refused"
+    );
+
+    // an exchange's body read by that number, a cancel handed on
+    let (_, token) = connect(&started).await;
+    let cancel = envelope_of(CANCEL, (1, 0));
+    let length = format!("Content-Length: {}", cancel.len());
+    let presented = format!("{CONNECTION_TOKEN_HEADER}: {token}");
+    let mut request = head_of(
+        ("POST", "/bead"),
+        (port, &[&bead, &presented, &length, &length]),
+    )
+    .into_bytes();
+
+    request.extend_from_slice(&cancel);
+    assert_eq!(
+        raw_answer_of(port, &request).await.status,
+        204,
+        "read as {} bytes",
+        cancel.len()
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;
