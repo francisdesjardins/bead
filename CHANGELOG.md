@@ -37,6 +37,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (17.5); a gateway's `Bearer` separator (2.4), its `content-encoding` (5.1), the order of its
   `proto` reader's refusals (5.2.1) and a `sec-fetch-*` value compared in its case (10.1); and a
   whole debug filter's patterns (6.4, 6.8).
+- The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
+  `check_proto_records`, says the record it refused in one set of words on every side: its cause is
+  "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause
+  "a proto payload nests a message more than 100 deep below the top one". The TypeScript side reads
+  a tag as a varint of 5 bytes at most, as the C# and Rust sides do, so every input reaches the same
+  case; no payload's outcome moves (decision 0028).
 
 ### Fixed
 
