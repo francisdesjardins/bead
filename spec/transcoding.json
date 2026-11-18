@@ -7101,6 +7101,104 @@
       ]
     },
     {
+      "name": "a content-encoding empty, identity then an empty element, or an empty element then identity is taken, identity then gzip in one line 415",
+      "clauses": [
+        "5.1",
+        "7.7",
+        "7.7.8",
+        "10.1.8"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-encoding: \r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-encoding: identity,\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-encoding: , identity\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-encoding: identity, gzip\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "type-refused"
+            },
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+          },
+          "on": "d"
+        }
+      ]
+    },
+    {
       "name": "a body the mapping refuses, 400 PAYLOAD_UNDECODABLE, unmarked",
       "clauses": [
         "5.2",
@@ -7587,6 +7685,40 @@
         {
           "send": {
             "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer\ta.b.c\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer error=\"invalid_request\""
+            },
+            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "under bearer-jwt, a tab after Bearer's space: 401, invalid_request",
+      "clauses": [
+        "2.4.2",
+        "7.6.26"
+      ],
+      "options": {
+        "authorization": "bearer-jwt"
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer \ta.b.c\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
             "body": "7B 7D"
           },
           "on": "a"
@@ -8615,6 +8747,78 @@
             "body": "{\"name\":\"operations/a\",\"done\":true}"
           },
           "on": "b"
+        }
+      ]
+    },
+    {
+      "name": "a sec-fetch-site, a sec-fetch-mode or a sec-fetch-dest in upper case is read as absent",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: CROSS-SITE\r\nsec-fetch-mode: no-cors\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "35",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"operations/a\",\"done\":true}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: NAVIGATE\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: OBJECT\r\nconnection: close\r\n\r\n"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "35",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"operations/a\",\"done\":true}"
+          },
+          "on": "c"
         }
       ]
     },

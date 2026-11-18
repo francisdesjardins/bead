@@ -631,12 +631,10 @@ public sealed class HttpGateway : IAsyncDisposable
     }
 
     // whether a body's type is its route's, its type compared case-insensitively, no parameter but a
-    // charset of utf-8, and no encoding but identity (5.1)
+    // charset of utf-8, and its body sent as it is, as spec 15.12 reads its content-encoding (5.1)
     private static bool IsTypeTaken(HttpRequest request, HttpEncoding encoding)
     {
-        var encoded = HeaderOf(request, HeaderNames.ContentEncoding)?.Trim();
-
-        if (encoded is not null && !encoded.Equals("identity", StringComparison.OrdinalIgnoreCase))
+        if (!FieldLines.IsUnencoded(request.Headers.ContentEncoding))
         {
             return false;
         }
@@ -882,10 +880,12 @@ public sealed class HttpGateway : IAsyncDisposable
             }
             else
             {
+                // RFC 6750 §2.1: "Bearer" 1*SP b64token, spaces alone between the two, so a tab after
+                // them is no separator; the token as it stands after them
                 var space = given.IndexOf(' ', StringComparison.Ordinal);
-                var token = space < 0 ? "" : given[(space + 1)..].Trim();
+                var token = space < 0 ? "" : given[(space + 1)..].TrimStart(' ');
 
-                if (space < 0 || !given[..space].Equals("Bearer", StringComparison.OrdinalIgnoreCase) || token.Length == 0)
+                if (space < 0 || !given[..space].Equals("Bearer", StringComparison.OrdinalIgnoreCase) || token.Length == 0 || token[0] == '\t')
                 {
                     await Answer(context, HttpProblems.Own(OwnFailure.Scheme, "an auth-scheme but Bearer", new OwnProblemOptions { Challenge = _options.Challenge }));
 

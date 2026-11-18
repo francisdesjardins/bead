@@ -208,8 +208,8 @@ Selectors of one letter add up.
 6.4. A pattern names procedures to keep, or, after `-`, to leave out, which wins. It matches a whole
 name: `*` stands for any run of characters, none included, line terminators among them; an ASCII
 letter stands for itself in either case; every other character stands for itself alone, compared
-code point by code point, so a name outside ASCII is compared as it is. A pattern never holds a
-parenthesis.
+code point by code point, so a name outside ASCII is compared as it is. A pattern this grammar
+reads never holds a parenthesis.
 
 6.5. A call passes on its direction, its type and its procedure's name, and an envelope on its
 direction and its kind, so one filter serves both. A list left empty keeps every one: an empty
@@ -239,7 +239,9 @@ side reports a code.
 
 6.8. A filter given whole, not as a string, is refused in this grammar's names, whichever listener it
 is given to: its directions, its types and its kinds, each value held to those this grammar names.
-Its patterns and its exclusions are taken as they are given.
+Its patterns and its exclusions are taken as they are given, never read by this grammar. One that
+holds, beside `*`, a character no procedure's name holds (`spec.md` section 16.4), as a
+parenthesis, a separator or a surrogate alone, keeps or leaves out no procedure.
 
 6.9. A filter given as a function is asked as its listener is made, and again at each event. The
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function

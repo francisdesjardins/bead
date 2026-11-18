@@ -1778,12 +1778,16 @@ async fn answers_401_to_a_tab_after_bearer_its_separator_one_or_more_spaces() {
         true,
     ))
     .await;
-    let tab = who_am_i(jwt.port, Some("Bearer	a.b.c".to_owned())).await;
+    // right after Bearer, or after its spaces
+    for authorization in ["Bearer\ta.b.c", "Bearer \ta.b.c"] {
+        let tab = who_am_i(jwt.port, Some(authorization.to_owned())).await;
 
-    assert_eq!(
-        (tab.head.status, field(&tab, "www-authenticate")),
-        (401, Some("Bearer error=\"invalid_request\""))
-    );
+        assert_eq!(
+            (tab.head.status, field(&tab, "www-authenticate")),
+            (401, Some("Bearer error=\"invalid_request\"")),
+            "{authorization:?}"
+        );
+    }
 
     // two spaces present the token, which a server with no JWT verifier refuses
     let spaces = who_am_i(jwt.port, Some("Bearer  a.b.c".to_owned())).await;

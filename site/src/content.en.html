@@ -1487,7 +1487,9 @@
   <p>
     A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
     <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
-    are enough. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
+    are enough. The loopback is judged by the host the client names, never by what it resolves to:
+    where a resolver sends a <code>localhost</code> name elsewhere, the credential crosses there in
+    the clear, and naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.
   </p>

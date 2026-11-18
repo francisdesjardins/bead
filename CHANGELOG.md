@@ -29,6 +29,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `spec/transports.json` take a `wait` step, and four cases more play the rule; the support matrix's
   open heartbeat row closes, a pong that waits behind a frame longer than `heartbeat` is a row of
   its "Leveled down", and `UNTESTED_OPEN` is 44.
+- The spec, its transcoding and its companion say what holds where the 0.15.0 review found them
+  short: `PAYLOAD_INVALID`'s detail as the one a requester reads (7.6); which of step 7's failed
+  checks a detail names (5.2); a `localhost` name trusted without Secure Contexts' condition on its
+  user agent (13.4); a WebSocket client's extensions (15.2); which request fields are read with
+  their lines joined, and which never are (15.12); a backslash that escapes within a string alone
+  (17.5); a gateway's `Bearer` separator (2.4), its `content-encoding` (5.1), the order of its
+  `proto` reader's refusals (5.2.1) and a `sec-fetch-*` value compared in its case (10.1); and a
+  whole debug filter's patterns (6.4, 6.8).
 
 ### Fixed
 
@@ -47,6 +55,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the bounds and lengths an envelope, a header, a transfer or a chunk is refused by.
   protovalidate's messages keep their own words. `tools/check-byte-counts.mjs` holds every side to
   it in CI.
+- A `Content-Encoding` is read as the list RFC 9110 makes it, its empty elements ignored: an empty
+  field, `identity,` or `, identity` sends a body as it is, on every side, at the transport and the
+  gateway. `identity` twice is still an encoding.
+- Under `bearer-jwt`, a tab after `Bearer`'s spaces is answered 401 `invalid_request`, as one right
+  after `Bearer` is, on every gateway, and the token is taken as it stands.
+- The TypeScript side's memory broker refuses a `maximumMessageBytes` or a `maximumQueuedMessages`
+  under 1, as the C# and Rust sides do.
 
 ## [0.15.0] - 2026-11-17
 
