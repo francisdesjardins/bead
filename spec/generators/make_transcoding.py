@@ -3728,6 +3728,22 @@ EXCHANGES = [
               send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: identity',
                                                      'content-encoding: gzip'], '{}', on='b'),
               refused_own(415, 'type-refused', TYPE_WORDS, on='b')]),
+    # a list's empty elements are ignored (RFC 9110 §5.6.1.2): a field that lists nothing, or identity
+    # once, sends its body as it is
+    exchange('a content-encoding empty, identity then an empty element, or an empty element then identity is taken, '
+             'identity then gzip in one line 415', ['5.1', '10.1.8'],
+             [send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: '], '{}',
+                   on='a'),
+              answered('{}', on='a'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: identity,'],
+                   '{}', on='b'),
+              answered('{}', on='b'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: , identity'],
+                   '{}', on='c'),
+              answered('{}', on='c'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json',
+                                                     'content-encoding: identity, gzip'], '{}', on='d'),
+              refused_own(415, 'type-refused', TYPE_WORDS, on='d')]),
     exchange('a body the mapping refuses, 400 PAYLOAD_UNDECODABLE, unmarked', ['5.2', '5.2.2', '7.6.12', '7.7'],
              [json_post('/api/Transcoding/echo', '{"nope":1}'),
               call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a key no field names', 'pointer': '#/nope'})]),

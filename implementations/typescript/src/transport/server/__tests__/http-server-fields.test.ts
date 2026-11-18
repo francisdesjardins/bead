@@ -349,7 +349,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(namesOf(started.events, 'connection')).toEqual([]);
   });
 
-  test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {
+  test('tells a header given empty from one absent: an empty token is malformed, an empty origin refused, an empty encoding taken as one absent, an empty listen none', async () => {
     const { connectScripted, fake, server } = await startScripted();
     const { connectionToken } = connectScripted();
     const statusOf = (headers: Record<string, string>) => {
@@ -368,7 +368,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ]).toEqual([
       [400, HTTP_REFUSALS.MALFORMED],
       [403, HTTP_REFUSALS.ORIGIN],
-      [415, HTTP_REFUSALS.TYPE],
+      statusOf({ [CONNECTION_TOKEN_HEADER]: connectionToken }),
       [400, HTTP_REFUSALS.MALFORMED],
     ]);
     await server.stop();

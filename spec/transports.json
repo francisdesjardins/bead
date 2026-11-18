@@ -1518,6 +1518,76 @@
       ]
     },
     {
+      "name": "a connect whose Content-Encoding is empty, identity then an empty element, or an empty element then identity is taken, identity then gzip in one line refused 415, marked",
+      "clauses": [
+        "15.6.11",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: \r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: identity,\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "trailing"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "trailing"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: , identity\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "leading"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "leading"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: identity, gzip\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "gzip"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "gzip"
+        }
+      ]
+    },
+    {
       "name": "a connect, or a POST on a connection, whose Content-Type comes in two lines, Bead's first, is refused 415, marked",
       "clauses": [
         "15.6.11",

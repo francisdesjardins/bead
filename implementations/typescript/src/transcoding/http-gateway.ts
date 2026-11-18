@@ -62,6 +62,7 @@ import {
   authorityNamedBy,
   closingOf,
   headerOf,
+  isUnencoded,
   joinedOf,
   linesOf,
   preflightOf,
@@ -352,13 +353,11 @@ const asksStream = (request: IHTTPRequestLike): boolean => {
 
 /**
  * Whether a body's `content-type` is its route's (5.1): one field, its type compared
- * case-insensitively, and no parameter but `charset=utf-8`, in any case; its `content-encoding`
- * none or `identity`.
+ * case-insensitively, and no parameter but `charset=utf-8`, in any case; its body sent as it is,
+ * as spec 15.12 reads its `content-encoding`.
  */
 const isTakenType = (request: IHTTPRequestLike, encoding: Encoding): boolean => {
-  const encoded = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
-
-  if (encoded !== undefined && encoded !== 'identity') {
+  if (!isUnencoded(request)) {
     return false;
   }
 

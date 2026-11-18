@@ -353,6 +353,14 @@ cases = [
                                       ('content-encoding', 'gzip')]),
          refused('gzip', 415, 'type-refused'),
          connect('joined', fields={'content-encoding': 'identity, identity'}), refused('joined', 415, 'type-refused')]),
+    # 15.12: a list's empty elements are ignored (RFC 9110 §5.6.1.2): a field that lists nothing, or
+    # identity once, sends its body as it is
+    ('a connect whose Content-Encoding is empty, identity then an empty element, or an empty element then identity is taken, identity then gzip in one line refused 415, marked',
+     ['15.6.11', '15.12'], None, [
+         connect('empty', fields={'content-encoding': ''}), expect('empty', 201),
+         connect('trailing', fields={'content-encoding': 'identity,'}), expect('trailing', 201),
+         connect('leading', fields={'content-encoding': ', identity'}), expect('leading', 201),
+         connect('gzip', fields={'content-encoding': 'identity, gzip'}), refused('gzip', 415, 'type-refused')]),
     # 15.12: Content-Type is a singleton field (RFC 9110 §8.3), refused in two lines
     ('a connect, or a POST on a connection, whose Content-Type comes in two lines, Bead\'s first, is refused 415, marked',
      ['15.6.11', '15.12'], None, [

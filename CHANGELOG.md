@@ -36,6 +36,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the bounds and lengths an envelope, a header, a transfer or a chunk is refused by.
   protovalidate's messages keep their own words. `tools/check-byte-counts.mjs` holds every side to
   it in CI.
+- A `Content-Encoding` is read as the list RFC 9110 makes it, its empty elements ignored: an empty
+  field, `identity,` or `, identity` sends a body as it is, on every side, at the transport and the
+  gateway. `identity` twice is still an encoding.
 
 ## [0.15.0] - 2026-11-17
 
