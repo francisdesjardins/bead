@@ -239,6 +239,25 @@ fn is_protocol_list(lines: &[&str]) -> bool {
             .all(|(index, element)| !elements.iter().take(index).any(|other| other == element))
 }
 
+// whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
+// `Transfer-Encoding`, or a `Content-Length` of one line of digits alone (RFC 9110 §8.6), or none
+fn is_framed(request: &HandshakeRequest<'_>) -> bool {
+    !lines_of(request, "transfer-encoding").is_empty()
+        || match lines_of(request, "content-length").as_slice() {
+            [] => true,
+            [length] => !length.is_empty() && length.bytes().all(|byte| byte.is_ascii_digit()),
+            [_, _, ..] => false,
+        }
+}
+
+// whether a request has content: a `Content-Length` past 0, or a `Transfer-Encoding`
+fn has_content(request: &HandshakeRequest<'_>) -> bool {
+    !lines_of(request, "transfer-encoding").is_empty()
+        || lines_of(request, "content-length")
+            .iter()
+            .any(|length| length.bytes().any(|byte| byte != b'0'))
+}
+
 // a version 13 upgrade's form beside its version: one key, its subprotocols, an `Authorization`
 // at most, which is no list to combine (RFC 9110 §5.3), and no content
 fn is_well_formed(request: &HandshakeRequest<'_>) -> bool {
@@ -247,10 +266,7 @@ fn is_well_formed(request: &HandshakeRequest<'_>) -> bool {
     matches!(lines_of(request, "sec-websocket-key").as_slice(), [key] if is_key(key))
         && (protocols.is_empty() || is_protocol_list(&protocols))
         && lines_of(request, "authorization").len() <= 1
-        && lines_of(request, "content-length")
-            .iter()
-            .all(|length| !length.is_empty() && length.bytes().all(|byte| byte == b'0'))
-        && lines_of(request, "transfer-encoding").is_empty()
+        && !has_content(request)
 }
 
 // a request's authority (spec 15.12), as the judgement reads it; none for what HTTP refuses
@@ -284,8 +300,9 @@ pub fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold {
 ///
 /// 1. what HTTP refuses of its own, a field value holding a control character but a tab or an
 ///    octet past ASCII (RFC 9110 §5.5), a target refused by spec 15.12's rule, a `Host` missing,
-///    repeated or no host, or a target in absolute-form that names none or another scheme (RFC
-///    9112 §3.2, §3.2.2), 400 unmarked;
+///    repeated or no host, a target in absolute-form that names none or another scheme (RFC 9112
+///    §3.2, §3.2.2), or, with no `Transfer-Encoding`, a `Content-Length` other than one line of
+///    digits alone (RFC 9112 §6.3; spec 15.12), 400 unmarked;
 /// 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
 ///    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
 /// 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;
@@ -295,8 +312,8 @@ pub fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold {
 /// 5. a `Sec-WebSocket-Version` in two lines, 400 `malformed`; any but 13, or none, 426
 ///    `version-refused`, naming 13;
 /// 6. a key not one line of 16 bytes in base64, subprotocols no list of distinct tokens, more than
-///    one `Authorization` line, which is no list to combine (RFC 9110 §5.3), or content, 400
-///    `malformed`;
+///    one `Authorization` line, which is no list to combine (RFC 9110 §5.3), or content, a
+///    `Content-Length` past 0 or a `Transfer-Encoding`, 400 `malformed`;
 /// 7. an `Origin` neither the server's own, by the request's authority, nor among the origins it
 ///    takes, 403 `origin-refused`.
 #[must_use]
@@ -304,8 +321,12 @@ pub fn refusal_of_handshake(
     request: &HandshakeRequest<'_>,
     taken: &HandshakeTaken<'_>,
 ) -> Option<HandshakeRefusal> {
-    // * before anything else: what HTTP refuses of its own
-    if !has_visible_fields(request.raw_fields) || !is_visible_target(request.target) {
+    // * before anything else: what HTTP refuses of its own, Bead's own reader being the HTTP server
+    // here
+    if !has_visible_fields(request.raw_fields)
+        || !is_visible_target(request.target)
+        || !is_framed(request)
+    {
         return Some(host_malformed());
     }
 

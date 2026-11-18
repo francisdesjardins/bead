@@ -3604,6 +3604,13 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
+def framed_by(lengths, *, on='a'):
+    """A POST of {} to the echo route, its Content-Length the lines given, each written as it is."""
+    head = 'POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\n'
+    head += ''.join(f'content-length: {length}\r\n' for length in lengths)
+    return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': hexadecimal(b'{}')}, 'on': on}
+
+
 def json_post(path, body, fields=(), *, on='a'):
     return send('POST', path, ['content-type: application/json', *fields], body, on=on)
 
@@ -3964,13 +3971,31 @@ EXCHANGES = [
              [send('GET', '/nope'), refused_own(404, 'path-unknown', 'a path no route matches')]),
     exchange("a command has no route", ['3.1', '3.10'],
              [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown', 'a path no route matches')]),
-    exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty", ['10.1', '10.1.1'],
+    # * a chunk's size that is no number, then a Content-Length spec 15.12 refuses: a word, two numbers
+    # in one line or in two
+    exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
                         + chr(13) + chr(10) + 'connection: close' + chr(13) + chr(10) + chr(13) + chr(10),
                         'body': hexadecimal(b'zz\r\n{}\r\n0\r\n\r\n')}, 'on': 'a'},
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'a'}]),
+               'on': 'a'},
+              *[step for on, lengths in (('b', ['abc']), ('c', ['2, 3']), ('d', ['2', '3']))
+                for step in (framed_by(lengths, on=on),
+                             {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                         'body': ''}, 'on': on})]]),
+    # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
+    # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
+    # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)
+    exchange("a body whose Content-Length names one number in two lines, refused as HTTP refuses it, unmarked, "
+             "its body empty, as section 15.12 levels it",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [framed_by(['2', '2']),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'a'}],
+             differs=[{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1',
+                       'language': 'Rust'}]),
     exchange("what HTTP refuses of its own, unmarked, its body empty", ['7.7', '10.1', '10.1.1'],
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},

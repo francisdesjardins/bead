@@ -442,6 +442,50 @@ fn refuses_first_unmarked_a_target_holding_an_octet_other_than_visible_ascii_or_
 }
 
 #[test]
+fn refuses_first_unmarked_a_content_length_other_than_one_line_of_digits_alone_in_a_request_with_no_transfer_encoding_whatever_else_the_request_holds()
+ {
+    // a word, nothing, a sign, a space, a list, one number twice in one line or in two, two
+    // numbers; from a host it does not take, under another method, with no upgrade
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Content-Length", "abc")]),
+            plain(&[("Content-Length", "")]),
+            plain(&[("Content-Length", "+0")]),
+            plain(&[("Content-Length", "-0")]),
+            plain(&[("Content-Length", "0 0")]),
+            plain(&[("Content-Length", "0, 0")]),
+            plain(&[("Content-Length", "0, 1")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "0")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "00")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "5")]),
+            without(
+                &[("Host", "elsewhere.test"), ("Content-Length", "abc")],
+                &["host"]
+            ),
+            request_of(
+                &[("Content-Length", "abc")],
+                Shape {
+                    method: Some("POST"),
+                    without: &["upgrade"],
+                    ..Shape::default()
+                }
+            ),
+        ]),
+        each(HOST, 12),
+        "each refused unmarked"
+    );
+    // one line of digits alone is a length, read as the number it is
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Content-Length", "000")]),
+            plain(&[("Content-Length", "7")])
+        ]),
+        [TAKEN, MALFORMED],
+        "a length"
+    );
+}
+
+#[test]
 fn refuses_a_host_it_does_not_take_before_anything_else_of_the_request_is_read() {
     let elsewhere = ("Host", "elsewhere.test");
     let shaped = |fields: &[(&str, &str)], shape: Shape<'_>| request_of(fields, shape);
@@ -673,9 +717,10 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
             plain(&[("Sec-WebSocket-Protocol", "")]),
             plain(&[("Sec-WebSocket-Protocol", "bead/1")]),
             plain(&[("Content-Length", "5")]),
-            plain(&[("Content-Length", "abc")]),
-            plain(&[("Content-Length", "0"), ("Content-Length", "5")]),
             plain(&[("Transfer-Encoding", "chunked")]),
+            // ! beside a Transfer-Encoding, a Content-Length is not judged at step 1: content all
+            // the same
+            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "abc")]),
             without(
                 &[
                     ("Sec-WebSocket-Key", "dGVzdA=="),
@@ -684,7 +729,7 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
                 &["sec-websocket-key"]
             ),
         ]),
-        each(MALFORMED, 21),
+        each(MALFORMED, 20),
         "each refused malformed"
     );
 }

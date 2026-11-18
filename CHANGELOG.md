@@ -40,6 +40,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (17.5); a gateway's `Bearer` separator (2.4), its `content-encoding` (5.1), the order of its
   `proto` reader's refusals (5.2.1) and a `sec-fetch-*` value compared in its case (10.1); and a
   whole debug filter's patterns (6.4, 6.8).
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request's body is framed as HTTP frames it. In a
+  request without a `Transfer-Encoding`, a `Content-Length` that frames no body — not digits alone,
+  an empty one among them, or two numbers in one line or across its lines — is answered as HTTP
+  answers it, 400 unmarked over HTTP/1.1 and at a WebSocket's address, its stream reset
+  `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged; so is one number
+  named more than once, which RFC 9110 §8.6 lets a recipient read as that number, a row of the
+  support matrix's "Leveled down". A WebSocket's step 6 reads content as a `Content-Length` past 0
+  or a `Transfer-Encoding`. Every side's WebSocket judgement refuses so at its step 1, where the
+  Rust side's marked these `malformed`, and the Rust HTTP transport and gateway reset over HTTP/2
+  the stream of a `Content-Length` in more than one line. Three platform rows of the matrix's
+  differences say the rest: the Rust side over HTTP/1.1, whose hyper reads one number in two lines
+  as that number; HTTP/2, where Kestrel ends the session; and a signed `Content-Length`, which
+  Kestrel reads as its number. Three cases of `spec/transports.json`, an exchange of
+  `spec/transcoding.json` and three steps of another play the rule, and the transports'
+  generator's `send` takes a list of lengths.
 - The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
   `check_proto_records`, says the record it refused in one set of words on every side: its cause is
   "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause

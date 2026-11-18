@@ -863,11 +863,13 @@ impl ServerInner {
         };
         let target = fields.target();
 
-        // * a field or a target past visible ASCII before anything else, as HTTP answers it
+        // * a field or a target past visible ASCII, or a Content-Length that frames no body, before
+        // anything else, as HTTP answers it
         let is_visible = fields
             .raw_fields()
             .is_some_and(|raw| has_visible_fields(&raw))
-            && is_visible_target(Some(&target));
+            && is_visible_target(Some(&target))
+            && fields.has_one_length();
         let Some(authority) = is_visible.then(|| fields.authority(&target)).flatten() else {
             return ready(malformed(&flow));
         };

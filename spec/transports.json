@@ -2892,6 +2892,194 @@
       ]
     },
     {
+      "name": "a request whose Content-Length frames no body — a word, nothing, two numbers in one line or in two, one number twice in one line — is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: abc\r\nconnection: close\r\n\r\n"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: \r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0, 1\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 1\r\nconnection: close\r\n\r\n"
+          },
+          "on": "numbers"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "numbers"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0, 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "twice"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length names one number in two lines is answered 400 unmarked, as section 15.12 levels it",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "differs": [
+        {
+          "row": "A `Content-Length` naming one number in several lines, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "exchange"
+        }
+      ]
+    },
+    {
       "name": "a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken",
       "clauses": [
         "15.1",
@@ -9643,6 +9831,142 @@
             "body": ""
           },
           "on": "portless"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Content-Length frames no body — a word, nothing, two numbers — or names one number twice, in one line or in two, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: abc\r\n\r\n"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: \r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 1\r\n\r\n"
+          },
+          "on": "numbers"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "numbers"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0, 0\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 0\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "twice"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 00\r\n\r\n"
+          },
+          "on": "padded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "padded"
         }
       ]
     },

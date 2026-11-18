@@ -4611,23 +4611,8 @@ async fn drops_a_stalled_reader_s_body_at_its_deadline_on_its_own_listener_and_e
     mounted.dispose().await.expect("disposed");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_holds_an_octet_past_visible_ascii_protocol_error_nothing_written()
- {
-    // * its own listener under TLS, HTTP/2 by ALPN: a NUL percent-encoded in its path, a path no
-    // route matches among them, and a field past ASCII, each reset before its path is matched,
-    // nothing drawn; what its target percent-encodes is no octet of it. A raw octet past ASCII in
-    // its `:path` is the HTTP transport's wire's, which h2's client cannot send through
-    // `http::Uri`: `http/server/tests/over_tls.rs` writes its frames by hand
-    let fixture = started_with((
-        |options: &mut HttpGatewayOptions| {
-            options.tls = Some(bead::testing::tls::server_config().expect("the server's config"));
-        },
-        true,
-    ))
-    .await;
-    let port = fixture.port;
-    let drawn = drawn_by(&fixture);
+// a session over HTTP/2 to a gateway under the fixture's TLS, by ALPN, its connection driven apart
+async fn http2_session(port: u16) -> h2::client::SendRequest<Bytes> {
     let mut config = rustls::ClientConfig::clone(
         &bead::testing::tls::client_config().expect("the client's config"),
     );
@@ -4649,6 +4634,86 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_hold
     drop(bead::testing::spawn(async move {
         drop(connection.await);
     }));
+
+    session
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_one_number_twice() {
+    // * h2 keeps every line of one number, and the gateway resets the stream (spec 15.12) before
+    // its path is matched, nothing drawn; one line is a length
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.tls = Some(bead::testing::tls::server_config().expect("the server's config"));
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let session = http2_session(port).await;
+    let answer_of = |lengths: &'static [&'static str]| {
+        let session = session.clone();
+
+        async move {
+            let mut request = http::Request::builder()
+                .method("GET")
+                .uri(format!("https://{HOST}:{port}/v1/books/2"))
+                .body(())
+                .expect("a request");
+
+            for length in lengths {
+                request.headers_mut().append(
+                    http::header::CONTENT_LENGTH,
+                    http::HeaderValue::from_static(length),
+                );
+            }
+
+            let mut session = session.ready().await.expect("ready");
+            let (response, _) = session.send_request(request, true).expect("sent");
+
+            match patience(PATIENCE, response)
+                .await
+                .expect("answered in time")
+            {
+                Ok(response) => Ok(response.status().as_u16()),
+                Err(error) => Err(error.reason()),
+            }
+        }
+    };
+
+    for lengths in [&["0", "0"][..], &["0", "00"][..]] {
+        assert_eq!(
+            answer_of(lengths).await,
+            Err(Some(h2::Reason::PROTOCOL_ERROR)),
+            "{lengths:?}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "nothing drawn");
+    assert_eq!(answer_of(&["0"]).await, Ok(200), "one line");
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resets_over_http_2_the_stream_of_a_request_whose_target_or_a_field_holds_an_octet_past_visible_ascii_protocol_error_nothing_written()
+ {
+    // * its own listener under TLS, HTTP/2 by ALPN: a NUL percent-encoded in its path, a path no
+    // route matches among them, and a field past ASCII, each reset before its path is matched,
+    // nothing drawn; what its target percent-encodes is no octet of it. A raw octet past ASCII in
+    // its `:path` is the HTTP transport's wire's, which h2's client cannot send through
+    // `http::Uri`: `http/server/tests/over_tls.rs` writes its frames by hand
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.tls = Some(bead::testing::tls::server_config().expect("the server's config"));
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let session = http2_session(port).await;
 
     // its status and body, or the reason its stream was reset with when none came
     let answer_of = |(path, other): (&'static [u8], Option<&'static [u8]>)| {

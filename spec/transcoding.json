@@ -8977,13 +8977,102 @@
       "name": "a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
       "clauses": [
         "10.1",
-        "10.1.1"
+        "10.1.1",
+        "spec:15.12"
       ],
       "steps": [
         {
           "send": {
             "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
             "body": "7A 7A 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: abc\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2, 3\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\ncontent-length: 3\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "d"
+        }
+      ]
+    },
+    {
+      "name": "a body whose Content-Length names one number in two lines, refused as HTTP refuses it, unmarked, its body empty, as section 15.12 levels it",
+      "clauses": [
+        "10.1",
+        "10.1.1",
+        "spec:15.12"
+      ],
+      "differs": [
+        {
+          "row": "A `Content-Length` naming one number in several lines, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
           },
           "on": "a"
         },

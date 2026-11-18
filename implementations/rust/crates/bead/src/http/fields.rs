@@ -263,6 +263,19 @@ impl Request<'_> {
             || self.headers.contains_key("transfer-encoding")
     }
 
+    /// Whether its `Content-Length` comes in one line at most (spec 15.12): one that names one
+    /// number in several lines frames no body, as h2 hands it on over HTTP/2.
+    pub(crate) fn has_one_length(&self) -> bool {
+        // ! never false over HTTP/1.1: hyper keeps the first of the lines that name one number and
+        // drops the others before the transport reads the request, the row "A `Content-Length`
+        // naming one number in several lines, over HTTP/1.1" of docs/support.md
+        self.headers
+            .get_all("content-length")
+            .iter()
+            .nth(1)
+            .is_none()
+    }
+
     /// The length its `Content-Length` declares, when it declares one.
     pub(crate) fn declared_length(&self) -> Option<u64> {
         self.first_line_of("content-length")

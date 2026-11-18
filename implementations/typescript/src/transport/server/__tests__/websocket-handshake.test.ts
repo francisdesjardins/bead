@@ -263,6 +263,50 @@ test.describe('refusalOfHandshake', () => {
     expect(answerOf(requestOf([], { url: '/?a%01%00' }))).toBe('taken');
   });
 
+  test('refuses first, unmarked, a Content-Length other than one line of digits alone, in a request with no Transfer-Encoding, whatever else the request holds', () => {
+    // a word, nothing, a sign, a space, a list, one number twice in one line or in two, two numbers;
+    // from a host it does not take, under another method, with no upgrade
+    expect(
+      [
+        requestOf([['Content-Length', 'abc']]),
+        requestOf([['Content-Length', '']]),
+        requestOf([['Content-Length', '+0']]),
+        requestOf([['Content-Length', '-0']]),
+        requestOf([['Content-Length', '0 0']]),
+        requestOf([['Content-Length', '0, 0']]),
+        requestOf([['Content-Length', '0, 1']]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Content-Length', '0'],
+        ]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Content-Length', '00'],
+        ]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Content-Length', '5'],
+        ]),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Content-Length', 'abc'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf([['Content-Length', 'abc']], { method: 'POST', without: ['upgrade'] }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 12 }, () => {
+        return HOST;
+      })
+    );
+    // one line of digits alone is a length, read as the number it is
+    expect(
+      [requestOf([['Content-Length', '000']]), requestOf([['Content-Length', '7']])].map(answerOf)
+    ).toEqual(['taken', MALFORMED]);
+  });
+
   test('refuses a host it does not take before anything else of the request is read', () => {
     const elsewhere = [['Host', 'elsewhere.test']] as const;
 
@@ -426,12 +470,12 @@ test.describe('refusalOfHandshake', () => {
         requestOf([['Sec-WebSocket-Protocol', '']]),
         requestOf([['Sec-WebSocket-Protocol', 'bead/1']]),
         requestOf([['Content-Length', '5']]),
-        requestOf([['Content-Length', 'abc']]),
-        requestOf([
-          ['Content-Length', '0'],
-          ['Content-Length', '5'],
-        ]),
         requestOf([['Transfer-Encoding', 'chunked']]),
+        // ! beside a Transfer-Encoding, a Content-Length is not judged at step 1: content all the same
+        requestOf([
+          ['Transfer-Encoding', 'chunked'],
+          ['Content-Length', 'abc'],
+        ]),
         requestOf(
           [
             ['Sec-WebSocket-Key', 'dGVzdA=='],
@@ -441,7 +485,7 @@ test.describe('refusalOfHandshake', () => {
         ),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 21 }, () => {
+      Array.from({ length: 20 }, () => {
         return MALFORMED;
       })
     );

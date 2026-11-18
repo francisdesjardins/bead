@@ -1684,6 +1684,30 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         });
     }
 
+    // spec 15.4: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Reads_a_signed_Content_Length_as_its_number_as_Kestrel_does_a_connect_drawn_under_plus_0_or_minus_0_and_an_exchange_read_by_plus_its_length()
+    {
+        await Start();
+
+        // ! Kestrel reads a sign before the digits, where RFC 9110 §8.6 holds a length to digits alone
+        foreach (var length in (string[])["+0", "-0"])
+        {
+            using var connect = await Wire.Open(_port);
+
+            await connect.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n\r\n");
+            Assert.Equal(201, (await connect.ReadHead()).Status);
+        }
+
+        var (connectionToken, _) = await Connect();
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, (1, 0));
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write(PostHead(connectionToken, $"Content-Length: +{cancel.Length}"));
+        await wire.Write(cancel);
+        Assert.Equal(204, (await wire.ReadHead()).Status);
+    }
+
     [Fact]
     public async Task Answers_GOAWAY_HTTP_1_1_REQUIRED_an_HTTP_2_preface_where_HTTP_1_1_alone_is_served()
     {
@@ -2734,6 +2758,34 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":path", "/bead?a%23b"), own, bead));
         Assert.Equal(new TlsAnswer(404, HttpRefusals.Path, null), await Http2Of((":path", "/bead%23"), own, bead));
         Assert.Single(_connections);
+    }
+
+    // spec 15.12: the row "A `Content-Length` HTTP refuses, over HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_names_one_number_twice_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // ! Kestrel refuses of its own one number in two lines, a list in one line, and two numbers,
+        // ending the session where the spec resets the stream (RFC 9113 §5.4.1 lets it)
+        foreach (var lengths in (string[][])[["0", "0"], ["0", "00"], ["0, 0"], ["0", "1"]])
+        {
+            (string, string)[] fields = [own, bead, .. lengths.Select((length) =>
+            {
+                return ("content-length", length);
+            })];
+
+            Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of(fields));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+
+        // one line is a length
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("content-length", "0")));
     }
 
     [Fact]

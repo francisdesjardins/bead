@@ -52,7 +52,10 @@ export const WEBSOCKET_REFUSALS = Object.freeze({
 // 16 bytes in base64 (RFC 6455 §4.2.1 item 5)
 const KEY = /^[\d+/A-Za-z]{22}==$/u;
 
-// a `Content-Length` of no content, read as the number it is (RFC 9110 §8.6), `00` among them
+// a `Content-Length`, digits alone (RFC 9110 §8.6)
+const LENGTH = /^\d+$/u;
+
+// a `Content-Length` of no content, read as the number it is, `00` among them
 const NO_CONTENT = /^0+$/u;
 
 // a `token` (RFC 9110 §5.6.2)
@@ -169,6 +172,28 @@ const isProtocolList = (lines: readonly string[]): boolean => {
   );
 };
 
+// whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
+// `Transfer-Encoding`, or a `Content-Length` of one line of digits alone, or none
+const isFramed = (request: IHandshakeRequestLike): boolean => {
+  const lengths = linesOf(request, 'content-length');
+
+  return (
+    linesOf(request, 'transfer-encoding').length > 0 ||
+    lengths.length === 0 ||
+    (lengths.length === 1 && LENGTH.test(lengths[0] ?? ''))
+  );
+};
+
+// whether a request has content: a `Content-Length` past 0, or a `Transfer-Encoding`
+const hasContent = (request: IHandshakeRequestLike): boolean => {
+  return (
+    linesOf(request, 'transfer-encoding').length > 0 ||
+    linesOf(request, 'content-length').some((length) => {
+      return !NO_CONTENT.test(length);
+    })
+  );
+};
+
 // a version 13 upgrade's form beside its version: one key, its subprotocols, an `Authorization`
 // at most, which is no list to combine (RFC 9110 §5.3), and no content
 const isWellFormed = (request: IHandshakeRequestLike): boolean => {
@@ -180,10 +205,7 @@ const isWellFormed = (request: IHandshakeRequestLike): boolean => {
     KEY.test(keys[0] ?? '') &&
     (protocols.length === 0 || isProtocolList(protocols)) &&
     linesOf(request, 'authorization').length <= 1 &&
-    linesOf(request, 'content-length').every((length) => {
-      return NO_CONTENT.test(length);
-    }) &&
-    linesOf(request, 'transfer-encoding').length === 0
+    !hasContent(request)
   );
 };
 
@@ -217,9 +239,10 @@ export const toldOfHandshake = (
  *
  * 1. what HTTP refuses of its own, a field value holding a control character but a tab or an
  *    octet past ASCII (RFC 9110 §5.5), a target holding an octet other than visible ASCII or a
- *    path whose percent-decoding holds NUL (RFC 3986 §2), a `Host` missing, repeated or no host, or
- *    a target in absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), 400
- *    unmarked;
+ *    path whose percent-decoding holds NUL (RFC 3986 §2), a `Host` missing, repeated or no host, a
+ *    target in absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), or, with
+ *    no `Transfer-Encoding`, a `Content-Length` other than one line of digits alone (RFC 9112
+ *    §6.3; spec 15.12), 400 unmarked;
  * 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
  *    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
  * 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;
@@ -228,8 +251,8 @@ export const toldOfHandshake = (
  * 5. a `Sec-WebSocket-Version` in two lines, 400 `malformed`; any but 13, or none, 426
  *    `version-refused`, naming 13;
  * 6. a key not one line of 16 bytes in base64, subprotocols no list of distinct tokens, more than
- *    one `Authorization` line, which is no list to combine (RFC 9110 §5.3), or content, 400
- *    `malformed`;
+ *    one `Authorization` line, which is no list to combine (RFC 9110 §5.3), or content, a
+ *    `Content-Length` past 0 or a `Transfer-Encoding`, 400 `malformed`;
  * 7. an `Origin` neither the server's own, by the request's authority, nor among `origins`, 403
  *    `origin-refused`.
  *
@@ -242,9 +265,14 @@ export const refusalOfHandshake = (
 ): IHandshakeRefusal | undefined => {
   const { httpVersion, method } = request;
 
-  // * Node's HTTP/1.1 parser answers controls and octets past ASCII in a target itself; fields
-  // can carry an octet past ASCII, targets a # it hands on or a NUL percent-encoded in their path
-  if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
+  // * Node's HTTP/1.1 parser answers controls and octets past ASCII in a target itself, and a
+  // Content-Length it cannot frame by; fields can carry an octet past ASCII, targets a # it hands
+  // on or a NUL percent-encoded in their path
+  if (
+    !hasVisibleFields(request.rawHeaders) ||
+    !isVisibleTarget(request.url) ||
+    !isFramed(request)
+  ) {
     return HOST_MALFORMED;
   }
 
