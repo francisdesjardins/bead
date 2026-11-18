@@ -544,6 +544,39 @@ cases = [
          for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD), *framing], length=[],
                            body=LAST_CHUNK, http='HTTP/1.0'),
                       unmarked(on))]),
+    # 15.12: an HTTP/1.0 request carrying a Transfer-Encoding, whose framing RFC 9112 §6.1 calls
+    # faulty, refused before hosts is read and its connection closed once answered, on a socket that
+    # asks it kept alive
+    ('an HTTP/1.0 request carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged, and its connection closed',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         *drawn('drawn'),
+         *[step
+           for on, host, fields, body in (
+               ('connect', '{host}', [('content-type', BEAD)], LAST_CHUNK),
+               ('exchange', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD)], CHUNKED_CANCEL),
+               ('elsewhere', 'elsewhere.test', [('content-type', BEAD)], LAST_CHUNK))
+           for step in (send(on, 'POST', host=host, fields=[*fields, ('connection', 'keep-alive'),
+                                                            ('transfer-encoding', 'chunked')],
+                             length=[], body=body, http='HTTP/1.0', close=False),
+                        unmarked(on), {'expect': {'end': True}, 'on': on})]]),
+    # 15.12: a Transfer-Encoding that lists anything after its first chunked, another chunked or an
+    # empty element among it, in one line or across its lines, refused before hosts is read and its
+    # connection closed once answered
+    ('a request whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged, and its connection closed',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         *drawn('drawn'),
+         *[step
+           for on, host, fields, body in (
+               ('connect', '{host}', [('content-type', BEAD), ('transfer-encoding', 'chunked, chunked')], LAST_CHUNK),
+               ('exchange', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD),
+                                       ('transfer-encoding', 'chunked, chunked')], CHUNKED_CANCEL),
+               ('lines', '{host}', [('content-type', BEAD), ('transfer-encoding', 'chunked'),
+                                    ('transfer-encoding', 'chunked')], LAST_CHUNK),
+               ('between', '{host}', [('content-type', BEAD), ('transfer-encoding', 'chunked, gzip, chunked')],
+                LAST_CHUNK),
+               ('empty', 'elsewhere.test', [('content-type', BEAD), ('transfer-encoding', 'chunked,')], LAST_CHUNK))
+           for step in (send(on, 'POST', host=host, fields=fields, length=[], body=body, close=False),
+                        unmarked(on), {'expect': {'end': True}, 'on': on})]]),
     # 15.12: a field value of visible ASCII, spaces and tabs, as both HTTP servers take it; the
     # escape, the bell and the delete are the octets themselves, and so is the one past ASCII
     ('a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
@@ -1247,6 +1280,24 @@ websocket = [
          step
          for on, coding in (('gzip', 'gzip'), ('identity', 'identity'), ('last', 'chunked, gzip'))
          for step in (handshake(on, [('transfer-encoding', coding)], host='elsewhere.test'), unmarked(on))]),
+    # 15.2, step 1, and 15.12: a Transfer-Encoding that lists anything after its first chunked, in one
+    # line or across its lines, judged before hosts is read
+    ('an upgrade whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         step
+         for on, codings in (('twice', ['chunked, chunked']), ('lines', ['chunked', 'chunked']), ('empty', ['chunked,']))
+         for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test'),
+                      unmarked(on))]),
+    # 15.2, step 1, and 15.12: a Transfer-Encoding an HTTP/1.0 request carries, judged before hosts is
+    # read and before step 4 would answer it 426, an upgrade asked or none
+    ('an HTTP/1.0 request at a WebSocket\'s address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         asked('old', [('transfer-encoding', 'chunked')], http='HTTP/1.0', body=LAST_CHUNK), unmarked('old'),
+         asked('elsewhere', [('transfer-encoding', 'chunked')], http='HTTP/1.0', host='elsewhere.test',
+               body=LAST_CHUNK),
+         unmarked('elsewhere'),
+         asked('plain', [('transfer-encoding', 'chunked')], http='HTTP/1.0', body=LAST_CHUNK, **PLAIN),
+         unmarked('plain')]),
     ('a request at a WebSocket\'s address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
      ['15.1', '15.2', '15.2.1', '15.12'], {}, [
          handshake('escape', {'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),

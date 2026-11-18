@@ -47,6 +47,7 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  isTransferEncodingFramed,
   isVisibleTarget,
   ownAuthorityOf,
   requestTargetOf,
@@ -62,6 +63,7 @@ import {
   authorityNamedBy,
   closingOf,
   headerOf,
+  isBehindRefusal,
   isUnencoded,
   joinedOf,
   linesOf,
@@ -1715,6 +1717,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   };
 
   const route = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
+    // ! a request pipelined behind one refused is left unread, its socket closing behind that
+    // refusal: Node hands it on all the same
+    if (isBehindRefusal(request)) {
+      return true;
+    }
+
     const target = requestTargetOf(request.url);
     const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
     const path = target === undefined ? undefined : rawPathOf(target.path);
@@ -1745,10 +1753,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     };
     writerOf(response);
 
-    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, or a #
-    // anywhere in its target, among it
+    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a #
+    // anywhere in its target, or a Transfer-Encoding section 15.12 refuses, one over HTTP/1.0 among
+    // it, which Node hands on and the refusal's connection: close closes behind (RFC 9112 §6.1)
     const named =
-      hasVisibleFields(request.rawHeaders) && isVisibleTarget(request.url)
+      hasVisibleFields(request.rawHeaders) &&
+      isVisibleTarget(request.url) &&
+      isTransferEncodingFramed(request.httpVersion, linesOf(request, 'transfer-encoding'))
         ? authorityNamedBy(request)
         : undefined;
 

@@ -31,7 +31,12 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
-import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
+import {
+  GOOD_CREDENTIAL,
+  type ITranscodingFixture,
+  SESSION,
+  startTranscoding,
+} from './transcoding-service';
 
 // interfaces
 
@@ -2052,6 +2057,87 @@ test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding, in eithe
     expect(came.split('HTTP/1.1 ')).toHaveLength(2);
     expect(came.toLowerCase()).not.toContain('bead-refusal');
   }
+});
+
+// what a gateway answers each request, written on a socket of its own with a GET pipelined behind
+// its chunked body: everything that came, to the socket's close, and the Bead connections drawn
+const pipelinedOn = async (
+  fixture: ITranscodingFixture,
+  requests: readonly (readonly [version: string, authority: string, codings: string])[]
+): Promise<{ answers: string[]; drawn: number }> => {
+  const { port } = fixture;
+  const answers: string[] = [];
+  let drawn = 0;
+
+  fixture.server.transport.on('connection', () => {
+    drawn += 1;
+  });
+
+  for (const [version, authority, codings] of requests) {
+    const socket = opened(
+      port,
+      `POST /api/Transcoding/echo ${version}\r\nhost: ${authority}\r\ncontent-type: application/json\r\n` +
+        `connection: keep-alive\r\n${codings}\r\n\r\n2\r\n{}\r\n0\r\n\r\n` +
+        `GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`
+    );
+    const chunks: Buffer[] = [];
+
+    socket.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    await new Promise((resolve) => {
+      socket.on('close', resolve);
+    });
+    answers.push(Buffer.concat(chunks).toString('latin1'));
+  }
+
+  return { answers, drawn };
+};
+
+// spec 15.12; transcoding 10.1
+test('refuses 400 unmarked an HTTP/1.0 request carrying a Transfer-Encoding under keep-alive, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.0', own, 'transfer-encoding: chunked'],
+    ['HTTP/1.0', 'elsewhere.test', 'transfer-encoding: chunked'],
+  ]);
+
+  // one answer each, unmarked, its connection closed behind it, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1
+test('refuses 400 unmarked a request whose Transfer-Encoding lists anything after its first chunked, in one line or two, an empty element among it, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // ! Node's parser refuses each before the gateway reads the request; this pins it, so that a
+  // Node that hands one on shows here
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: chunked, chunked'],
+    ['HTTP/1.1', own, 'transfer-encoding: chunked\r\ntransfer-encoding: chunked'],
+    ['HTTP/1.1', own, 'transfer-encoding: Chunked, CHUNKED'],
+    ['HTTP/1.1', own, 'transfer-encoding: chunked, gzip, chunked'],
+    ['HTTP/1.1', own, 'transfer-encoding: chunked,'],
+    ['HTTP/1.1', 'elsewhere.test', 'transfer-encoding: chunked, chunked'],
+    ['HTTP/1.1', 'elsewhere.test', 'transfer-encoding: chunked ,  '],
+  ]);
+
+  // one answer each, unmarked, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(drawn).toBe(0);
 });
 
 test('resets over HTTP/2 the stream of a request whose target or a field holds an octet past visible ASCII, PROTOCOL_ERROR, nothing written', async () => {

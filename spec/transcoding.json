@@ -9070,6 +9070,78 @@
             "body": ""
           },
           "on": "e"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked, chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "f"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "f"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "g"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "g"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked,\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "h"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "h"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.0\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "i"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "i"
         }
       ]
     },

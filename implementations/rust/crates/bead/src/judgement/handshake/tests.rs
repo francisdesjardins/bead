@@ -486,11 +486,22 @@ fn refuses_first_unmarked_a_content_length_other_than_one_line_of_digits_alone_i
 }
 
 #[test]
-fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_order_whatever_either_holds_or_a_transfer_encoding_whose_final_coding_is_not_chunked_whatever_else_the_request_holds()
+fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_order_whatever_either_holds_or_a_transfer_encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_http_1_0_request_carries_whatever_else_the_request_holds()
  {
+    let old = |fields: &[(&str, &str)], without: &[&str]| {
+        request_of(
+            fields,
+            Shape {
+                http_version: Some("1.0"),
+                without,
+                ..Shape::default()
+            },
+        )
+    };
+
     // the pair in either order, a Content-Length of no number among it; a final coding but
-    // chunked, across two lines among it, or none; from a host it does not take, under another
-    // method
+    // chunked, across two lines among it, or none; anything after the first chunked, an empty
+    // element among it; HTTP/1.0's; from a host it does not take, under another method
     assert_eq!(
         answers_of(&[
             plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "0")]),
@@ -508,6 +519,17 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
                 ("Transfer-Encoding", "gzip")
             ]),
             plain(&[("Transfer-Encoding", ",")]),
+            plain(&[("Transfer-Encoding", "chunked, chunked")]),
+            plain(&[
+                ("Transfer-Encoding", "chunked"),
+                ("Transfer-Encoding", "chunked")
+            ]),
+            plain(&[("Transfer-Encoding", "Chunked, CHUNKED")]),
+            plain(&[("Transfer-Encoding", "chunked, gzip, chunked")]),
+            plain(&[("Transfer-Encoding", "chunked, , chunked")]),
+            plain(&[("Transfer-Encoding", "chunked,")]),
+            plain(&[("Transfer-Encoding", "chunked ,  ")]),
+            old(&[("Transfer-Encoding", "chunked")], &[]),
             without(
                 &[
                     ("Host", "elsewhere.test"),
@@ -520,6 +542,17 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
                 &[("Host", "elsewhere.test"), ("Transfer-Encoding", "gzip")],
                 &["host"]
             ),
+            without(
+                &[
+                    ("Host", "elsewhere.test"),
+                    ("Transfer-Encoding", "chunked, chunked")
+                ],
+                &["host"]
+            ),
+            old(
+                &[("Host", "elsewhere.test"), ("Transfer-Encoding", "chunked")],
+                &["host"]
+            ),
             request_of(
                 &[("Transfer-Encoding", "gzip")],
                 Shape {
@@ -529,21 +562,23 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
                 }
             ),
         ]),
-        each(HOST, 12),
+        each(HOST, 22),
         "each refused unmarked"
     );
-    // a final coding chunked, in any case, its empty elements ignored, is content, at step 6
+    // a final coding chunked and nothing after it, in any case, the empty elements before it
+    // ignored, is content, at step 6
     assert_eq!(
         answers_of(&[
             plain(&[("Transfer-Encoding", "Chunked")]),
             plain(&[("Transfer-Encoding", ", chunked")]),
+            plain(&[("Transfer-Encoding", "gzip, , chunked")]),
             plain(&[("Transfer-Encoding", "gzip, chunked")]),
             plain(&[
                 ("Transfer-Encoding", "gzip"),
                 ("Transfer-Encoding", "chunked")
             ]),
         ]),
-        each(MALFORMED, 4),
+        each(MALFORMED, 5),
         "content"
     );
 }

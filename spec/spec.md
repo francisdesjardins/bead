@@ -1409,7 +1409,8 @@ WebSocket's address in this order, and answers the first that applies:
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
    path whose percent-decoding holds NUL, a field that holds a control character or an octet past
    US-ASCII, a `Content-Length` that frames no body or one beside a `Transfer-Encoding`, or a
-   `Transfer-Encoding` whose final coding is not `chunked` (section 15.12), its HTTP server answers,
+   `Transfer-Encoding` whose final coding is not `chunked` or that lists anything after its first
+   `chunked`, or one an HTTP/1.0 request carries (section 15.12), its HTTP server answers,
    unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
@@ -1878,7 +1879,17 @@ message be handled as an error, and [§6.1](https://www.rfc-editor.org/rfc/rfc91
 lets a server refuse it and requires the close. So is a request whose `Transfer-Encoding` does not
 end in `chunked`, a `Content-Length` beside it or none, which
 [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) item 4 makes HTTP's own
-refusal. One platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
+refusal. So is a request whose `Transfer-Encoding` lists anything after its first `chunked`, in one
+line or across its lines. Another `chunked` is one a sender never applies
+([RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1)), and a recipient cannot
+tell whether a body that names it twice was coded twice. An empty element after it, which
+[RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2) has a recipient
+ignore, is refused alike, since not every platform's HTTP takes it (`docs/support.md`, "Leveled
+down"). So is an HTTP/1.0 request that carries a `Transfer-Encoding`.
+[RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server treat its framing
+as faulty and close its connection, since its sender may have passed on a chunked body it never
+decoded. A server may refuse it all the same, and the refusal reads none of that body. One
+platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
 `Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences"). Over
 HTTP/2 a `Transfer-Encoding` is malformed
 ([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)), a `Content-Length`

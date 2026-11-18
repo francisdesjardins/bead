@@ -156,19 +156,9 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
-    // whether a Transfer-Encoding's final coding, its last element across its field lines but the
-    // empty ones (RFC 9110 §5.6.1.2), is chunked, in any ASCII case (RFC 9112 §6.3 item 4)
-    private static bool IsChunkedLast(StringValues lines)
-    {
-        return ElementsOf(lines).LastOrDefault((element) =>
-        {
-            return element.Length > 0;
-        }) is { } last && HostsAndOrigins.IsAsciiEqual(last, "chunked");
-    }
-
     // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-    // Transfer-Encoding alone whose final coding is chunked, or a Content-Length of one line of digits
-    // alone (RFC 9110 §8.6), or neither
+    // Transfer-Encoding alone that ends in one chunked, over HTTP/1.1, or a Content-Length of one line
+    // of digits alone (RFC 9110 §8.6), or neither
     private static bool IsFramed(HttpRequest request)
     {
         var headers = request.Headers;
@@ -183,7 +173,7 @@ internal static class WebSocketHandshake
 
             return lengths.Count == 0
                 && !(isHttp1 && RequestFields.HasLengthBesideTransferEncoding(headers.TransferEncoding, headers["X-Content-Length"]))
-                && IsChunkedLast(headers.TransferEncoding);
+                && RequestFields.IsTransferEncodingFramed(request.Protocol, headers.TransferEncoding);
         }
 
         return lengths.Count == 0
@@ -283,7 +273,8 @@ internal static class WebSocketHandshake
     /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
     /// a <c>Content-Length</c> other than one line of digits alone, one beside a
     /// <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
-    /// <c>chunked</c>, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// <c>chunked</c> or that lists anything after its first <c>chunked</c>, or one an HTTP/1.0
+    /// request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
     /// <c>Authorization</c> lines and content, a <c>Content-Length</c> past 0 or a
     /// <c>Transfer-Encoding</c>, among it, 400; an origin not taken, 403.
@@ -309,7 +300,9 @@ internal static class WebSocketHandshake
 
         // and a body HTTP cannot frame, judged alike: a Content-Length that frames no body, and a
         // Transfer-Encoding whose final coding is not chunked, which Kestrel refuses before the
-        // application runs, and a Content-Length beside a Transfer-Encoding, which it hands on
+        // application runs, a Content-Length beside a Transfer-Encoding, and a Transfer-Encoding that
+        // lists anything after its first chunked or that an HTTP/1.0 request carries, which it hands
+        // on
         if (!isVisible || !IsFramed(request))
         {
             return BadRequest;

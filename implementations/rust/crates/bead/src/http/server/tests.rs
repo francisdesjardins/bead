@@ -1118,6 +1118,123 @@ async fn serves_over_http_1_1_a_request_carrying_a_content_length_beside_a_trans
     started.stop().await;
 }
 
+// spec 15.12: hyper refuses an HTTP/1.0 request carrying a Transfer-Encoding 400, unmarked, and
+// closes its connection before the transport reads it (`proto/h1/role.rs`, 280-283)
+#[tokio::test]
+async fn refuses_400_unmarked_an_http_1_0_request_carrying_a_transfer_encoding_under_keep_alive_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let cancel = envelope_of(CANCEL, (5, 0));
+    // * a connect pipelined behind the chunked body, on a socket the request asks kept alive
+    let pipelined = head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"]));
+    // an exchange that cancels on its connection, then a connect from a host not taken
+    for (authority, is_exchange) in [
+        (format!("{HOST}:{port}"), true),
+        ("elsewhere.test".to_owned(), false),
+    ] {
+        let presented = if is_exchange {
+            format!("{CONNECTION_TOKEN_HEADER}: {token}\r\n")
+        } else {
+            String::new()
+        };
+        let mut request = format!(
+            "POST /bead HTTP/1.0\r\nHost: {authority}\r\n{bead}\r\n{presented}Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n"
+        )
+        .into_bytes();
+
+        if is_exchange {
+            request.extend_from_slice(format!("{:x}\r\n", cancel.len()).as_bytes());
+            request.extend_from_slice(&cancel);
+            request.extend_from_slice(b"\r\n");
+        }
+
+        request.extend_from_slice(b"0\r\n\r\n");
+        request.extend_from_slice(pipelined.as_bytes());
+
+        let answer = read_to_end_of(port, &request).await;
+
+        // one answer, unmarked, its socket closed behind it
+        assert!(answer.starts_with("HTTP/1.1 400 "), "{answer}");
+        assert_eq!(
+            answer.matches("HTTP/1.1 ").count(),
+            1,
+            "one answer: {answer}"
+        );
+        assert!(
+            !answer.to_ascii_lowercase().contains(REFUSAL_HEADER),
+            "{answer}"
+        );
+    }
+
+    assert_eq!(started.server.clients().len(), 1, "no connect pipelined");
+    assert!(
+        started.recorder.told().refusals.is_empty(),
+        "the parser's alone"
+    );
+    started.stop().await;
+}
+
+// spec 15.12: hyper hands each on, the body read by its final chunked, which the transport refuses
+// but `chunked,` and `chunked ,  `, which hyper refuses itself (`headers.rs:159`, `is_chunked_`)
+#[tokio::test]
+async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_after_its_first_chunked_in_one_line_or_two_an_empty_element_among_it_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let cancel = envelope_of(CANCEL, (5, 0));
+    let own = format!("{HOST}:{port}");
+    let mut body = format!("{:x}\r\n", cancel.len()).into_bytes();
+
+    body.extend_from_slice(&cancel);
+    body.extend_from_slice(b"\r\n0\r\n\r\n");
+    body.extend_from_slice(
+        head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"])).as_bytes(),
+    );
+
+    for (authority, codings) in [
+        (own.as_str(), "Transfer-Encoding: chunked, chunked"),
+        (
+            own.as_str(),
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked",
+        ),
+        (own.as_str(), "Transfer-Encoding: Chunked, CHUNKED"),
+        (own.as_str(), "Transfer-Encoding: chunked, gzip, chunked"),
+        (own.as_str(), "Transfer-Encoding: chunked,"),
+        ("elsewhere.test", "Transfer-Encoding: chunked, chunked"),
+        ("elsewhere.test", "Transfer-Encoding: chunked ,  "),
+    ] {
+        let mut request = format!(
+            "POST /bead HTTP/1.1\r\nHost: {authority}\r\n{bead}\r\n{CONNECTION_TOKEN_HEADER}: {token}\r\n{codings}\r\n\r\n"
+        )
+        .into_bytes();
+
+        request.extend_from_slice(&body);
+
+        let answer = read_to_end_of(port, &request).await;
+
+        // one answer, unmarked, its socket closed behind it
+        assert!(answer.starts_with("HTTP/1.1 400 "), "{codings}: {answer}");
+        assert_eq!(
+            answer.matches("HTTP/1.1 ").count(),
+            1,
+            "one answer: {answer}"
+        );
+        assert!(
+            !answer.to_ascii_lowercase().contains(REFUSAL_HEADER),
+            "{answer}"
+        );
+    }
+
+    assert_eq!(started.server.clients().len(), 1, "no connect pipelined");
+    assert!(started.recorder.told().refusals.is_empty(), "none told");
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;

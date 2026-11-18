@@ -1748,6 +1748,82 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12
     [Fact]
+    public async Task Refuses_400_unmarked_an_HTTP_1_0_request_carrying_a_Transfer_Encoding_under_keep_alive_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+
+        // * a connect pipelined behind the chunked body, on a socket the request asks kept alive
+        var pipelined = $"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n";
+        (string Authority, string Fields, byte[] Chunks)[] requests =
+        [
+            (Host, $"{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n", ChunkOf(EnvelopeOf(EnvelopeKind.Cancel, 5))),
+            ("elsewhere.test", "", []),
+        ];
+
+        foreach (var (authority, fields, chunks) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.0\r\nHost: {authority}\r\nContent-Type: {HttpTransport.MediaType}\r\n{fields}Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n"), .. chunks, .. "0\r\n\r\n"u8, .. Encoding.ASCII.GetBytes(pipelined)]);
+
+            var (head, answered) = await wire.Read();
+
+            Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+            Assert.Empty(answered);
+            Assert.True(await wire.IsClosed());
+        }
+
+        // neither the cancel handed on, nor the pipelined connect drawn, nor anything told
+        Assert.Empty(_messages);
+        Assert.Single(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.12
+    [Fact]
+    public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_anything_after_its_first_chunked_in_one_line_or_two_an_empty_element_among_it_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var pipelined = $"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n";
+        byte[] body = [.. ChunkOf(EnvelopeOf(EnvelopeKind.Cancel, 5)), .. "0\r\n\r\n"u8, .. Encoding.ASCII.GetBytes(pipelined)];
+
+        // ! Kestrel hands each on, the body read by its final chunked, which the transport refuses
+        (string Authority, string Codings)[] requests =
+        [
+            (Host, "Transfer-Encoding: chunked, chunked"),
+            (Host, "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked"),
+            (Host, "Transfer-Encoding: Chunked, CHUNKED"),
+            (Host, "Transfer-Encoding: chunked, gzip, chunked"),
+            (Host, "Transfer-Encoding: chunked,"),
+            ("elsewhere.test", "Transfer-Encoding: chunked, chunked"),
+            ("elsewhere.test", "Transfer-Encoding: chunked ,  "),
+        ];
+
+        foreach (var (authority, codings) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {authority}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{codings}\r\n\r\n"), .. body]);
+
+            var (head, answered) = await wire.Read();
+
+            Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+            Assert.Empty(answered);
+            Assert.True(await wire.IsClosed());
+        }
+
+        // neither the cancel handed on, nor the pipelined connect drawn, nor anything told
+        Assert.Empty(_messages);
+        Assert.Single(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.12
+    [Fact]
     public async Task Refuses_400_unmarked_a_client_s_own_X_Content_Length_beside_a_Transfer_Encoding_which_reads_as_the_one_Kestrel_writes_and_takes_one_with_no_Transfer_Encoding()
     {
         await Start();

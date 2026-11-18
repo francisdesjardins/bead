@@ -307,9 +307,10 @@ test.describe('refusalOfHandshake', () => {
     ).toEqual(['taken', MALFORMED]);
   });
 
-  test('refuses first, unmarked, a Content-Length beside a Transfer-Encoding, in either order, whatever either holds, or a Transfer-Encoding whose final coding is not chunked, whatever else the request holds', () => {
+  test('refuses first, unmarked, a Content-Length beside a Transfer-Encoding, in either order, whatever either holds, or a Transfer-Encoding whose final coding is not chunked, that lists anything after its first chunked, or that an HTTP/1.0 request carries, whatever else the request holds', () => {
     // the pair in either order, a Content-Length of no number among it; a final coding but chunked,
-    // across two lines among it, or none; from a host it does not take, under another method
+    // across two lines among it, or none; anything after the first chunked, an empty element among
+    // it; HTTP/1.0's; from a host it does not take, under another method
     expect(
       [
         requestOf([
@@ -336,6 +337,17 @@ test.describe('refusalOfHandshake', () => {
           ['Transfer-Encoding', 'gzip'],
         ]),
         requestOf([['Transfer-Encoding', ',']]),
+        requestOf([['Transfer-Encoding', 'chunked, chunked']]),
+        requestOf([
+          ['Transfer-Encoding', 'chunked'],
+          ['Transfer-Encoding', 'chunked'],
+        ]),
+        requestOf([['Transfer-Encoding', 'Chunked, CHUNKED']]),
+        requestOf([['Transfer-Encoding', 'chunked, gzip, chunked']]),
+        requestOf([['Transfer-Encoding', 'chunked, , chunked']]),
+        requestOf([['Transfer-Encoding', 'chunked,']]),
+        requestOf([['Transfer-Encoding', 'chunked ,  ']]),
+        requestOf([['Transfer-Encoding', 'chunked']], { httpVersion: '1.0' }),
         requestOf(
           [
             ['Host', 'elsewhere.test'],
@@ -351,18 +363,34 @@ test.describe('refusalOfHandshake', () => {
           ],
           { without: ['host'] }
         ),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', 'chunked, chunked'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', 'chunked'],
+          ],
+          { httpVersion: '1.0', without: ['host'] }
+        ),
         requestOf([['Transfer-Encoding', 'gzip']], { method: 'POST', without: ['upgrade'] }),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 12 }, () => {
+      Array.from({ length: 22 }, () => {
         return HOST;
       })
     );
-    // a final coding chunked, in any case, its empty elements ignored, is content, at step 6
+    // a final coding chunked and nothing after it, in any case, the empty elements before it
+    // ignored, is content, at step 6
     expect(
       [
         requestOf([['Transfer-Encoding', 'Chunked']]),
         requestOf([['Transfer-Encoding', ', chunked']]),
+        requestOf([['Transfer-Encoding', 'gzip, , chunked']]),
         requestOf([['Transfer-Encoding', 'gzip, chunked']]),
         requestOf([
           ['Transfer-Encoding', 'gzip'],
@@ -370,7 +398,7 @@ test.describe('refusalOfHandshake', () => {
         ]),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 4 }, () => {
+      Array.from({ length: 5 }, () => {
         return MALFORMED;
       })
     );
