@@ -3303,8 +3303,8 @@ async fn drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartb
         "dropped"
     );
 
-    // told closed, unclean, once its router resumes it at the latest
-    server.resume(&handle);
+    // told closed, unclean, while still paused (docs/support.md, "A paused connection its own
+    // heartbeat drops")
     assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
     stopped(&server).await;
 }

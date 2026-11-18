@@ -3380,7 +3380,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
             Assert.Null(await FrameFrom(stream));
 
-            // told closed, unclean, once its router resumes it at the latest
+            // ! told closed, unclean, only once resumed: its read loop waits in Resumed() while
+            // paused (docs/support.md, "A paused connection its own heartbeat drops")
             _server.Resume(connectionHandle);
             Assert.Equal((false, connectionHandle), await Next(_closes));
         }

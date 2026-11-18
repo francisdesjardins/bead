@@ -17,8 +17,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and held to the support matrix's Transports, as the implementations' is; the French page keeps a
   number whole and with its unit by no-break spaces. How Bead is made moves to
   francisdesjardins.ca, and README's "Why Bead" drops the two paragraphs the page dropped.
-- Spec 15.3: a side pings a WebSocket connection once nothing of it has been read for `heartbeat`,
-  a part of a frame, a control frame and an unsolicited pong each counting. Its ping carries data of
+- Spec 15.3: a side pings a WebSocket connection once nothing of it has been read for `heartbeat`, a
+  part of a frame, a control frame and an unsolicited pong each counting. Its ping carries data of
   its own, never empty nor an earlier ping's, and goes ahead of what the side holds unsent; it drops
   the connection once the pong that echoes that data has not come within `heartbeat`, no other frame
   answering it. A peer that keeps sending is never pinged, and a side that pauses a connection past
@@ -26,9 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so, as the C# side's .NET keep-alive does, each with 8 bytes of a count from 1: the TypeScript
   side counts its raw socket's reads and holds its own send queue in front of `ws`, the Rust side
   counts its stream's reads and queues its ping at the front. The WebSocket cases of
-  `spec/transports.json` take a `wait` step, and four cases more play the rule; the support
-  matrix's open heartbeat row closes, a pong that waits behind a frame longer than `heartbeat` is a
-  row of its "Leveled down", and `UNTESTED_OPEN` is 44.
+  `spec/transports.json` take a `wait` step, and four cases more play the rule; the support matrix's
+  open heartbeat row closes, a pong that waits behind a frame longer than `heartbeat` is a row of
+  its "Leveled down", a paused connection its own heartbeat drops is an open row, the C# side
+  telling its close only once the connection resumes, and `UNTESTED_OPEN` is 45.
 
 ## [0.15.0] - 2026-11-17
 

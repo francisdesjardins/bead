@@ -2549,8 +2549,8 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       expect(await exchange.next(2_000)).toEqual({ ping: expect.any(Uint8Array) as unknown });
       expect(await exchange.next(2_000)).toEqual({ end: true });
 
-      // told closed, unclean, once its router resumes it at the latest
-      server.resume(connectionHandle);
+      // told closed, unclean, while still paused (docs/support.md, "A paused connection its own
+      // heartbeat drops")
       expect(await closed).toEqual([false, connectionHandle]);
     } finally {
       exchange.destroy();
