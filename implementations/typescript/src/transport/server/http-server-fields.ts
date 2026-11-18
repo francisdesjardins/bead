@@ -244,6 +244,18 @@ export const isBeadBody = (request: IHTTPRequestLike): boolean => {
   return type === BEAD_MEDIA_TYPE && isUnencoded(request);
 };
 
+/**
+ * The fields of an answer that carries no length, a 204's, a 304's or a HEAD's: where Node closes a
+ * connection kept alive for want of one, over HTTP/1.0, `connection: keep-alive`, as its request
+ * asks (RFC 9112 §9.3); none otherwise, Node's own fields standing.
+ */
+export const keptAliveOf = (response: IHTTPResponseLike): Readonly<Record<string, string>> => {
+  // ! Node's own condition: it keeps an answer of no length only where it would chunk one
+  return response.shouldKeepAlive === true && response.useChunkedEncodingByDefault === false
+    ? { connection: 'keep-alive' }
+    : {};
+};
+
 // writes an exchange's end, once: its status and headers, marked when it is a refusal
 // ! never tells: the 404 of a connection that closes is section 15.7's close, told by `close`, and
 // no refusal; a refusal the transport judges goes through `finish`, which tells it
@@ -251,6 +263,11 @@ export const endWith = (response: IHTTPResponseLike, { headers, reason, status }
   if (!response.headersSent) {
     response.writeHead(status, {
       ...RESPONSE_HEADERS,
+      // * its length, 0, so its connection is kept over HTTP/1.0 and its end framed by no chunk
+      // (RFC 9110 §8.6); a 204, a 304 or a HEAD's carries none, kept alive as its request asks
+      ...(status === 204 || status === 304 || response.req?.method === 'HEAD'
+        ? keptAliveOf(response)
+        : { 'content-length': '0' }),
       ...headers,
       ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
     });
@@ -283,13 +300,13 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
 };
 
 /**
- * The fields of an answer written while its request's body still comes: over HTTP/1,
- * `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes is
- * dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
- * whose stream ends alone, or once the body came whole.
+ * The fields of an answer that closes its connection behind a body it does not read whole: over
+ * HTTP/1, `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes
+ * is dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
+ * whose stream ends alone. Whether it closes is its caller's to judge.
  */
 export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<string, string>> => {
-  if (request.httpVersionMajor !== 1 || request.complete !== false) {
+  if (request.httpVersionMajor !== 1) {
     return {};
   }
 

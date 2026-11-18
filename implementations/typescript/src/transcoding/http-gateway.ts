@@ -68,6 +68,7 @@ import {
   inTurn,
   isUnencoded,
   joinedOf,
+  keptAliveOf,
   linesOf,
   preflightOf,
   HTTP_REFUSALS,
@@ -75,6 +76,7 @@ import {
   RESPONSE_HEADERS,
 } from '../transport/server/http-server-fields';
 import {
+  answerBeforeClose,
   boundHeadOf,
   createSendPace,
   HEADERS_TIMEOUT,
@@ -823,12 +825,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return;
     }
 
-    const closing = exchange.isBodyRead ? {} : closingOf(exchange);
+    // * a body its request declares and it did not read whole closes its connection, whatever of it
+    // came; a request that declares none keeps it (spec 15.12)
+    const closing = exchange.isBodyRead || !carriesContent(request) ? {} : closingOf(exchange);
 
     response.writeHead(status, {
       ...(isPlain
         ? { vary: RESPONSE_HEADERS.vary, 'x-content-type-options': 'nosniff' }
         : RESPONSE_HEADERS),
+      // * a 204 or a 304 carries no length
+      ...(body === undefined ? keptAliveOf(response) : {}),
       ...fields,
       ...(body === undefined ? {} : { 'content-length': String(body.length) }),
       ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
@@ -1453,6 +1459,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             response.writeHead(200, {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
+              // ! a HEAD has no length to write
+              ...(isHead ? keptAliveOf(response) : {}),
             });
 
             if (isHead) {
@@ -1997,6 +2005,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         };
 
         boundHeadOf(instance, headersTimeout);
+        answerBeforeClose(instance);
         listening.add(instance);
 
         return new Promise((resolve, reject) => {

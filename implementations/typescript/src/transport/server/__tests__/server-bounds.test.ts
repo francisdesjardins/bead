@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import { GenericError, ProgrammerError } from '../../shared/errors';
 import { spyIntervals } from '../../shared/__tests__/fixtures';
 import {
+  answerBeforeClose,
   assertCount,
   boundHeadOf,
   createSendPace,
@@ -199,6 +200,66 @@ test.describe('boundHeadOf', () => {
       { connectionsCheckingInterval: 1_000, headersTimeout: 1_234, requestTimeout: 0 },
       {},
     ]);
+  });
+});
+
+test.describe('answerBeforeClose', () => {
+  // RFC 9112 §9.6
+  test('lets the answer under way end behind a request that asked its connection closed, and answers every other refusal of its parser’s as Node does', () => {
+    const http1 = Object.assign(new EventEmitter(), { headersTimeout: 1_000 });
+    const http2 = new EventEmitter();
+    const socketOf = (answer: { _headerSent: boolean } | null) => {
+      const socket = {
+        _httpMessage: answer,
+        destroyed: [] as (Error | undefined)[],
+        destroy: (error?: Error) => {
+          socket.destroyed.push(error);
+        },
+        writable: true,
+        write: (data: string) => {
+          socket.written.push(data);
+        },
+        written: [] as string[],
+      };
+
+      return socket;
+    };
+    const refusalOf = (code: string): Error => {
+      return Object.assign(new Error(code), { code });
+    };
+
+    answerBeforeClose(http1);
+    answerBeforeClose(http2);
+
+    // * an answer under way, its head written or not: left to end
+    const underWay = socketOf({ _headerSent: true });
+
+    http1.emit('clientError', refusalOf('HPE_CLOSED_CONNECTION'), underWay);
+
+    expect([underWay.written, underWay.destroyed]).toEqual([[], []]);
+
+    // none under way, or another refusal: answered as Node answers it, then destroyed
+    for (const [code, answer, written] of [
+      ['HPE_CLOSED_CONNECTION', null, '400 Bad Request'],
+      ['HPE_INVALID_METHOD', null, '400 Bad Request'],
+      ['ERR_HTTP_REQUEST_TIMEOUT', null, '408 Request Timeout'],
+      ['HPE_CHUNK_EXTENSIONS_OVERFLOW', null, '413 Payload Too Large'],
+      ['HPE_HEADER_OVERFLOW', { _headerSent: false }, '431 Request Header Fields Too Large'],
+      ['HPE_INVALID_METHOD', { _headerSent: true }, undefined],
+    ] as const) {
+      const socket = socketOf(answer);
+      const error = refusalOf(code);
+
+      http1.emit('clientError', error, socket);
+
+      expect(socket.written).toEqual(
+        written === undefined ? [] : [`HTTP/1.1 ${written}\r\nConnection: close\r\n\r\n`]
+      );
+      expect(socket.destroyed).toEqual([error]);
+    }
+
+    // a server without a head's bounds heard nothing
+    expect(http2.listenerCount('clientError')).toBe(0);
   });
 });
 

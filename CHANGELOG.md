@@ -129,6 +129,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the body budget among them, is flushed, then what still comes is read and dropped until its
   client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
   a body on and reset it.
+- The TypeScript gateway keeps the connection of a refusal of a request that declares no body,
+  wherever the request stands on its socket: it closed one that came first, judging by whether
+  Node's parser had reached the request's end.
+- The TypeScript HTTP transport and gateway write their own answer to a request that carries
+  `Connection: close` when bytes come behind it: Node's parser refused those bytes and wrote a bare
+  400 in place of the answer, its request already handed on. The answer under way now ends, and
+  Node closes the connection behind it.
+- The TypeScript HTTP transport and gateway keep an HTTP/1.0 connection kept alive behind an answer
+  of no body, as the C# and Rust sides do: the transport writes `content-length: 0` on an empty
+  answer (RFC 9110 §8.6), where Node closed it over HTTP/1.0 and framed it in chunks over HTTP/1.1,
+  and both write `connection: keep-alive` on a 204, a 304 or a HEAD's answer, which carries no
+  length.
 - The Rust side gives an answer to an HTTP/1.0 request whose body has no length version 1.0 and
   `connection: close`, as the TypeScript and C# sides write it, where hyper wrote
   `connection: keep-alive` before delimiting the body by its close.

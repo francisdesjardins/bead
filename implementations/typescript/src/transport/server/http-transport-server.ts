@@ -45,6 +45,7 @@ import {
   listenOn,
 } from './transport-server';
 import {
+  answerBeforeClose,
   assertCount,
   boundHeadOf,
   createSendPace,
@@ -1172,6 +1173,7 @@ export const createHTTPTransportServer = (
             // * its head within `headersTimeout`, judged each second, its 408 the server's own; no
             // time for the whole request, which a body's rate holds instead (spec 15.12)
             boundHeadOf(instance, headersTimeout);
+            answerBeforeClose(instance);
 
             const entry = {
               instance,
@@ -1392,7 +1394,8 @@ export const createHTTPTransportServer = (
             if (!response.headersSent) {
               response.writeHead(200, {
                 ...RESPONSE_HEADERS,
-                ...closingOf(exchange),
+                // its body still coming: its connection closed in stages behind it
+                ...(exchange.request.complete === false ? closingOf(exchange) : {}),
                 'content-length': String(bytes.length),
                 'content-type': BEAD_MEDIA_TYPE,
               });

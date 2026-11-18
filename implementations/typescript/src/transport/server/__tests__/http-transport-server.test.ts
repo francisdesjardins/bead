@@ -2473,6 +2473,88 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
+  test('writes content-length: 0 on an empty answer but a 204 or a HEAD’s, and keeps an HTTP/1.0 connection kept alive behind each', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const bead = `Content-Type: ${BEAD_MEDIA_TYPE}\r\n`;
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\n${bead}Content-Length: 0\r\n\r\n`;
+    const kept = 'Connection: keep-alive\r\n';
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+
+    // each answer's length: 0, none on a 204 or a HEAD's
+    for (const [first, status, lengths] of [
+      [
+        `POST /bead HTTP/1.0\r\nHost: ${host}\r\n${bead}${kept}Content-Length: 0\r\n\r\n`,
+        '201',
+        ['0'],
+      ],
+      [`HEAD /bead HTTP/1.0\r\nHost: ${host}\r\n${kept}\r\n`, '405', [undefined]],
+      [`GET /other HTTP/1.0\r\nHost: ${host}\r\n${kept}\r\n`, '404', ['0']],
+      [
+        `POST /bead HTTP/1.0\r\nHost: ${host}\r\n${bead}${kept}` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n` +
+          `Content-Length: ${String(cancel.length)}\r\n\r\n${cancel}`,
+        '204',
+        [undefined],
+      ],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+      const statuses = (): string[] => {
+        return [...read.text.matchAll(/HTTP\/1\.[01] (\d{3}) /gu)].map(([, each]) => {
+          return each ?? '';
+        });
+      };
+
+      socket.write(`${first}${pipelined}`, 'latin1');
+      await expect.poll(statuses).toHaveLength(2);
+      socket.end();
+
+      // the empty answer, kept alive, then the connect behind it
+      const [answer = ''] = read.text.split(/(?=HTTP\/1\.[01] \d{3} )/u);
+
+      expect(statuses()).toEqual([status, '201']);
+      expect(lengths).toContain(/\r\ncontent-length: (\S*)\r\n/iu.exec(answer)?.[1]);
+      expect(answer.toLowerCase()).not.toContain('transfer-encoding');
+      expect(read.text.toLowerCase()).not.toContain('connection: close');
+    }
+  });
+
+  // spec 15.12; RFC 9112 §9.6
+  test('answers a request that carries close with its own answer, and reads nothing behind it', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const drawn = namesOf(started.events, 'connection').length;
+    const bead = `Content-Type: ${BEAD_MEDIA_TYPE}\r\n`;
+    const sendOn = `POST /bead HTTP/1.1\r\nHost: ${host}\r\n${bead}${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nConnection: close\r\n`;
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect pipelined behind each, in the same write
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\n${bead}Content-Length: 0\r\n\r\n`;
+
+    for (const [first, status] of [
+      [`${sendOn}Content-Length: ${String(cancel.length)}\r\n\r\n${cancel}`, '204'],
+      [`${sendOn}Content-Length: 5\r\n\r\nabcde`, '400'],
+      [`GET /other HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`, '404'],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(`${first}${pipelined}`, 'latin1');
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // its own answer alone, which closes its connection
+      expect(read.text).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `, 'u'));
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+    }
+
+    // no pipelined connect drawn
+    expect(namesOf(started.events, 'connection')).toHaveLength(drawn);
+  });
+
   test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
     const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
@@ -3108,8 +3190,9 @@ test.describe('createHTTPTransportServer, its edges', () => {
           return read.isClosed;
         })
         .toBe(true);
-      // an empty chunked body carries its terminating zero chunk on the wire
-      expect(read.text.slice(read.text.indexOf('\r\n\r\n') + 4)).toBe('0\r\n\r\n');
+      // an empty body, its length 0 (RFC 9110 §8.6)
+      expect(read.text.toLowerCase()).toContain('\r\ncontent-length: 0\r\n');
+      expect(read.text.slice(read.text.indexOf('\r\n\r\n') + 4)).toBe('');
       expect(namesOf(started.events, 'message')).toEqual([]);
     } finally {
       socket.destroy();
