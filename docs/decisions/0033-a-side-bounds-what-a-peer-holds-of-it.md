@@ -529,11 +529,12 @@ resolver told before its failure came stays silent. Each objection, with the ans
 
 ### On the heartbeat on silence
 
-The heartbeat on silence met the Tenth Man at xhigh effort, probed against each side's server. A
-side pings a connection once nothing of it has been read for `heartbeat`, its ping carrying 8 bytes
-of a count of its own and going ahead of what the side holds unsent, and drops it once the pong that
-echoes them has not come within `heartbeat` (spec 15.3). .NET's keep-alive already does so, so the
-C# side keeps it, and the TypeScript and the Rust sides take it. Each objection, with the answer that holds:
+The heartbeat on silence met the Tenth Man at xhigh effort, probed against the C# and TypeScript
+servers. A side pings a connection once nothing of it has been read for `heartbeat`, its ping
+carrying 8 bytes of a count of its own and going ahead of what the side holds unsent, and drops it
+once the pong that echoes them has not come within `heartbeat` (spec 15.3). .NET's keep-alive
+already does so, so the C# side keeps it, and the TypeScript and the Rust sides take it. Each
+objection, with the answer that holds:
 
 | Objection                                                                                                                                      | Answer                                                                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
