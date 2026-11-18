@@ -3,7 +3,7 @@ export const meta = {
   description:
     'An adversarial review of Bead through several lenses, each finding put back to the code by a verifier, then one synthesis by severity; nothing in the repository changes',
   whenToUse:
-    'Before a freeze: a version of the spec or its companion, a release, the .proto options v1 (max); a layer or a branch (xhigh)',
+    'Before a release, a version of the spec or its companion, a layer or a branch (xhigh); before a freeze that cannot be revised, the .proto options v1 or the spec at 1.0 (max)',
   phases: [
     { title: 'Review', detail: 'one reviewer per lens' },
     { title: 'Verify', detail: 'each finding rerun, confirmed, partly or refuted' },
@@ -15,9 +15,10 @@ export const meta = {
 // - scope: what is reviewed, in full: the ref and its commit, the versions, what is out of scope;
 // - slug: the folder under `scratch`, `review` by default;
 // - lenses: [{ key, focus, effort? }], the five below by default, each at `effort` but where it
-//   names its own: the two on the spec and its companion at max, as a version of the spec asks
-//   (CLAUDE.md, the agents' effort), the three on the code at xhigh;
-// - effort: the reviewers' where a lens names none, 'max' by default;
+//   names its own: the two on the spec and its companion at `effort`, the three on the code at
+//   xhigh;
+// - effort: the reviewers' where a lens names none, 'xhigh' by default; 'max' before a freeze
+//   that cannot be revised (CLAUDE.md, the agents' effort);
 // - model: the model of the stages at xhigh or max, when it is not the session's ('fable', say),
 //   none by default: the user asks for it, or a session proposes it with its reason;
 // - serial: one agent at a time, each lens reviewed then verified before the next, where the quota
@@ -35,7 +36,7 @@ const TOOLCHAIN =
   `\`${SCRATCH}/venv/Scripts\` and \`${SCRATCH}/dotnet-10.0.404\` first on PATH, \`DOTNET_ROOT\` the latter, \`NO_COLOR\` unset for Node`;
 const SCOPE = args.scope;
 const SLUG = args.slug || 'review';
-const EFFORT = args.effort || 'max';
+const EFFORT = args.effort || 'xhigh';
 const OUT = `${SCRATCH}/${SLUG}`;
 // * the session's model but where `model` names another, and then only at xhigh or max
 const modelOf = (effort) => {
