@@ -522,7 +522,7 @@ public static class ProtoRecords
                 // library reads it as its declared type
                 if (field is not null && !field.Takes(wireType))
                 {
-                    throw Refused("a field at a wire type its type does not take");
+                    throw Refused($"field {number} at a wire type its type does not take");
                 }
 
                 Record(field, (tag, frame));
@@ -538,7 +538,7 @@ public static class ProtoRecords
         // exception
         private static FormatException Refused(string found)
         {
-            return new FormatException(NotItsMessage, new FormatException($"a proto payload is not its message: {found}"));
+            return new FormatException(NotItsMessage, new FormatException($"a proto payload holds {found}"));
         }
 
         // one record after its tag, of a field the message declares, or null

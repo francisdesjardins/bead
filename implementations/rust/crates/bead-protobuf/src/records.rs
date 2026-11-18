@@ -615,7 +615,7 @@ impl Frame {
 
 // the record refused, in the check's words, the refusal's cause
 fn refused(record: &str) -> CodecRefusal {
-    found(NOT_ITS_MESSAGE, record)
+    found(NOT_ITS_MESSAGE, format!("a proto payload holds {record}"))
 }
 
 // one walk of a payload, its position moving over its bytes, and whether it met a singular closed
@@ -685,7 +685,9 @@ impl<'a> Reader<'a> {
             // * spec 17.9.5: where protobuf's reference parsers keep it as unknown, a stock library
             // reads it as its declared type
             if field.is_some_and(|field| !field.takes(wire)) {
-                return Err(refused("a field at a wire type its type does not take"));
+                return Err(refused(&format!(
+                    "field {number} at a wire type its type does not take"
+                )));
             }
 
             self.record(field, (tag, frame))?;
