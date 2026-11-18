@@ -1362,6 +1362,154 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     started.stop().await;
 }
 
+// spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
+#[tokio::test]
+async fn writes_content_length_0_on_an_empty_answer_but_a_204_or_a_head_s_and_keeps_an_http_1_0_connection_kept_alive_behind_each()
+ {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}\r\n");
+    let pipelined = head_of(
+        ("POST", "/bead"),
+        (port, &[bead.trim_end(), "Content-Length: 0"]),
+    );
+    let kept = "Connection: keep-alive\r\n";
+    let statuses_of = |came: &str| {
+        came.match_indices("HTTP/1.")
+            .filter_map(|(at, _)| came.get(at + 9..at + 12))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    let cancel = envelope_of(CANCEL, (5, 0));
+    let mut cancelled = format!(
+        "POST /bead HTTP/1.0\r\nHost: {HOST}:{port}\r\n{bead}{kept}{CONNECTION_TOKEN_HEADER}: {token}\r\nContent-Length: {}\r\n\r\n",
+        cancel.len()
+    )
+    .into_bytes();
+
+    cancelled.extend_from_slice(&cancel);
+
+    // each answer's length: 0, none on a 204 or a HEAD's
+    for (first, status, lengths) in [
+        (
+            format!("POST /bead HTTP/1.0\r\nHost: {HOST}:{port}\r\n{bead}{kept}Content-Length: 0\r\n\r\n")
+                .into_bytes(),
+            "201",
+            &[Some("0")][..],
+        ),
+        (
+            format!("HEAD /bead HTTP/1.0\r\nHost: {HOST}:{port}\r\n{kept}\r\n").into_bytes(),
+            "405",
+            &[None][..],
+        ),
+        (
+            format!("GET /other HTTP/1.0\r\nHost: {HOST}:{port}\r\n{kept}\r\n").into_bytes(),
+            "404",
+            &[Some("0")][..],
+        ),
+        (cancelled, "204", &[None][..]),
+    ] {
+        let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+        let mut read = Vec::new();
+        let mut buffer = [0_u8; 4_096];
+
+        let mut request = first;
+
+        request.extend_from_slice(pipelined.as_bytes());
+        socket.write_all(&request).await.unwrap();
+
+        while statuses_of(&text_of_latin1(&read)).len() < 2 {
+            let count = patience(PATIENCE, socket.read(&mut buffer))
+                .await
+                .expect("read within patience")
+                .unwrap();
+
+            assert_ne!(count, 0, "kept: {}", text_of_latin1(&read));
+            read.extend_from_slice(&buffer[..count]);
+        }
+
+        // the empty answer, kept alive, then the connect behind it
+        let came = text_of_latin1(&read).to_ascii_lowercase();
+        let answer = came.get(..came.find("\r\n\r\n").unwrap_or(came.len())).unwrap_or_default();
+        let length = answer
+            .split("\r\n")
+            .find_map(|line| line.strip_prefix("content-length: "));
+
+        assert_eq!(
+            statuses_of(&text_of_latin1(&read)),
+            [status, "201"],
+            "{came}"
+        );
+        assert!(lengths.contains(&length), "{came}");
+        assert!(!answer.contains("transfer-encoding"), "{came}");
+        assert!(!came.contains("connection: close"), "{came}");
+    }
+
+    started.stop().await;
+}
+
+// spec 15.12; RFC 9112 §9.6
+#[tokio::test]
+async fn answers_a_request_that_carries_close_with_its_own_answer_and_reads_nothing_behind_it() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let drawn = started.recorder.told().connections.len();
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let send_on = format!(
+        "POST /bead HTTP/1.1\r\nHost: {HOST}:{port}\r\n{bead}\r\n{CONNECTION_TOKEN_HEADER}: {token}\r\nConnection: close\r\n"
+    );
+    let cancel = envelope_of(CANCEL, (5, 0));
+    // * a connect pipelined behind each, in the same write
+    let pipelined = head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"]));
+    let mut cancelled = format!("{send_on}Content-Length: {}\r\n\r\n", cancel.len()).into_bytes();
+
+    cancelled.extend_from_slice(&cancel);
+
+    for (first, status) in [
+        (cancelled, "204"),
+        (
+            format!("{send_on}Content-Length: 5\r\n\r\nabcde").into_bytes(),
+            "400",
+        ),
+        (
+            format!("GET /other HTTP/1.1\r\nHost: {HOST}:{port}\r\nConnection: close\r\n\r\n")
+                .into_bytes(),
+            "404",
+        ),
+    ] {
+        let mut request = first;
+
+        request.extend_from_slice(pipelined.as_bytes());
+
+        let answer = read_to_end_of(port, &request).await;
+
+        // its own answer alone, which closes its connection
+        assert!(
+            answer.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{answer}"
+        );
+        assert_eq!(answer.matches("HTTP/1.").count(), 1, "one answer: {answer}");
+        assert!(
+            answer
+                .to_ascii_lowercase()
+                .contains("\r\nconnection: close\r\n"),
+            "{answer}"
+        );
+    }
+
+    assert_eq!(
+        started.recorder.told().connections.len(),
+        drawn,
+        "no connect pipelined"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;

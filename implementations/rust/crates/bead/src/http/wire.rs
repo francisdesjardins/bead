@@ -552,7 +552,17 @@ where
         TokioIo::new(socket),
         service_fn(move |request: Request<Incoming>| {
             serving.head_read();
-            exchange(request, &serving)
+
+            let is_http_1_0 = request.version() == ::http::Version::HTTP_10
+                && request.method() != ::http::Method::HEAD;
+            let answered = exchange(request, &serving);
+            let closing: BoxFuture<Result<Response<AnswerBody>, Cut>> = Box::pin(async move {
+                answered
+                    .await
+                    .map(|response| closing_over_http_1_0((response, is_http_1_0)))
+            });
+
+            closing
         }),
     );
     let stopped = unless_cancelled(
@@ -603,6 +613,34 @@ where
         _ if flow.lingers.load(Ordering::SeqCst) => close_in_stages(socket, &platform).await,
         _ => {}
     }
+}
+
+// ! an answer to an HTTP/1.0 request whose body has no length is delimited by its close: given
+// version 1.0 and `connection: close`, as the other sides write it, where hyper would write
+// `connection: keep-alive` on a head of version 1.1 before it chooses that close (RFC 9112 §9.3)
+fn closing_over_http_1_0(
+    (mut response, is_http_1_0): (Response<AnswerBody>, bool),
+) -> Response<AnswerBody> {
+    let status = response.status();
+    let has_length = response
+        .headers()
+        .contains_key(::http::header::CONTENT_LENGTH)
+        || response.body().size_hint().exact().is_some();
+
+    if is_http_1_0
+        && !has_length
+        && !status.is_informational()
+        && status != ::http::StatusCode::NO_CONTENT
+        && status != ::http::StatusCode::NOT_MODIFIED
+    {
+        *response.version_mut() = ::http::Version::HTTP_10;
+        response.headers_mut().insert(
+            ::http::header::CONNECTION,
+            ::http::HeaderValue::from_static("close"),
+        );
+    }
+
+    response
 }
 
 /// What ends an HTTP/2 stream the transport ends itself: a reset of its reason, which hyper finds

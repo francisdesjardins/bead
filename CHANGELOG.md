@@ -129,6 +129,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the body budget among them, is flushed, then what still comes is read and dropped until its
   client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
   a body on and reset it.
+- The Rust side gives an answer to an HTTP/1.0 request whose body has no length version 1.0 and
+  `connection: close`, as the TypeScript and C# sides write it, where hyper wrote
+  `connection: keep-alive` before delimiting the body by its close.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.

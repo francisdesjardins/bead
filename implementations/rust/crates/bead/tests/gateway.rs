@@ -4995,7 +4995,7 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     fixture.dispose().await.expect("disposed");
 }
 
-// spec 15.12; transcoding 10.1; RFC 9112 §9.6: hyper reads no request behind an answer that closes
+// spec 15.12; transcoding 10.1, 10.2; RFC 9112 §9.6
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
  {
@@ -5014,9 +5014,9 @@ async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection
     );
     let body = r#"{"aString":"0123"}"#;
 
-    // ! hyper keeps its connection behind a HEAD over HTTP/1.0, a stream's head among it
     for (first, status) in [
-        // a refusal of a body that still comes
+        // a refusal of a request that declares a body, whatever of it came, its connection closed
+        // in stages
         (
             "POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}".to_owned(),
             403,
@@ -5067,6 +5067,279 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
         !came.to_ascii_lowercase().contains("connection: close"),
         "{came}"
     );
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.5
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn keeps_its_connection_behind_a_refusal_of_a_request_that_declares_no_body_first_on_its_socket_and_serves_the_request_behind_it()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+
+    for (first, status) in [
+        (
+            "GET /v1/books/2 HTTP/1.1\r\nhost: elsewhere.test\r\n\r\n".to_owned(),
+            "403",
+        ),
+        (
+            format!("GET /v1/nowhere HTTP/1.1\r\nhost: {own}\r\n\r\n"),
+            "404",
+        ),
+        (
+            format!("DELETE /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n"),
+            "405",
+        ),
+        (
+            format!(
+                "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-length: 0\r\n\r\n"
+            ),
+            "415",
+        ),
+    ] {
+        let octets = format!("{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n");
+        let mut socket = sent(port, octets.as_bytes()).await;
+        let came = read_until(&mut socket, "A tale").await;
+        let statuses = came
+            .split("HTTP/1.1 ")
+            .skip(1)
+            .map(|answer| answer.get(..3).unwrap_or_default())
+            .collect::<Vec<_>>();
+
+        // the refusal, kept alive, then the book
+        assert_eq!(statuses, [status, "200"], "{came}");
+        assert!(
+            !came.to_ascii_lowercase().contains("connection: close"),
+            "{came}"
+        );
+    }
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closes_in_stages_a_refusal_of_a_body_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+ {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.maximum_body_bytes = Some(16);
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let echo = format!(
+        "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{port}\r\ncontent-type: application/json\r\n"
+    );
+    let more = core::iter::repeat_n('a', 64).collect::<String>();
+
+    for (head, each, status) in [
+        // a refusal of its own before the body, a body declared past maximum_body_bytes, then one
+        // past it as it comes
+        (
+            "POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\ncontent-length: 1000000\r\n\r\n".to_owned(),
+            more.clone(),
+            "403",
+        ),
+        (
+            format!("{echo}content-length: 1000000\r\n\r\n"),
+            more.clone(),
+            "413",
+        ),
+        (
+            format!("{echo}transfer-encoding: chunked\r\n\r\n"),
+            format!("40\r\n{more}\r\n"),
+            "413",
+        ),
+    ] {
+        let (came, closed_within) = refused_as_it_sends(port, (&head, &each)).await;
+
+        // the refusal whole, which closes its connection, then its close within the linger's 2 s
+        assert!(came.starts_with(&format!("HTTP/1.1 {status} ")), "{came}");
+        assert!(
+            came.to_ascii_lowercase().contains("\r\nconnection: close\r\n"),
+            "{came}"
+        );
+        assert!(
+            closed_within < Duration::from_secs(4),
+            "{status} closed past 4 s: {closed_within:?}"
+        );
+    }
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// a request's head and a part of its body written on a socket of its own, that part sent again each
+// 20 ms while the socket lasts: what came to the end of its answer, a problem's closing brace, and
+// how long its socket took to close once that came
+async fn refused_as_it_sends(port: u16, (head, each): (&str, &str)) -> (String, Duration) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let socket = sent(port, format!("{head}{each}").as_bytes()).await;
+    let (mut reading, mut writing) = socket.into_split();
+    let again = each.as_bytes().to_vec();
+    // * its client sends on as it reads, until its socket closes
+    let sending = bead::testing::spawn(async move {
+        while writing.write_all(&again).await.is_ok() {
+            rest(Duration::from_millis(20)).await;
+        }
+    });
+    let mut read = Vec::new();
+    let mut buffer = vec![0_u8; 16_384];
+
+    patience(PATIENCE, async {
+        while !String::from_utf8_lossy(&read).ends_with('}') {
+            let count = reading.read(&mut buffer).await.expect("its bytes");
+
+            assert_ne!(count, 0, "its socket ended before its answer");
+            read.extend_from_slice(&buffer[..count]);
+        }
+    })
+    .await
+    .expect("answered in time");
+
+    let answered = bead::testing::Instant::now();
+
+    patience(Duration::from_secs(10), async {
+        // what follows its answer: nothing, then its end or its reset once its client sends on
+        while matches!(reading.read(&mut buffer).await, Ok(count) if count > 0) {}
+    })
+    .await
+    .expect("closed in time");
+
+    let closed_within = answered.elapsed();
+
+    sending.abort();
+
+    (String::from_utf8_lossy(&read).into_owned(), closed_within)
+}
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.3, §9.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serves_no_request_pipelined_behind_a_stream_asked_over_http_1_0_kept_alive_whose_head_closes_its_connection_for_want_of_a_length()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let own = format!("{HOST}:{port}");
+    let octets = format!(
+        "GET /v1/watch HTTP/1.0\r\nhost: {own}\r\naccept: text/event-stream\r\nconnection: keep-alive\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n"
+    );
+    let mut socket = sent(port, octets.as_bytes()).await;
+    let came = read_until(&mut socket, "\r\n\r\n").await;
+
+    // * the request behind given its time
+    rest(Duration::from_millis(200)).await;
+
+    // the stream's head, which closes its connection, and its call alone
+    assert!(
+        came.starts_with("HTTP/1.1 200 ") || came.starts_with("HTTP/1.0 200 "),
+        "{came}"
+    );
+    assert!(
+        came.to_ascii_lowercase().contains("connection: close"),
+        "{came}"
+    );
+    assert!(!came.to_ascii_lowercase().contains("keep-alive"), "{came}");
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 1, "its call alone");
+
+    drop(socket);
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 8.1, 8.3, 11.1; RFC 9110 §8.6; RFC 9112 §9.3
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn keeps_an_http_1_0_connection_kept_alive_behind_an_answer_of_no_length_a_head_of_a_stream_a_204_or_a_304_and_serves_the_request_behind_it()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+    let behind = format!("GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n");
+    let kept = format!("HTTP/1.0\r\nhost: {own}\r\nconnection: keep-alive\r\n");
+    let stream = "accept: text/event-stream\r\n";
+    let statuses_of = |came: &str| {
+        came.match_indices("HTTP/1.")
+            .filter_map(|(at, _)| came.get(at + 9..at + 12))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    for (first, status) in [
+        (format!("HEAD /v1/watch {kept}{stream}\r\n"), "200"),
+        (
+            format!("GET /v1/watch {kept}{stream}last-event-id: 3\r\n\r\n"),
+            "204",
+        ),
+        (
+            format!("GET /openapi.json {kept}if-none-match: *\r\n\r\n"),
+            "304",
+        ),
+    ] {
+        let mut socket = sent(port, format!("{first}{behind}").as_bytes()).await;
+        let came = read_until(&mut socket, "A tale").await;
+
+        // the answer of no length, kept alive, then the book
+        assert_eq!(statuses_of(&came), [status, "200"], "{came}");
+        assert!(
+            !came.to_ascii_lowercase().contains("connection: close"),
+            "{came}"
+        );
+    }
+
+    // one that does not ask it kept alive, closed behind its head
+    let octets = format!(
+        "HEAD /v1/watch HTTP/1.0\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n{behind}"
+    );
+    let alone = text_on(sent(port, octets.as_bytes()).await).await;
+
+    assert_eq!(statuses_of(&alone), ["200"], "{alone}");
+    assert!(
+        !alone.to_ascii_lowercase().contains("keep-alive"),
+        "{alone}"
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; RFC 9112 §9.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_a_request_that_carries_close_with_its_own_answer_and_reads_nothing_behind_it() {
+    let fixture = started().await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+
+    for (first, status) in [
+        (
+            format!("GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\nconnection: close\r\n\r\n"),
+            "200",
+        ),
+        (
+            format!(
+                "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}"
+            ),
+            "200",
+        ),
+        (
+            "GET /v1/books/2 HTTP/1.1\r\nhost: elsewhere.test\r\nconnection: close\r\n\r\n"
+                .to_owned(),
+            "403",
+        ),
+    ] {
+        let octets = format!("{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n");
+        let came = text_on(sent(port, octets.as_bytes()).await).await;
+
+        // its own answer alone, which closes its connection
+        assert!(came.starts_with(&format!("HTTP/1.1 {status} ")), "{came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(
+            came.to_ascii_lowercase()
+                .contains("\r\nconnection: close\r\n"),
+            "{came}"
+        );
+    }
 
     fixture.dispose().await.expect("disposed");
 }
