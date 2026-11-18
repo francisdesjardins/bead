@@ -36,6 +36,21 @@ export interface IHeadBoundServerLike {
   requestTimeout?: number | undefined;
 }
 
+/** The part of a socket Node hands its server's `clientError`: Node's `net.Socket`. */
+export interface IClientErrorSocketLike {
+  readonly writable: boolean;
+  destroy(error?: Error): unknown;
+  write(data: string): unknown;
+}
+
+/** The part of Node's HTTP server that tells its parser's refusals: its `clientError`. */
+export interface IClientErrorServerLike {
+  on(
+    event: 'clientError',
+    listener: (error: Error, socket: IClientErrorSocketLike) => void
+  ): unknown;
+}
+
 /**
  * The part of a socket an answer written before its request's body is whole closes in stages:
  * Node's `net.Socket`.
@@ -74,6 +89,14 @@ export const LINGER_MILLISECONDS = 2_000;
 
 // how often what waits for a socket, and a server's heads, are judged
 const CHECK_MILLISECONDS = 1_000;
+
+// what Node's HTTP server answers each refusal of its parser's with, by its code, 400 for any
+// other, as its `socketOnError` writes it when no listener hears `clientError`
+const PARSER_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
+  ERR_HTTP_REQUEST_TIMEOUT: '408 Request Timeout',
+  HPE_CHUNK_EXTENSIONS_OVERFLOW: '413 Payload Too Large',
+  HPE_HEADER_OVERFLOW: '431 Request Header Fields Too Large',
+});
 
 // helpers
 
@@ -126,6 +149,39 @@ export const boundHeadOf = (server: IHeadBoundServerLike, headersTimeout: number
   server.headersTimeout = headersTimeout;
   server.requestTimeout = 0;
   server.connectionsCheckingInterval = CHECK_MILLISECONDS;
+};
+
+/**
+ * Lets the answer under way on a socket end when Node's parser refuses what comes behind a request
+ * that asked its connection closed, `HPE_CLOSED_CONNECTION`: Node would write a bare 400 in its
+ * place, its request already handed on, where the answer goes and Node closes its socket behind it
+ * (RFC 9112 §9.6). Every other refusal of the parser's is answered as Node answers it. A server
+ * without a head's bounds, `node:http2`'s, is left as it is.
+ */
+export const answerBeforeClose = (server: IHeadBoundServerLike & IClientErrorServerLike): void => {
+  if (typeof server.headersTimeout !== 'number') {
+    return;
+  }
+
+  server.on('clientError', (error, socket) => {
+    // ! Node's own: the response its socket writes, `null` once none is under way
+    const answer = (socket as { _httpMessage?: { _headerSent?: boolean } | null })._httpMessage;
+    const code = (error as { code?: unknown }).code;
+    const isUnderWay = answer !== undefined && answer !== null;
+
+    if (code === 'HPE_CLOSED_CONNECTION' && isUnderWay) {
+      return;
+    }
+
+    // * a refusal written where no answer began on the socket, then its close, as Node's own
+    if (socket.writable && (!isUnderWay || answer._headerSent !== true)) {
+      const refusal = typeof code === 'string' ? PARSER_REFUSALS[code] : undefined;
+
+      socket.write(`HTTP/1.1 ${refusal ?? '400 Bad Request'}\r\nConnection: close\r\n\r\n`);
+    }
+
+    socket.destroy(error);
+  });
 };
 
 /**

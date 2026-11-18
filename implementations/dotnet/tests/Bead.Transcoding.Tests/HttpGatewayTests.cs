@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
@@ -1977,8 +1978,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // spec 15.12; transcoding 10.1; RFC 9112 §9.6: Kestrel reads no request behind an answer that
-    // closes
+    // spec 15.12; transcoding 10.1, 10.2; RFC 9112 §9.6
     [Fact]
     public async Task Serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
     {
@@ -1993,18 +1993,30 @@ public sealed class HttpGatewayTests
         try
         {
             var own = $"127.0.0.1:{started.Port}";
+            var echo = $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\n";
             var body = "{\"aString\":\"0123\"}";
 
-            // ! a body past MaximumBodyBytes as it comes: Kestrel reads a body that came whole on, and
-            // keeps its connection behind a refusal of it, and behind a HEAD over HTTP/1.0
-            var came = Encoding.ASCII.GetString(await Received(started.Port, Encoding.ASCII.GetBytes(
-                $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n" +
-                $"12\r\n{body}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n")));
+            (string First, int Status)[] requests =
+            [
+                // a refusal of a request that declares a body, whatever of it came, its connection
+                // closed in stages
+                ("POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}", 403),
+                // a body declared past MaximumBodyBytes, then one past it as it comes
+                ($"{echo}content-length: {body.Length}\r\n\r\n{body}", 413),
+                ($"{echo}transfer-encoding: chunked\r\n\r\n12\r\n{body}\r\n0\r\n\r\n", 413),
+            ];
 
-            // one answer, which closes its connection, and no call made
-            Assert.StartsWith("HTTP/1.1 413 ", came, StringComparison.Ordinal);
-            Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
-            Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            foreach (var (first, status) in requests)
+            {
+                var came = Encoding.ASCII.GetString(await Received(started.Port, Encoding.ASCII.GetBytes($"{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n")));
+
+                // one answer, which closes its connection
+                Assert.StartsWith($"HTTP/1.1 {status} ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // no call made
             Assert.Equal(0, Volatile.Read(ref drawn));
         }
         finally
@@ -2041,6 +2053,197 @@ public sealed class HttpGatewayTests
                 return answer[..3];
             }));
             Assert.DoesNotContain("connection: close", came.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.2; RFC 9112 §9.5
+    [Fact]
+    public async Task Keeps_its_connection_behind_a_refusal_of_a_request_that_declares_no_body_first_on_its_socket_and_serves_the_request_behind_it()
+    {
+        var started = await Started();
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            (string First, string Status)[] requests =
+            [
+                ("GET /v1/books/2 HTTP/1.1\r\nhost: elsewhere.test\r\n\r\n", "403"),
+                ($"GET /v1/nowhere HTTP/1.1\r\nhost: {own}\r\n\r\n", "404"),
+                ($"DELETE /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n", "405"),
+                ($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-length: 0\r\n\r\n", "415"),
+            ];
+
+            foreach (var (first, status) in requests)
+            {
+                using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes($"{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n"));
+                var came = await ReadUntil(socket, "A tale");
+
+                // the refusal, kept alive, then the book
+                Assert.Equal([status, "200"], came.Split("HTTP/1.1 ").Skip(1).Select((answer) =>
+                {
+                    return answer[..3];
+                }));
+                Assert.DoesNotContain("connection: close", came, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.2; RFC 9112 §9.6
+    [Fact]
+    public async Task Closes_in_stages_a_refusal_of_a_body_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+    {
+        var started = await Started((options) =>
+        {
+            return options with { MaximumBodyBytes = 16 };
+        });
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var echo = $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\n";
+            var more = new string('a', 64);
+
+            (string Head, string Each, string Status)[] requests =
+            [
+                // a refusal of its own before the body, a body declared past MaximumBodyBytes, then
+                // one past it as it comes
+                ("POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\ncontent-length: 1000000\r\n\r\n", more, "403"),
+                ($"{echo}content-length: 1000000\r\n\r\n", more, "413"),
+                ($"{echo}transfer-encoding: chunked\r\n\r\n", $"40\r\n{more}\r\n", "413"),
+            ];
+
+            foreach (var (head, each, status) in requests)
+            {
+                var (came, closedWithin) = await RefusedAsItSends(started.Port, (head, each));
+
+                // the refusal whole, which closes its connection, then its close within the
+                // linger's 2 s
+                Assert.StartsWith($"HTTP/1.1 {status} ", came, StringComparison.Ordinal);
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.True(closedWithin < TimeSpan.FromSeconds(4), $"{status} closed past 4 s: {closedWithin}");
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.2; RFC 9112 §9.3, §9.6
+    [Fact]
+    public async Task Serves_no_request_pipelined_behind_a_stream_asked_over_HTTP_1_0_kept_alive_whose_head_closes_its_connection_for_want_of_a_length()
+    {
+        var started = await Started();
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(
+                $"GET /v1/watch HTTP/1.0\r\nhost: {own}\r\naccept: text/event-stream\r\nconnection: keep-alive\r\n\r\n" +
+                $"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n"));
+            var came = await ReadUntil(socket, "\r\n\r\n");
+
+            // * the request behind given its time
+            await Task.Delay(TimeSpan.FromMilliseconds(200), TimeProvider.System, Cancelled);
+
+            // the stream's head, which closes its connection, and its call alone
+            Assert.Matches(@"^HTTP/1\.[01] 200 ", came);
+            Assert.Contains("connection: close", came, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("keep-alive", came, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(1, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 8.1, 8.3, 11.1; RFC 9110 §8.6; RFC 9112 §9.3
+    [Fact]
+    public async Task Keeps_an_HTTP_1_0_connection_kept_alive_behind_an_answer_of_no_length_a_HEAD_of_a_stream_a_204_or_a_304_and_serves_the_request_behind_it()
+    {
+        var started = await Started();
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var behind = $"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n";
+            var kept = $"HTTP/1.0\r\nhost: {own}\r\nconnection: keep-alive\r\n";
+            var stream = "accept: text/event-stream\r\n";
+
+            (string First, string Status)[] requests =
+            [
+                ($"HEAD /v1/watch {kept}{stream}\r\n", "200"),
+                ($"GET /v1/watch {kept}{stream}last-event-id: 3\r\n\r\n", "204"),
+                ($"GET /openapi.json {kept}if-none-match: *\r\n\r\n", "304"),
+            ];
+
+            foreach (var (first, status) in requests)
+            {
+                using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(first + behind));
+                var came = await ReadUntil(socket, "A tale");
+
+                // the answer of no length, kept alive, then the book
+                Assert.Equal([status, "200"], Regex.Matches(came, @"HTTP/1\.[01] (\d{3}) ").Select((match) =>
+                {
+                    return match.Groups[1].Value;
+                }));
+                Assert.DoesNotContain("connection: close", came, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // one that does not ask it kept alive, closed behind its head
+            var alone = Encoding.ASCII.GetString(await Received(started.Port, Encoding.ASCII.GetBytes(
+                $"HEAD /v1/watch HTTP/1.0\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n{behind}")));
+
+            Assert.Matches(@"^HTTP/1\.[01] 200 ", alone);
+            Assert.Single(Regex.Matches(alone, @"HTTP/1\.[01] \d{3} "));
+            Assert.DoesNotContain("keep-alive", alone, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; RFC 9112 §9.6
+    [Fact]
+    public async Task Answers_a_request_that_carries_close_with_its_own_answer_and_reads_nothing_behind_it()
+    {
+        var started = await Started();
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            (string First, int Status)[] requests =
+            [
+                ($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\nconnection: close\r\n\r\n", 200),
+                ($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}", 200),
+                ("GET /v1/books/2 HTTP/1.1\r\nhost: elsewhere.test\r\nconnection: close\r\n\r\n", 403),
+            ];
+
+            foreach (var (first, status) in requests)
+            {
+                var came = Encoding.ASCII.GetString(await Received(started.Port, Encoding.ASCII.GetBytes($"{first}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n")));
+
+                // its own answer alone, which closes its connection
+                Assert.StartsWith($"HTTP/1.1 {status} ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
@@ -3920,6 +4123,59 @@ public sealed class HttpGatewayTests
         }
 
         return Encoding.UTF8.GetString([.. came]);
+    }
+
+    // a request's head and a part of its body written on a socket of its own, that part sent again
+    // each 20 ms while the socket lasts: what came to the end of its answer, a problem's closing
+    // brace, and how long its socket took to close once that came
+    private static async Task<(string Came, TimeSpan ClosedWithin)> RefusedAsItSends(int port, (string Head, string Each) request)
+    {
+        using var socket = await Opened(port, Encoding.ASCII.GetBytes(request.Head + request.Each));
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var each = Encoding.ASCII.GetBytes(request.Each);
+        var sending = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        await socket.SendAsync(each, stop.Token);
+                        await Task.Delay(TimeSpan.FromMilliseconds(20), TimeProvider.System, stop.Token);
+                    }
+                }
+                catch (Exception reason) when (reason is SocketException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // its socket closed, or the test done
+                }
+            },
+            Cancelled);
+
+        try
+        {
+            var came = await ReadUntil(socket, "}");
+            var answered = TimeProvider.System.GetTimestamp();
+            var buffer = new byte[65_536];
+
+            try
+            {
+                while (await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled) > 0)
+                {
+                    // what follows its answer: nothing
+                }
+            }
+            catch (SocketException)
+            {
+                // its close, a reset once its client sends on
+            }
+
+            return (came, TimeProvider.System.GetElapsedTime(answered));
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await sending;
+        }
     }
 
     // `octets` written on a socket of its own, and every byte that came back to its end, or its reset

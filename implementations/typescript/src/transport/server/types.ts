@@ -26,7 +26,11 @@ import type {
   IWorkerPortLike,
 } from '../shared/types';
 import type { IHTTPPolicyOption } from './http-policy';
-import type { IHeadBoundServerLike, ILingeringSocketLike } from './server-bounds';
+import type {
+  IClientErrorSocketLike,
+  IHeadBoundServerLike,
+  ILingeringSocketLike,
+} from './server-bounds';
 
 // interfaces
 
@@ -750,6 +754,12 @@ export interface IHTTPResponseLike {
   readonly stream?: { close(code?: number): void } | undefined;
   /** Sets a field the head carries, which `writeHead` merges with its own. */
   setHeader(name: string, value: string): unknown;
+  /** The request it answers, its method among it; Node's has it. */
+  readonly req?: { readonly method?: string | undefined } | undefined;
+  /** Node's over HTTP/1: whether its connection is to be kept once it ends, as its request asks. */
+  readonly shouldKeepAlive?: boolean | undefined;
+  /** Node's over HTTP/1: whether it frames a body of no length in chunks, which HTTP/1.0 has not. */
+  readonly useChunkedEncodingByDefault?: boolean | undefined;
   write(chunk: Uint8Array): unknown;
   writeHead(statusCode: number, headers?: Record<string, string>): unknown;
 }
@@ -772,6 +782,11 @@ export interface IHTTPServerLike extends IHeadBoundServerLike {
   // oxlint-disable-next-line bead/options-last -- Node's own, `listen(port, host, callback)`
   listen(port: number, host: string, callback?: () => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
+  /** HTTP/1's: each refusal of its parser's, which a listener answers in Node's place. */
+  on(
+    event: 'clientError',
+    listener: (error: Error, socket: IClientErrorSocketLike) => void
+  ): unknown;
   /** HTTP/2's: each session, which a stop closes, since it outlives the server's close. */
   on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown;
 }

@@ -90,6 +90,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The companion's 1.2 points to the spec for what a constrained profile conforms to, in place of a
   list of its sections, and the spec's 9.2, step 3, drops its comparison with two HTTP/2 servers,
   the bound and Rapid Reset's CVE unchanged.
+- Spec 15.12 says when a server closes over HTTP/1: a refusal of its own of a request that declares
+  a body carries `connection: close`, whatever of the body was read, and closes in stages; one of a
+  request that declares none carries no `connection: close` of its own over HTTP/1.1 (RFC 9112
+  §9.5); what HTTP refuses of its own closes. A server answers a connection's requests in their
+  order and serves none behind an answer that closes it, none judged, handed on or told (§9.3.2,
+  §9.6), so it serves a request once the answers before it ended. The transcoding's 10.2 holds a
+  gateway to it. The gateways' twins carry the same closing cases on every side, and new twins hold
+  a bodiless refusal that keeps its connection, a refusal of a body still coming closed in stages,
+  and a stream asked over HTTP/1.0 closed for want of a length, nothing served behind it.
 
 ### Fixed
 
@@ -113,6 +122,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP's own 400 among them. Node's parser hands such a request on, and the transport drew its
   connection or the gateway served its route, its answer never written. Over HTTP/1, each now serves
   a request once Node gives its answer the socket, the answers before it ended.
+- The C# gateway closes, in stages, the connection of a refusal of its own of a request that
+  declares a body: it kept it, and Kestrel read the refused body on with no bound, a declared 413's
+  among it, then reset the connection 6 to 7 seconds later, no `connection: close` telling its
+  client to stop. Every answer it writes before its body is whole, a 413 by count, a 408 and a 503
+  on the body budget among them, is flushed, then what still comes is read and dropped until its
+  client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
+  a body on and reset it.
+- The TypeScript gateway keeps the connection of a refusal of a request that declares no body,
+  wherever the request stands on its socket: it closed one that came first, judging by whether
+  Node's parser had reached the request's end.
+- The TypeScript HTTP transport and gateway write their own answer to a request that carries
+  `Connection: close` when bytes come behind it: Node's parser refused those bytes and wrote a bare
+  400 in place of the answer, its request already handed on. The answer under way now ends, and
+  Node closes the connection behind it.
+- The TypeScript HTTP transport and gateway keep an HTTP/1.0 connection kept alive behind an answer
+  of no body, as the C# and Rust sides do: the transport writes `content-length: 0` on an empty
+  answer (RFC 9110 §8.6), where Node closed it over HTTP/1.0 and framed it in chunks over HTTP/1.1,
+  and both write `connection: keep-alive` on a 204, a 304 or a HEAD's answer, which carries no
+  length.
+- The Rust side gives an answer to an HTTP/1.0 request whose body has no length version 1.0 and
+  `connection: close`, as the TypeScript and C# sides write it, where hyper wrote
+  `connection: keep-alive` before delimiting the body by its close.
 - `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
   branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
   `git branch -d` to do by hand, rather than an `EPERM` alone.

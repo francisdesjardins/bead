@@ -706,6 +706,10 @@ names and their defaults: `bodyBytesBudget`, `maximumBodyBytes`, `headersTimeout
 `minimumBodyBytesPerSecond` and `bodyGracePeriod` for what comes; `minimumSendBytesPerSecond`,
 `sendGracePeriod` and `maximumUnsentBytes` for an answer and a stream that go out, a stream's
 response dropped past either as a WebSocket's connection is, which closes its exchange's connection.
+A gateway closes a connection, and serves the requests on it in their order, as section 15.12 of
+`spec.md` has a server do: a refusal of its own of a request that declares a body closes it, in
+stages, and an answer to a call, written once its body was read, carries no `connection: close` of
+its own.
 
 10.3. A gateway counts its calls and its streams apart, each holding one Bead connection while it
 lasts: a call, which lives one request, by `maximumExchanges`, 10,000, those of every caller, and

@@ -50,6 +50,12 @@ public sealed class HttpGateway : IAsyncDisposable
     // the methods a rule of http.proto's names, in upper case
     private static readonly HashSet<string> RuleMethods = new(["GET", "PUT", "POST", "DELETE", "PATCH"], StringComparer.Ordinal);
 
+    // what an exchange's items hold once its body was read whole, an object of the gateway's own
+    private static readonly object BodyRead = new();
+
+    // what a socket closed in stages reads of what still comes at once, and drops
+    private const int LingerReadBytes = 65_536;
+
     private readonly HttpGatewayOptions _options;
     private readonly Resolved _policy;
     private readonly ProxyTrust _proxyTrust;
@@ -252,6 +258,8 @@ public sealed class HttpGateway : IAsyncDisposable
             Report(reason);
             await AnswerUnforeseen(context);
         }
+
+        await Linger(context);
     }
 
     // what no gate foresaw, answered 500 while its head is unsent, with none of the fields set before
@@ -467,6 +475,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
             var (body, refused) = await BodyOf(context);
 
+            if (refused is null)
+            {
+                context.Items[BodyRead] = BodyRead;
+            }
+
             if (refused is { IsHttp: true } framing)
             {
                 // * a body HTTP cannot frame is refused as HTTP refuses it, unmarked (10.1, step 1)
@@ -477,7 +490,6 @@ public sealed class HttpGateway : IAsyncDisposable
 
             if (refused is { } end)
             {
-                CloseBehind(context);
                 await Refuse(context, end, end.Status == StatusCodes.Status503ServiceUnavailable ? new Dictionary<string, string> { ["retry-after"] = "1" } : null);
 
                 return;
@@ -1357,7 +1369,8 @@ public sealed class HttpGateway : IAsyncDisposable
     {
         context.Response.StatusCode = StatusCodes.Status204NoContent;
         Stamp(context.Response);
-        await context.Response.CompleteAsync();
+        CloseBehindUnread(context);
+        await Complete(context);
     }
 
     private static async Task Preflight(HttpContext context, List<string> methods)
@@ -1371,7 +1384,8 @@ public sealed class HttpGateway : IAsyncDisposable
         response.Headers.AccessControlAllowMethods = string.Join(", ", methods);
         response.Headers.AccessControlAllowHeaders = string.Join(", ", allowed);
         response.Headers.AccessControlMaxAge = "7200";
-        await response.CompleteAsync();
+        CloseBehindUnread(context);
+        await Complete(context);
     }
 
     // the document its builder wrote, as it is (11.1): a strong tag of its sha256, and 304 to one that holds it
@@ -1426,13 +1440,14 @@ public sealed class HttpGateway : IAsyncDisposable
         Stamp(response);
         response.ContentType = answer.ContentType;
         response.ContentLength = answer.Body.Length;
+        CloseBehindUnread(context);
 
         if (!IsMethod(context.Request, "HEAD") && answer.Body.Length > 0)
         {
             await WriteSlices(context, answer.Body);
         }
 
-        await response.CompleteAsync();
+        await Complete(context);
     }
 
     // a whole body handed to the pace in slices of at most 64 KiB
@@ -1567,7 +1582,7 @@ public sealed class HttpGateway : IAsyncDisposable
             context.Response.Headers.Connection = "close";
         }
 
-        await context.Response.CompleteAsync();
+        await Complete(context);
     }
 
     // a malformed HTTP/2 request's end: its stream reset, PROTOCOL_ERROR, nothing written (RFC 9113 §8.1.1)
@@ -1588,6 +1603,85 @@ public sealed class HttpGateway : IAsyncDisposable
         if (!HttpProtocol.IsHttp2(context.Request.Protocol) && !HttpProtocol.IsHttp3(context.Request.Protocol))
         {
             context.Response.Headers.Connection = "close";
+        }
+    }
+
+    // * an answer that leaves a body its request declares unread closes its connection behind it,
+    // whatever of that body came; one whose request declares none keeps it (spec 15.12)
+    private static void CloseBehindUnread(HttpContext context)
+    {
+        if (HasBody(context.Request) && !context.Items.ContainsKey(BodyRead))
+        {
+            CloseBehind(context);
+        }
+    }
+
+    // whether an exchange's end leaves its body still to come behind a close: over HTTP/1, its
+    // socket then closes in stages, its server reading on behind its end (RFC 9112 §9.6)
+    private static bool IsLingering(HttpContext context)
+    {
+        return !HttpProtocol.IsHttp2(context.Request.Protocol)
+            && !HttpProtocol.IsHttp3(context.Request.Protocol)
+            && HasBody(context.Request)
+            && context.Response.Headers.Connection.ToString() == "close";
+    }
+
+    // ! an end written whole: completed; or, its body still coming behind a close, flushed alone,
+    // which a completion would follow at once with its socket's close, a reset that erases the end
+    // its client has not read yet; Answer reads on behind it before it closes
+    private static async Task Complete(HttpContext context)
+    {
+        var response = context.Response;
+
+        if (IsLingering(context))
+        {
+            // its length written, as a completion writes it of an end with no body
+            if (!response.HasStarted && response.ContentLength is null)
+            {
+                response.ContentLength = 0;
+            }
+
+            await response.StartAsync(context.RequestAborted);
+            await response.Body.FlushAsync(context.RequestAborted);
+
+            return;
+        }
+
+        await response.CompleteAsync();
+    }
+
+    // ! an answer written before its body is whole closes its socket in stages, its write side
+    // first (spec 15.12; RFC 9112 §9.6): what still comes is read and dropped until its client
+    // closes or 2 seconds pass, on the real clock, since what it waits on is the network's, so a
+    // reset never erases an answer its client has not read yet. A body read whole ends at once
+    private static async Task Linger(HttpContext context)
+    {
+        if (!IsLingering(context))
+        {
+            return;
+        }
+
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var dropped = new byte[LingerReadBytes];
+
+        lingering.CancelAfter(ServerBounds.Linger);
+
+        try
+        {
+            while (await context.Request.Body.ReadAsync(dropped, lingering.Token) > 0)
+            {
+                // dropped
+            }
+        }
+        catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! its 2 seconds passed, its client still sending: its socket closed now, where Kestrel
+            // would read on a chunked body itself once the exchange returned, then reset it
+            context.Abort();
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or Microsoft.AspNetCore.Http.BadHttpRequestException)
+        {
+            // its client gone, or its body no more to read
         }
     }
 

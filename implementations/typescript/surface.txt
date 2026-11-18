@@ -3486,6 +3486,9 @@ src/transport/server/types.ts IHTTPResponseLike
     readonly socket?: object | null | undefined
     readonly stream?: {close(code?: number): void} | undefined
     setHeader(name: string, value: string): unknown
+    readonly req?: {readonly method?: string | undefined} | undefined
+    readonly shouldKeepAlive?: boolean | undefined
+    readonly useChunkedEncodingByDefault?: boolean | undefined
     write(chunk: Uint8Array): unknown
     writeHead(statusCode: number, headers?: Record<string, string>): unknown
 src/transport/server/types.ts IHTTPServerLike
@@ -3495,6 +3498,7 @@ src/transport/server/types.ts IHTTPServerLike
     closeAllConnections?(): void
     listen(port: number, host: string, callback?: () => void): unknown
     on(event: 'error', listener: (error: Error) => void): unknown
+    on(event: 'clientError', listener: (error: Error, socket: IClientErrorSocketLike) => void): unknown
     on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown
     connectionsCheckingInterval?: number | undefined
     headersTimeout?: number | undefined

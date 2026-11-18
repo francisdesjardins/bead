@@ -1768,12 +1768,22 @@ it before the transport reads anything of the request, so no refusal is told; it
 time, and within 2 seconds of it, on the platform's clock. A body is held, on the server's clock, to
 come at `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed since its head: one that has
 brought _R_ bytes and none more by its head's reading plus max(`bodyGracePeriod`, ⌈_R_ × 1,000 /
-`minimumBodyBytesPerSecond`⌉) milliseconds is refused 408, `too-slow`. An answer written before its
-request's body is whole carries `connection: close`, and its server closes the connection in stages,
-its write side first, reading on and dropping what still comes until its client closes or 2 seconds
-pass, so its client reads the answer before the close
-([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Nothing of such an exchange
-is handed on, and the close of its socket closes no Bead connection.
+`minimumBodyBytesPerSecond`⌉) milliseconds is refused 408, `too-slow`. Over HTTP/1, a refusal of
+the server's own of a request that declares a body — a `Content-Length` past 0, or a
+`Transfer-Encoding` — carries `connection: close`, whatever of its body was read, and its server
+closes the connection in stages; a refusal of one that declares none carries no `connection: close`
+of its own over HTTP/1.1, as [RFC 9112 §9.5](https://www.rfc-editor.org/rfc/rfc9112#section-9.5)
+asks a server to sustain a connection. An answer written before its request's body is whole carries
+`connection: close`, and its server closes the connection in stages, its write side first, reading
+on and dropping what still comes until its client closes or 2 seconds pass, so its client reads the
+answer before the close ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)).
+Nothing of such an exchange is handed on, and the close of its socket closes no Bead connection.
+What HTTP refuses of its own closes the connection. A server answers a connection's requests in the
+order they came ([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and
+serves none received behind an answer that closes it: none is judged, handed on or told
+([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close its
+connection after its request was read whole — a drop past a bound, a failure unforeseen — a server
+serves a request once the answers before it on that connection ended.
 
 A request names its authority by its target when the target is in absolute-form, the `Host`
 beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over

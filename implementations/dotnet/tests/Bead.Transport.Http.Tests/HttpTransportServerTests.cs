@@ -1904,6 +1904,85 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Single(_server.Clients);
     }
 
+    // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
+    [Fact]
+    public async Task Writes_content_length_0_on_an_empty_answer_but_a_204_or_a_HEAD_s_and_keeps_an_HTTP_1_0_connection_kept_alive_behind_each()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var bead = $"Content-Type: {HttpTransport.MediaType}\r\n";
+        var pipelined = Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\n{bead}Content-Length: 0\r\n\r\n");
+        var kept = "Connection: keep-alive\r\n";
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, 5);
+
+        // each answer's length: 0, none on a 204 or a HEAD's
+        (byte[] First, int Status, string?[] Lengths)[] requests =
+        [
+            (Encoding.ASCII.GetBytes($"POST /bead HTTP/1.0\r\nHost: {Host}\r\n{bead}{kept}Content-Length: 0\r\n\r\n"), 201, ["0"]),
+            (Encoding.ASCII.GetBytes($"HEAD /bead HTTP/1.0\r\nHost: {Host}\r\n{kept}\r\n"), 405, [null]),
+            (Encoding.ASCII.GetBytes($"GET /other HTTP/1.0\r\nHost: {Host}\r\n{kept}\r\n"), 404, ["0"]),
+            ([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.0\r\nHost: {Host}\r\n{bead}{kept}{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: {cancel.Length}\r\n\r\n"), .. cancel], 204, [null]),
+        ];
+
+        foreach (var (first, status, lengths) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. first, .. pipelined]);
+
+            var (answer, body) = await wire.Read();
+            var (behind, _) = await wire.Read();
+
+            // the empty answer, kept alive, then the connect behind it
+            Assert.Equal((status, 201), (answer.Status, behind.Status));
+            Assert.Contains(answer.Headers.GetValueOrDefault("content-length"), lengths);
+            Assert.Empty(body);
+            Assert.False(answer.Headers.ContainsKey("transfer-encoding"));
+            Assert.NotEqual("close", answer.Headers.GetValueOrDefault("connection"));
+            Assert.NotEqual("close", behind.Headers.GetValueOrDefault("connection"));
+        }
+    }
+
+    // spec 15.12; RFC 9112 §9.6
+    [Fact]
+    public async Task Answers_a_request_that_carries_close_with_its_own_answer_and_reads_nothing_behind_it()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var drawn = _connections.Count;
+        var bead = $"Content-Type: {HttpTransport.MediaType}\r\n";
+        var sendOn = $"POST /bead HTTP/1.1\r\nHost: {Host}\r\n{bead}{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nConnection: close\r\n";
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, 5);
+
+        // * a connect pipelined behind each, in the same write
+        var pipelined = Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\n{bead}Content-Length: 0\r\n\r\n");
+
+        (byte[] First, int Status)[] requests =
+        [
+            ([.. Encoding.ASCII.GetBytes($"{sendOn}Content-Length: {cancel.Length}\r\n\r\n"), .. cancel], 204),
+            (Encoding.ASCII.GetBytes($"{sendOn}Content-Length: 5\r\n\r\nabcde"), 400),
+            (Encoding.ASCII.GetBytes($"GET /other HTTP/1.1\r\nHost: {Host}\r\nConnection: close\r\n\r\n"), 404),
+        ];
+
+        foreach (var (first, status) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. first, .. pipelined]);
+
+            var (head, _) = await wire.Read();
+
+            // its own answer alone, which closes its connection
+            Assert.Equal((status, "close"), (head.Status, head.Headers.GetValueOrDefault("connection")));
+            Assert.True(await wire.IsClosed());
+        }
+
+        // no pipelined connect drawn
+        Assert.Equal(drawn, _connections.Count);
+    }
+
     // spec 15.12
     [Fact]
     public async Task Refuses_400_unmarked_a_client_s_own_X_Content_Length_beside_a_Transfer_Encoding_which_reads_as_the_one_Kestrel_writes_and_takes_one_with_no_Transfer_Encoding()
