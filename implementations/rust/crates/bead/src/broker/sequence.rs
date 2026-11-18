@@ -12,6 +12,7 @@ use bytes::{Bytes, BytesMut};
 
 use crate::broker::parcel::{PREFIX_BYTES, codes};
 use crate::clock::{Schedule, SharedClock, Timer};
+use crate::failure::byte_count_of;
 
 /// What a parcel taken in one direction is to its sequence (spec 15.19).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,8 +261,8 @@ impl Parts {
     /// Why parts that came too slowly lost their connection.
     pub(crate) fn late_of(&self) -> String {
         format!(
-            "an envelope's parts came slower than minimumBodyBytesPerSecond, {} bytes a second, past bodyGracePeriod, {} ms",
-            self.bounds.minimum_body_bytes_per_second,
+            "an envelope's parts came slower than minimumBodyBytesPerSecond, {} a second, past bodyGracePeriod, {} ms",
+            byte_count_of(self.bounds.minimum_body_bytes_per_second),
             self.bounds.body_grace_period.as_millis()
         )
     }
@@ -295,8 +296,8 @@ impl Parts {
             return PartTaking::Lost(
                 codes::TOO_BIG,
                 format!(
-                    "an envelope's parts would pass maximumEnvelopePartsBytes, {} bytes",
-                    self.bounds.maximum_envelope_parts_bytes
+                    "an envelope's parts would pass maximumEnvelopePartsBytes, {}",
+                    byte_count_of(self.bounds.maximum_envelope_parts_bytes)
                 ),
             );
         }
@@ -308,8 +309,8 @@ impl Parts {
             return PartTaking::Lost(
                 codes::LOST,
                 format!(
-                    "a part would pass its participant's heldBytesBudget, {} bytes",
-                    self.bounds.budget.budget()
+                    "a part would pass its participant's heldBytesBudget, {}",
+                    byte_count_of(self.bounds.budget.budget())
                 ),
             );
         }

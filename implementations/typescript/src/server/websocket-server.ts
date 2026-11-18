@@ -9,7 +9,7 @@ import {
 } from '../transport/server/websocket-transport-server';
 import { LIMIT_DEFAULTS } from '../router/shared/constants';
 import { limitsOf } from '../router/shared/router-limits';
-import { ProgrammerError } from '../transport/shared/errors';
+import { byteCountOf, ProgrammerError } from '../transport/shared/errors';
 import { createServer } from './server';
 import type { IServer, IServerLayers, IServerOptions } from './types';
 
@@ -67,7 +67,7 @@ export const createWebSocketServer = <Data = unknown>(
 
   if (maxPayload < maximumEnvelopeBytes) {
     throw new ProgrammerError(
-      `maxPayload is an envelope's limit at least, ${String(maximumEnvelopeBytes)} bytes, not ${String(maxPayload)}`
+      `maxPayload is an envelope's limit at least, ${byteCountOf(maximumEnvelopeBytes)}, not ${String(maxPayload)}`
     );
   }
 

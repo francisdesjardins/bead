@@ -139,6 +139,55 @@ test.describe('broker sequence', () => {
     expect(held.held).toBe(0);
   });
 
+  test('writes 1 byte for a bound, a budget and a rate of 1', async () => {
+    const clock = createTestClock();
+    const held = createHeldBytes(1);
+    const slowed: IBrokerLoss[] = [];
+    const bounds = {
+      bodyGracePeriod: 5_000,
+      clock,
+      maximumEnvelopePartsBytes: 1,
+      minimumBodyBytesPerSecond: 1,
+    };
+    const slow = (loss: IBrokerLoss): void => {
+      slowed.push(loss);
+    };
+
+    // past its participant's budget, which another connection's part holds whole
+    const other = createBrokerParts({ held, slow }, bounds);
+
+    other.add(bytesOf(1), { isLast: false });
+    expect(createBrokerParts({ held, slow }, bounds).add(bytesOf(1), { isLast: false })).toEqual({
+      lost: {
+        code: CloseCode.LOST,
+        reason: "a part would pass its participant's heldBytesBudget, 1 byte",
+      },
+    });
+    other.stop();
+
+    // past its bound
+    const bounded = createBrokerParts({ held, slow }, bounds);
+
+    bounded.add(bytesOf(1), { isLast: false });
+    expect(bounded.add(bytesOf(1), { isLast: false })).toEqual({
+      lost: {
+        code: CloseCode.TOO_BIG,
+        reason: "an envelope's parts would pass maximumEnvelopePartsBytes, 1 byte",
+      },
+    });
+
+    // slower than its rate once its grace passed
+    createBrokerParts({ held, slow }, bounds).add(bytesOf(1), { isLast: false });
+    await clock.tickAsync(5_000);
+    expect(slowed).toEqual([
+      {
+        code: CloseCode.LOST,
+        reason:
+          "an envelope's parts came slower than minimumBodyBytesPerSecond, 1 byte a second, past bodyGracePeriod, 5000 ms",
+      },
+    ]);
+  });
+
   test('cuts an envelope in parts each as large as the peer’s bound lets it, the credential on the first alone', () => {
     const envelope = bytesOf(1_510);
 

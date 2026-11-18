@@ -837,6 +837,36 @@ async fn tells_an_envelope_past_maximum_body_bytes_an_answer_s_or_a_batch_s_on_e
     );
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_maximum_body_bytes_of_1() {
+    let faked = connected(
+        fake().await,
+        &HttpTransportClientOptions {
+            maximum_body_bytes: Some(1),
+            ..not_listening()
+        },
+    )
+    .await;
+    let sending = sending(&faked.client, request(1));
+
+    faked
+        .fake
+        .call_of(1)
+        .await
+        .answer(&bead(&[0; 2]).with("content-length", "2"));
+    within(sending).await.unwrap();
+    faked.told.closed(1).await;
+
+    assert_eq!(
+        faked.told.events(),
+        [
+            "error the connection is closed: an envelope past its maximumBodyBytes, 1 byte",
+            "close false false"
+        ],
+        "told before its close"
+    );
+}
+
 // spec 15.1
 #[tokio::test]
 async fn tells_a_batch_that_does_not_read_on_error_before_its_close_saying_what_of_it_does_not_and_a_refusal_of_its_listen_by_its_close_alone()

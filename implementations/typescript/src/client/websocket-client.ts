@@ -8,7 +8,7 @@ import {
   type WebSocketTransportClient,
 } from '../transport/client/websocket-transport-client';
 import { LIMIT_DEFAULTS } from '../router/shared/constants';
-import { ProgrammerError } from '../transport/shared/errors';
+import { byteCountOf, ProgrammerError } from '../transport/shared/errors';
 import { createClient } from './client';
 import type { IClient, IClientLayers, IClientOptions } from './types';
 
@@ -59,7 +59,7 @@ export const createWebSocketClient = (options?: IWebSocketClientOptions): WebSoc
 
   if (maxPayload < maximumEnvelopeBytes) {
     throw new ProgrammerError(
-      `maxPayload is an envelope's limit at least, ${String(maximumEnvelopeBytes)} bytes, not ${String(maxPayload)}`
+      `maxPayload is an envelope's limit at least, ${byteCountOf(maximumEnvelopeBytes)}, not ${String(maxPayload)}`
     );
   }
 

@@ -193,7 +193,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     /// <summary>Why parts that came too slowly lost their connection.</summary>
     public string LateOf()
     {
-        return string.Create(CultureInfo.InvariantCulture, $"an envelope's parts came slower than minimumBodyBytesPerSecond, {bounds.MinimumBodyBytesPerSecond} bytes a second, past bodyGracePeriod, {(long)bounds.BodyGracePeriod.TotalMilliseconds} ms");
+        return string.Create(CultureInfo.InvariantCulture, $"an envelope's parts came slower than minimumBodyBytesPerSecond, {FailureException.ByteCountOf(bounds.MinimumBodyBytesPerSecond)} a second, past bodyGracePeriod, {(long)bounds.BodyGracePeriod.TotalMilliseconds} ms");
     }
 
     /// <summary>
@@ -222,7 +222,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         {
             Stop();
 
-            return new BrokerPartTaking(null, null, (1009, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts would pass maximumEnvelopePartsBytes, {bounds.MaximumEnvelopePartsBytes} bytes")));
+            return new BrokerPartTaking(null, null, (1009, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts would pass maximumEnvelopePartsBytes, {FailureException.ByteCountOf(bounds.MaximumEnvelopePartsBytes)}")));
         }
 
         // * each part charged, the last among them, until its envelope is whole
@@ -230,7 +230,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         {
             Stop();
 
-            return new BrokerPartTaking(null, null, (4000, string.Create(CultureInfo.InvariantCulture, $"a part would pass its participant's heldBytesBudget, {bounds.Budget.Budget} bytes")));
+            return new BrokerPartTaking(null, null, (4000, string.Create(CultureInfo.InvariantCulture, $"a part would pass its participant's heldBytesBudget, {FailureException.ByteCountOf(bounds.Budget.Budget)}")));
         }
 
         if (_firstAt is null)

@@ -20,7 +20,7 @@ import {
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { GenericError, ProgrammerError } from '../shared/errors';
+import { byteCountOf, GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { createHold, type IHold } from '../shared/hold';
 import type { Data } from '../shared/types';
@@ -639,7 +639,7 @@ export const createHTTPTransportServer = (
           return (
             drop(
               connection,
-              `its outbox would pass maximumOutboxBytes, ${String(maximumOutboxBytes)} bytes`
+              `its outbox would pass maximumOutboxBytes, ${byteCountOf(maximumOutboxBytes)}`
             ),
             undefined
           );

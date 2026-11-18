@@ -627,7 +627,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // (spec 15.1): an envelope past its bound, named with its value, as a WebSocket's 1009 is
     private static InvalidDataException PastBoundOf(int maximumBodyBytes)
     {
-        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"the connection is closed: an envelope past its maximumBodyBytes, {maximumBodyBytes} bytes"));
+        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"the connection is closed: an envelope past its maximumBodyBytes, {FailureException.ByteCountOf(maximumBodyBytes)}"));
     }
 
     // and a batch that does not read, saying what of it does not, as a WebSocket's protocol error

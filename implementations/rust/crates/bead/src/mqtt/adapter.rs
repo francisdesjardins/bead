@@ -55,6 +55,7 @@ use crate::broker::adapter::{
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{HoldWithinOptions, hold_finite, hold_within};
 use crate::errors::ProgrammerError;
+use crate::failure::byte_count_of;
 use crate::mqtt::link::{
     Address, Incoming, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
 };
@@ -1769,8 +1770,9 @@ impl State {
         if bytes > u64::from(link.maximum_packet_size) {
             reply
                 .send(Err(BrokerError::failed(format!(
-                    "a PUBLISH of {bytes} bytes to {name}, past its broker's Maximum Packet Size, {} bytes",
-                    link.maximum_packet_size
+                    "a PUBLISH of {} to {name}, past its broker's Maximum Packet Size, {}",
+                    byte_count_of(bytes),
+                    byte_count_of(link.maximum_packet_size)
                 ))))
                 .ok();
 

@@ -602,7 +602,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         // ([MQTT-3.2.2-15]), every connection of its participant with it
         if (bytes > link.PublicationBound)
         {
-            throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a PUBLISH of {bytes} bytes to {topic}, past its broker's Maximum Packet Size, {link.PublicationBound} bytes"), nameof(publication));
+            throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a PUBLISH of {FailureException.ByteCountOf(bytes)} to {topic}, past its broker's Maximum Packet Size, {FailureException.ByteCountOf(link.PublicationBound)}"), nameof(publication));
         }
 
         var builder = new MqttApplicationMessageBuilder()
@@ -1112,7 +1112,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     {
         var (link, size) = past;
 
-        Lost((link, new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"))));
+        Lost((link, new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {FailureException.ByteCountOf(size)}, past its Maximum Packet Size, {FailureException.ByteCountOf(_options.MaximumPacketSize)}"))));
     }
 
     // a packet its client cannot read (spec 15.29), on MQTTnet's receive loop, in every phase: its

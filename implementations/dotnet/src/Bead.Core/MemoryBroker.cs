@@ -666,7 +666,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
 
             if (_broker.MaximumMessageBytes is { } bound && copy.Payload.Length > bound)
             {
-                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {copy.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {FailureException.ByteCountOf(copy.Payload.Length)}, past the broker's maximumMessageBytes, {FailureException.ByteCountOf(bound)}"), nameof(published));
             }
 
             if (copy.CancellationToken.IsCancellationRequested)

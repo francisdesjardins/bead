@@ -38,7 +38,7 @@ internal sealed partial class RouterCore
         // the failure of a payload of `length` bytes, past `limit`
         internal static Failure TooLargeOf(long length, int limit)
         {
-            return ProtocolFailureOf(ProtocolCode.PayloadTooLarge, $"a payload is {limit} bytes at most, not {length}");
+            return ProtocolFailureOf(ProtocolCode.PayloadTooLarge, $"a payload is {FailureException.ByteCountOf(limit)} at most, not {length}");
         }
 
         // * the bytes of its payload an opening of `header` carries, as its sender places them: the
@@ -101,14 +101,14 @@ internal sealed partial class RouterCore
             {
                 return (null, ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {openingHeaderBytes} bytes passes {EnvelopeCodec.MaximumHeaderBytes}"));
+                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {FailureException.ByteCountOf(openingHeaderBytes)} passes {EnvelopeCodec.MaximumHeaderBytes}"));
             }
 
             if (openingBytes < 1)
             {
                 return (null, ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {openingHeaderBytes} bytes leaves it no byte within {WholeBytes}"));
+                    $"a payload of {FailureException.ByteCountOf(payload.Length)} goes as a transfer, whose opening's header of {FailureException.ByteCountOf(openingHeaderBytes)} leaves it no byte within {WholeBytes}"));
             }
 
             return (new OutgoingTransfer(payload, (openingBytes, PayloadBytesPerChunk)), null);

@@ -165,6 +165,22 @@ test.describe('createRouterCore', () => {
     });
   });
 
+  test('writes 1 byte for a procedure’s maximumPayloadBytes of 1', async () => {
+    const { port } = createPort();
+    using core = createRouterCore(port);
+
+    await expect(
+      core.request(Uint8Array.of(1, 2), {
+        connectionHandle: 'a',
+        options,
+        procedure: { ...echo, maximumPayloadBytes: 1 },
+      })
+    ).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_TOO_LARGE,
+      detail: 'a payload is 1 byte at most, not 2',
+    });
+  });
+
   test.describe('the transfers it sends', () => {
     test('send a payload in one envelope to its limit, and one byte more as a transfer, or not at all where none is sent', async () => {
       const answering = createAnswering();

@@ -954,6 +954,38 @@ mod held {
         pair.stop().await;
     }
 
+    #[tokio::test]
+    async fn writes_1_byte_for_a_maximum_held_envelope_bytes_of_1() {
+        let pair = BrokerPair::of(&BrokerPairOptions {
+            maximum_held_envelope_bytes: Some(1),
+            ..BrokerPairOptions::default()
+        })
+        .await;
+        let log = logged(&pair);
+        let first = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+        first.send(data_of(1, 2)).expect("sent");
+        until(
+            || log_of(&log).contains(&"1 closed false".to_owned()),
+            "the paused connection lost",
+        )
+        .await;
+
+        assert!(
+            locked(&pair.told.errors).iter().any(|(error, handle)| {
+                error.ends_with(
+                    "is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 1 byte",
+                ) && handle.as_ref() == handles.first()
+            }),
+            "reported naming the bound, with its connection: {:?}",
+            locked(&pair.told.errors)
+        );
+
+        pair.stop().await;
+    }
+
     // spec 15.12.17: a router whose release is a later turn's resumes a connection that may be gone
     #[tokio::test]
     async fn lets_be_a_pause_and_a_resume_its_router_asks_of_a_connection_gone_its_participant_holding_a_paused_one_in_order()

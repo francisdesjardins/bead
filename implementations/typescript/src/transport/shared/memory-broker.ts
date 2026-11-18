@@ -5,7 +5,7 @@
 import { type IClock, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_BROKER } from './constants';
 import { createEmitter } from './emitter';
-import { GenericError, ProgrammerError, toError } from './errors';
+import { byteCountOf, GenericError, ProgrammerError, toError } from './errors';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -360,7 +360,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
 
           if (publication.payload.length > maximumMessageBytes) {
             throw new GenericError(
-              `a payload of ${String(publication.payload.length)} bytes, past the broker's maximumMessageBytes, ${String(maximumMessageBytes)} bytes`
+              `a payload of ${byteCountOf(publication.payload.length)}, past the broker's maximumMessageBytes, ${byteCountOf(maximumMessageBytes)}`
             );
           }
 

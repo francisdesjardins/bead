@@ -248,7 +248,7 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
 
         if (opened.Total > _limits.MaximumPayloadBytes)
         {
-            return Refused(ProtocolCode.PayloadTooLarge, $"a payload is {_limits.MaximumPayloadBytes} bytes at most, not {opened.Total}");
+            return Refused(ProtocolCode.PayloadTooLarge, $"a payload is {FailureException.ByteCountOf(_limits.MaximumPayloadBytes)} at most, not {opened.Total}");
         }
 
         // * the second ceiling first: the transfers received and those whose call's resolver outlives
@@ -278,7 +278,7 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         // budget is bounded as a chunk is (spec 12.3)
         if (opened.OpeningBytes is { } openingBytes && opening.Length != openingBytes)
         {
-            return Refused(ProtocolCode.ChunkInvalid, $"an opening carries {openingBytes} bytes of its payload, not {opening.Length}");
+            return Refused(ProtocolCode.ChunkInvalid, $"an opening carries {FailureException.ByteCountOf(openingBytes)} of its payload, not {opening.Length}");
         }
 
         // * admitted at once only when no opening waits, on any connection, and the budget left holds
@@ -411,7 +411,7 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     {
         return Failure.OfProtocol(
             ProtocolCode.CapacityExceeded,
-            string.Create(CultureInfo.InvariantCulture, $"a total of {total} bytes waited {(long)BudgetWaitOf(_limits).TotalMilliseconds} milliseconds for the budget"));
+            string.Create(CultureInfo.InvariantCulture, $"a total of {FailureException.ByteCountOf(total)} waited {(long)BudgetWaitOf(_limits).TotalMilliseconds} milliseconds for the budget"));
     }
 
     // sets a transfer's timer going again, when one governs it

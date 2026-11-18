@@ -107,7 +107,7 @@ export const createPayloadPlacement = (
   const tooLargeOf = (length: number, limit: number): IProtocolFailure => {
     return {
       ...failures.payloadTooLarge,
-      detail: `a payload is ${String(limit)} bytes at most, not ${String(length)}`,
+      detail: `a payload is ${byteCountOf(limit)} at most, not ${String(length)}`,
     };
   };
 
@@ -159,8 +159,8 @@ export const createPayloadPlacement = (
         ...failures.payloadTooLarge,
         detail:
           openingHeaderBytes > MAXIMUM_HEADER_BYTES
-            ? `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes passes ${String(MAXIMUM_HEADER_BYTES)}`
-            : `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes leaves it no byte within ${String(wholeBytes)}`,
+            ? `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${byteCountOf(openingHeaderBytes)} passes ${String(MAXIMUM_HEADER_BYTES)}`
+            : `a payload of ${byteCountOf(payload.length)} goes as a transfer, whose opening's header of ${byteCountOf(openingHeaderBytes)} leaves it no byte within ${String(wholeBytes)}`,
       };
     }
 

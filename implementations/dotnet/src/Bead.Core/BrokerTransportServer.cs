@@ -395,7 +395,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
         if (held is not null && !BrokerParts.Fits((held.Room, null)))
         {
-            return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {held.Room} bytes leaves no byte of an envelope beside its credential"), nameof(message)));
+            return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {FailureException.ByteCountOf(held.Room)} leaves no byte of an envelope beside its credential"), nameof(message)));
         }
 
         // * copied as it is sent: the sender's buffer stays its own

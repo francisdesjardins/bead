@@ -284,8 +284,8 @@ internal sealed class IncomingTransfer
         if (isLast ? bytes.Length > _payloadBytesPerChunk : bytes.Length != _payloadBytesPerChunk)
         {
             return Refused(Invalid(isLast
-                ? $"a last chunk carries {_payloadBytesPerChunk} bytes at most, not {bytes.Length}"
-                : $"a chunk before the last carries {_payloadBytesPerChunk} bytes, not {bytes.Length}"));
+                ? $"a last chunk carries {FailureException.ByteCountOf(_payloadBytesPerChunk)} at most, not {bytes.Length}"
+                : $"a chunk before the last carries {FailureException.ByteCountOf(_payloadBytesPerChunk)}, not {bytes.Length}"));
         }
 
         if (bytes.Length > _creditEnd - offset)

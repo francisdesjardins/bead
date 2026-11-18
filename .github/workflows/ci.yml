@@ -1179,6 +1179,10 @@ jobs:
         run: node tools/check-citations.mjs
       - name: Check the details
         run: node tools/check-details.mjs
+      # Every count of bytes a side writes into a report, an error or a refusal goes through its
+      # helper, "1 byte" at 1, or is a constant above 1 the tool names.
+      - name: Check the byte counts
+        run: node tools/check-byte-counts.mjs
       # The page beadproto.dev serves is what its build writes from site/, byte for byte, each
       # diagram's SVG its source's render and each icon its mark's, by the hashes they record: no
       # browser, nothing installed.

@@ -14,7 +14,7 @@ import mqtt, {
 import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 import { createEmitter } from './emitter';
-import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
+import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
 import {
   ACKNOWLEDGEMENT_TYPES,
   type AcknowledgementType,
@@ -1144,7 +1144,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       if (bytes > incarnation.maximumPacketSize) {
         return Promise.reject(
           new GenericError(
-            `a PUBLISH of ${String(bytes)} bytes to ${name}, past its broker's Maximum Packet Size, ${String(incarnation.maximumPacketSize)} bytes`
+            `a PUBLISH of ${byteCountOf(bytes)} to ${name}, past its broker's Maximum Packet Size, ${byteCountOf(incarnation.maximumPacketSize)}`
           )
         );
       }

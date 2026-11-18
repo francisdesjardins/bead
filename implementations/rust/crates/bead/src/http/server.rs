@@ -27,7 +27,7 @@ use crate::broker::participant::{BODY_GRACE_PERIOD, MINIMUM_BODY_BYTES_PER_SECON
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::ProgrammerError;
-use crate::failure::ProcedureAddress;
+use crate::failure::{ProcedureAddress, byte_count_of};
 use crate::http::exchange::{BodyBuffer, ExchangeState, Facts, Prefix, Responder};
 use crate::http::fields::{
     AFTER_HEADER, CANCEL, CONNECTION_TOKEN_HEADER, End, FAILURE, FIRST_LAYOUT, HTTP_REFUSALS,
@@ -2686,8 +2686,8 @@ impl ServerTransport for HttpTransportServer {
                     inner.drop_drawn(
                         connection_handle,
                         &format!(
-                            "its outbox would pass maximumOutboxBytes, {} bytes",
-                            inner.settings.maximum_outbox_bytes
+                            "its outbox would pass maximumOutboxBytes, {}",
+                            byte_count_of(inner.settings.maximum_outbox_bytes)
                         ),
                     );
                 }

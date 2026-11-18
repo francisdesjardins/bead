@@ -3,7 +3,7 @@
 // dependencies
 
 import { PLATFORM_CLOCK, type TimeoutId } from '../../transport/shared/clock';
-import { CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
+import { byteCountOf, CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
 import { mergeGauges } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { Data, ITransportMessage } from '../../transport/shared/types';
@@ -647,7 +647,7 @@ export const createRouterCore = <Handle extends string>(
       throw new FailureError(
         {
           ...failures.payloadTooLarge,
-          detail: `a subscription's result goes in one envelope, of ${String(wholeBytes)} bytes at most`,
+          detail: `a subscription's result goes in one envelope, of ${byteCountOf(wholeBytes)} at most`,
         },
         { header }
       );

@@ -6,6 +6,18 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterCoreTests
 {
+    [Fact]
+    public async Task Writes_1_byte_for_a_procedure_s_maximumPayloadBytes_of_1()
+    {
+        var server = new Peer(RouterSide.Server);
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return server.Core.Request(new byte[] { 1, 2 }, CallOf(Handle, (Echo with { MaximumPayloadBytes = 1 }, TimeSpan.FromSeconds(1)))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, "a payload is 1 byte at most, not 2"), (refused.Code, refused.Detail));
+    }
+
     // spec 12.3.2
     [Fact]
     public async Task Holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
