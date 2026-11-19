@@ -1,8 +1,10 @@
 """What the generators share: the folder the conformance files sit in and the writer of each file, bytes
-as the files write them, the steps of a case on the server's clock, the order of an entry's units, the
-spec's codes, a failure's detail, and the small searches and values more than one generator draws on."""
+as the files write them, the steps of a case on the server's clock, the requests a case writes behind
+an exchange's and their bound, the order of an entry's units, the spec's codes, a failure's detail,
+and the small searches and values more than one generator draws on."""
 import json
 import os
+import re
 
 # the conformance files sit one folder up from their generators
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
@@ -45,6 +47,40 @@ def armed(milliseconds):
 
 def advance(milliseconds):
     return {'advance': milliseconds}
+
+
+# ── Requests written behind an exchange's ───────────────────────────────────────────────────────
+
+# the octets one behind writes at most, within what a host's socket takes, so that no player's write
+# waits on a server that reads nothing more: a case holds a server's outcome, never its read-ahead
+BEHIND_BOUND = 65_536
+# what a value put in a head, {host} or one captured, counts for against that bound: more than any
+# IP literal and port, token or entity tag, the longest of them 66 octets, takes
+PUT_IN = 128
+# * the requests a case pipelines in one write behind an answer held (spec 15.12), sized by their
+# octets, each value put in counted as written, the least a server reads of them: past hyper's first
+# read of a socket, 8,192 octets, its INIT_BUFFER_SIZE, so that hyper reads again once it served what
+# it read, and far past the 32 the TypeScript side holds unserved before it stops reading a socket.
+# Kestrel reads ahead to 1 MB, past BEHIND_BOUND, so no case reaches its stop: its twins do
+PIPELINED = 200
+HYPER_FIRST_READ = 8_192
+
+
+def octets_written(requests, *, put_in=None):
+    """The octets requests take in one write: each head's characters, one octet each, and its body's
+    octets; each value put in, {name}, counted as written, or as put_in octets where it is given."""
+    return sum(len(request['head'] if put_in is None else re.sub(r'\{[a-z][a-zA-Z0-9]*\}', 'x' * put_in, request['head']))
+               + len(request.get('body', '').replace('|', ' ').split())
+               for request in requests)
+
+
+def pipelined(step):
+    """A behind that pipelines requests behind an answer held, checked against what sizes them: past
+    hyper's first read and far past the TypeScript side's 32, within BEHIND_BOUND."""
+    requests = step['behind']
+    assert len(requests) > 32 and octets_written(requests) > HYPER_FIRST_READ, 'past every read-ahead a case reaches'
+    assert octets_written(requests, put_in=PUT_IN) <= BEHIND_BOUND, 'within what one behind writes'
+    return step
 
 
 # ── A failure's detail ──────────────────────────────────────────────────────────────────────────

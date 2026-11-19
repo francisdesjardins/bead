@@ -27,7 +27,7 @@ from google.protobuf import wrappers_pb2  # noqa: F401
 
 import proto_text
 from bounds import DEFAULTS
-from conformance import CODES, hexadecimal, unit_order, write_json, write_text
+from conformance import CODES, PIPELINED, hexadecimal, pipelined, unit_order, write_json, write_text
 from details import canonical, es, number_text
 from proto_wire import EGROUP, LEN, SGROUP, f32, length_delimited, scalar_bytes, tag
 from spec_version import transcoding_version
@@ -3512,20 +3512,21 @@ ORIGIN = 'https://app.example'
 CALL_FIELDS = {'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'vary': 'Origin'}
 
 
-def head(method, target, fields=(), *, body=b''):
-    """A request's head as a test's socket sends it: its own exchange, closed once answered."""
+def head(method, target, fields=(), *, body=b'', close=True):
+    """A request's head as a test's socket sends it: its own exchange, closed once answered unless
+    close is false, so that requests are written behind it."""
     named = any(field.lower().startswith('host:') for field in fields)
     lines = [f'{method} {target} HTTP/1.1', *([] if named else ['host: {host}']), *fields]
 
     if body:
         lines.append(f'content-length: {len(body)}')
 
-    return '\r\n'.join([*lines, 'connection: close', '', ''])
+    return '\r\n'.join([*lines, *(['connection: close'] if close else []), '', ''])
 
 
-def send(method, target, fields=(), body=None, *, on='a'):
+def send(method, target, fields=(), body=None, *, on='a', close=True):
     data = body.encode('utf-8') if isinstance(body, str) else (body or b'')
-    step = {'send': {'head': head(method, target, fields, body=data)}, 'on': on}
+    step = {'send': {'head': head(method, target, fields, body=data, close=close)}, 'on': on}
 
     if data:
         step['send']['body'] = hexadecimal(data)
@@ -3616,8 +3617,14 @@ def framed_by(fields, *, on='a', http='HTTP/1.1'):
     return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': body}, 'on': on}
 
 
-def json_post(path, body, fields=(), *, on='a'):
-    return send('POST', path, ['content-type: application/json', *fields], body, on=on)
+def json_post(path, body, fields=(), *, on='a', close=True):
+    return send('POST', path, ['content-type: application/json', *fields], body, on=on, close=close)
+
+
+def behind(sent, *, on='a'):
+    """Requests written in their order and in one write on the socket of the exchange named, which a
+    send opened: the requests of the sends given."""
+    return {'behind': [step['send'] for step in sent], 'on': on}
 
 
 def result(message_name, value):
@@ -3646,6 +3653,9 @@ ORIGINLESS = 'a request from a page of another site that shows no origin'
 METHOD_WORDS = 'a method no route of its path takes'
 TYPE_WORDS = "this route's body is application/json, unencoded"
 BOOK_2 = {'name': 'shelves/1/books/2', 'title': 'A tale', 'pages': 3}
+# the gateway's timeout of a call held while requests are pipelined behind it: past what an until and a
+# behind take on a loaded runner
+PIPELINED_TIMEOUT = 1_000
 
 EXCHANGES = [
     exchange('a default POST answers its result, 200, in Bead\'s proto JSON form', ['2.1', '2.2', '3.2', '5.1', '5.1.1',
@@ -3845,6 +3855,25 @@ EXCHANGES = [
              [json_post('/api/Transcoding/hang', '{}'), {'until': {'hanging': 1}}, {'close': 'a'},
               send('GET', '/api/Transcoding/cancels?atLeast=1', on='b'),
               answered(result('CancelsResponse', {'count': 1}), on='b')], real_time=True),
+    # spec 15.12, as 10.2 has a gateway serve the requests of an HTTP/1 socket: books pipelined in one
+    # write behind a call its timeout ends, each answered in its turn, each naming its own, then one
+    # more on the same socket, which the gateway keeps; the timeout leaves the behind time to land
+    # while the call is held, though the verdict does not wait on it
+    exchange("requests pipelined in one write behind a call are each answered in their turn once its timeout ends it, and the socket is kept",
+             ['10.2', '9.2', '7.6.22', 'spec:15.12'],
+             [json_post('/api/Transcoding/hang', '{}', close=False), {'until': {'hanging': 1}},
+              pipelined(behind([send('GET', f'/v1/shelves/1/books/{k}?revision={k}', close=False)
+                                for k in range(1, PIPELINED + 1)])),
+              {'expect': {'status': 504, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': None},
+                          'body': problem(504, detail=f'no answer within {PIPELINED_TIMEOUT} ms')},
+               'on': 'a'},
+              *[answered(result('Book', {'name': f'shelves/1/books/{k}', 'title': 'A tale', 'pages': k}))
+                for k in range(1, PIPELINED + 1)],
+              behind([send('GET', f'/v1/shelves/1/books/{PIPELINED + 1}?revision={PIPELINED + 1}')]),
+              answered(result('Book', {'name': f'shelves/1/books/{PIPELINED + 1}', 'title': 'A tale',
+                                       'pages': PIPELINED + 1}))],
+             options={'timeout': PIPELINED_TIMEOUT}, real_time=True),
     exchange("a stream: its result, each notification as a message, then the failure that ends it",
              ['8.1', '8.2', '8.3', '8.4', '8.5', '8.6', '8.8'],
              [json_post('/api/Transcoding/ticks', '{"from":2}', [EVENT_STREAM]), stream_answer(counted(2))]),
@@ -4202,7 +4231,7 @@ DOCUMENT_JSON = {
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],

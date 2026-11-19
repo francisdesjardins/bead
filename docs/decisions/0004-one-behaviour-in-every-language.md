@@ -377,12 +377,15 @@ across languages in the interop, ahead, plays in their place
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
 there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
 the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which every
-side's HTTP server serves, an open row of the matrix; the keep or close of a connection after a
-refusal of the server's own, the service of a connection's requests in their order, and pipelining,
-which one request per socket leaves out; and the transport's contract with its router — its
-events, its handles, its gauges. Three framing cases over HTTP send on a socket that asks no close,
-one of them an HTTP/1.0 request that asks `connection: keep-alive`, and expect the socket's end:
-they play the close a framing refusal asks.
+side's HTTP server serves, an open row of the matrix; the close of a socket after a refusal of the
+server's own of a request that declares a body, which needs the requests behind it in that
+request's own write, never in a later step, and which no case writes; and the transport's contract
+with its router — its events, its handles, its gauges. Three framing cases over HTTP send on a
+socket that asks no close, one of them an HTTP/1.0 request that asks `connection: keep-alive`, and
+expect the socket's end: they play the close a framing refusal asks. The service of a socket's
+requests in their order, pipelining, and the keep of a socket after a refusal of the server's own of
+a request that declares no body are played by the cases of the step `behind`, which writes requests
+on an open exchange's socket.
 
 **A twin test leaves every side one assertion at a time**, in the change that pairs that assertion
 with the case that plays it, and the cell of the matrix it proves points to that case in the same

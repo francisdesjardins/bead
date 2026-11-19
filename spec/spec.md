@@ -1799,12 +1799,26 @@ asks a server to sustain a connection. An answer written before its request's bo
 on and dropping what still comes until its client closes or 2 seconds pass, so its client reads the
 answer before the close ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)).
 Nothing of such an exchange is handed on, and the close of its socket closes no Bead connection.
-What HTTP refuses of its own closes the connection. A server answers a connection's requests in the
-order they came ([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and
-serves none received behind an answer that closes it: none is judged, handed on or told
-([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close its
-connection after its request was read whole — a drop past a bound, a failure unforeseen — a server
-serves a request once the answers before it on that connection ended.
+What HTTP refuses of its own closes the connection. Over HTTP/1, a server answers the requests of
+one socket in the order they came
+([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and serves none
+received behind an answer that closes it: none is judged, handed on or told
+([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close
+its socket after its request was read whole — a drop past a bound, a failure unforeseen — a server
+serves a request once the answers before it on that socket ended.
+
+Over HTTP/1, a server holds no more of a socket than a bound of its own of what it read behind the
+answer under way and has not served, its platform's
+([`docs/support.md`](../docs/support.md), "Differences"), as
+[RFC 9110 §17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5) has a recipient limit what
+it processes. Past it, it reads nothing more of that socket until the answers ahead end, and keeps
+it: each request a client pipelines is answered in its turn, however many come in one write, the
+client paced meanwhile by its transport's window
+([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)), as a paused
+connection's peer is. A server learns its client went by the end of the socket it reads, and, once
+it reads nothing more of the socket, by a write that fails: a listen's answer, held no longer than
+`maximumWait`, or a stream's heartbeat or event (section 8.7 of `transcoding.md`); never by a
+close it has not read.
 
 A request names its authority by its target when the target is in absolute-form, the `Host`
 beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over
