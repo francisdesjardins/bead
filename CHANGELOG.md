@@ -7,13 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-18
+
 ### Changed
 
+- The spec moves to 0.17.0 (`spec-v0.17.0`), its companion, `spec/debugging.md`, to 0.11.1
+  (`debugging-v0.11.1`), and the transcoding's companion, `spec/transcoding.md`, to 0.7.0
+  (`transcoding-v0.7.0`).
 - The DevTools extension is on the Chrome Web Store, and the page and the TypeScript side's README
   link its listing.
-- The `bead-adversarial-review` workflow reviews the code's lenses at xhigh and the spec's and its
-  companion's at max, and its verifier reruns the proof of a blocker and a major, a minor's only
-  where reading cannot settle it.
+- The `bead-adversarial-review` workflow reviews every lens at xhigh, the spec's and its
+  companion's at max only before a freeze that cannot be revised, and its verifier reruns the proof
+  of a blocker and a major, a minor's only where reading cannot settle it.
 - The page beadproto.dev serves, in English and in French, answers a team's questions in order: one
   contract for every team, the teams that do not speak Bead, evolving without breaking, the
   transports, the same behaviour on every side, debugging and observing, and security. Where Bead
@@ -3467,7 +3472,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.15.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.16.0...develop
+[0.16.0]: https://github.com/francisdesjardins/bead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
