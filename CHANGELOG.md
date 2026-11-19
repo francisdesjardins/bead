@@ -109,6 +109,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The documents are brought to 0.16.0: the records, the matrix and the READMEs state the heartbeat
   on silence, the HTTP framing refusals and the service of a connection's requests in their order
   as what holds.
+- The guides for teams are brought to 0.16.0, their scenario built and run again in Node: the
+  DevTools extension comes from the Chrome Web Store or is built from the clone, the guides say no
+  package or image is published, and getting started says that Bead has not run in production and
+  that before 1.0.0 a minor may break.
 
 ### Fixed
 
