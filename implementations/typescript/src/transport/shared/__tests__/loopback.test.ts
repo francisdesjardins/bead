@@ -160,4 +160,18 @@ test.describe('loopbackLookup', () => {
       loopbackFailureOf(reason, { host: PROBE, signal: controller.signal }),
     ]).toEqual([fetchFailure, failure, reason]);
   });
+
+  // spec 13.4
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', () => {
+    // * as a fetch fails once its socket opened: reset as it read, closed unanswered, or no cause
+    for (const cause of [
+      Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', syscall: 'read' }),
+      Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }),
+      undefined,
+    ]) {
+      const fetchFailure = new TypeError('fetch failed', { cause });
+
+      expect(loopbackFailureOf(fetchFailure, { host: PROBE })).toBe(fetchFailure);
+    }
+  });
 });

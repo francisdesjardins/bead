@@ -28,9 +28,11 @@ import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import {
   createUndiciDialer,
+  isConnectFailure,
   type IUndiciDrawn,
   loopbackConnectOptions,
   loopbackSentenceOf,
+  watchedOf,
 } from '../shared/loopback';
 import { isLoopbackUrl, isSecureUrl } from '../shared/secure';
 import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
@@ -450,6 +452,8 @@ export const createWebSocketTransportClient = (
                   }
 
                   const written = given === '' ? undefined : given;
+                  // what undici's own connect failed with, which its `error` event does not carry
+                  const watched = drawn === undefined ? undefined : watchedOf(drawn.agent);
                   let socket: IWebSocketLike;
 
                   // ! `closeTimeout`, `ws`'s own close timer, which it arms on every close, its
@@ -478,7 +482,7 @@ export const createWebSocketTransportClient = (
                                 : { headers: { authorization: written } }),
                             })
                           : (new drawn.undici.WebSocket(url, {
-                              dispatcher: drawn.agent,
+                              dispatcher: watched?.dispatcher ?? drawn.agent,
                               protocols: protocols ?? [],
                             }) as IWebSocketLike);
                   } catch (reason) {
@@ -522,10 +526,11 @@ export const createWebSocketTransportClient = (
                     const closed = closeEvent.reason
                       ? `${closeEvent.reason} (${String(closeEvent.code)})`
                       : String(closeEvent.code);
-                    // where its dialer took a localhost name to the loopback itself, and no
-                    // upgrade was read that says it reached its server (spec 13.4)
+                    // where its dialer took a localhost name to the loopback itself, and its
+                    // every attempt failed: no socket opened (spec 13.4)
                     const said =
-                      drawn !== undefined || isWsShaped(WebSocket)
+                      (drawn !== undefined || isWsShaped(WebSocket)) &&
+                      isConnectFailure(watched?.failures[0] ?? lastError)
                         ? loopbackSentenceOf(host)
                         : undefined;
                     const message =

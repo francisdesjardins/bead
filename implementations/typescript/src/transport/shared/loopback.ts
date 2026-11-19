@@ -34,9 +34,19 @@ export interface ILoopbackConnectOptions {
   lookup?: typeof loopbackLookup;
 }
 
+/** What a dispatcher of undici's dispatches a request by: its options, and the handler of its outcome. */
+type Dispatch = (options: object, handler: object) => boolean;
+
 /** An `Agent` of the package undici's, which a client closes as it is dropped. */
 export interface IUndiciAgent {
   close(): Promise<void>;
+  compose(interceptor: (dispatch: Dispatch) => Dispatch): IUndiciAgent;
+}
+
+/** A dispatcher over a client's agent, and the error each request it dispatched failed with. */
+export interface IUndiciWatched {
+  readonly dispatcher: IUndiciAgent;
+  readonly failures: readonly unknown[];
 }
 
 /**
@@ -183,9 +193,27 @@ export const loopbackConnectOptions = (host: string): ILoopbackConnectOptions =>
 };
 
 /**
- * What a connect to `host` that failed says of where it went, when `host` is a localhost name: "bead.localhost
- * names the loopback: connected to 127.0.0.1 and ::1, no resolver asked" (spec 13.4); none for any
- * other host.
+ * Whether `reason` failed a connect that opened no socket: Node's error of its `connect` call, or an
+ * `AggregateError` of one such error per address it raced. An error after a socket opened, a reset
+ * as it read or a refused upgrade, is none.
+ */
+export const isConnectFailure = (reason: unknown): boolean => {
+  if (reason instanceof AggregateError) {
+    return (
+      reason.errors.length > 0 &&
+      reason.errors.every((error) => {
+        return isConnectFailure(error);
+      })
+    );
+  }
+
+  return reason instanceof Error && 'syscall' in reason && reason.syscall === 'connect';
+};
+
+/**
+ * What a connect to `host` whose every attempt failed says of where it went, when `host` is a
+ * localhost name: "bead.localhost names the loopback: connected to 127.0.0.1 and ::1, no resolver
+ * asked" (spec 13.4); none for any other host.
  */
 export const loopbackSentenceOf = (host: string): string | undefined => {
   if (!isLocalhostName(host)) {
@@ -199,8 +227,9 @@ export const loopbackSentenceOf = (host: string): string | undefined => {
 
 /**
  * A fetch's network failure toward `host`, a `TypeError`, followed by {@link loopbackSentenceOf}
- * when `host` is a localhost name, a `TypeError` still, `reason` its cause. Anything else is kept as
- * it is: a fetch whose `signal` aborted rejects with that signal's own reason.
+ * when `host` is a localhost name and its cause {@link isConnectFailure}, a `TypeError` still,
+ * `reason` its cause. Anything else is kept as it is: a socket that opened, and a fetch whose
+ * `signal` aborted, which rejects with that signal's own reason.
  */
 export const loopbackFailureOf = (
   reason: unknown,
@@ -208,11 +237,50 @@ export const loopbackFailureOf = (
 ): unknown => {
   const sentence = loopbackSentenceOf(host);
 
-  if (sentence === undefined || signal?.aborted === true || !(reason instanceof TypeError)) {
+  if (
+    sentence === undefined ||
+    signal?.aborted === true ||
+    !(reason instanceof TypeError) ||
+    !isConnectFailure(reason.cause)
+  ) {
     return reason;
   }
 
   return new TypeError(`${reason.message}; ${sentence}`, { cause: reason });
+};
+
+/**
+ * `agent` composed with an interceptor that notes the error each request it dispatches fails with:
+ * the `error` event of undici's `WebSocket` carries no cause, and this tells a connect that opened
+ * no socket from an upgrade refused after one did.
+ */
+export const watchedOf = (agent: IUndiciAgent): IUndiciWatched => {
+  const failures: unknown[] = [];
+  const dispatcher = agent.compose((dispatch) => {
+    // ! two parameters, as undici's `compose` requires of what an interceptor returns
+    return (options, handler) => {
+      return dispatch(
+        options,
+        new Proxy(handler, {
+          get: (target, key) => {
+            const value: unknown = Reflect.get(target, key, target);
+
+            if (key === 'onResponseError' && typeof value === 'function') {
+              return (controller: unknown, error: unknown): unknown => {
+                failures.push(error);
+
+                return value.call(target, controller, error) as unknown;
+              };
+            }
+
+            return typeof value === 'function' ? (value.bind(target) as unknown) : value;
+          },
+        })
+      );
+    };
+  });
+
+  return { dispatcher, failures };
 };
 
 /** Whether the package undici resolves from here, as Node's `import` of it would. */

@@ -34,7 +34,7 @@ import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } fro
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
 import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
-import { loopbackConnectOptions, loopbackSentenceOf } from './loopback';
+import { isConnectFailure, loopbackConnectOptions, loopbackSentenceOf } from './loopback';
 import { isSecureUrl } from './secure';
 import { assertTls, builtinOf, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
@@ -1378,8 +1378,12 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     return (context: EventContext): void => {
       const error = context.connection.error ?? context.error;
       const said = error === undefined ? '' : `: ${conditionOf(error)}`;
-      // where it went, when its connect to a localhost name failed (spec 13.4)
-      const where = loopbackSaid === undefined || incarnation.isUp ? '' : `; ${loopbackSaid}`;
+      // where it went, when its every attempt to connect a localhost name failed: its socket's
+      // own error, no socket opened (spec 13.4)
+      const where =
+        loopbackSaid === undefined || incarnation.isUp || !isConnectFailure(context.error)
+          ? ''
+          : `; ${loopbackSaid}`;
 
       retire(
         incarnation,

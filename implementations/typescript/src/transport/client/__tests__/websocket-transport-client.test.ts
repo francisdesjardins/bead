@@ -69,6 +69,8 @@ import {
   PROBE,
   replaceResolver,
   settledOf,
+  startDropping,
+  startHeard,
   startPlatformProxy,
   withoutUndici,
 } from '../../shared/__tests__/loopback-fixtures';
@@ -4256,6 +4258,34 @@ test.describe('WebSocketTransportClient, on the loopback', () => {
     }
 
     expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * its upgrade refused, and its socket closed unanswered
+    await using refusing = await startHeard();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const failures: unknown[] = [];
+
+    for (const port of [refusing.port, dropping.port]) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        failures.push(
+          await settledOf(() => {
+            return client.connect({ host: PROBE, port });
+          })
+        );
+      }
+    }
+
+    expect(
+      failures.map((failure) => {
+        return failure instanceof ConnectError && !failure.message.includes('no resolver asked');
+      })
+    ).toEqual([true, true, true, true]);
+    expect([resolver.asked, refusing.heard.length]).toEqual([[], 2]);
   });
 
   test('reaches a host on the loopback through undici’s own dialer where undici resolves, and through Node’s global one where it does not', async () => {

@@ -164,6 +164,41 @@ export const startHeard = async (
 };
 
 /**
+ * A listener on 127.0.0.1 that takes each connection and ends it once it is sent its first bytes,
+ * answering nothing: a socket that opened and closed unanswered.
+ */
+export const startDropping = async () => {
+  const sockets = new Set<Socket>();
+  const listener = createTcpServer((socket) => {
+    sockets.add(socket);
+    socket.on('error', () => {
+      // a client that gave up
+    });
+    socket.once('data', () => {
+      socket.end();
+    });
+  });
+
+  listener.listen(0, '127.0.0.1');
+  await once(listener, 'listening');
+
+  return {
+    port: (listener.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: () => {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+
+      return new Promise<void>((resolve) => {
+        listener.close(() => {
+          resolve();
+        });
+      });
+    },
+  };
+};
+
+/**
  * The platform's proxy, until disposed: a listener on 127.0.0.1 that notes the first line of each
  * request it is sent and answers 502, which the global dispatcher, the global `fetch`'s and
  * `WebSocket`'s, sends every request through, as Node's own does under `NODE_USE_ENV_PROXY` and

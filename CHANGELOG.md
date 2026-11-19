@@ -33,8 +33,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   global ones where undici does not resolve, it judges the name by its name, and spec 13.4 states
   that residual.
 - A `.localhost` name that a hosts file or a container's `extra_hosts` maps elsewhere reaches the
-  loopback, and a connect that fails there says that it went to the loopback and asked no resolver;
-  no option points such a name elsewhere.
+  loopback, and a connect whose every attempt failed there says that it went to the loopback and
+  asked no resolver; no option points such a name elsewhere.
 
 ## [0.16.0] - 2026-11-18
 

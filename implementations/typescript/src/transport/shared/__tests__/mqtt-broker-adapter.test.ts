@@ -30,7 +30,7 @@ import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
 import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
-import { PROBE, replaceResolver, startHeard } from './loopback-fixtures';
+import { PROBE, replaceResolver, startDropping, startHeard } from './loopback-fixtures';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 import { PKI } from './tls-front';
 
@@ -3620,14 +3620,52 @@ test.describe('createMqttBrokerAdapter, on the loopback', () => {
       url: `ws://${PROBE}:${String(server.port)}/mqtt`,
     });
 
-    // * its upgrade refused, which reached the loopback by its name
-    expect(await failureOf(adapter.start())).toBeInstanceOf(GenericError);
+    // * its upgrade refused, which reached the loopback by its name, and says nothing of it
+    const refused = await failureOf(adapter.start());
+
+    expect(refused).toBeInstanceOf(GenericError);
+    expect((refused as GenericError).message).not.toContain('no resolver asked');
     expect([
       resolver.asked,
       server.heard.map(({ host }) => {
         return host;
       }),
     ]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
+    // and closed unanswered
+    const closed = await (async () => {
+      await using listener = await startDropping();
+
+      return listener.port;
+    })();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const messages: string[] = [];
+
+    for (const port of [closed, dropping.port]) {
+      const adapter = createMqttBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: `mqtt://${PROBE}:${String(port)}`,
+      });
+      const failure = await failureOf(adapter.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      messages.push((failure as GenericError).message);
+    }
+
+    expect(
+      messages.map((message) => {
+        return message.includes(
+          `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+        );
+      })
+    ).toEqual([true, false]);
+    expect(resolver.asked).toEqual([]);
   });
 
   test('sends nothing through the platform’s proxy to a host on the loopback', async () => {

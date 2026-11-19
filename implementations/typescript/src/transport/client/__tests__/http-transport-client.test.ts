@@ -58,6 +58,7 @@ import {
   PROBE,
   replaceResolver,
   settledOf,
+  startDropping,
   startHeard,
   startPlatformProxy,
   withoutUndici,
@@ -3618,6 +3619,20 @@ test.describe('createHTTPTransportClient, on the loopback', () => {
     expect((refused as ConnectError).message).toContain(
       `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
     );
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * its socket closed unanswered
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({ isListening: false });
+    const failed = await settledOf(() => {
+      return client.connect({ host: PROBE, port: dropping.port });
+    });
+
+    expect(failed).toBeInstanceOf(ConnectError);
+    expect((failed as ConnectError).message).not.toContain('no resolver asked');
     expect(resolver.asked).toEqual([]);
   });
 

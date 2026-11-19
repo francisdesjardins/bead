@@ -904,8 +904,9 @@ application software treat the name so (item 2). A client races the two addresse
 `127.0.0.1` goes first, since a server on its defaults listens there (section 15.12), where
 [RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
 first. Its request names the host as its URL does, in its `Host` and in its TLS server name,
-whatever its scheme. A connect that fails says that it went to the loopback and asked no resolver.
-No option points such a name elsewhere: a host off the machine is named by its own name or address.
+whatever its scheme. A connect whose every attempt failed says that it went to the loopback and
+asked no resolver. No option points such a name elsewhere: a host off the machine is named by its
+own name or address.
 
 A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
 `localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps

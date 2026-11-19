@@ -27,7 +27,7 @@ import {
   topicOf,
 } from './mqtt-packets';
 import { guardPackets } from './mqtt-packet-guard';
-import { loopbackConnectOptions, loopbackSentenceOf } from './loopback';
+import { isConnectFailure, loopbackConnectOptions, loopbackSentenceOf } from './loopback';
 import { noop } from './noop';
 import { isLoopbackUrl, isSecureUrl } from './secure';
 import { withSlicedSends } from './sliced-sends';
@@ -1064,8 +1064,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           lastError = error;
         });
         client.once('close', () => {
-          // where its stream took a localhost name to the loopback itself (spec 13.4)
-          const said = isOnTheLoopback ? loopbackSentenceOf(hostname) : undefined;
+          // where its stream took a localhost name to the loopback itself, and its every
+          // attempt failed: no socket opened (spec 13.4)
+          const said =
+            isOnTheLoopback && isConnectFailure(lastError)
+              ? loopbackSentenceOf(hostname)
+              : undefined;
 
           fail(
             new GenericError(

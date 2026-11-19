@@ -37,7 +37,7 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
-import { PROBE, replaceResolver } from './loopback-fixtures';
+import { PROBE, replaceResolver, startDropping } from './loopback-fixtures';
 import { PKI } from './tls-front';
 
 // constants
@@ -3305,5 +3305,40 @@ test.describe('createAmqpBrokerAdapter, on the loopback', () => {
     } finally {
       listener.close();
     }
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
+    // and closed unanswered
+    const closed = await (async () => {
+      await using listener = await startDropping();
+
+      return listener.port;
+    })();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const messages: string[] = [];
+
+    for (const port of [closed, dropping.port]) {
+      const adapter = createAmqpBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: `amqp://${PROBE}:${String(port)}`,
+      });
+      const failure = await settledOf(adapter.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      messages.push((failure as GenericError).message);
+    }
+
+    expect(
+      messages.map((message) => {
+        return message.includes(
+          `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+        );
+      })
+    ).toEqual([true, false]);
+    expect(resolver.asked).toEqual([]);
   });
 });
