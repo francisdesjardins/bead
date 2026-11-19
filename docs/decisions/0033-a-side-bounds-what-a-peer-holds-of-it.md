@@ -14,7 +14,10 @@
   call past those its connection has it answer and its transfer's opening past those it receives,
   and 9.6's requester; the conversations of 9.2's step 3, the transports' cases of a WebSocket
   server's connections, a body's rate and a head's time, and the durations of the bounds it adds.
-  The heartbeat is 15.3's own; the client's address a bound per address reads,
+  15.3's heartbeat on silence is this record's too: its ping goes ahead of what waits, and its echo
+  alone answers it. 15.21's heartbeat, which any parcel answers, is
+  [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)'s.
+  The client's address a bound per address reads is
   [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)'s; the 503
   a stop answers,
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
@@ -42,7 +45,7 @@ failed at 6 s by Kestrel's `MinRequestBodyDataRate`, an abort that names no boun
 read for a heartbeat, its ping goes ahead of what waits for it, and the echo never comes (spec
 15.3). Paused 75 s and silent, the client is closed by both servers before it resumes, within two
 heartbeats. A reader that keeps sending is never pinged. What the heartbeat leaves unbounded is the
-bytes held within a beat, what waits for a reader that keeps sending, and everything where the
+bytes held within a heartbeat, what waits for a reader that keeps sending, and everything where the
 heartbeat is never.
 
 **A byte bound judged at once drops an honest reader.** 100 results of 1 MiB, the answers to calls a
@@ -188,6 +191,7 @@ echo waits behind a frame longer than its heartbeat is dropped, a row of `docs/s
 "Leveled down". Spec 15.21 keeps "any parcel answers": a broker's participant never pauses its link
 (15.12), and Bead itself reads every parcel of it, while a WebSocket's peer can stop reading under
 TCP. The two heartbeats differ on purpose.
+
 **Each drop is reported**, naming its connection and its bound, on the transport's `error` before
 its `close`, so an operator tells it from a network that failed (RFC 6455 §7.1.7), and an HTTP
 outbox's overflow alike; a WebSocket so dropped closes with no closing handshake, unclean, since a
@@ -223,8 +227,11 @@ Bead connection kept. A trickle charges `bodyBytesBudget` as it comes, never as 
 `MinRequestBodyDataRate` is set to none and Node's `requestTimeout` to 0, Bead's rate in their
 place. **Every answer written before its body is whole closes its socket in stages** — the 408, a
 413, a 503 of the budget, the 404 `connection-unknown` — `connection: close`, its write side first,
-reading on and dropping what comes until the client closes or 2 seconds pass, never by a reset, so
-its client reads the answer and its Bead connection stands.
+reading on and dropping what comes until the client closes or 2 seconds pass, never at once by a
+reset, so its client reads the answer and its Bead connection stands. Kestrel's connection has no
+half-close, so on the C# side the write side ends with the close itself, once its client closed or
+2 seconds passed (`docs/support.md`, "A request's head held to `headersTimeout`, and an answer's
+close in stages, as each platform does them").
 
 **Over a broker, the family gains its own** (spec 15.18, 15.20, 15.23;
 [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)):
@@ -303,9 +310,10 @@ server does: behind one it neither names nor counts, every client is the proxy's
 The bound counts the users behind one NAT as one and an IPv6 network's addresses as many, on both
 transports alike.
 
-**What every socket holds together is 10,000 × 176 MiB at most.** Within a beat, a reader that stops
-behind a large burst and sends nothing holds its backlog until the heartbeat drops it; where the
-heartbeat is never, or the reader keeps sending, the bound alone holds it. A body at exactly 240 bytes a second holds its socket
+**What every socket holds together is 10,000 × 176 MiB at most.** Within a heartbeat, a reader that
+stops behind a large burst and sends nothing holds its backlog until the heartbeat drops it; where
+the heartbeat is never, or the reader keeps sending, the bound alone holds it. A body at exactly 240
+bytes a second holds its socket
 and its place as long as it keeps the rate, as Kestrel's, IIS's and Apache's rules let it; the bound
 per address bounds how many. A client's own queue toward a server that stops reading is its
 application's. Over HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and
@@ -532,15 +540,14 @@ resolver told before its failure came stays silent. Each objection, with the ans
 The heartbeat on silence met the Tenth Man at xhigh effort, probed against the C# and TypeScript
 servers. A side pings a connection once nothing of it has been read for `heartbeat`, its ping
 carrying 8 bytes of a count of its own and going ahead of what the side holds unsent, and drops it
-once the pong that echoes them has not come within `heartbeat` (spec 15.3). .NET's keep-alive
-already does so, so the C# side keeps it, and the TypeScript and the Rust sides take it. Each
-objection, with the answer that holds:
+once the pong that echoes them has not come within `heartbeat` (spec 15.3). .NET's keep-alive does
+so, and every side holds to it. Each objection, with the answer that holds:
 
 | Objection                                                                                                                                      | Answer                                                                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A peer that sends envelopes, or unsolicited pongs, and answers no ping is never pinged on silence, so cases that expect it dropped fail on C#. | Accepted: each case's peer stays silent until it is pinged, and two cases hold that a peer heard from within each heartbeat is never pinged.                          |
 | "Nothing has come" is undefined: .NET counts what it reads, a part of a frame among it, and `ws` shows TypeScript no read below a message.     | Accepted: 15.3 counts what is read. TypeScript counts its raw socket's reads, and Rust its stream's; a case of a message in fragments over three heartbeats holds it. |
-| .NET's public `WebSocket` gives no ping to send and no pong to see, so C# cannot ping every beat nor take any frame as the answer.             | Accepted: the rule is .NET's, and C# does not move.                                                                                                                   |
+| .NET's public `WebSocket` gives no ping to send and no pong to see, so C# cannot ping every beat nor take any frame as the answer.             | Accepted: the rule is .NET's, and the C# side keeps it.                                                                                                               |
 | RFC 6455 binds the pong's sender, not what the pinging side takes as alive, and a broker takes any parcel.                                     | Accepted: the echo alone is a leveling of `docs/support.md`, and 15.21 keeps any parcel, its reason above.                                                            |
 | Ping on silence never pings a peer that keeps sending, whatever it reads.                                                                      | Accepted: 15.3 says so, and the pace and the bound hold what waits for it on a server, its application on a client.                                                   |
 | A ping behind everything already handed to `ws`, or at the back of Rust's queue, drops an honest slow reader that C# keeps.                    | Accepted: every side's ping goes ahead of what it holds unsent. TypeScript holds its own queue in front of `ws`, and Rust queues its ping at the front.               |
@@ -549,4 +556,4 @@ objection, with the answer that holds:
 | A floor counted from the 101 is unsafe, the server's silence starting before its 101 is read.                                                  | Accepted: each ping's floor counts from a frame the peer sent.                                                                                                        |
 | The WebSocket cases have no `wait` step.                                                                                                       | Accepted: the schema, the generator and the three players take it in a case played on the real clock.                                                                 |
 | TypeScript's silence heartbeat takes anything heard as the answer.                                                                             | Accepted: the WebSocket has its own, which takes the echo alone; the broker's keeps its rule.                                                                         |
-| Documents and tests still name the old schedule.                                                                                               | Accepted: each is brought to the rule, its test retitled on every side.                                                                                               |
+| Documents and tests name another schedule.                                                                                                     | Accepted: every document and test states this rule, each test under one title on every side.                                                                          |

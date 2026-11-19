@@ -106,6 +106,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gateway to it. The gateways' twins carry the same closing cases on every side, and new twins hold
   a bodiless refusal that keeps its connection, a refusal of a body still coming closed in stages,
   and a stream asked over HTTP/1.0 closed for want of a length, nothing served behind it.
+- The documents are brought to 0.16.0: the records, the matrix and the READMEs state the heartbeat
+  on silence, the HTTP framing refusals and the service of a connection's requests in their order
+  as what holds.
 
 ### Fixed
 
