@@ -945,12 +945,14 @@ struct Sent {
     body: Option<String>,
 }
 
-/// A step of an exchange: a request sent, a response read, a socket closed, or a wait on counts.
+/// A step of an exchange: a request sent, requests written behind it, a response read, a socket
+/// closed, or a wait on counts.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExchangeStep {
     on: Option<String>,
     send: Option<Sent>,
+    behind: Option<Vec<Sent>>,
     expect: Option<Expected>,
     close: Option<String>,
     until: Option<BTreeMap<String, u64>>,
@@ -1074,13 +1076,15 @@ struct Heard {
     is_ended: bool,
 }
 
-/// A socket of an exchange, and what came on it so far.
+/// A socket of an exchange, and what came on it so far; what a step writes behind its request
+/// written by a task of its own, which hands its writer on to the next.
 struct Peer {
     method: String,
     heard: Arc<Mutex<Heard>>,
     woken: Arc<Notify>,
     taken: usize,
     writer: Option<OwnedWriteHalf>,
+    writing: Option<JoinHandle<Option<OwnedWriteHalf>>>,
     reader: Option<JoinHandle<()>>,
 }
 
@@ -1136,6 +1140,7 @@ impl Peer {
             woken,
             taken: 0,
             writer: Some(writer),
+            writing: None,
             reader: Some(reader),
         })
     }
@@ -1151,13 +1156,42 @@ impl Peer {
             woken: Arc::new(Notify::new()),
             taken: 0,
             writer: None,
+            writing: None,
             reader: None,
         }
+    }
+
+    // `bytes` written behind what its socket carried, in their order, never awaited: a socket its
+    // gateway reads no further does not hold the step; a write refused is no failure, since its
+    // gateway may have ended its side
+    fn behind(&mut self, bytes: Vec<u8>) {
+        let writer = self.writer.take();
+        let before = self.writing.take();
+
+        self.writing = Some(spawn(async move {
+            let mut writer = match before {
+                Some(before) => before.await.ok().flatten(),
+                None => writer,
+            };
+
+            if let Some(writing) = writer.as_mut()
+                && writing.write_all(&bytes).await.is_err()
+            {
+                return None;
+            }
+
+            writer
+        }));
     }
 
     fn close(&mut self) {
         if let Some(reader) = self.reader.take() {
             reader.abort();
+        }
+
+        // * the writer a write behind holds goes with its task
+        if let Some(writing) = self.writing.take() {
+            writing.abort();
         }
 
         self.writer = None;
@@ -1459,24 +1493,44 @@ async fn until_counted(
     Ok(())
 }
 
+// a request's octets: its head, {host} the gateway's and each name captured its value, then its body
+fn request_of(
+    sent: &Sent,
+    (port, captured): (u16, &BTreeMap<String, String>),
+) -> Result<Vec<u8>, Failed> {
+    let mut head = sent.head.replace("{host}", &format!("127.0.0.1:{port}"));
+
+    for (name, value) in captured {
+        head = head.replace(&format!("{{{name}}}"), value);
+    }
+
+    let mut request = latin1_of(&head).ok_or_else(|| Failed::from("a head of latin-1"))?;
+
+    request.extend(bytes_of(sent.body.as_deref().unwrap_or(""))?);
+
+    Ok(request)
+}
+
 async fn steps_of(fixture: &TranscodingFixture, entry: &Exchange) -> Result<(), Failed> {
     let mut peers = BTreeMap::<String, Peer>::new();
     let mut captured = BTreeMap::<String, String>::new();
 
     for step in &entry.steps {
         if let (Some(sent), Some(on)) = (&step.send, &step.on) {
-            let mut head = sent
-                .head
-                .replace("{host}", &format!("127.0.0.1:{}", fixture.port));
+            let request = request_of(sent, (fixture.port, &captured))?;
 
-            for (name, value) in &captured {
-                head = head.replace(&format!("{{{name}}}"), value);
+            peers.insert(on.clone(), Peer::open(fixture.port, &request).await?);
+        } else if let (Some(behind), Some(on)) = (&step.behind, &step.on) {
+            let mut written = Vec::new();
+
+            for sent in behind {
+                written.extend(request_of(sent, (fixture.port, &captured))?);
             }
 
-            let mut request = latin1_of(&head).ok_or_else(|| Failed::from("a head of latin-1"))?;
-
-            request.extend(bytes_of(sent.body.as_deref().unwrap_or(""))?);
-            peers.insert(on.clone(), Peer::open(fixture.port, &request).await?);
+            peers
+                .get_mut(on)
+                .ok_or_else(|| Failed::from(format!("no exchange {on} was sent")))?
+                .behind(written);
         } else if let (Some(expected), Some(on)) = (&step.expect, &step.on) {
             let peer = peers
                 .get_mut(on)

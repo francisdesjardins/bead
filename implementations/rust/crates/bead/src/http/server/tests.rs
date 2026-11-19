@@ -1431,9 +1431,29 @@ async fn taken(socket: &mut TcpStream, batch: &[u8]) -> usize {
     taken
 }
 
-// RFC 9112 §9.3
+// whether `socket` is neither ended nor reset a second on, whatever comes on it
+async fn is_kept(socket: &mut TcpStream) -> bool {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut buffer = [0_u8; 4_096];
+
+    patience(Duration::from_secs(1), async {
+        loop {
+            if matches!(socket.read(&mut buffer).await, Ok(0) | Err(_)) {
+                return false;
+            }
+        }
+    })
+    .await
+    .unwrap_or(true)
+}
+
+// the requests pipelined behind an answer held, past one read of any platform's
+const PIPELINED: usize = 6_000;
+
+// spec 15.12; RFC 9112 §9.3
 #[tokio::test]
-async fn bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen() {
+async fn stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_socket() {
     use tokio::io::AsyncWriteExt as _;
 
     let started = started(&HttpTransportServerOptions::default()).await;
@@ -1472,9 +1492,74 @@ async fn bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen() {
         core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), 1_000).collect::<String>();
     let octets = taken(&mut socket, batch.as_bytes()).await;
 
-    // what it took bounded, and the transport still serves
+    // what it took bounded, its socket neither ended nor reset, and the transport still serves
     assert!(octets < MOST_TAKEN, "{octets} octets taken");
+    assert!(is_kept(&mut socket).await, "its socket kept");
     connect(&started).await;
+    started.stop().await;
+}
+
+// spec 15.12; RFC 9112 §9.3
+#[tokio::test]
+async fn answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = &drawn.head.fields[CONNECTION_TOKEN_HEADER];
+    let listen = exchange_of(
+        port,
+        head_of(
+            ("GET", "/bead"),
+            (
+                port,
+                &[
+                    &format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+                    &format!("{AFTER_HEADER}: 0"),
+                    &format!("{WAIT_HEADER}: 1000"),
+                ],
+            ),
+        )
+        .as_bytes(),
+    )
+    .await;
+
+    // * a listen held 1 s, then requests pipelined behind it in one write, written by a task of
+    // their own while the test reads
+    listen.write_behind(
+        core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), PIPELINED)
+            .collect::<String>()
+            .into_bytes(),
+    );
+
+    let mut statuses = Vec::with_capacity(PIPELINED.saturating_add(1));
+
+    for _ in 0..=PIPELINED {
+        statuses.push(listen.response(PATIENCE).await.unwrap().head.status);
+        listen.pass();
+    }
+
+    // the listen's 204 once it ends, then each request's 404 in its turn
+    let wrong: Vec<(usize, u16)> = statuses
+        .iter()
+        .enumerate()
+        .filter(|(index, status)| **status != if *index == 0 { 204 } else { 404 })
+        .map(|(index, status)| (index, *status))
+        .take(8)
+        .collect();
+
+    assert_eq!(wrong, [], "answered out of turn");
+
+    // * one more on the same socket, answered: the socket kept
+    listen.write_behind(head_of(("GET", "/other"), (port, &["Connection: close"])).into_bytes());
+    assert_eq!(listen.response(PATIENCE).await.unwrap().head.status, 404);
     started.stop().await;
 }
 

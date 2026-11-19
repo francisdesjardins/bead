@@ -5146,9 +5146,29 @@ async fn taken(socket: &mut tokio::net::TcpStream, batch: &[u8]) -> usize {
     taken
 }
 
-// RFC 9112 §9.3
+// whether `socket` is neither ended nor reset a second on, whatever comes on it
+async fn is_kept(socket: &mut tokio::net::TcpStream) -> bool {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut buffer = vec![0_u8; 16_384];
+
+    patience(Duration::from_secs(1), async {
+        loop {
+            if matches!(socket.read(&mut buffer).await, Ok(0) | Err(_)) {
+                return false;
+            }
+        }
+    })
+    .await
+    .unwrap_or(true)
+}
+
+// the requests pipelined behind a call held, past one read of any platform's
+const PIPELINED: usize = 6_000;
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.3
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn bounds_what_it_reads_of_requests_pipelined_behind_a_stream() {
+async fn stops_reading_requests_pipelined_behind_a_stream_and_keeps_its_socket() {
     let fixture = started().await;
     let port = fixture.port;
     let own = format!("{HOST}:{port}");
@@ -5166,8 +5186,9 @@ async fn bounds_what_it_reads_of_requests_pipelined_behind_a_stream() {
     .collect::<String>();
     let octets = taken(&mut socket, batch.as_bytes()).await;
 
-    // what it took bounded, and the gateway still serves
+    // what it took bounded, its socket neither ended nor reset, and the gateway still serves
     assert!(octets < MOST_TAKEN, "{octets} octets taken");
+    assert!(is_kept(&mut socket).await, "its socket kept");
     assert_eq!(
         exchanged(
             port,
@@ -5182,6 +5203,140 @@ async fn bounds_what_it_reads_of_requests_pipelined_behind_a_stream() {
     );
 
     drop(socket);
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.3
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_every_request_pipelined_behind_a_call_in_its_turn_once_its_timeout_ends_it_and_keeps_its_socket()
+ {
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| options.timeout = Some(Duration::from_millis(500)),
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+    let book = |fields: &str| format!("GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n{fields}\r\n");
+    let call = opened(
+        port,
+        format!(
+            "POST /api/Transcoding/hang HTTP/1.1\r\nhost: {own}\r\n{JSON}\r\ncontent-length: 2\r\n\r\n{{}}"
+        )
+        .as_bytes(),
+    )
+    .await;
+
+    // * a call held until its timeout, then requests pipelined behind it in one write, written by a
+    // task of their own while the test reads
+    until(|| fixture.counts.hanging.load(Ordering::SeqCst) == 1).await;
+    call.write_behind(
+        core::iter::repeat_n(book(""), PIPELINED)
+            .collect::<String>()
+            .into_bytes(),
+    );
+
+    let mut statuses = Vec::with_capacity(PIPELINED.saturating_add(1));
+
+    for _ in 0..=PIPELINED {
+        statuses.push(
+            call.response(PATIENCE)
+                .await
+                .expect("its answer")
+                .head
+                .status,
+        );
+        call.pass();
+    }
+
+    // the call's 504 once its timeout ends it, then each request's 200 in its turn
+    let wrong: Vec<(usize, u16)> = statuses
+        .iter()
+        .enumerate()
+        .filter(|(index, status)| **status != if *index == 0 { 504 } else { 200 })
+        .map(|(index, status)| (index, *status))
+        .take(8)
+        .collect();
+
+    assert_eq!(wrong, [], "answered out of turn");
+
+    // * one more on the same socket, answered: the socket kept
+    call.write_behind(book("connection: close\r\n").into_bytes());
+    assert_eq!(
+        call.response(PATIENCE)
+            .await
+            .expect("its answer")
+            .head
+            .status,
+        200
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 8.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn frees_the_place_of_a_stream_within_two_heartbeats_once_its_client_leaves_with_a_request_pipelined_behind_it()
+ {
+    const HEARTBEAT: Duration = Duration::from_millis(250);
+
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.maximum_connections_per_address = Some(1);
+            options.heartbeat = Some(HEARTBEAT);
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+    let watch = |fields: &str| {
+        format!(
+            "GET /v1/watch HTTP/1.1\r\nhost: {own}\r\naccept: text/event-stream\r\n{fields}\r\n"
+        )
+    };
+    // * a stream, then a request pipelined behind it in the same write
+    let mut socket = sent(
+        port,
+        format!(
+            "{}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n",
+            watch("")
+        )
+        .as_bytes(),
+    )
+    .await;
+
+    read_until(&mut socket, "\r\n\r\n").await;
+
+    // * its client leaves: the gateway, which reads its socket no further, learns it by a write
+    // that fails, a heartbeat's
+    drop(socket);
+
+    let left = bead::testing::Instant::now();
+    let most = HEARTBEAT
+        .saturating_mul(2)
+        .saturating_add(Duration::from_secs(1));
+
+    loop {
+        let second = opened(port, watch("connection: close\r\n").as_bytes()).await;
+        let status = second.head(PATIENCE).await.expect("its head").status;
+
+        if status == 200 {
+            break;
+        }
+
+        assert_eq!(status, 503, "a second stream of its address refused busy");
+        assert!(left.elapsed() <= most, "its place held past {most:?}");
+        drop(second);
+        rest(Duration::from_millis(25)).await;
+    }
+
+    // a second stream of its address taken within two heartbeats and a second
+    assert!(
+        left.elapsed() <= most,
+        "taken {:?} after its client left",
+        left.elapsed()
+    );
     fixture.dispose().await.expect("disposed");
 }
 
