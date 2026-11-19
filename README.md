@@ -1300,8 +1300,8 @@ Those rules keep every language to one behaviour. They hold each one to the same
 to the interop between sides, and to a strict linter and analyzer set, and they put every change
 that reaches across the languages through an adversarial review before it lands. What these gates
 hold is held. Where a side departs from TypeScript's idioms, or where the spec reads a standard, it
-has been checked by tests and by those reviews, not by a specialist. Corrections from people who
-know better are welcome.
+has been checked by tests and by those reviews, and reviewed by no one with the knowledge to judge
+it. Corrections from people who know better are welcome.
 
 ## Contributing
 
