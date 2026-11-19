@@ -1517,9 +1517,10 @@
     Un justificatif porteur ne quitte la machine que sous TLS (RFC 6750 §5.3) : <code>wss</code>,
     <code>https</code>, ou un courtier que chaque pair joint sous TLS. Sur la machine, la boucle locale, un Web Worker ou un routeur du même
     processus suffisent. La boucle locale se juge à l’hôte que le client nomme, jamais à l’adresse
-    vers laquelle ce nom se résout. Un résolveur peut envoyer un nom <code>localhost</code>
-    ailleurs, et le justificatif y passe alors en clair. Nommer <code>127.0.0.1</code> ou
-    <code>[::1]</code> l’évite. Ailleurs, l’appel échoue avant de partir avec
+    vers laquelle ce nom se résout. Un client connecte un nom <code>localhost</code> à la boucle
+    locale elle-même, sans rien demander à un résolveur, et un hôte de la boucle locale sans passer
+    par un mandataire. Une page laisse cette connexion à son navigateur, et Node sans undici à sa
+    plateforme. Ailleurs, l’appel échoue avant de partir avec
     <code>DESTINATION_UNREACHABLE</code>, et le justificatif reste. Un serveur derrière un
     mandataire TLS se déclare sûr par l’option <code>secure</code>.
   </p>
