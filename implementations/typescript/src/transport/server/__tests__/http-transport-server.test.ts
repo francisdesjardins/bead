@@ -2316,6 +2316,50 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // spec 15.12; RFC 9112 §6.1
+  test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a server whose parser is insecureHTTPParser’s, in either order, and closes its connection before a request smuggled behind it is read', async () => {
+    await using started = await startTransport({
+      createServer: (listener) => {
+        return createServer({ insecureHTTPParser: true }, listener);
+      },
+    });
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect behind the chunked body, which the Content-Length covers and the
+    // Transfer-Encoding leaves to be read as the next request (RFC 9112 §11.2)
+    const smuggled = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+    const body = `${cancel.length.toString(16)}\r\n${cancel}\r\n0\r\n\r\n${smuggled}`;
+    const length = `Content-Length: ${String(body.length)}`;
+
+    for (const framing of [
+      `Transfer-Encoding: chunked\r\n${length}`,
+      `${length}\r\nTransfer-Encoding: chunked`,
+    ]) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n${framing}\r\n\r\n${body}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked, which closes its connection
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the smuggled connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
   // spec 15.12
   test('refuses 400 unmarked an HTTP/1.0 request carrying a Transfer-Encoding under keep-alive, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
     await using started = await startTransport();

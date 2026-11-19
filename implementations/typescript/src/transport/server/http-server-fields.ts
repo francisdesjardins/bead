@@ -14,6 +14,7 @@ import {
   HOST_REFUSAL,
   ORIGIN_REFUSAL,
   isAuthority,
+  isTransferEncodingFramed,
   requestTargetOf,
   type IAuthority,
 } from './hosts-and-origins';
@@ -145,6 +146,19 @@ export const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   }
 
   return values;
+};
+
+// whether a request's `Transfer-Encoding` is one spec 15.12 takes: none, or one that frames its body
+// with no `Content-Length` beside it (RFC 9112 §6.1, §6.3 item 3)
+// ! Node's parser refuses the pair, but not a server's built with `insecureHTTPParser`
+export const isTransferEncodingTaken = (request: IHTTPRequestLike): boolean => {
+  const codings = linesOf(request, 'transfer-encoding');
+
+  return (
+    codings.length === 0 ||
+    (linesOf(request, 'content-length').length === 0 &&
+      isTransferEncodingFramed(request.httpVersion, codings))
+  );
 };
 
 // a field's lines joined in their order by `, ` (RFC 9110 §5.3, spec 15.12); none without a line

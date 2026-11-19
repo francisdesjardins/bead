@@ -2059,6 +2059,47 @@ test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding, in eithe
   }
 });
 
+// spec 15.12; transcoding 10.1; RFC 9112 §6.1
+test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a server whose parser is insecureHTTPParser’s, in either order, and closes its connection before a request smuggled behind it is read', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer({ insecureHTTPParser: true }, listener);
+    },
+  });
+  const { port } = fixture;
+  // * a GET behind the chunked body, which the Content-Length covers and the Transfer-Encoding
+  // leaves to be read as the next request (RFC 9112 §11.2)
+  const body = `2\r\n{}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`;
+  const length = `content-length: ${String(body.length)}`;
+
+  for (const framing of [
+    `transfer-encoding: chunked\r\n${length}`,
+    `${length}\r\ntransfer-encoding: chunked`,
+  ]) {
+    const socket = opened(
+      port,
+      `POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n` +
+        `content-type: application/json\r\n${framing}\r\n\r\n${body}`
+    );
+    const chunks: Buffer[] = [];
+
+    socket.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    await new Promise((resolve) => {
+      socket.on('close', resolve);
+    });
+
+    // one answer, unmarked, its connection closed behind it
+    const came = Buffer.concat(chunks).toString('latin1');
+
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+});
+
 // what a gateway answers each request, written on a socket of its own with a GET pipelined behind
 // its chunked body: everything that came, to the socket's close, and the Bead connections drawn
 const pipelinedOn = async (
