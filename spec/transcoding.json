@@ -10,7 +10,7 @@
     "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
     "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
     "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
+    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
@@ -7936,6 +7936,3675 @@
             "body": "{\"count\":1}"
           },
           "on": "b"
+        }
+      ]
+    },
+    {
+      "name": "requests pipelined in one write behind a call are each answered in their turn once its timeout ends it, and the socket is kept",
+      "clauses": [
+        "7.6.22",
+        "9.2",
+        "10.2",
+        "spec:15.12"
+      ],
+      "options": {
+        "timeout": 1000
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/hang HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "until": {
+            "hanging": 1
+          }
+        },
+        {
+          "behind": [
+            {
+              "head": "GET /v1/shelves/1/books/1?revision=1 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/2?revision=2 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/3?revision=3 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/4?revision=4 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/5?revision=5 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/6?revision=6 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/7?revision=7 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/8?revision=8 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/9?revision=9 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/10?revision=10 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/11?revision=11 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/12?revision=12 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/13?revision=13 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/14?revision=14 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/15?revision=15 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/16?revision=16 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/17?revision=17 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/18?revision=18 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/19?revision=19 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/20?revision=20 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/21?revision=21 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/22?revision=22 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/23?revision=23 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/24?revision=24 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/25?revision=25 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/26?revision=26 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/27?revision=27 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/28?revision=28 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/29?revision=29 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/30?revision=30 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/31?revision=31 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/32?revision=32 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/33?revision=33 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/34?revision=34 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/35?revision=35 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/36?revision=36 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/37?revision=37 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/38?revision=38 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/39?revision=39 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/40?revision=40 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/41?revision=41 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/42?revision=42 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/43?revision=43 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/44?revision=44 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/45?revision=45 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/46?revision=46 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/47?revision=47 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/48?revision=48 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/49?revision=49 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/50?revision=50 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/51?revision=51 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/52?revision=52 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/53?revision=53 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/54?revision=54 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/55?revision=55 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/56?revision=56 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/57?revision=57 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/58?revision=58 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/59?revision=59 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/60?revision=60 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/61?revision=61 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/62?revision=62 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/63?revision=63 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/64?revision=64 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/65?revision=65 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/66?revision=66 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/67?revision=67 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/68?revision=68 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/69?revision=69 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/70?revision=70 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/71?revision=71 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/72?revision=72 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/73?revision=73 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/74?revision=74 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/75?revision=75 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/76?revision=76 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/77?revision=77 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/78?revision=78 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/79?revision=79 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/80?revision=80 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/81?revision=81 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/82?revision=82 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/83?revision=83 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/84?revision=84 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/85?revision=85 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/86?revision=86 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/87?revision=87 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/88?revision=88 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/89?revision=89 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/90?revision=90 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/91?revision=91 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/92?revision=92 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/93?revision=93 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/94?revision=94 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/95?revision=95 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/96?revision=96 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/97?revision=97 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/98?revision=98 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/99?revision=99 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/100?revision=100 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/101?revision=101 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/102?revision=102 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/103?revision=103 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/104?revision=104 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/105?revision=105 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/106?revision=106 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/107?revision=107 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/108?revision=108 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/109?revision=109 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/110?revision=110 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/111?revision=111 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/112?revision=112 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/113?revision=113 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/114?revision=114 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/115?revision=115 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/116?revision=116 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/117?revision=117 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/118?revision=118 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/119?revision=119 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/120?revision=120 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/121?revision=121 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/122?revision=122 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/123?revision=123 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/124?revision=124 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/125?revision=125 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/126?revision=126 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/127?revision=127 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/128?revision=128 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/129?revision=129 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/130?revision=130 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/131?revision=131 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/132?revision=132 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/133?revision=133 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/134?revision=134 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/135?revision=135 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/136?revision=136 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/137?revision=137 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/138?revision=138 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/139?revision=139 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/140?revision=140 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/141?revision=141 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/142?revision=142 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/143?revision=143 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/144?revision=144 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/145?revision=145 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/146?revision=146 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/147?revision=147 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/148?revision=148 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/149?revision=149 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/150?revision=150 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/151?revision=151 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/152?revision=152 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/153?revision=153 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/154?revision=154 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/155?revision=155 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/156?revision=156 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/157?revision=157 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/158?revision=158 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/159?revision=159 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/160?revision=160 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/161?revision=161 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/162?revision=162 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/163?revision=163 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/164?revision=164 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/165?revision=165 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/166?revision=166 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/167?revision=167 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/168?revision=168 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/169?revision=169 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/170?revision=170 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/171?revision=171 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/172?revision=172 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/173?revision=173 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/174?revision=174 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/175?revision=175 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/176?revision=176 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/177?revision=177 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/178?revision=178 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/179?revision=179 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/180?revision=180 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/181?revision=181 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/182?revision=182 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/183?revision=183 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/184?revision=184 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/185?revision=185 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/186?revision=186 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/187?revision=187 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/188?revision=188 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/189?revision=189 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/190?revision=190 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/191?revision=191 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/192?revision=192 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/193?revision=193 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/194?revision=194 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/195?revision=195 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/196?revision=196 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/197?revision=197 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/198?revision=198 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/199?revision=199 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "GET /v1/shelves/1/books/200?revision=200 HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            }
+          ],
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 504,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"detail\":\"no answer within 1000 ms\",\"status\":504,\"title\":\"Gateway Timeout\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/1\",\"title\":\"A tale\",\"pages\":\"1\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/2\",\"title\":\"A tale\",\"pages\":\"2\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/3\",\"title\":\"A tale\",\"pages\":\"3\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/4\",\"title\":\"A tale\",\"pages\":\"4\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/5\",\"title\":\"A tale\",\"pages\":\"5\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/6\",\"title\":\"A tale\",\"pages\":\"6\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/7\",\"title\":\"A tale\",\"pages\":\"7\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/8\",\"title\":\"A tale\",\"pages\":\"8\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "57",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/9\",\"title\":\"A tale\",\"pages\":\"9\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/10\",\"title\":\"A tale\",\"pages\":\"10\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/11\",\"title\":\"A tale\",\"pages\":\"11\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/12\",\"title\":\"A tale\",\"pages\":\"12\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/13\",\"title\":\"A tale\",\"pages\":\"13\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/14\",\"title\":\"A tale\",\"pages\":\"14\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/15\",\"title\":\"A tale\",\"pages\":\"15\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/16\",\"title\":\"A tale\",\"pages\":\"16\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/17\",\"title\":\"A tale\",\"pages\":\"17\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/18\",\"title\":\"A tale\",\"pages\":\"18\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/19\",\"title\":\"A tale\",\"pages\":\"19\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/20\",\"title\":\"A tale\",\"pages\":\"20\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/21\",\"title\":\"A tale\",\"pages\":\"21\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/22\",\"title\":\"A tale\",\"pages\":\"22\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/23\",\"title\":\"A tale\",\"pages\":\"23\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/24\",\"title\":\"A tale\",\"pages\":\"24\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/25\",\"title\":\"A tale\",\"pages\":\"25\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/26\",\"title\":\"A tale\",\"pages\":\"26\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/27\",\"title\":\"A tale\",\"pages\":\"27\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/28\",\"title\":\"A tale\",\"pages\":\"28\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/29\",\"title\":\"A tale\",\"pages\":\"29\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/30\",\"title\":\"A tale\",\"pages\":\"30\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/31\",\"title\":\"A tale\",\"pages\":\"31\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/32\",\"title\":\"A tale\",\"pages\":\"32\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/33\",\"title\":\"A tale\",\"pages\":\"33\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/34\",\"title\":\"A tale\",\"pages\":\"34\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/35\",\"title\":\"A tale\",\"pages\":\"35\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/36\",\"title\":\"A tale\",\"pages\":\"36\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/37\",\"title\":\"A tale\",\"pages\":\"37\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/38\",\"title\":\"A tale\",\"pages\":\"38\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/39\",\"title\":\"A tale\",\"pages\":\"39\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/40\",\"title\":\"A tale\",\"pages\":\"40\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/41\",\"title\":\"A tale\",\"pages\":\"41\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/42\",\"title\":\"A tale\",\"pages\":\"42\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/43\",\"title\":\"A tale\",\"pages\":\"43\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/44\",\"title\":\"A tale\",\"pages\":\"44\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/45\",\"title\":\"A tale\",\"pages\":\"45\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/46\",\"title\":\"A tale\",\"pages\":\"46\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/47\",\"title\":\"A tale\",\"pages\":\"47\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/48\",\"title\":\"A tale\",\"pages\":\"48\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/49\",\"title\":\"A tale\",\"pages\":\"49\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/50\",\"title\":\"A tale\",\"pages\":\"50\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/51\",\"title\":\"A tale\",\"pages\":\"51\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/52\",\"title\":\"A tale\",\"pages\":\"52\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/53\",\"title\":\"A tale\",\"pages\":\"53\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/54\",\"title\":\"A tale\",\"pages\":\"54\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/55\",\"title\":\"A tale\",\"pages\":\"55\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/56\",\"title\":\"A tale\",\"pages\":\"56\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/57\",\"title\":\"A tale\",\"pages\":\"57\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/58\",\"title\":\"A tale\",\"pages\":\"58\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/59\",\"title\":\"A tale\",\"pages\":\"59\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/60\",\"title\":\"A tale\",\"pages\":\"60\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/61\",\"title\":\"A tale\",\"pages\":\"61\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/62\",\"title\":\"A tale\",\"pages\":\"62\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/63\",\"title\":\"A tale\",\"pages\":\"63\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/64\",\"title\":\"A tale\",\"pages\":\"64\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/65\",\"title\":\"A tale\",\"pages\":\"65\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/66\",\"title\":\"A tale\",\"pages\":\"66\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/67\",\"title\":\"A tale\",\"pages\":\"67\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/68\",\"title\":\"A tale\",\"pages\":\"68\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/69\",\"title\":\"A tale\",\"pages\":\"69\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/70\",\"title\":\"A tale\",\"pages\":\"70\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/71\",\"title\":\"A tale\",\"pages\":\"71\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/72\",\"title\":\"A tale\",\"pages\":\"72\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/73\",\"title\":\"A tale\",\"pages\":\"73\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/74\",\"title\":\"A tale\",\"pages\":\"74\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/75\",\"title\":\"A tale\",\"pages\":\"75\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/76\",\"title\":\"A tale\",\"pages\":\"76\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/77\",\"title\":\"A tale\",\"pages\":\"77\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/78\",\"title\":\"A tale\",\"pages\":\"78\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/79\",\"title\":\"A tale\",\"pages\":\"79\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/80\",\"title\":\"A tale\",\"pages\":\"80\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/81\",\"title\":\"A tale\",\"pages\":\"81\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/82\",\"title\":\"A tale\",\"pages\":\"82\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/83\",\"title\":\"A tale\",\"pages\":\"83\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/84\",\"title\":\"A tale\",\"pages\":\"84\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/85\",\"title\":\"A tale\",\"pages\":\"85\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/86\",\"title\":\"A tale\",\"pages\":\"86\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/87\",\"title\":\"A tale\",\"pages\":\"87\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/88\",\"title\":\"A tale\",\"pages\":\"88\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/89\",\"title\":\"A tale\",\"pages\":\"89\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/90\",\"title\":\"A tale\",\"pages\":\"90\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/91\",\"title\":\"A tale\",\"pages\":\"91\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/92\",\"title\":\"A tale\",\"pages\":\"92\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/93\",\"title\":\"A tale\",\"pages\":\"93\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/94\",\"title\":\"A tale\",\"pages\":\"94\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/95\",\"title\":\"A tale\",\"pages\":\"95\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/96\",\"title\":\"A tale\",\"pages\":\"96\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/97\",\"title\":\"A tale\",\"pages\":\"97\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/98\",\"title\":\"A tale\",\"pages\":\"98\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "59",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/99\",\"title\":\"A tale\",\"pages\":\"99\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/100\",\"title\":\"A tale\",\"pages\":\"100\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/101\",\"title\":\"A tale\",\"pages\":\"101\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/102\",\"title\":\"A tale\",\"pages\":\"102\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/103\",\"title\":\"A tale\",\"pages\":\"103\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/104\",\"title\":\"A tale\",\"pages\":\"104\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/105\",\"title\":\"A tale\",\"pages\":\"105\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/106\",\"title\":\"A tale\",\"pages\":\"106\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/107\",\"title\":\"A tale\",\"pages\":\"107\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/108\",\"title\":\"A tale\",\"pages\":\"108\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/109\",\"title\":\"A tale\",\"pages\":\"109\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/110\",\"title\":\"A tale\",\"pages\":\"110\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/111\",\"title\":\"A tale\",\"pages\":\"111\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/112\",\"title\":\"A tale\",\"pages\":\"112\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/113\",\"title\":\"A tale\",\"pages\":\"113\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/114\",\"title\":\"A tale\",\"pages\":\"114\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/115\",\"title\":\"A tale\",\"pages\":\"115\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/116\",\"title\":\"A tale\",\"pages\":\"116\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/117\",\"title\":\"A tale\",\"pages\":\"117\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/118\",\"title\":\"A tale\",\"pages\":\"118\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/119\",\"title\":\"A tale\",\"pages\":\"119\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/120\",\"title\":\"A tale\",\"pages\":\"120\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/121\",\"title\":\"A tale\",\"pages\":\"121\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/122\",\"title\":\"A tale\",\"pages\":\"122\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/123\",\"title\":\"A tale\",\"pages\":\"123\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/124\",\"title\":\"A tale\",\"pages\":\"124\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/125\",\"title\":\"A tale\",\"pages\":\"125\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/126\",\"title\":\"A tale\",\"pages\":\"126\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/127\",\"title\":\"A tale\",\"pages\":\"127\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/128\",\"title\":\"A tale\",\"pages\":\"128\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/129\",\"title\":\"A tale\",\"pages\":\"129\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/130\",\"title\":\"A tale\",\"pages\":\"130\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/131\",\"title\":\"A tale\",\"pages\":\"131\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/132\",\"title\":\"A tale\",\"pages\":\"132\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/133\",\"title\":\"A tale\",\"pages\":\"133\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/134\",\"title\":\"A tale\",\"pages\":\"134\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/135\",\"title\":\"A tale\",\"pages\":\"135\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/136\",\"title\":\"A tale\",\"pages\":\"136\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/137\",\"title\":\"A tale\",\"pages\":\"137\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/138\",\"title\":\"A tale\",\"pages\":\"138\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/139\",\"title\":\"A tale\",\"pages\":\"139\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/140\",\"title\":\"A tale\",\"pages\":\"140\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/141\",\"title\":\"A tale\",\"pages\":\"141\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/142\",\"title\":\"A tale\",\"pages\":\"142\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/143\",\"title\":\"A tale\",\"pages\":\"143\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/144\",\"title\":\"A tale\",\"pages\":\"144\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/145\",\"title\":\"A tale\",\"pages\":\"145\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/146\",\"title\":\"A tale\",\"pages\":\"146\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/147\",\"title\":\"A tale\",\"pages\":\"147\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/148\",\"title\":\"A tale\",\"pages\":\"148\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/149\",\"title\":\"A tale\",\"pages\":\"149\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/150\",\"title\":\"A tale\",\"pages\":\"150\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/151\",\"title\":\"A tale\",\"pages\":\"151\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/152\",\"title\":\"A tale\",\"pages\":\"152\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/153\",\"title\":\"A tale\",\"pages\":\"153\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/154\",\"title\":\"A tale\",\"pages\":\"154\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/155\",\"title\":\"A tale\",\"pages\":\"155\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/156\",\"title\":\"A tale\",\"pages\":\"156\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/157\",\"title\":\"A tale\",\"pages\":\"157\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/158\",\"title\":\"A tale\",\"pages\":\"158\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/159\",\"title\":\"A tale\",\"pages\":\"159\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/160\",\"title\":\"A tale\",\"pages\":\"160\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/161\",\"title\":\"A tale\",\"pages\":\"161\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/162\",\"title\":\"A tale\",\"pages\":\"162\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/163\",\"title\":\"A tale\",\"pages\":\"163\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/164\",\"title\":\"A tale\",\"pages\":\"164\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/165\",\"title\":\"A tale\",\"pages\":\"165\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/166\",\"title\":\"A tale\",\"pages\":\"166\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/167\",\"title\":\"A tale\",\"pages\":\"167\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/168\",\"title\":\"A tale\",\"pages\":\"168\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/169\",\"title\":\"A tale\",\"pages\":\"169\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/170\",\"title\":\"A tale\",\"pages\":\"170\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/171\",\"title\":\"A tale\",\"pages\":\"171\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/172\",\"title\":\"A tale\",\"pages\":\"172\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/173\",\"title\":\"A tale\",\"pages\":\"173\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/174\",\"title\":\"A tale\",\"pages\":\"174\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/175\",\"title\":\"A tale\",\"pages\":\"175\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/176\",\"title\":\"A tale\",\"pages\":\"176\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/177\",\"title\":\"A tale\",\"pages\":\"177\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/178\",\"title\":\"A tale\",\"pages\":\"178\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/179\",\"title\":\"A tale\",\"pages\":\"179\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/180\",\"title\":\"A tale\",\"pages\":\"180\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/181\",\"title\":\"A tale\",\"pages\":\"181\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/182\",\"title\":\"A tale\",\"pages\":\"182\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/183\",\"title\":\"A tale\",\"pages\":\"183\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/184\",\"title\":\"A tale\",\"pages\":\"184\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/185\",\"title\":\"A tale\",\"pages\":\"185\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/186\",\"title\":\"A tale\",\"pages\":\"186\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/187\",\"title\":\"A tale\",\"pages\":\"187\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/188\",\"title\":\"A tale\",\"pages\":\"188\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/189\",\"title\":\"A tale\",\"pages\":\"189\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/190\",\"title\":\"A tale\",\"pages\":\"190\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/191\",\"title\":\"A tale\",\"pages\":\"191\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/192\",\"title\":\"A tale\",\"pages\":\"192\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/193\",\"title\":\"A tale\",\"pages\":\"193\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/194\",\"title\":\"A tale\",\"pages\":\"194\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/195\",\"title\":\"A tale\",\"pages\":\"195\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/196\",\"title\":\"A tale\",\"pages\":\"196\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/197\",\"title\":\"A tale\",\"pages\":\"197\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/198\",\"title\":\"A tale\",\"pages\":\"198\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/199\",\"title\":\"A tale\",\"pages\":\"199\"}"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/200\",\"title\":\"A tale\",\"pages\":\"200\"}"
+          },
+          "on": "a"
+        },
+        {
+          "behind": [
+            {
+              "head": "GET /v1/shelves/1/books/201?revision=201 HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+            }
+          ],
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "61",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"shelves/1/books/201\",\"title\":\"A tale\",\"pages\":\"201\"}"
+          },
+          "on": "a"
         }
       ]
     },

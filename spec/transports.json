@@ -2,12 +2,12 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-    "A step is what the test does — send, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
-    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
+    "A step is what the test does — send, behind, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the HTTP exchange it names, which a send opened: it never opens a socket. A behind is never awaited: the next step starts as it is written, the player writing it from a task of its own, without waiting for its socket to take it. Each of its heads is whole, of no HEAD and no CONNECT, and carries no upgrade or expect, so that each response is framed by its status and its fields alone (RFC 9112, section 6.3); one behind writes 65,536 octets at most, each value put in counted as 128, within what a host's socket takes, since a case holds a server's outcome, never what it reads ahead. On a socket its server ended, a behind writes what the platform takes, and a write refused fails no step.",
+    "expect reads the next response on the exchange it names, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). On an exchange a behind wrote on, each told is the next refusal told on it, in order. A response is read by its content-length, or de-chunked, as responses checks every reader, several on one socket among them, each read whole after the one before. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). No expect of an exchange a behind wrote on is orLost or told null: a refusal told names its socket, not its request, so neither could be matched to one response. An expect of end, once its responses were read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12), and that nothing came past those responses. The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
-    "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
-    "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
+    "Before each send, behind and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
+    "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, behind, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
     "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
@@ -84,6 +84,39 @@
         "bead-refusal": "busy"
       },
       "body": ""
+    },
+    {
+      "name": "responses one after another on one socket, two in one read and the third cut across reads",
+      "pieces": [
+        "48 54 54 50 2F 31 2E 31 20 32 30 34 20 4E 6F 20 43 6F 6E 74 65 6E 74 0D 0A 43 61 63 68 65 2D 43 6F 6E 74 72 6F 6C 3A 20 6E 6F 2D 73 74 6F 72 65 0D 0A 0D 0A 48 54 54 50 2F 31 2E 31 20 34 30 34 20 4E 6F 74 20 46 6F 75 6E 64 0D 0A 62 65 61 64 2D 72 65 66 75 73 61 6C 3A 20 70 61 74 68 2D 75 6E 6B 6E 6F 77 6E 0D 0A 63 6F 6E 74 65 6E 74 2D 6C 65 6E 67 74 68 3A 20 30 0D 0A 0D 0A 48 54 54 50 2F 31 2E 31 20 32 30 30 20 4F 4B 0D 0A 43 6F 6E 74 65 6E 74 2D 54 79 70 65 3A 20 61 70 70 6C",
+        "69 63 61 74 69 6F 6E 2F 70 72 73 2E 62 65 61 64 0D 0A 43 6F 6E 74 65 6E 74 2D 4C 65 6E 67 74 68 3A 20 33 0D 0A 0D 0A 01",
+        "02 03"
+      ],
+      "responses": [
+        {
+          "status": 204,
+          "fields": {
+            "cache-control": "no-store"
+          },
+          "body": ""
+        },
+        {
+          "status": 404,
+          "fields": {
+            "bead-refusal": "path-unknown",
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "status": 200,
+          "fields": {
+            "content-type": "application/prs.bead",
+            "content-length": "3"
+          },
+          "body": "01 02 03"
+        }
+      ]
     }
   ],
   "cases": [
@@ -8192,6 +8225,4294 @@
           "expect": {
             "status": 204,
             "body": ""
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
+      "name": "requests pipelined in one write behind a held listen are each answered in their turn once it ends, and the socket is kept",
+      "clauses": [
+        "15.6.4",
+        "15.6.6",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 1000\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "behind": [
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            },
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\n\r\n"
+            },
+            {
+              "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\n\r\n"
+            }
+          ],
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "behind": [
+            {
+              "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            }
+          ],
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "end": true
           },
           "on": "listen"
         }

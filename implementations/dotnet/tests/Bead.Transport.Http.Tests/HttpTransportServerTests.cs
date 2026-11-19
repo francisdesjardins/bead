@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -678,6 +679,78 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             }
 
             return taken;
+        }
+
+        // whether its server keeps it a second more: neither its end nor its reset came, nor
+        // anything else
+        public async Task<bool> IsKept()
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), Cancelled);
+
+            return !_tcp.Client.Poll(TimeSpan.Zero, SelectMode.SelectRead);
+        }
+
+        // the statuses of so many answers, one after another, each head and its body by its length
+        // read off it in bulk
+        // ! what comes past the last of them is dropped: no read of it follows before more is asked
+        public async Task<List<int>> Statuses(int count)
+        {
+            var statuses = new List<int>();
+            var came = new List<byte>();
+            var buffer = new byte[65_536];
+            var at = 0;
+
+            while (statuses.Count < count)
+            {
+                var end = CollectionsMarshal.AsSpan(came)[at..].IndexOf("\r\n\r\n"u8);
+
+                if (end < 0)
+                {
+                    var read = await _stream.ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                    if (read == 0)
+                    {
+                        throw new IOException($"the socket ended after {statuses.Count} answers");
+                    }
+
+                    came.RemoveRange(0, at);
+                    came.AddRange(buffer.AsSpan(0, read));
+                    at = 0;
+
+                    continue;
+                }
+
+                var head = Encoding.ASCII.GetString(CollectionsMarshal.AsSpan(came).Slice(at, end));
+                var lines = head.Split("\r\n");
+                var length = lines.Skip(1).Select((line) =>
+                {
+                    return line.Split(':', 2);
+                }).Where((field) =>
+                {
+                    return field[0].Trim().Equals("content-length", StringComparison.OrdinalIgnoreCase);
+                }).Select((field) =>
+                {
+                    return int.Parse(field[1].Trim(), CultureInfo.InvariantCulture);
+                }).FirstOrDefault();
+
+                // its body by its length, as it comes
+                while (came.Count < at + end + 4 + length)
+                {
+                    var read = await _stream.ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                    if (read == 0)
+                    {
+                        throw new IOException($"the socket ended within answer {statuses.Count + 1}");
+                    }
+
+                    came.AddRange(buffer.AsSpan(0, read));
+                }
+
+                statuses.Add(int.Parse(lines[0].Split(' ')[1], CultureInfo.InvariantCulture));
+                at += end + 4 + length;
+            }
+
+            return statuses;
         }
 
         // dropped with a reset, as a client gone does
@@ -1956,9 +2029,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
     }
 
-    // RFC 9112 §9.3
+    // spec 15.12; RFC 9112 §9.3
     [Fact]
-    public async Task Bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen()
+    public async Task Stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_socket()
     {
         await Start();
 
@@ -1970,9 +2043,49 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         var taken = await wire.Taken(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n", 1_000))));
 
-        // what it took bounded, and the transport still serves
+        // what it took bounded, its socket kept, and the transport still serves
         Assert.True(taken < MostTaken, $"{taken} octets taken");
+        Assert.True(await wire.IsKept(), "its socket ended or reset");
         await Connect();
+    }
+
+    // spec 15.12; RFC 9112 §9.3
+    [Fact]
+    public async Task Answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect(isListening: true);
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 1000\r\n\r\n");
+        await Until(() =>
+        {
+            return Count("listens") == 1;
+        });
+
+        // * 6,000 requests pipelined behind the listen in one write, from a task of their own, read
+        // all the while: a write the server does not take never holds the reads up
+        var other = $"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n";
+        var writing = Task.Run(
+            () =>
+            {
+                return wire.Write(string.Concat(Enumerable.Repeat(other, 6_000)));
+            },
+            Cancelled);
+        var reading = wire.Statuses(6_001);
+
+        // the listen ends at its wait, once the requests went or a second passed
+        await Task.WhenAny(writing, Task.Delay(TimeSpan.FromSeconds(1), Cancelled));
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        // its 204, then each request's 404, in turn
+        Assert.Equal([204, .. Enumerable.Repeat(404, 6_000)], await reading);
+        await writing;
+
+        // one more, on the same socket
+        await wire.Write(other);
+        Assert.Equal([404], await wire.Statuses(1));
     }
 
     // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3

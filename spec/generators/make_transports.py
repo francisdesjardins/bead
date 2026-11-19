@@ -6,7 +6,8 @@ from datetime import datetime
 
 import amqp_messages
 from bounds import DEFAULTS
-from conformance import advance, armed, citing_no_detail, detail_by_default, hexadecimal, text, word, write_json
+from conformance import (PIPELINED, advance, armed, citing_no_detail, detail_by_default, hexadecimal, pipelined, text,
+                         word, write_json)
 from interop import PROCEDURES, SERVICE_ID
 from jws import signed, unbase64url
 from mqtt_packets import largest_payload, receive_bound
@@ -120,11 +121,17 @@ def post(on, body, *, fields=None):
     return send(on, 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD), *pairs(fields)], body=body)
 
 
-def listen(on, after=None, wait=None, *, fields=None, target='/bead'):
+def listen(on, after=None, wait=None, *, fields=None, target='/bead', close=True):
     """A listen at the connection's one URL, its cursor in bead-after and its wait in bead-wait (spec
     15.9), each left out when None and written as given otherwise, a malformed count among them."""
     counts = [(name, value) for name, value in (('bead-after', after), ('bead-wait', wait)) if value is not None]
-    return send(on, 'GET', target, fields=[('bead-connection-token', '{token}'), *counts, *pairs(fields)])
+    return send(on, 'GET', target, fields=[('bead-connection-token', '{token}'), *counts, *pairs(fields)], close=close)
+
+
+def behind(on, sent):
+    """Requests written in their order and in one write on the socket of the exchange named, which a
+    send opened: the requests of the sends given."""
+    return {'behind': [step['send'] for step in sent], 'on': on}
 
 
 def expect(on, status, *, fields=None, **body):
@@ -259,6 +266,11 @@ SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'languag
 METHODS_CASE = [{'row': "A method Node's HTTP parser does not know", 'language': 'TypeScript'}]
 # a 405 over HTTP names the methods its path takes (RFC 9110 §15.5.6)
 ALLOWED = {'allow': 'GET, POST, DELETE'}
+# the requests pipelined behind a listen held, in turn, each with its refusal: a path the server does
+# not serve, and an exchange with no token (spec 15.6), neither declaring a body, so that each keeps
+# its socket (spec 15.12)
+PIPELINED_REFUSALS = [(send('listen', 'POST', '/elsewhere', close=False), (404, 'path-unknown')),
+                      (send('listen', 'GET', close=False), (400, 'malformed'))]
 
 
 cases = [
@@ -939,6 +951,17 @@ cases = [
         *drawn(listening=True), listen('listen', 0, 1000), armed(1000), advance(1000), expect('listen', 204, body='')]),
     ('a listen is held no longer than the server\'s bound, whatever its wait', ['15.9', '15.12.7'], {'maximumWait': 1000}, [
         *drawn(listening=True), listen('listen', 0, 60000), armed(1000), advance(1000), expect('listen', 204, body='')]),
+    # 15.12: requests pipelined in one write behind a listen held, each answered in its turn once the
+    # listen ends, then one more on the same socket, which it keeps; each a refusal of the server's own
+    # of a request that declares no body, 404 and 400 in turn, so that their order shows
+    ('requests pipelined in one write behind a held listen are each answered in their turn once it ends, and the socket is kept',
+     ['15.6.4', '15.6.6', '15.12'], None, [
+         *drawn(listening=True), listen('listen', 0, 1000, close=False),
+         pipelined(behind('listen', [PIPELINED_REFUSALS[k % 2][0] for k in range(PIPELINED)])),
+         armed(1000), advance(1000), expect('listen', 204, body=''),
+         *[refused('listen', *PIPELINED_REFUSALS[k % 2][1]) for k in range(PIPELINED)],
+         behind('listen', [send('listen', 'POST', '/elsewhere')]), refused('listen', 404, 'path-unknown'),
+         {'expect': {'end': True}, 'on': 'listen'}]),
     ('a connection with no exchange under way closes past its inactivity timeout, a listen held holding it off',
      ['15.1', '15.7', '15.12.9'], {'inactivityTimeout': 5000}, [
          *drawn(listening=True), listen('listen', 0, 10000), armed(10_000), advance(10_000), expect('listen', 204, body=''),
@@ -2763,7 +2786,28 @@ responses = [
     ('a field cut across reads, its name in any case', [text('HTTP/1.1 204 No Content\r\nBEAD-Refusal: bu'),
                                                         text('sy\r\n\r\n')],
      204, {'bead-refusal': 'busy'}, ''),
+    # several responses on one socket, as requests pipelined behind one another bring them (spec
+    # 15.12): two in one read, then a third's head and its body cut across the reads that follow
+    ('responses one after another on one socket, two in one read and the third cut across reads',
+     [text('HTTP/1.1 204 No Content\r\nCache-Control: no-store\r\n\r\n'
+           'HTTP/1.1 404 Not Found\r\nbead-refusal: path-unknown\r\ncontent-length: 0\r\n\r\n'
+           'HTTP/1.1 200 OK\r\nContent-Type: appl'),
+      text('ication/prs.bead\r\nContent-Length: 3\r\n\r\n') + ' 01', '02 03'],
+     [(204, {'cache-control': 'no-store'}, ''),
+      (404, {'bead-refusal': 'path-unknown', 'content-length': '0'}, ''),
+      (200, {'content-type': BEAD, 'content-length': '3'}, '01 02 03')]),
 ]
+
+
+def response_entry(name, pieces, *read):
+    """An entry of responses: one response's status, fields and body, or, as a list, several on one
+    socket, so that a reader that reads one alone reads no entry of several."""
+    if len(read) == 1:
+        return {'name': name, 'pieces': pieces,
+                'responses': [{'status': status, 'fields': fields, 'body': body} for status, fields, body in read[0]]}
+
+    status, fields, body = read
+    return {'name': name, 'pieces': pieces, 'status': status, 'fields': fields, 'body': body}
 
 # ── What a refusal tells ────────────────────────────────────────────────────────────────────────
 
@@ -2855,25 +2899,36 @@ def told_of(head, status, reason, options):
 
 
 def tell(steps, options):
-    """Gives every expect marked in bead-refusal what its server tells of it, from the request its
-    exchange sent; one that sets its own, null where nothing is told, keeps it."""
+    """Gives every expect marked in bead-refusal what its server tells of it, from the request it
+    answers: the first its exchange wrote, by its send or a behind, that no expect of a status read
+    yet; one that sets its own, null where nothing is told, keeps it."""
     heads = {}
 
     for step in steps:
         if 'send' in step and 'head' in step['send']:
-            heads[step['on']] = step['send']['head']
+            heads.setdefault(step['on'], []).append(step['send']['head'])
+            continue
+
+        if 'behind' in step:
+            heads.setdefault(step['on'], []).extend(request['head'] for request in step['behind'])
             continue
 
         expectation = step.get('expect', {})
+
+        if 'status' not in expectation:
+            continue
+
+        written = heads.get(step['on'], [])
+        head = written.pop(0) if written else None
         reason = expectation.get('fields', {}).get('bead-refusal')
 
         if not isinstance(reason, str) or 'told' in expectation:
             continue
 
-        if step['on'] not in heads:
+        if head is None:
             raise ValueError(f'a refusal on {step["on"]!r} that no request of its own sent')
 
-        expectation['told'] = told_of(heads[step['on']], expectation['status'], reason, options)
+        expectation['told'] = told_of(head, expectation['status'], reason, options)
 
 
 def mqtt_broker():
@@ -2935,12 +2990,12 @@ document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-        'A step is what the test does — send, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
-        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
+        'A step is what the test does — send, behind, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the HTTP exchange it names, which a send opened: it never opens a socket. A behind is never awaited: the next step starts as it is written, the player writing it from a task of its own, without waiting for its socket to take it. Each of its heads is whole, of no HEAD and no CONNECT, and carries no upgrade or expect, so that each response is framed by its status and its fields alone (RFC 9112, section 6.3); one behind writes 65,536 octets at most, each value put in counted as 128, within what a host\'s socket takes, since a case holds a server\'s outcome, never what it reads ahead. On a socket its server ended, a behind writes what the platform takes, and a write refused fails no step.',
+        'expect reads the next response on the exchange it names, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). On an exchange a behind wrote on, each told is the next refusal told on it, in order. A response is read by its content-length, or de-chunked, as responses checks every reader, several on one socket among them, each read whole after the one before. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). No expect of an exchange a behind wrote on is orLost or told null: a refusal told names its socket, not its request, so neither could be matched to one response. An expect of end, once its responses were read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12), and that nothing came past those responses. The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
-        'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
-        'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
+        'Before each send, behind and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
+        'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, behind, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
         'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
@@ -2958,10 +3013,7 @@ document = {
     'specVersion': spec_version(),
     'wallClock': WALL_CLOCK,
     'defaults': DEFAULTS,
-    'responses': [
-        {'name': name, 'pieces': pieces, 'status': status, 'fields': fields, 'body': body}
-        for name, pieces, status, fields, body in responses
-    ],
+    'responses': [response_entry(*entry) for entry in responses],
     'cases': [
         {'name': name, 'clauses': citing_no_detail(clauses, steps), 'transport': 'http', **({'options': options} if options else {}),
          **({'realTime': True} if name in HTTP_REAL_TIME else {}),

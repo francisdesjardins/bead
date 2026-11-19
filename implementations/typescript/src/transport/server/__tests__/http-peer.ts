@@ -23,17 +23,35 @@ export interface IResponse extends IResponseHead {
   body: Uint8Array;
 }
 
-/** A response read as its bytes come, in whatever reads they come. */
-export interface IResponseReader {
+/** One response read as its bytes come, in whatever reads they come. */
+export interface IResponseReading {
   /** Settles once the head is read, so a response whose body never comes still shows its head. */
   readonly head: Promise<IResponseHead>;
-  /** The stream ended, reset or not, before any status line: the exchange is lost. */
+  /** The stream ended, reset or not, before its status line: the exchange is lost. */
   readonly isLost: boolean;
   /** Settles once the body is whole. */
   readonly response: Promise<IResponse>;
+}
+
+/** The responses of one socket, read in their order as their bytes come. */
+export interface IResponseReader {
+  /** The octets that came past the responses taken; none once the socket switched protocols. */
+  readonly unread: number;
   /** The stream ended: a body read to its end is whole, any other is cut short. */
   end(error?: Error): void;
   feed(bytes: Uint8Array): void;
+  /** Takes the response after the last one taken, as it comes. */
+  next(): IResponseReading;
+}
+
+// one response of a reader's: its head and its whole as they come, whether it settled, whether it
+// was lost, and where it ended among the octets fed
+interface ISlot {
+  end: number | undefined;
+  readonly head: PromiseWithResolvers<IResponseHead>;
+  isLost: boolean;
+  isSettled: boolean;
+  readonly whole: PromiseWithResolvers<IResponse>;
 }
 
 /** A WebSocket frame, RFC 6455 5.2: its opcode, whether it ends its message, and its payload. */
@@ -58,7 +76,10 @@ export interface IExchange {
   next(within: number): Promise<Heard | undefined>;
   /** Writes frames on its WebSocket, each masked, as a client's must be. */
   send(frames: readonly IFrame[]): void;
-  /** Writes `bytes` on its socket as they are: a part of a frame, say. */
+  /**
+   * Writes `bytes` on its socket as they are, never waiting for it to take them: a part of a frame,
+   * or requests pipelined behind the one it sent.
+   */
   write(bytes: Uint8Array): void;
 }
 
@@ -224,109 +245,178 @@ export const closeFrameOf = (code: number): IFrame => {
 // definition
 
 /**
- * A reader of one HTTP/1.1 response, fed its bytes as they come; `onWhole` is given the response once
- * whole, and what came after it, which a 101 hands to the protocol it switched to.
+ * A reader of the HTTP/1.1 responses of one socket, in their order, fed its bytes as they come:
+ * each response is read whole after the one before it, requests pipelined bringing several. Once a
+ * 101 is whole, what came after it is handed to `onSwitch`, the protocol it switched to.
  */
-export const createResponseReader = (
-  onWhole?: (response: IResponse, rest: Uint8Array) => void
-): IResponseReader => {
-  const head = Promise.withResolvers<IResponseHead>();
-  const whole = Promise.withResolvers<IResponse>();
-  let pending = Buffer.alloc(0);
+export const createResponseReader = (onSwitch?: (rest: Uint8Array) => void): IResponseReader => {
+  // every response read or taken so far, in order, and where each ended among the octets fed
+  const slots: ISlot[] = [];
+  let pending: Buffer = Buffer.alloc(0);
   let read: { framing: 'chunked' | 'end' | number; head: IResponseHead } | undefined;
-  let isSettled = false;
-  let isLost = false;
+  // the response the next octets belong to, how many `next` took, and the octets fed
+  let reading = 0;
+  let taken = 0;
+  let fed = 0;
+  let ended: Error | undefined;
+  let isSwitched = false;
 
-  // a response nobody waits for may be cut short: neither rejection goes unhandled
-  head.promise.catch(noop);
-  whole.promise.catch(noop);
+  const slotAt = (index: number): ISlot => {
+    while (slots.length <= index) {
+      const slot: ISlot = {
+        end: undefined,
+        head: Promise.withResolvers<IResponseHead>(),
+        isLost: false,
+        isSettled: false,
+        whole: Promise.withResolvers<IResponse>(),
+      };
 
-  const fail = (error: Error): void => {
-    isSettled = true;
-    head.reject(error);
-    whole.reject(error);
+      // a response nobody waits for may be cut short: neither rejection goes unhandled
+      slot.head.promise.catch(noop);
+      slot.whole.promise.catch(noop);
+      slots.push(slot);
+    }
+
+    return slots[index] as ISlot;
   };
 
-  const settle = (body: Uint8Array, rest: Uint8Array): void => {
-    if (read !== undefined) {
-      const response = { ...read.head, body };
+  const fail = (index: number, { error, isLost }: { error: Error; isLost: boolean }): void => {
+    const slot = slotAt(index);
 
-      isSettled = true;
-      whole.resolve(response);
-      onWhole?.(response, rest);
+    if (!slot.isSettled) {
+      slot.isSettled = true;
+      slot.isLost = isLost;
+      slot.head.reject(error);
+      slot.whole.reject(error);
     }
   };
 
-  // the head once it is in, then the body once it is whole
-  const advance = (): void => {
+  const settle = (body: Uint8Array, rest: Buffer): void => {
     if (read === undefined) {
-      const at = pending.indexOf(HEAD_END);
-
-      if (at === -1) {
-        return;
-      }
-
-      const parsed = headOf(pending.subarray(0, at).toString('latin1'));
-
-      read = { framing: framingOf(parsed), head: parsed };
-      pending = pending.subarray(at + HEAD_END.length);
-      head.resolve(parsed);
-    }
-
-    const { framing } = read;
-
-    if (framing === 'chunked') {
-      const chunked = dechunk(pending);
-
-      if (chunked !== undefined) {
-        settle(chunked.body, pending.subarray(chunked.end));
-      }
-
       return;
     }
 
-    if (typeof framing === 'number' && pending.length >= framing) {
-      settle(pending.subarray(0, framing), pending.subarray(framing));
+    const slot = slotAt(reading);
+    const response = { ...read.head, body };
+
+    slot.isSettled = true;
+    slot.end = fed - rest.length;
+    slot.whole.resolve(response);
+    read = undefined;
+    reading += 1;
+    pending = rest;
+
+    // * a 101 switches the socket to another protocol (RFC 9110 15.2.2): no response follows
+    if (response.status === 101) {
+      isSwitched = true;
+      fed -= rest.length;
+      pending = Buffer.alloc(0);
+      onSwitch?.(rest);
+    }
+  };
+
+  // each response in turn: its head once it is in, then its body once it is whole
+  const advance = (): void => {
+    while (!isSwitched) {
+      if (read === undefined) {
+        const at = pending.indexOf(HEAD_END);
+
+        if (at === -1) {
+          return;
+        }
+
+        const parsed = headOf(pending.subarray(0, at).toString('latin1'));
+
+        read = { framing: framingOf(parsed), head: parsed };
+        pending = pending.subarray(at + HEAD_END.length);
+        slotAt(reading).head.resolve(parsed);
+      }
+
+      const { framing } = read;
+
+      if (framing === 'chunked') {
+        const chunked = dechunk(pending);
+
+        if (chunked === undefined) {
+          return;
+        }
+
+        settle(chunked.body, pending.subarray(chunked.end));
+      } else if (typeof framing === 'number' && pending.length >= framing) {
+        settle(pending.subarray(0, framing), pending.subarray(framing));
+      } else {
+        return;
+      }
+    }
+  };
+
+  // what the stream's end leaves of the response under way, and of each taken after it
+  const endFrom = (index: number, error: Error | undefined): void => {
+    for (let each = index; each < slots.length; each += 1) {
+      const reason = each === reading && read !== undefined ? 'the body' : 'the head';
+      // * lost: no status line came whole before the stream ended, as the C# side's peer reads it
+      const isLost = each > reading || (read === undefined && !pending.includes(CRLF));
+
+      fail(each, {
+        error: error ?? new Error(`the stream ended before ${reason} was whole`),
+        isLost,
+      });
     }
   };
 
   return {
     end: (error) => {
-      if (isSettled) {
+      if (ended !== undefined || isSwitched) {
         return;
       }
+
+      ended = error ?? new Error('the stream ended');
 
       if (read?.framing === 'end') {
-        settle(pending, new Uint8Array());
-
-        return;
+        settle(pending, Buffer.alloc(0));
       }
 
-      const reason = read === undefined ? 'the head' : 'the body';
-
-      // * lost: no status line came whole before the stream ended, as the C# side's peer reads it
-      isLost = read === undefined && !pending.includes('\r\n');
-
-      fail(error ?? new Error(`the stream ended before ${reason} was whole`));
+      endFrom(reading, error);
     },
     feed: (bytes) => {
-      if (isSettled) {
+      if (ended !== undefined || isSwitched) {
         return;
       }
 
+      fed += bytes.length;
       pending = Buffer.concat([pending, bytes]);
 
       try {
         advance();
       } catch (error) {
-        fail(toError(error));
+        ended = toError(error);
+        fail(reading, { error: ended, isLost: false });
       }
     },
-    head: head.promise,
-    get isLost() {
-      return isLost;
+    next: () => {
+      const slot = slotAt(taken);
+
+      taken += 1;
+
+      if (ended !== undefined && !slot.isSettled) {
+        endFrom(reading, undefined);
+      }
+
+      return {
+        head: slot.head.promise,
+        get isLost() {
+          return slot.isLost;
+        },
+        response: slot.whole.promise,
+      };
     },
-    response: whole.promise,
+    get unread() {
+      if (isSwitched) {
+        return 0;
+      }
+
+      return fed - (taken === 0 ? 0 : (slots[taken - 1]?.end ?? fed));
+    },
   };
 };
 
@@ -498,11 +588,9 @@ export const openExchange = (
     }
   };
 
-  const reader = createResponseReader((response, rest) => {
-    if (response.status === 101) {
-      frames = createFrameReader({ answer, hear });
-      feedFrames(rest);
-    }
+  const reader = createResponseReader((rest) => {
+    frames = createFrameReader({ answer, hear });
+    feedFrames(rest);
   });
 
   const end = (error?: Error): void => {
@@ -543,7 +631,10 @@ export const openExchange = (
       socket.end();
     },
     write: (bytes) => {
-      socket.write(bytes);
+      // * a write refused, on a socket its server ended, fails nothing: its end is what is read
+      if (socket.writable) {
+        socket.write(bytes);
+      }
     },
     next: (within) => {
       const first = heard.shift();

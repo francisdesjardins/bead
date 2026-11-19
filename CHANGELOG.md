@@ -22,6 +22,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side's handlers read `HttpClient.DefaultProxy`, Node's global dialers the environment's proxy
   under `NODE_USE_ENV_PROXY`, MQTT.js the SOCKS proxy `MQTTJS_SOCKS_PROXY` names, and the Rust side
   none. `UNTESTED_OPEN` is 45.
+- Spec 15.12: over HTTP/1, a server holds no more of a socket than a bound of its own of what it
+  read behind the answer under way, and past it reads nothing more of that socket until the answers
+  ahead end, keeping it. Each request pipelined is answered in its turn, however many come in one
+  write. A server that reads nothing more of a socket learns its client went by a write that fails.
+  The TypeScript side stops reading a socket past 32 requests unserved and resumes it at 16, and
+  across its sockets holds 65,536 at most; a head Node parsed in part behind them is still timed by
+  `headersTimeout`, which resets a socket whose answer ahead is held that long. Transcoding 10.2 inherits the rule, 8.6 says how a stream
+  learns its client went, and 8.7 that a stream whose heartbeat is without end outlives a client
+  gone unseen.
+- `spec/transports.json` and `spec/transcoding.json` take a step, `behind`, which writes requests on
+  an exchange's socket in one write, never awaited, 65,536 octets at most. An `expect` of a status
+  reads the next response on its socket, and an `expect` of `end` reads that nothing came past the
+  responses read. A case in each pipelines requests behind an answer held and has each answered in
+  its turn, the socket kept, and `responses` gains several responses on one socket. The support
+  matrix's open row on requests pipelined becomes a platform row: what each platform reads ahead,
+  and when each side sees its client leave.
 
 ### Security
 

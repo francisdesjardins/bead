@@ -624,11 +624,14 @@ result and `event: failure` for the failure that ends the stream; then `id: `, i
 subscription (section 11.7, item 2, of `spec.md`) — its queue past its bounds, `CAPACITY_EXCEEDED`;
 its session ended, `SESSION_REQUIRED`; a failure its application ends it with — as its problem; or
 the gateway's own, 502, where its exchange's connection closed before it. A stream whose client goes
-ends as its exchange's connection closes, which ends its subscription (section 11.7, item 3).
+ends as its exchange's connection closes, which ends its subscription (section 11.7, item 3); a
+gateway that reads nothing more of its socket (section 15.12 of `spec.md`) learns it went by a write
+that fails, its heartbeat's or an event's.
 
 8.7. While nothing else goes, a gateway writes a comment, `:` and a line feed, every `heartbeat`, 30
 seconds by default, a duration of section 1.4 of `spec.md`, which may be without end, so that an
-intermediary's idle timeout does not cut a quiet stream.
+intermediary's idle timeout does not cut a quiet stream. A stream whose heartbeat is without end and
+that writes nothing then outlives a client gone unseen, as one whose link was cut does.
 
 8.8. A gateway MUST ask its subscription paced (section 11.8 of `spec.md`), and credit each
 notification once the event before it was taken by its response — written whole to its socket, or
@@ -706,7 +709,8 @@ names and their defaults: `bodyBytesBudget`, `maximumBodyBytes`, `headersTimeout
 `minimumBodyBytesPerSecond` and `bodyGracePeriod` for what comes; `minimumSendBytesPerSecond`,
 `sendGracePeriod` and `maximumUnsentBytes` for an answer and a stream that go out, a stream's
 response dropped past either as a WebSocket's connection is, which closes its exchange's connection.
-A gateway closes a connection, and serves the requests on it in their order, as section 15.12 of
+A gateway closes a connection, serves the requests of an HTTP/1 socket in their order, and reads no
+more of one than its bound behind the answer under way, keeping the socket, as section 15.12 of
 `spec.md` has a server do: a refusal of its own of a request that declares a body closes it, in
 stages, and an answer to a call, written once its body was read, carries no `connection: close` of
 its own.

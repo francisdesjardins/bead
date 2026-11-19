@@ -2091,9 +2091,9 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // RFC 9112 §9.3
+    // spec 15.12; transcoding 10.2; RFC 9112 §9.3
     [Fact]
-    public async Task Bounds_what_it_reads_of_requests_pipelined_behind_a_stream()
+    public async Task Stops_reading_requests_pipelined_behind_a_stream_and_keeps_its_socket()
     {
         // ! a stream's heartbeat finds its client gone: Kestrel, which stopped reading, never reads
         // its close, and the gateway's stop would wait on the stream
@@ -2110,9 +2110,120 @@ public sealed class HttpGatewayTests
             using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes($"GET /v1/watch HTTP/1.1\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n"));
             var taken = await Taken(socket, Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n", 1_000))));
 
-            // what it took bounded, and the gateway still serves
+            // what it took bounded, its socket kept, and the gateway still serves
             Assert.True(taken < MostTaken, $"{taken} octets taken");
+            Assert.True(IsKept(socket), "its socket ended or reset");
             Assert.Equal(200, (await Exchanged(started.Port, Encoding.ASCII.GetBytes($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\nconnection: close\r\n\r\n"))).Status);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.2; RFC 9112 §9.3
+    [Fact]
+    public async Task Answers_every_request_pipelined_behind_a_call_in_its_turn_once_its_timeout_ends_it_and_keeps_its_socket()
+    {
+        // ! the timeout bounds each of the 6,001 calls, the books' too: at 500 ms, a pause of the
+        // runner under coverage timed one book out on CI, so it leaves them room
+        var started = await Started((options) =>
+        {
+            return options with { Timeout = TimeSpan.FromSeconds(2) };
+        });
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var book = $"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n";
+
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/hang HTTP/1.1\r\nhost: {own}\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{{}}"));
+            var reader = new Exchanges.Reader(socket);
+
+            await Until(() =>
+            {
+                return started.Service.Hanging == 1;
+            });
+
+            // * 6,000 requests pipelined behind the call in one write, from a task of their own,
+            // read all the while: a write the gateway does not take never holds the reads up
+            var writing = Task.Run(
+                async () =>
+                {
+                    await socket.SendAsync(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat(book, 6_000))), Cancelled);
+                },
+                Cancelled);
+            var statuses = new List<int>();
+
+            for (var index = 0; index < 6_001; index += 1)
+            {
+                var head = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+
+                await reader.ReadBody(head).WaitAsync(Patience, Cancelled);
+                statuses.Add(head.Status);
+            }
+
+            // the call's 504 at its timeout, then each book, in turn
+            Assert.Equal([504, .. Enumerable.Repeat(200, 6_000)], statuses);
+            await writing;
+
+            // one more, on the same socket
+            await socket.SendAsync(Encoding.ASCII.GetBytes(book), Cancelled);
+            Assert.Equal(200, (await reader.ReadHead().WaitAsync(Patience, Cancelled)).Status);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 8.6
+    [Fact]
+    public async Task Frees_the_place_of_a_stream_within_two_heartbeats_once_its_client_leaves_with_a_request_pipelined_behind_it()
+    {
+        var heartbeat = TimeSpan.FromMilliseconds(250);
+        var started = await Started((options) =>
+        {
+            return options with { MaximumConnectionsPerAddress = 1, Heartbeat = heartbeat };
+        });
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var watch = $"GET /v1/watch HTTP/1.1\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n";
+
+            // * a stream, then a request pipelined behind it in the same write, its client gone once
+            // the stream began
+            using (var socket = await Opened(started.Port, Encoding.ASCII.GetBytes($"{watch}GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n")))
+            {
+                await ReadUntil(socket, "data: {}\n\n");
+            }
+
+            var left = TimeProvider.System.GetTimestamp();
+            HttpResponseMessage? second = null;
+
+            // a second stream from the same address, refused busy until the first one's place is freed
+            try
+            {
+                while (second?.StatusCode != HttpStatusCode.OK && TimeProvider.System.GetElapsedTime(left) < Patience)
+                {
+                    second?.Dispose();
+
+                    var request = new HttpRequestMessage(HttpMethod.Get, "/v1/watch");
+
+                    request.Headers.Accept.ParseAdd("text/event-stream");
+                    second = await started.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Cancelled);
+                }
+
+                var freedWithin = TimeProvider.System.GetElapsedTime(left);
+
+                Assert.Equal(HttpStatusCode.OK, second?.StatusCode);
+                Assert.True(freedWithin <= (2 * heartbeat) + TimeSpan.FromSeconds(1), $"freed in {freedWithin.TotalMilliseconds} ms");
+            }
+            finally
+            {
+                second?.Dispose();
+            }
         }
         finally
         {
@@ -4183,6 +4294,30 @@ public sealed class HttpGatewayTests
         }
 
         return Encoding.UTF8.GetString([.. came]);
+    }
+
+    // whether its server keeps `socket` a second more: what comes on it read, a stream's heartbeats,
+    // neither its end nor its reset among it
+    private static bool IsKept(Socket socket)
+    {
+        var buffer = new byte[65_536];
+
+        for (var since = TimeProvider.System.GetTimestamp(); TimeProvider.System.GetElapsedTime(since) < TimeSpan.FromSeconds(1);)
+        {
+            try
+            {
+                if (socket.Poll(TimeSpan.FromMilliseconds(50), SelectMode.SelectRead) && socket.Receive(buffer) == 0)
+                {
+                    return false;
+                }
+            }
+            catch (SocketException)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // the octets `socket` takes of `batch`, sent again and again until a send waits a second or

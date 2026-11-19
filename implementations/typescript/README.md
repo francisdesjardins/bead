@@ -1096,10 +1096,15 @@ past its deadline is an exchange lost, its connection dropped at both ends, repo
 its connection closes, naming its bounds and their values.
 Over HTTP/1, the transport and the gateway serve a socket's requests in their order, each once
 the answers before it ended, and none behind an answer that closes its connection (RFC 9112 §9.3,
-§9.6). Behind an answer under way or one that closes its connection, a socket holds at most 32
-requests unserved, `MAXIMUM_UNSERVED_REQUESTS`. At the 33rd it is destroyed
+§9.6). Behind an answer under way or one that closes its connection, a socket holds 32 requests
+unserved, `MAXIMUM_UNSERVED_REQUESTS`, plus the rest of the read that brought the 33rd; past it the
+socket is no longer read until 16 are left, and it is kept. A head Node parsed in part behind them
+is still timed by `headersTimeout`, so a socket whose answer ahead is held that long is reset.
+Across sockets, 65,536 requests unserved at most, `UNSERVED_REQUESTS_BUDGET`; the socket whose
+request would pass it is destroyed
 ([`docs/support.md`](../../docs/support.md#differences),
-`Requests pipelined behind an answer under way, over HTTP/1.1`). A request carrying a
+`What a server reads of an HTTP/1.1 socket behind the answer under way, and when it sees its client leave`).
+A request carrying a
 `Content-Length` beside a `Transfer-Encoding` is refused 400 unmarked by Node's parser. On a server
 built with `insecureHTTPParser`, or in a process run with `--insecure-http-parser`, Node's parser
 hands it on. The transport and the gateway then refuse it themselves, 400 unmarked, and close its
