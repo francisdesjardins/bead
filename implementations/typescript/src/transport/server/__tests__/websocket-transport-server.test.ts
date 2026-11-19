@@ -62,6 +62,7 @@ import {
   type IFakeSocket,
 } from './fake-websocket-server';
 import { frameOf, OPCODES, openExchange } from './http-peer';
+import { closingAnswerOf } from './http-transport-server-fixtures';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IDrawingRequest>;
 
@@ -4192,6 +4193,30 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     expect(
       (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['X-Other: café']))).answer
     ).toEqual([400, null]);
+  });
+
+  // spec 15.2, 15.12; RFC 9110 §8.6
+  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const answers: unknown[] = [];
+
+    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
+    for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+      answers.push(
+        await closingAnswerOf(
+          started.port,
+          requestOf('GET / HTTP/1.1', [`Content-Length: ${length}`])
+        )
+      );
+    }
+
+    // Node's parser counts to 2⁶⁴ − 1: an upgrade that declares content is malformed, and past it Node
+    // answers its own 400
+    expect(answers).toEqual([
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, null],
+    ]);
   });
 
   test('waits for a head not whole', async () => {

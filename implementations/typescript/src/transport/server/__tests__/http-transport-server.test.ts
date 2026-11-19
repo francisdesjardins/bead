@@ -73,6 +73,7 @@ import {
   PAGE,
   batchOf,
   bytesOf,
+  closingAnswerOf,
   connect,
   envelopeOf,
   fieldsOf,
@@ -2515,6 +2516,31 @@ test.describe('createHTTPTransportServer, its edges', () => {
     // the refusal, then the connect it drew
     expect(read.text).toMatch(/^HTTP\/1\.1 404 [^]*HTTP\/1\.1 201 /u);
     expect(started.server.clients).toHaveLength(1);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+    await using started = await startTransport();
+    const answers: unknown[] = [];
+
+    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a connect
+    for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+      answers.push(
+        await closingAnswerOf(
+          portOf(started.url),
+          `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+            `Content-Length: ${length}\r\n\r\n`
+        )
+      );
+    }
+
+    // Node's parser counts to 2⁶⁴ − 1: a connect that declares a body is malformed, and past it Node
+    // answers its own 400
+    expect(answers).toEqual([
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, null],
+    ]);
   });
 
   // RFC 9112 §9.3

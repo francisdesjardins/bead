@@ -31,6 +31,7 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
+import { closingAnswerOf } from '../../transport/server/__tests__/http-transport-server-fixtures';
 import {
   GOOD_CREDENTIAL,
   type ITranscodingFixture,
@@ -2250,6 +2251,31 @@ test('serves a request pipelined behind an answer that keeps its connection, in 
   // the book, twice, each kept alive
   expect(received()).toMatch(/^HTTP\/1\.1 200 [^]*HTTP\/1\.1 200 /u);
   expect(received().toLowerCase()).not.toContain('connection: close');
+});
+
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const answers: unknown[] = [];
+
+  // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a route
+  for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+    answers.push(
+      await closingAnswerOf(
+        fixture.port,
+        `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+          `content-length: ${length}\r\n\r\n`
+      )
+    );
+  }
+
+  // Node's parser counts to 2⁶⁴ − 1: a body past maximumBodyBytes, and past it Node answers its own 400
+  expect(answers).toEqual([
+    [413, 'too-large'],
+    [413, 'too-large'],
+    [400, null],
+  ]);
 });
 
 // RFC 9112 §9.3

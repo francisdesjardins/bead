@@ -5071,6 +5071,58 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     fixture.dispose().await.expect("disposed");
 }
 
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+ {
+    use tokio::io::AsyncReadExt as _;
+
+    let fixture = started().await;
+    let port = fixture.port;
+    let mut answers = Vec::new();
+
+    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
+    for length in [
+        "9223372036854775808",
+        "18446744073709551615",
+        "18446744073709551616",
+    ] {
+        let mut socket = sent(
+            port,
+            format!(
+                "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{port}\r\n{JSON}\r\ncontent-length: {length}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await;
+        let mut came = Vec::new();
+
+        patience(PATIENCE, socket.read_to_end(&mut came))
+            .await
+            .expect("its socket closed")
+            .expect("its answer");
+
+        let came = String::from_utf8_lossy(&came).into_owned();
+
+        answers.push((
+            came.get(9..12).unwrap_or_default().to_owned(),
+            came.contains("bead-refusal: too-large\r\n"),
+        ));
+    }
+
+    // hyper counts to 2⁶⁴ − 3: a body past maximumBodyBytes; 2⁶⁴ − 2 and 2⁶⁴ − 1 hyper refuses
+    // 431, and past them 400
+    assert_eq!(
+        answers,
+        [
+            ("413".to_owned(), true),
+            ("431".to_owned(), false),
+            ("400".to_owned(), false),
+        ]
+    );
+    fixture.dispose().await.expect("disposed");
+}
+
 // what a server that stops reading takes at most of what one socket pipelines: its platform's
 // buffers and the loopback's are far below it
 const MOST_TAKEN: usize = 64 * 1024 * 1024;

@@ -1362,6 +1362,52 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     started.stop().await;
 }
 
+// spec 15.12; RFC 9110 §8.6
+#[tokio::test]
+async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let mut answers = Vec::new();
+
+    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a connect
+    for length in [
+        "9223372036854775808",
+        "18446744073709551615",
+        "18446744073709551616",
+    ] {
+        let mut socket = RawSocket::on(port).await;
+
+        socket
+            .write(
+                head_of(
+                    ("POST", "/bead"),
+                    (port, &[&bead, &format!("Content-Length: {length}")]),
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let head = socket.head(PATIENCE).await.expect("its answer");
+
+        answers.push((refusal_of(&head), socket.ended(PATIENCE).await));
+    }
+
+    // hyper counts to 2⁶⁴ − 3: a connect that declares a body is malformed; 2⁶⁴ − 2 and 2⁶⁴ − 1
+    // hyper refuses 431, and past them 400
+    assert_eq!(
+        answers,
+        [
+            ((400, Some(HTTP_REFUSALS.malformed.to_owned())), true),
+            ((431, None), true),
+            ((400, None), true),
+        ]
+    );
+    started.stop().await;
+}
+
 // what a server that stops reading takes at most of what one socket pipelines: its platform's
 // buffers and the loopback's are far below it
 const MOST_TAKEN: usize = 64 * 1024 * 1024;
