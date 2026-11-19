@@ -18,8 +18,8 @@
     <h2 id="methode-h">Where Bead stands</h2>
     <p>
       Bead is one person’s project, kept at its author’s pace. It has not reached 1.0.0, and it has
-      not run in production. It is not offered as a product to depend on: it is a vision of a company’s own
-      protocol, one typed contract from a device to a service to a page. A team takes it whole and
+      not run in production. It is not offered as a product to depend on: it is a vision of a
+      company’s own protocol. A team takes it whole and
       makes it its own, the protocol included: it changes the specification to its needs, and the
       conformance files and <a href="{{blob path="docs/maintaining.md"}}">the method</a> keep its
       implementations in step as it does. That method is in the repository, with its gates,
@@ -70,9 +70,8 @@
     <li><span class="swatch seg-payload"></span>the payload</li>
   </ul>
   <p class="space">
-    A service is declared in a <code>.proto</code>, and <code>beadc</code>
-    <a href="#implantations-beadc">generates</a> its server and its client. What is left to write
-    is the resolvers and the calls, here abridged from
+    Once <code>beadc</code> has <a href="#implantations-beadc">generated</a> a service’s server and
+    client, what is left to write is the resolvers and the calls, here abridged from
     <a href="{{tree path="examples/hello"}}"><code>examples/hello</code></a>:
   </p>
   {{code of="hello"}}
@@ -92,8 +91,7 @@
   </ol>
   <p>
     Each section gives its gist first, and the longer details are folded under a triangle. After
-    the questions comes <a href="#protocole">the protocol, in detail</a>, for the reader who
-    implements a side or audits one.
+    the questions comes <a href="#protocole">the protocol, in detail</a>.
   </p>
 </section>
 
@@ -113,8 +111,7 @@
     <li>
       <strong>A broker is one more transport</strong
       ><span>Over MQTT 5, and over AMQP 1.0 on the TypeScript and C# sides, both ends keep the API
-        they have over a WebSocket: calls with their failures, cancel, credentials, each client’s
-        pace and transfers.</span>
+        they have over a WebSocket.</span>
     </li>
     <li>
       <strong>One credit paces a subscription as it paces a transfer</strong
@@ -123,15 +120,15 @@
     </li>
     <li>
       <strong>The spec’s conformance files are its executable form</strong
-      ><span>Every unit of the spec is cited by a file, or carries the reason none does. Each side
-        plays those files, not a copy of its own, and the Rust side plays the part it reaches.</span>
+      ><span>Each side plays those files, not a copy of its own, and the Rust side plays the part it
+        reaches.</span>
     </li>
   </ul>
   <p class="space">
     The architecture guide sets Bead
     <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
     The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: it is
-    unpublished, it has no production use, it speaks three languages, and it has one maintainer.
+    unpublished, and it speaks three languages.
   </p>
 </section>
 
@@ -148,10 +145,8 @@
     and client, the validators, the route table, the OpenAPI document and the HTTP client.
   </p>
   <p>
-    A payload’s rules belong to the contract too. They are protovalidate’s options in the
-    <code>.proto</code>, which <code>beadc</code> compiles into each side’s validator, and the
-    server judges each request by them before its resolver sees it:
-    <a href="#regles">a payload’s rules</a> shows how.
+    A payload’s rules belong to the contract too, written with protovalidate’s options in the
+    <code>.proto</code>: <a href="#regles">a payload’s rules</a> shows how.
   </p>
   <p>
     <a href="{{tree path="examples/hello"}}"><code>examples/hello</code></a> is the same program in
@@ -162,15 +157,12 @@
   </p>
   <h3 id="implantations-beadc">Generated from a <code>.proto</code></h3>
   <p>
-    A service’s code is not written by hand in each language. <code>beadc</code>, the generator,
-    reads a <code>.proto</code> compiled by buf and draws a blueprint from it, a JSON file that
-    describes the API without depending on any language. <code>beadc check</code> judges it by its
-    rules, each refusal at its line and column. Each target then writes a typed server, where only
-    the resolvers are written, and the client that calls it. <code>beadc breaking</code> compares the
-    blueprint with the last release, and says what breaks a peer already deployed or the code
-    written against the API. <code>beadc</code> runs in a Docker image. One contract gives several
-    packages, each with its own selection of procedures. Each transport of a server takes the
-    procedures it is given.
+    <code>beadc</code>, the generator, reads a <code>.proto</code> compiled by buf and draws a
+    blueprint from it, a JSON file that describes the API without depending on any language.
+    <code>beadc check</code> judges it by its rules, each refusal at its line and column. Each
+    language’s target then writes its code from it, and <code>beadc breaking</code> holds it to
+    <a href="#versions">the last release</a>. <code>beadc</code> runs in a Docker image. One
+    contract gives several packages, each with its own selection of procedures.
     <a href="/playground/#packages">The demo’s Packages tab</a> cuts a blueprint into packages
     with <code>beadc</code>’s own code.
   </p>
@@ -219,8 +211,7 @@
     presents it ELSEWHERE, and the server’s verifier makes of it what the application decides. With
     its option <code>authorization</code> at <code>bearer-jwt</code>, it presents a
     <code>Bearer</code> field’s token as a JWT,
-    which the server verifies. It reads no credential from a cookie or a query string, and offers no
-    command.
+    which the server verifies. It reads no credential from a cookie or a query string.
   </p>
   <p>A call with <code>curl</code> to the gateway of <a href="#memoire">the server with joined transports</a>, on port 8081:</p>
   {{code of="curl" language="shell"}}
@@ -380,8 +371,7 @@
   </p>
   {{transports}}
   <p class="space">
-    The sides call each other in CI over WebSocket, HTTP and MQTT 5, and the TypeScript and C# sides
-    over AMQP 1.0 too. In a page or in Node, the TypeScript side depends on no package. A project
+    In a page or in Node, the TypeScript side depends on no package. A project
     adds the optional peers it uses: protobuf-es, MQTT.js, rhea or undici. A WebSocket server in
     Node also takes <code>ws</code>’s <code>WebSocketServer</code>, which its application installs
     and passes to it.
@@ -398,23 +388,17 @@
     matrix, with the test that shows it.
   </p>
   <p>
-    TypeScript and C# are at behavioural parity. Rust has its core, its WebSocket and HTTP
-    transports, its MQTT 5 binding, its gateway and <code>beadc</code>’s Rust target. Each part it
-    lacks is ahead, a row of the support matrix.
+    TypeScript and C# are at behavioural parity. The Rust side has the parts below, and what it
+    lacks is ahead.
   </p>
   {{implementations}}
   <p class="space">
-    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. The core also
-    compiles for <code>wasm32-unknown-unknown</code>.
-  </p>
-  <p>
     Parity holds down to the field. Where one platform cannot do what another can, the difference
     either stays between the sides or is leveled, every side keeping to what that platform can. A
     64-bit field, a chunk’s offset for instance, is leveled: it stops everywhere at
-    2<sup>53</sup> − 1, which a JavaScript number holds exactly. The support matrix,
-    <a href="{{blob path="docs/support.md"}}"><code>docs/support.md</code></a>, holds each
-    difference with the test that shows it, and its “Leveled down” register each limit one platform
-    imposes on all.
+    2<sup>53</sup> − 1, which a JavaScript number holds exactly.
+    <a href="{{blob path="docs/support.md"}}">The support matrix</a> keeps each such limit in its
+    “Leveled down” register.
   </p>
   <p>
     The sides also measure themselves. TypeScript and C# measure the same layers in the same
@@ -451,13 +435,12 @@
         {{fact of="values"}} values written, in <code>raw</code>, <code>text</code>,
         <code>json</code> and <code>proto</code>.</li>
       <li><strong>A payload’s rules</strong>: {{fact of="verdicts"}} verdicts and
-        {{fact of="details"}} details, and a differential against protovalidate-es in CI.</li>
+        {{fact of="details"}} details.</li>
       <li><strong>Transcoding</strong>: {{fact of="templates"}} templates, {{fact of="readings"}}
         readings, {{fact of="writings"}} writings, {{fact of="bindings"}} bindings,
         {{fact of="transcodingFailures"}} failures, {{fact of="events"}} event streams and
         {{fact of="exchanges"}} exchanges.</li>
-      <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors, and
-        <code>tools/fuzz.mjs</code> fuzzes each side’s parsers, guided by coverage.</li>
+      <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors.</li>
     </ul>
   </details>
   <details class="more" id="methode-spec">
@@ -465,9 +448,7 @@
     <p>
       A behaviour is written in <a href="{{blob path="spec/spec.md"}}"><code>spec/spec.md</code></a>
       before it is coded, its MUST and SHOULD in the sense of BCP 14 (RFC 2119, RFC 8174). The
-      conformance files then
-      play it, and every side reads them from <code>spec/</code>, with no copy of its own. Where no
-      file can play it, each side that carries it has a twin test, named by one sentence in every
+      conformance files then play it. Where no file can play it, each side that carries it has a twin test, named by one sentence in every
       language’s case: the TypeScript side’s
       <code>says at connect that it listens, then listens: a batch heard in order, acknowledged by the next listen</code>
       is the C# side’s
@@ -503,7 +484,7 @@
     <li>The conformance files on every side, and the sides calling each other, both ways.</li>
     <li>Protobuf’s conformance suite, over each side’s JSON mapping and codec.</li>
     <li>A differential against protovalidate-es, for a payload’s rules.</li>
-    <li>A weekly fuzzing campaign, guided by coverage, and coverage floors.</li>
+    <li>A weekly fuzzing campaign over each side’s parsers, guided by coverage, and coverage floors.</li>
     <li>
       Each side’s public surface pinned to its list, and every public name mapped across the
       languages.
@@ -648,18 +629,7 @@
   <h2 id="securite-h">Security, plainly</h2>
   <p class="gist">
     A Bead server keeps itself behind six gates, from the outermost to the innermost. Each gate
-    answers one question, and each refusal but the address’s says why. None of it has been
-    reviewed by an independent security expert.
-  </p>
-  <p>
-    The listening address says who can reach the server. The hosts and the origins say which
-    browser page it listens to. The credential says on whose behalf the call is made. The
-    procedure’s admission says what that caller may do. The payload’s rules say what the request
-    may carry.
-  </p>
-  <p>
-    Encryption is no gate of Bead’s. It is TLS’s job, under the transport, set up by the
-    deployment. Of its own, Bead only refuses to send a bearer credential in clear off the machine.
+    keeps one thing out, and each refusal but the address’s says why.
   </p>
   <div class="table-wrap" tabindex="0">
     <table>
@@ -761,8 +731,7 @@
 
   <h3 id="securite-certificat">TLS and the client’s certificate</h3>
   <p>
-    Bead has no encryption of its own: TLS carries it, <code>wss</code>, <code>https</code> or a
-    broker’s link under TLS. A client outside a page takes from its application the authorities it
+    A client outside a page takes from its application the authorities it
     trusts and a certificate with its key, and presents that certificate when its server asks for
     one. It takes its server’s certificate only when that certificate names the host the client
     asked for. A page’s TLS is its browser’s.
@@ -844,8 +813,7 @@
   <details class="more" id="securite-tls">
     <summary>What TLS does, and Bead does not</summary>
     <p>
-      Bead has no encryption of its own. Its envelopes and its tokens pass as they are in the
-      transport. Over HTTP in clear, whoever reads the traffic also reads the connection’s token and
+      Bead’s envelopes and its tokens pass as they are in the transport. Over HTTP in clear, whoever reads the traffic also reads the connection’s token and
       speaks in its name. Off the machine, HTTP and WebSocket are therefore served under TLS, and the
       certificates are the deployment’s concern.
     </p>
@@ -948,8 +916,6 @@
   </p>
   <ul class="chips space" aria-label="In figures">
     <li>8-byte prefix</li>
-    <li>12 bytes for a request</li>
-    <li>payloads past one envelope</li>
     <li>23 failure codes</li>
     <li>{{fact of="units"}} units in the spec</li>
   </ul>
@@ -1265,10 +1231,6 @@
       paths and the detail’s format are in §18.
     </p>
   </details>
-  <p class="space">
-    These rules belong to the contract every team shares:
-    <a href="#contrat">one contract for every team</a>.
-  </p>
 </section>
 
 <section id="annulation" data-toc="Cancel">
@@ -1734,9 +1696,8 @@
     <code>POST</code> carries an envelope (§15.4 to §15.12).
   </p>
   <p>
-    WebSocket does all that Bead asks of a transport: it delimits messages, carries both directions
-    and delivers in order. Where its platform lets it, each end sends a PING on a connection silent
-    for 30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
+    Where its platform lets it, each end of a WebSocket sends a PING on a connection silent for
+    30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
     The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
   </p>
@@ -1757,8 +1718,7 @@
   </p>
   <p>
     A call that presents ELSEWHERE carries its credential in the <code>Authorization</code> field of
-    its <code>POST</code>. Two calls of one connection can thus present two credentials, and a token is
-    renewed without reconnecting. The server takes only the hosts and the origins it knows:
+    its <code>POST</code>, so a token is renewed without reconnecting. The server takes only the hosts and the origins it knows:
     <a href="#securite-hotes">security</a> explains it.
   </p>
   <h3 id="http-ecoute">What the server sends of its own</h3>
@@ -1795,7 +1755,7 @@
     <p>
       WebSocket’s handshake is an HTTP request. The WebSocket server judges it by its own
       <code>hosts</code> and <code>origins</code>, under the same rules, and bounds its connections
-      as an HTTP server does: 10,000 in all, 64 per address. A handshake without
+      as an HTTP server does. A handshake without
       <code>Origin</code>, a client’s outside a browser, carries its <code>Authorization</code>
       beside each envelope of its connection. A page’s carries none, since its browser adds its
       user’s own authentication to it, as it adds cookies. A page therefore presents a JWT.
@@ -1848,8 +1808,7 @@
   </p>
   <p>
     A broker often joins services and devices already. Bead adds what topics alone lack: calls with
-    their answers and their failures, cancel, each client’s pace and transfers under credit. Both
-    ends keep the same API as over WebSocket.
+    their answers and their failures, cancel, each client’s pace and transfers under credit.
   </p>
   <p>
     A connection is placed once, at its opening, and named by its two ends, as a TCP connection is
@@ -1889,13 +1848,12 @@
       queue that ends with it. The deployment provisions each name’s queue, and the broker delivers
       each of its messages to a single member. Each message follows a single profile, counted to the
       byte. AMQP 1.0 has no will: Bead’s heartbeat alone says a peer went quiet. The TypeScript side
-      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. The
-      Rust side’s binding is ahead. No page reaches an AMQP 1.0 broker.
+      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. No
+      page reaches an AMQP 1.0 broker.
     </p>
     <p>
       In both cases, a deployment’s broker authenticates each link, by a password or a TLS client
-      certificate, and its access control lets a participant alone read its inbox. Each binding’s
-      interop runs in CI, both ways.
+      certificate, and its access control lets a participant alone read its inbox.
     </p>
   </details>
 </section>
@@ -1996,9 +1954,7 @@
   <div class="invite">
     <p>
       <strong id="essayer">See it run, then read it</strong>
-      The demo calls a server that runs in your browser, in a Web Worker. The getting-started guide
-      builds a C# server and a TypeScript client from an empty folder, and the repository holds the
-      specification, the three implementations and every decision.
+      The repository holds the specification, the three implementations and every decision.
     </p>
     <div class="actions">
       <a class="button" href="/playground/">Open the demo</a>
