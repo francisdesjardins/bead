@@ -869,31 +869,51 @@ a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over
 memory or over a broker (sections 15.9, 15.2, 15.13, 15.22) — and for one that presents a `JWT` or
 an `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential
 crosses only TLS off the machine
-([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a resolver sends a
-`localhost` name elsewhere (below). A transport is judged by what it is given, never by what a name
-resolves to. It is secure under TLS, its scheme `wss` or
-`https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
-in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
+([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a dialer the client
+does not own sends a `localhost` name elsewhere (below). A transport is judged by what it is given,
+never by what a name resolves to. It is secure under TLS, its scheme `wss` or `https`; on the
+loopback: a client by the host it names in its URL — `localhost` or a name that ends in
+`.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
 `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy, without its condition that the user agent keep such a name on the
-loopback; a server by the address it listens on (section 15.12), in 127.0.0.0/8, `::1`, or
-`localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
-transport or a router called in process. A broker's transport is secure while its own leg and its
-peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
+potentially trustworthy, its condition that the user agent keep such a name on the loopback met by
+every dialer the client owns (below); a server by the address it listens on (section 15.12), in
+127.0.0.0/8, `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an
+in-memory transport or a router called in process. A broker's transport is secure while its own leg
+and its peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
 which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
-space among them, is not, nor is `localhost.`, which it keeps as given. A client judges a
-`localhost` name by the name alone, and connects it through its platform's resolver, as
-[RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets application software do
-(item 2). A resolver that sends a name under `.localhost` on to its DNS server, as glibc's and
-musl's do, connects it wherever that server answers, and a credential judged secure crosses there
-in the clear. An application whose platform resolves so names the loopback by its address,
-`127.0.0.1` or `[::1]`, which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
-what stands in front of it: its application MAY say so, and is then believed whatever the server
-listens on — TLS terminated before it, which makes it secure, or a proxy that serves the network in
-the clear, which leaves it in the clear.
+space among them, is not, nor is `localhost.`, nor a name that ends in `.localhost.`, which it
+keeps as given. These two are Bead's departures from Secure Contexts, which takes both: every server
+refuses them, since it compares a host as it comes (section 15.12), and a client and a server read
+one set of names. Any other host leaves the machine in the clear. A server cannot tell what stands
+in front of it: its application MAY say so, and is then believed whatever the server listens on —
+TLS terminated before it, which makes it secure, or a proxy that serves the network in the clear,
+which leaves it in the clear.
+
+A client connects a host it judges on the loopback to the loopback itself, through no proxy, its
+own or its platform's. It connects `localhost` and a name that ends in `.localhost` to `127.0.0.1`
+and `::1`, and asks no resolver.
+[draft-ietf-dnsop-let-localhost-be-localhost-02](https://datatracker.ietf.org/doc/html/draft-ietf-dnsop-let-localhost-be-localhost-02#section-3)
+asks this of application software that makes a security decision on such a name (section 3,
+item 2). That draft has expired; its rules are the ones by which Secure Contexts conditions its
+trust in such a name. [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets
+application software treat the name so (item 2). A client races the two addresses as
+[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305) races a name's families, an attempt every 250 ms.
+`127.0.0.1` goes first, since a server on its defaults listens there (section 15.12), where
+[RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
+first. Its request names the host as its URL does, in its `Host` and in its TLS server name,
+whatever its scheme. A connect that fails says that it went to the loopback and asked no resolver.
+No option points such a name elsewhere: a host off the machine is named by its own name or address.
+
+A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
+`localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps
+such a name on the loopback. Such a dialer is one its application gives it, a page's, which its user
+agent connects, or its platform's own, which a side takes where it can build none of its own
+([`docs/support.md`](../docs/support.md), "Differences"). There, a resolver that sends a name under
+`.localhost` on to its DNS server, as glibc's and musl's do, a proxy, or a user agent that does not
+follow the draft's rules takes a credential judged secure wherever it answers, in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -2026,10 +2046,12 @@ for want of the address or of the family, it listens on `127.0.0.1` alone, and r
 as its address in place of `localhost`. A server the network reaches is one its application opened
 to it, `0.0.0.0` or `::` among them ([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)).
 Its address keeps the network out, and `hosts` a page on its own machine that rebinds its name to
-it; neither stands for the other. A client that connects by `localhost` reaches it on whichever
-family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); a server
-given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
-there, which then answers a client that tries that family first.
+it; neither stands for the other. A client connects `localhost`, over a dialer it owns, to
+`127.0.0.1` first, then to `::1`, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305))
+(section 13.4). A server given `::1` alone leaves `127.0.0.1`'s port to any process that listens
+there, which then answers every such connect by a `localhost` name. A server given `127.0.0.1` alone
+leaves `::1`'s port to a process that answers a client that tries the IPv6 loopback first: a
+browser, a client of another library, or one over a dialer it does not own.
 
 ### In memory
 

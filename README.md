@@ -134,7 +134,8 @@ and AMQP 1.0 on RabbitMQ 4 its second
   other's gateway.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
   Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
-  MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
+  MQTT 5, rhea over AMQP 1.0, and undici in Node, for an HTTP client's `tls` and for a client that
+  connects the loopback's names to the loopback without asking a resolver.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
@@ -148,11 +149,10 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the rules a security pass brings to every side: a `localhost` name reached on the
-  loopback without a resolver, as RFC 6761 §6.3 gives it ([0024](docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md));
-  a bound on what a server reads of a connection ahead of the request it serves, and on a
-  `Content-Length`; a transfer coding other than `chunked` refused, as RFC 9112 §6.1 asks; and a
-  malformed `Bearer` answered as RFC 6750 §3.1 gives it.
+- **Next**: the rules a security pass brings to every side: a bound on what a server reads of a
+  connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other than
+  `chunked` refused, as RFC 9112 §6.1 asks; and a malformed `Bearer` answered as RFC 6750 §3.1 gives
+  it.
 - **Then**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   a row of the [support matrix](docs/support.md#differences) ahead.
