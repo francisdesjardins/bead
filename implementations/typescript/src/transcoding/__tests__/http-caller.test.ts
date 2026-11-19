@@ -1386,7 +1386,9 @@ test.describe('createHTTPCaller, on the loopback', () => {
       });
     }
 
-    // * the proxy stands for every request of the platform's, one off the machine among them
+    // * the proxy stands for every request of the platform's, one off the machine among them, in the
+    // clear so that it reads its line
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
     expect((await fetch('http://bead.invalid/')).status).toBe(502);
     expect(proxy.received).toEqual(['GET http://bead.invalid/ HTTP/1.1']);
   });
