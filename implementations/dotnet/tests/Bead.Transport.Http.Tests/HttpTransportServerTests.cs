@@ -53,6 +53,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // what a server that stops reading takes at most of what one socket pipelines: its platform's
+    // buffers and the loopback's are far below it
+    private const long MostTaken = 64L * 1024 * 1024;
+
     private static readonly TransportServerStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
 
     // another address of this machine, which a socket of the tests' own comes from, as a peer elsewhere
@@ -651,6 +655,29 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 return true;
             }
+        }
+
+        // the octets it takes of `batch`, written again and again until a write waits a second or
+        // fails, or MostTaken went
+        public async Task<long> Taken(byte[] batch)
+        {
+            var taken = 0L;
+
+            while (taken < MostTaken)
+            {
+                try
+                {
+                    await _stream.WriteAsync(batch, Cancelled).AsTask().WaitAsync(TimeSpan.FromSeconds(1), Cancelled);
+                }
+                catch (Exception error) when (error is TimeoutException or IOException)
+                {
+                    break;
+                }
+
+                taken += batch.Length;
+            }
+
+            return taken;
         }
 
         // dropped with a reset, as a client gone does
@@ -1902,6 +1929,25 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // the refusal, then the connect it drew
         Assert.Equal((404, 201), (refused.Status, drawn.Status));
         Assert.Single(_server.Clients);
+    }
+
+    // RFC 9112 §9.3
+    [Fact]
+    public async Task Bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect(isListening: true);
+        using var wire = await Wire.Open(_port);
+
+        // * a listen held 30 s, then requests pipelined behind it, a thousand a write
+        await wire.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 30000\r\n\r\n");
+
+        var taken = await wire.Taken(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n", 1_000))));
+
+        // what it took bounded, and the transport still serves
+        Assert.True(taken < MostTaken, $"{taken} octets taken");
+        await Connect();
     }
 
     // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3

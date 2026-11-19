@@ -1362,6 +1362,74 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     started.stop().await;
 }
 
+// what a server that stops reading takes at most of what one socket pipelines: its platform's
+// buffers and the loopback's are far below it
+const MOST_TAKEN: usize = 64 * 1024 * 1024;
+
+// the octets `socket` takes of `batch`, written again and again until a write waits a second or
+// fails, or MOST_TAKEN went
+async fn taken(socket: &mut TcpStream, batch: &[u8]) -> usize {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut taken = 0;
+
+    while taken < MOST_TAKEN {
+        match patience(Duration::from_secs(1), socket.write_all(batch)).await {
+            Ok(Ok(())) => taken = taken.saturating_add(batch.len()),
+            _ => break,
+        }
+    }
+
+    taken
+}
+
+// RFC 9112 §9.3
+#[tokio::test]
+async fn bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen() {
+    use tokio::io::AsyncWriteExt as _;
+
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = &drawn.head.fields[CONNECTION_TOKEN_HEADER];
+    let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+
+    // * a listen held 30 s, then requests pipelined behind it, a thousand a write
+    socket
+        .write_all(
+            head_of(
+                ("GET", "/bead"),
+                (
+                    port,
+                    &[
+                        &format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+                        &format!("{AFTER_HEADER}: 0"),
+                        &format!("{WAIT_HEADER}: 30000"),
+                    ],
+                ),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let batch =
+        core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), 1_000).collect::<String>();
+    let octets = taken(&mut socket, batch.as_bytes()).await;
+
+    // what it took bounded, and the transport still serves
+    assert!(octets < MOST_TAKEN, "{octets} octets taken");
+    connect(&started).await;
+    started.stop().await;
+}
+
 // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
 #[tokio::test]
 async fn writes_content_length_0_on_an_empty_answer_but_a_204_or_a_head_s_and_keeps_an_http_1_0_connection_kept_alive_behind_each()

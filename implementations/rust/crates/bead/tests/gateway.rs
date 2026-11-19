@@ -5071,6 +5071,66 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     fixture.dispose().await.expect("disposed");
 }
 
+// what a server that stops reading takes at most of what one socket pipelines: its platform's
+// buffers and the loopback's are far below it
+const MOST_TAKEN: usize = 64 * 1024 * 1024;
+
+// the octets `socket` takes of `batch`, written again and again until a write waits a second or
+// fails, or MOST_TAKEN went
+async fn taken(socket: &mut tokio::net::TcpStream, batch: &[u8]) -> usize {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut taken = 0;
+
+    while taken < MOST_TAKEN {
+        match patience(Duration::from_secs(1), socket.write_all(batch)).await {
+            Ok(Ok(())) => taken = taken.saturating_add(batch.len()),
+            _ => break,
+        }
+    }
+
+    taken
+}
+
+// RFC 9112 §9.3
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounds_what_it_reads_of_requests_pipelined_behind_a_stream() {
+    let fixture = started().await;
+    let port = fixture.port;
+    let own = format!("{HOST}:{port}");
+    // * a stream that never ends, then requests pipelined behind it, a thousand a write
+    let mut socket = sent(
+        port,
+        format!("GET /v1/watch HTTP/1.1\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n")
+            .as_bytes(),
+    )
+    .await;
+    let batch = core::iter::repeat_n(
+        format!("GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n"),
+        1_000,
+    )
+    .collect::<String>();
+    let octets = taken(&mut socket, batch.as_bytes()).await;
+
+    // what it took bounded, and the gateway still serves
+    assert!(octets < MOST_TAKEN, "{octets} octets taken");
+    assert_eq!(
+        exchanged(
+            port,
+            format!("GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\nconnection: close\r\n\r\n")
+                .as_bytes()
+        )
+        .await
+        .head
+        .status,
+        200,
+        "the gateway serves"
+    );
+
+    drop(socket);
+    fixture.dispose().await.expect("disposed");
+}
+
 // spec 15.12; transcoding 10.2; RFC 9112 §9.5
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn keeps_its_connection_behind_a_refusal_of_a_request_that_declares_no_body_first_on_its_socket_and_serves_the_request_behind_it()

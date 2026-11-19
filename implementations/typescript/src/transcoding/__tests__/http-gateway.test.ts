@@ -2211,6 +2211,41 @@ test('serves a request pipelined behind an answer that keeps its connection, in 
   expect(received().toLowerCase()).not.toContain('connection: close');
 });
 
+// RFC 9112 §9.3
+test('bounds what it reads of requests pipelined behind a stream', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // * a stream that never ends, then a thousand requests pipelined behind it, in one write
+  const socket = opened(
+    fixture.port,
+    `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n` +
+      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
+  );
+  const chunks: Buffer[] = [];
+  let isClosed = false;
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  socket.on('close', () => {
+    isClosed = true;
+  });
+  await until(() => {
+    return isClosed;
+  }, 5_000);
+
+  // its socket closed, none of them answered, and the gateway still serves
+  expect(Buffer.concat(chunks).toString('latin1')).not.toContain('A tale');
+  expect(
+    (
+      await exchanged(
+        fixture.port,
+        `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\nconnection: close\r\n\r\n`
+      )
+    ).status
+  ).toBe(200);
+});
+
 // spec 15.12; transcoding 10.2; RFC 9112 §9.5
 test('keeps its connection behind a refusal of a request that declares no body, first on its socket, and serves the request behind it', async () => {
   await using fixture = await startTranscoding();

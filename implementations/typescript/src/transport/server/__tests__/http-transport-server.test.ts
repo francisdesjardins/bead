@@ -2473,6 +2473,31 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // RFC 9112 §9.3
+  test('bounds what it reads of requests pipelined behind a held listen', async () => {
+    await using started = await startTransport();
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    // * a listen held 30 s, then a thousand requests pipelined behind it, in one write
+    socket.write(
+      `GET /bead HTTP/1.1\r\nHost: ${host}\r\n${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n` +
+        `${AFTER_HEADER}: 0\r\n${WAIT_HEADER}: 30000\r\n\r\n` +
+        `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000),
+      'latin1'
+    );
+    await expect
+      .poll(() => {
+        return read.isClosed;
+      })
+      .toBe(true);
+
+    // its socket closed, none of them answered, and the transport still serves
+    expect(read.text).not.toContain(' 404 ');
+    expect((await post(started.url)).status).toBe(201);
+  });
+
   // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
   test('writes content-length: 0 on an empty answer but a 204 or a HEAD’s, and keeps an HTTP/1.0 connection kept alive behind each', async () => {
     await using started = await startTransport();

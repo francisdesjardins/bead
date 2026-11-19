@@ -19,6 +19,7 @@ import {
   hasBody,
   headerOf,
   inTurn,
+  MAXIMUM_UNSERVED_REQUESTS,
   isBeadBody,
   joinedOf,
   linesOf,
@@ -1068,5 +1069,69 @@ test.describe('an exchange in its turn', () => {
     waiting.emit('socket');
 
     expect(served).toEqual(['HTTP/2', 'held', 'waiting']);
+  });
+
+  // RFC 9112 §9.3
+  test('destroys a socket that holds more than MAXIMUM_UNSERVED_REQUESTS requests unserved, behind an answer under way or one that closes its connection, and counts each served one off', () => {
+    const served: number[] = [];
+    const socketOf = (socket: Partial<IHTTPRequestLike['socket']> = {}) => {
+      const destroyed = { count: 0 };
+
+      return {
+        destroyed,
+        socket: {
+          ...socket,
+          destroy: () => {
+            destroyed.count += 1;
+          },
+        },
+      };
+    };
+    const serving = (socket: IHTTPRequestLike['socket'], index: number) => {
+      const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: 1, socket };
+      const response = Object.assign(new EventEmitter(), { socket: null });
+
+      inTurn({ request, response: response as unknown as IHTTPResponseLike }, () => {
+        served.push(index);
+      });
+
+      return response;
+    };
+
+    // * behind an answer under way, its bound waiting
+    const waiting = socketOf();
+    const responses = Array.from({ length: MAXIMUM_UNSERVED_REQUESTS }, (_, index) => {
+      return serving(waiting.socket, index);
+    });
+
+    expect(waiting.destroyed.count).toBe(0);
+
+    // one served counts off, so one more waits, and the next is past the bound
+    responses[0]?.emit('socket');
+    serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS);
+
+    expect([served, waiting.destroyed.count]).toEqual([[0], 0]);
+
+    const past = serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS + 1);
+
+    expect(waiting.destroyed.count).toBe(1);
+
+    // the one past it is never served
+    past.emit('socket');
+
+    expect(served).toEqual([0]);
+
+    // * behind an answer that closes its connection, none served, its bound dropped
+    const closing = socketOf({ writableEnded: true });
+
+    for (let index = 0; index < MAXIMUM_UNSERVED_REQUESTS; index += 1) {
+      serving(closing.socket, index);
+    }
+
+    expect(closing.destroyed.count).toBe(0);
+
+    serving(closing.socket, MAXIMUM_UNSERVED_REQUESTS);
+
+    expect([served, closing.destroyed.count]).toEqual([[0], 1]);
   });
 });

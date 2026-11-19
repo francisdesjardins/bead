@@ -90,6 +90,15 @@ const PREFLIGHT_MAX_AGE = '7200';
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
 
+/**
+ * The requests one HTTP/1 socket may hold unserved, pipelined behind an answer under way or behind
+ * one that closes its connection. Past it, the socket is destroyed. Node's parser reads on while the
+ * answers ahead write nothing, so behind a held listen or a stream one socket would queue requests
+ * without end. 32 is far above what a client that pipelines sends, and 32 heads at Node's 16 KB
+ * bound stay under the megabyte Kestrel buffers of a connection (`MaxRequestBufferSize`).
+ */
+export const MAXIMUM_UNSERVED_REQUESTS = 32;
+
 // the 404 that tells a client its connection is gone
 export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
   reason: HTTP_REFUSALS.CONNECTION_UNKNOWN,
@@ -342,12 +351,33 @@ export const refuseMalformed = ({ request, response }: IExchangeIn): void => {
   return undefined;
 };
 
+// the requests each HTTP/1 socket holds unserved, by its socket
+const unserved = new WeakMap<object, number>();
+
+// whether `socket` may hold one more request unserved, which it counts; past
+// MAXIMUM_UNSERVED_REQUESTS, it is destroyed instead
+const isHeld = (socket: IHTTPRequestLike['socket']): boolean => {
+  const count = (unserved.get(socket) ?? 0) + 1;
+
+  unserved.set(socket, count);
+
+  if (count > MAXIMUM_UNSERVED_REQUESTS) {
+    socket.destroy?.();
+
+    return false;
+  }
+
+  return true;
+};
+
 /**
  * Serves an exchange in its turn. Over HTTP/1, Node's parser hands on every request a read holds,
  * one pipelined behind an answer under way among them, and that request's answer holds no socket
  * until the answers before it ended; behind one that closes its connection, it never does. So a
  * request is served once its answer holds its socket, and none is served behind an answer that
- * closes, whatever closed it (RFC 9112 §9.3, §9.6). Over HTTP/2, or for a fake of a test's, at once.
+ * closes, whatever closed it (RFC 9112 §9.3, §9.6). A socket that holds more than
+ * {@link MAXIMUM_UNSERVED_REQUESTS} unserved is destroyed. Over HTTP/2, or for a fake of a test's,
+ * at once.
  */
 export const inTurn = ({ request, response }: IExchangeIn, serve: () => void): void => {
   if (request.httpVersionMajor !== 1) {
@@ -356,15 +386,24 @@ export const inTurn = ({ request, response }: IExchangeIn, serve: () => void): v
 
   const { socket } = request;
 
-  // * its socket closes behind an answer already written: a request in a later read
-  if (socket.destroyed === true || socket.writableEnded === true) {
+  if (socket.destroyed === true) {
     return undefined;
+  }
+
+  // * its socket closes behind an answer already written: a request in a later read, never served
+  if (socket.writableEnded === true) {
+    return (isHeld(socket), undefined);
   }
 
   // ! Node's own: `null` while an answer before it is under way, then `socket` once that one ended
   // keeping its connection; a fake's has none, and is served at once
   if (response.socket === null && response.once !== undefined) {
-    response.once('socket', serve);
+    if (isHeld(socket)) {
+      response.once('socket', () => {
+        unserved.set(socket, (unserved.get(socket) ?? 1) - 1);
+        serve();
+      });
+    }
 
     return undefined;
   }
