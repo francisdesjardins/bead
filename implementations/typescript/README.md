@@ -114,10 +114,12 @@ it listens on alone: a container, or any server another machine reaches, says `0
 and names its hosts. Any other name — `LOCALHOST`,
 `localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
 loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
-clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
-tries first, Node's and the browsers' racing them (RFC 8305); a server given one loopback,
-`127.0.0.1` or `::1`, leaves the other's port to any process that listens there, which then answers
-a client that tries that family first. A server meant for other machines and given no address is
+clear, it says `secure: false`. A client that connects by `localhost` over a dialer of its own
+reaches `127.0.0.1` first, then `::1` (see below); a browser, and Node's global `fetch` and
+`WebSocket`, reach it whichever family they try first, racing them (RFC 8305). A server given `::1`
+alone leaves `127.0.0.1`'s port to any process that listens there, which then answers every such
+connect by `localhost`; one given `127.0.0.1` alone leaves `::1`'s to a process that answers a
+client that tries the IPv6 loopback first. A server meant for other machines and given no address is
 refused there by the network, its connection reset or refused, never by a Bead refusal: no socket
 opens, so nothing is told.
 
@@ -184,6 +186,21 @@ under TLS — unless its application tells it what stands in front of it, `secur
 terminated before it, which makes each connection secure, `false` for a proxy that serves the
 network in the clear, which leaves each in the clear; a worker always, since it never leaves the
 machine.
+
+A client connects a host it judges on the loopback to the loopback itself, through no proxy (spec
+13.4, decision 0054). It connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to
+`::1` 250 ms later or as soon as the first fails, as RFC 8305 races a name's families, and asks no
+resolver. Its request names the host as its URL does, in its `Host` and in its TLS server name. A
+connect that fails says where it went: "…; api.localhost names the loopback: connected to 127.0.0.1
+and ::1, no resolver asked". In Node, a `ws` given, the MQTT 5 adapter and the AMQP 1.0 adapter
+connect so; the MQTT 5 adapter then goes through no SOCKS proxy that `MQTTJS_SOCKS_PROXY` names.
+With undici installed, a client's default WebSocket and `fetch`, and a gateway's caller's, connect
+so too, through undici's own `WebSocket` and `fetch` and an `Agent` of the client's. Without it,
+Node's global `fetch` and `WebSocket` resolve a localhost name as the platform does, and, under
+`NODE_USE_ENV_PROXY`, go through the environment's proxy. A `fetch` or a WebSocket constructor given, and a page's,
+connect as their platform does. Over these dialers, which Bead does not own, a resolver that sends a
+name under `.localhost` on to its DNS server, or a proxy, takes a credential judged secure wherever
+it answers, in the clear.
 
 A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
 string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
@@ -1035,12 +1052,14 @@ answer's `redirected`, and is caught there: the connect fails, "the server drew 
 redirect followed", and a send or a listen loses its connection, nothing of the answer read.
 
 In Node, the HTTP client takes the same `tls`. It goes through undici's own `fetch` and an `Agent` of
-the client's, on each exchange under `https`; under `http`, the global `fetch` goes and `tls` is
-held unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
-loaded on the first connect under `https`, and never enters a page's bundle. The agent closes as the
-client drops its connection, and a new one is drawn at the next. The client is refused as it is
-built as the WebSocket client is, and also beside a `fetch` given or where undici does not resolve.
-A handshake the server refuses fails the connect, never a connection drawn and then lost.
+the client's, on each exchange under `https`, and on each to a host on the loopback, which that
+agent connects as above; under `http` to any other host, the global `fetch` goes and `tls` is held
+unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
+loaded on the first exchange that needs it, and never enters a page's bundle. The agent closes as
+the client drops its connection, and a new one is drawn at the next. The client is refused as it is
+built as the WebSocket client is, and also beside a `fetch` given or, with `tls`, where undici does
+not resolve. A handshake the server refuses fails the connect, never a connection drawn and then
+lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

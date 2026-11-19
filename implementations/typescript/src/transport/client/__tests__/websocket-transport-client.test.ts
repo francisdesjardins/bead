@@ -65,6 +65,13 @@ import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
+import {
+  PROBE,
+  replaceResolver,
+  settledOf,
+  startPlatformProxy,
+  withoutUndici,
+} from '../../shared/__tests__/loopback-fixtures';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
@@ -4156,5 +4163,119 @@ test.describe('createWebSocketTransportClient, a client certificate', () => {
     expect(() => {
       return createWebSocketTransportClient({ tls: {} });
     }).not.toThrow();
+  });
+});
+
+// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+test.describe('WebSocketTransportClient, on the loopback', () => {
+  /** A `ws` server on 127.0.0.1 that notes the `Host` of each upgrade it takes. */
+  const startNoting = async () => {
+    const server = await startServer();
+    const hosts: (string | undefined)[] = [];
+
+    server.on('connection', (_socket, request) => {
+      hosts.push(request.headers.host);
+    });
+
+    return {
+      hosts,
+      port: portOf(server),
+      [Symbol.asyncDispose]: () => {
+        return stopServer(server);
+      },
+    };
+  };
+
+  /** Connects `client` to `target`, and disconnects it once open. */
+  const openedTo = async (
+    client: WebSocketTransportClient,
+    target: { host: string; port: number }
+  ) => {
+    await client.connect(target);
+    const isOpen = client.isOpen();
+    await client.disconnect();
+
+    return isOpen;
+  };
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    await using server = await startNoting();
+    using resolver = replaceResolver();
+
+    expect(
+      await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+    ).toBe(true);
+    expect([resolver.asked, server.hosts]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over ws', async () => {
+    await using server = await startNoting();
+    using resolver = replaceResolver();
+    const client = createWebSocketTransportClient({
+      WebSocket: WsClient as unknown as IWebSocketConstructor,
+    });
+
+    expect(await openedTo(client, { host: PROBE, port: server.port })).toBe(true);
+    expect([resolver.asked, server.hosts]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using server = await startNoting();
+    await using proxy = await startPlatformProxy();
+
+    for (const named of [PROBE, host]) {
+      expect(
+        await openedTo(createWebSocketTransportClient(), { host: named, port: server.port })
+      ).toBe(true);
+    }
+
+    // * the proxy stands for every request of the platform's, one off the machine among them
+    expect((await fetch('http://bead.invalid/')).status).toBe(502);
+    expect([proxy.received, server.hosts.length]).toEqual([
+      ['GET http://bead.invalid/ HTTP/1.1'],
+      2,
+    ]);
+  });
+
+  test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
+    const port = await closedPort();
+    using resolver = replaceResolver();
+
+    for (const client of [
+      createWebSocketTransportClient(),
+      createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+    ]) {
+      const refused = await settledOf(() => {
+        return client.connect({ host: PROBE, port });
+      });
+
+      expect(refused).toBeInstanceOf(ConnectError);
+      expect((refused as ConnectError).message).toContain(
+        `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+      );
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('reaches a host on the loopback through undici’s own dialer where undici resolves, and through Node’s global one where it does not', async () => {
+    await using server = await startNoting();
+    // * a resolver that answers the loopback, so that the global WebSocket connects all the same
+    using resolver = replaceResolver('127.0.0.1');
+
+    expect(
+      await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+    ).toBe(true);
+    expect(resolver.asked).toEqual([]);
+
+    {
+      using _absent = withoutUndici();
+
+      expect(
+        await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+      ).toBe(true);
+    }
+
+    expect([resolver.asked, server.hosts.length]).toEqual([[PROBE], 2]);
   });
 });

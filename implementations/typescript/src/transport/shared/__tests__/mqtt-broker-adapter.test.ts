@@ -30,6 +30,7 @@ import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
 import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
+import { PROBE, replaceResolver, startHeard } from './loopback-fixtures';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 import { PKI } from './tls-front';
 
@@ -3589,6 +3590,95 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(unwholeOf(relay.frames)).toEqual([]);
     } finally {
       await adapter.stop();
+    }
+  });
+});
+
+// spec 13.4: a link to a host on the loopback, connected by Bead to the loopback itself
+test.describe('createMqttBrokerAdapter, on the loopback', () => {
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over TCP', async () => {
+    await using script = await createMqttScript();
+    using resolver = replaceResolver();
+    const adapter = createMqttBrokerAdapter({
+      id: ID,
+      password: PASSWORD,
+      url: script.url.replace('127.0.0.1', PROBE),
+    });
+    const { connect } = await linkUp({ adapter, script });
+
+    expect([connect.cmd, resolver.asked]).toEqual(['connect', []]);
+    await adapter.stop();
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over a WebSocket', async () => {
+    await using server = await startHeard();
+    using resolver = replaceResolver();
+    const adapter = createMqttBrokerAdapter({
+      connectTimeout: 2_000,
+      id: ID,
+      password: PASSWORD,
+      url: `ws://${PROBE}:${String(server.port)}/mqtt`,
+    });
+
+    // * its upgrade refused, which reached the loopback by its name
+    expect(await failureOf(adapter.start())).toBeInstanceOf(GenericError);
+    expect([
+      resolver.asked,
+      server.heard.map(({ host }) => {
+        return host;
+      }),
+    ]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using script = await createMqttScript();
+    const proxied: number[] = [];
+    const proxy = createServer((socket) => {
+      proxied.push(socket.remotePort ?? 0);
+      socket.destroy();
+    });
+
+    proxy.listen(0, '127.0.0.1');
+    await once(proxy, 'listening');
+
+    const { MQTTJS_SOCKS_PROXY: previous } = process.env;
+
+    // * the proxy MQTT.js reads from its environment, for every link it connects itself
+    process.env['MQTTJS_SOCKS_PROXY'] =
+      `socks5h://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`;
+
+    try {
+      for (const named of ['127.0.0.1', PROBE]) {
+        const adapter = createMqttBrokerAdapter({
+          id: ID,
+          password: PASSWORD,
+          url: script.url.replace('127.0.0.1', named),
+        });
+
+        await linkUp({ adapter, script });
+        await adapter.stop();
+      }
+
+      expect(proxied).toEqual([]);
+
+      // a host off the machine goes through it
+      const away = createMqttBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: 'mqtt://bead.invalid:1883',
+      });
+
+      expect(await failureOf(away.start())).toBeInstanceOf(GenericError);
+      expect(proxied.length).toBe(1);
+    } finally {
+      if (previous === undefined) {
+        delete process.env['MQTTJS_SOCKS_PROXY'];
+      } else {
+        process.env['MQTTJS_SOCKS_PROXY'] = previous;
+      }
+
+      proxy.close();
     }
   });
 });

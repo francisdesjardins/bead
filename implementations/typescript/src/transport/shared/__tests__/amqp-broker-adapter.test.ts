@@ -8,6 +8,7 @@
 
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { type AddressInfo, createServer } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -36,6 +37,7 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
+import { PROBE, replaceResolver } from './loopback-fixtures';
 import { PKI } from './tls-front';
 
 // constants
@@ -3264,6 +3266,44 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
       await calling[Symbol.asyncDispose]();
       await serving[Symbol.asyncDispose]();
       await relay[Symbol.asyncDispose]();
+    }
+  });
+});
+
+// spec 13.4: a connection to a localhost name, connected by Bead to the loopback itself
+test.describe('createAmqpBrokerAdapter, on the loopback', () => {
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    const headers: Buffer[] = [];
+    const listener = createServer((socket) => {
+      socket.once('data', (data) => {
+        headers.push(data.subarray(0, 8));
+        socket.destroy();
+      });
+    });
+
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+
+    using resolver = replaceResolver();
+    const adapter = createAmqpBrokerAdapter({
+      connectTimeout: 2_000,
+      id: ID,
+      password: PASSWORD,
+      url: `amqp://${PROBE}:${String((listener.address() as AddressInfo).port)}`,
+    });
+
+    try {
+      // * its protocol header read where the name was connected, the link refused there
+      expect(await settledOf(adapter.start())).toBeInstanceOf(GenericError);
+      expect(resolver.asked).toEqual([]);
+      // the SASL protocol header (AMQP 1.0 §5.3.1)
+      expect(
+        headers.map((header) => {
+          return [...header];
+        })
+      ).toEqual([[0x41, 0x4d, 0x51, 0x50, 3, 1, 0, 0]]);
+    } finally {
+      listener.close();
     }
   });
 });

@@ -7,6 +7,7 @@ import mqtt, {
   type IClientOptions,
   type IDisconnectPacket,
   type IPublishPacket,
+  type IStream,
   type KeepaliveManager,
   type MqttClient,
   type Packet,
@@ -26,9 +27,11 @@ import {
   topicOf,
 } from './mqtt-packets';
 import { guardPackets } from './mqtt-packet-guard';
-import { isSecureUrl } from './secure';
+import { loopbackConnectOptions, loopbackSentenceOf } from './loopback';
+import { noop } from './noop';
+import { isLoopbackUrl, isSecureUrl } from './secure';
 import { withSlicedSends } from './sliced-sends';
-import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
+import { assertTls, builtinOf, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -221,6 +224,90 @@ const mqttWebSocketOptions = (
   return { maxPayload: Math.max(WS_MESSAGE_BYTES, maximumPacketSize), perMessageDeflate: false };
 };
 
+// the part of `node:net` and `node:tls` a link on the loopback connects by
+interface INetLike {
+  connect(options: object): IStream;
+  isIP(host: string): number;
+}
+
+interface ITlsConnectLike {
+  connect(options: object): IStream & { readonly authorized: boolean };
+}
+
+/**
+ * A client of MQTT.js over `mqtt` or `mqtts` whose stream Bead connects, for a host on the loopback:
+ * a localhost name to the loopback itself, asking no resolver, and no host through a proxy (spec
+ * 13.4). MQTT.js's own TCP stream drops `lookup`, and both of its streams go through the SOCKS
+ * proxy `MQTTJS_SOCKS_PROXY` names.
+ */
+// ! what `mqtt.connect` derives from the URL, and its TCP and TLS streams, mirrored: a bump of
+// MQTT.js re-reads its lib/connect/index.js, tcp.js and tls.js
+const loopbackLinkOf = (url: string, clientOptions: IClientOptions): MqttClient => {
+  const parsed = new URL(url);
+  const isTls = parsed.protocol === 'mqtts:';
+  const protocol = isTls ? 'mqtts' : 'mqtt';
+  const host = parsed.hostname.replace(/^\[(.*)\]$/u, '$1');
+  const port = parsed.port === '' ? (isTls ? 8883 : 1883) : Number(parsed.port);
+  const clientId = parsed.searchParams.get('clientId');
+  const username = decodeURIComponent(parsed.username);
+  const options: IClientOptions = {
+    ...clientOptions,
+    defaultProtocol: protocol,
+    host,
+    hostname: host,
+    port,
+    protocol,
+    // the URL's user information over the options', as MQTT.js reads it
+    ...(username === ''
+      ? {}
+      : parsed.password === ''
+        ? { username }
+        : { password: decodeURIComponent(parsed.password), username }),
+    ...(clientId === null ? {} : { clientId }),
+  };
+  const net = builtinOf('node:net') as INetLike;
+  const connect = { ...loopbackConnectOptions(host), host, port };
+  const client = new mqtt.MqttClient((built) => {
+    if (!isTls) {
+      return net.connect(connect);
+    }
+
+    const rejectUnauthorized = built.options.rejectUnauthorized !== false;
+    const { path: _path, ...rest } = built.options as IClientOptions & { path?: unknown };
+    const connection = (builtinOf('node:tls') as ITlsConnectLike).connect({
+      ...rest,
+      ...connect,
+      rejectUnauthorized,
+      ...(net.isIP(host) === 0 && built.options.servername === undefined
+        ? { servername: host }
+        : {}),
+    });
+    const onError = (error: Error): void => {
+      if (rejectUnauthorized) {
+        built.emit('error', error);
+      }
+
+      connection.end();
+    };
+
+    connection.on('secureConnect', () => {
+      if (rejectUnauthorized && !connection.authorized) {
+        connection.emit('error', new Error('TLS not authorized'));
+      } else {
+        connection.removeListener('error', onError);
+      }
+    });
+    connection.on('error', onError);
+
+    return connection;
+  }, options);
+
+  // as `mqtt.connect` does, so that an error nobody else listens to never throws
+  client.on('error', noop);
+
+  return client;
+};
+
 // a Reason Code as a refusal names it
 const reasonOf = (code: number): string => {
   return `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
@@ -301,7 +388,9 @@ const assertAuthentication = ({
  * as MQTT.js reads a CONNACK of 0x00 whose Maximum QoS is not 0, whatever comes after it; any other
  * CONNACK fails its start, naming its code, and sends nothing. Its leg is secure under TLS or to the
  * loopback.
- * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
+ * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame. In Node,
+ * it connects a host on the loopback to the loopback itself, a localhost name asking no resolver,
+ * and through no proxy (spec 13.4); a page's WebSocket connects as its browser does.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -370,6 +459,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   }
 
   assertAuthentication({ password, passwordProvider, tls });
+
+  // * in Node, a host on the loopback is connected by Bead, a localhost name to the loopback itself
+  // asking no resolver, and no host through a proxy (spec 13.4); a page's WebSocket connects as its
+  // browser does
+  const hostname = new URL(url).hostname;
+  const isOnTheLoopback = isNode() && isLoopbackUrl(url);
 
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
@@ -784,7 +879,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       // its stream sends with a callback, which the sliced send would drop; there `ws` reassembles a
       // message whole, bounded by its Maximum Packet Size at least, no permessage-deflate offered
       ...(isNode()
-        ? { wsOptions: mqttWebSocketOptions(maximumPacketSize) }
+        ? {
+            wsOptions: {
+              ...mqttWebSocketOptions(maximumPacketSize),
+              ...loopbackConnectOptions(hostname),
+            },
+          }
         : {
             createWebsocket: (webSocketUrl: string, protocols: string[]) => {
               return withSlicedSends(new WebSocket(webSocketUrl, protocols));
@@ -835,7 +935,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
             },
           }),
     };
-    const client = mqtt.connect(url, clientOptions);
+    const client =
+      isOnTheLoopback && (protocol === 'mqtt:' || protocol === 'mqtts:')
+        ? loopbackLinkOf(url, clientOptions)
+        : mqtt.connect(url, clientOptions);
     const held: IIncarnation = {
       client,
       drained: undefined,
@@ -961,9 +1064,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           lastError = error;
         });
         client.once('close', () => {
+          // where its stream took a localhost name to the loopback itself (spec 13.4)
+          const said = isOnTheLoopback ? loopbackSentenceOf(hostname) : undefined;
+
           fail(
             new GenericError(
-              `the link of ${id} ended before its CONNACK${lastError === undefined ? '' : `: ${lastError.message}`}`,
+              `the link of ${id} ended before its CONNACK${lastError === undefined ? '' : `: ${lastError.message}`}${said === undefined ? '' : `; ${said}`}`,
               { cause: lastError }
             )
           );
