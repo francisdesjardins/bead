@@ -2125,9 +2125,11 @@ public sealed class HttpGatewayTests
     [Fact]
     public async Task Answers_every_request_pipelined_behind_a_call_in_its_turn_once_its_timeout_ends_it_and_keeps_its_socket()
     {
+        // ! the timeout bounds each of the 6,001 calls, the books' too: at 500 ms, a pause of the
+        // runner under coverage timed one book out on CI, so it leaves them room
         var started = await Started((options) =>
         {
-            return options with { Timeout = TimeSpan.FromMilliseconds(500) };
+            return options with { Timeout = TimeSpan.FromSeconds(2) };
         });
 
         try
