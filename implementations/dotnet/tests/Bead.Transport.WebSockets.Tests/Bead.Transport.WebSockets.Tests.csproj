@@ -46,6 +46,10 @@
          whose assembly fixture cleans the user's CA store on Windows -->
     <Content Include="../../../../spec/pki/*.pem;../../../../spec/pki/*.key" LinkBase="pki" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Shared/Pki.cs" Link="Pki.cs" />
+    <!-- what stands in for the platform's resolver and its proxy, and the listener that reads what
+         reaches the loopback (spec 13.4), with the collection of the tests that set them -->
+    <Compile Include="../Shared/StandIns.cs" Link="StandIns.cs" />
+    <Compile Include="../Shared/PlatformSeams.cs" Link="PlatformSeams.cs" />
     <Compile Include="../Shared/TlsFront.cs" Link="TlsFront.cs" />
   </ItemGroup>
 </Project>

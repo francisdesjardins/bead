@@ -33,10 +33,18 @@ internal sealed record HappyEyeballsOptions
 /// milliseconds, or at once when one fails, until one connects (§5); the first connected kept, and
 /// the attempts left cancelled, a socket one of them connects after closed. The platform's own
 /// connect tries each address in turn, and so waits out the refusal of a loopback family a server
-/// does not listen on, two seconds on Windows, before it tries the other.
+/// does not listen on, two seconds on Windows, before it tries the other. A localhost name,
+/// <c>localhost</c> or a name that ends in <c>.localhost</c>, asks no resolver: its addresses are
+/// <c>127.0.0.1</c> then <c>::1</c>, the IPv4 loopback first, where a Bead server listens on its
+/// defaults (spec 13.4, 15.12).
 /// </summary>
 internal static class HappyEyeballs
 {
+    // constants
+
+    // the addresses of a localhost name, the IPv4 loopback first (spec 13.4)
+    private static readonly IPAddress[] Loopbacks = [IPAddress.Loopback, IPAddress.IPv6Loopback];
+
     // helpers
 
     // the addresses in the order they are tried: the first answer's family first, then the families
@@ -107,12 +115,34 @@ internal static class HappyEyeballs
         }
     }
 
+    // what a localhost name's connect that failed says, beside the platform's cause (spec 13.4)
+    private static Exception FailureOf((string Host, Exception Last) failed)
+    {
+        var (host, last) = failed;
+
+        if (!TransportSecurity.IsLocalhostName(host) || last is not SocketException platform)
+        {
+            return last;
+        }
+
+        return new SocketException(platform.ErrorCode, $"{platform.Message}; {host} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked");
+    }
+
     // definition
+
+    // ! process-wide: a test that sets it runs alone, and puts back what it found
+    /// <summary>
+    /// What answers a name with its addresses where <see cref="HappyEyeballsOptions.Resolve"/> is
+    /// none: the platform's resolver. A test hook, which stands in for that resolver end to end.
+    /// </summary>
+    public static Func<string, CancellationToken, Task<IPAddress[]>> PlatformResolve { get; set; } = Dns.GetHostAddressesAsync;
 
     /// <summary>
     /// Connects to <paramref name="endPoint"/>: its host, an IP address or a name, the name resolved
-    /// and its addresses raced; the socket of the first attempt that connects. When every one fails,
-    /// the last failure; a name that resolves to none, a <see cref="SocketException"/>, host not found.
+    /// and its addresses raced; the socket of the first attempt that connects. A localhost name is
+    /// never resolved: its addresses are <c>127.0.0.1</c> and <c>::1</c>, in that order. When every
+    /// attempt fails, the last failure, which for a localhost name says it went to the loopback; a
+    /// name that resolves to none, a <see cref="SocketException"/>, host not found.
     /// </summary>
     public static async Task<Socket> ConnectAsync(DnsEndPoint endPoint, HappyEyeballsOptions? options = null)
     {
@@ -121,10 +151,14 @@ internal static class HappyEyeballs
         var given = options ?? new HappyEyeballsOptions();
         var cancellationToken = given.CancellationToken;
         var host = endPoint.Host.StartsWith('[') && endPoint.Host.EndsWith(']') ? endPoint.Host[1..^1] : endPoint.Host;
-        var resolve = given.Resolve ?? Dns.GetHostAddressesAsync;
+        var resolve = given.Resolve ?? PlatformResolve;
         var connect = given.Connect ?? Attempt;
         var clock = given.Clock ?? TimeProvider.System;
-        var addresses = Interleave(IPAddress.TryParse(host, out var literal) ? [literal] : await resolve(host, cancellationToken));
+
+        // * a localhost name asks no resolver, whatever the platform's would answer (spec 13.4)
+        var addresses = Interleave(IPAddress.TryParse(host, out var literal)
+            ? [literal]
+            : TransportSecurity.IsLocalhostName(host) ? Loopbacks : await resolve(host, cancellationToken));
 
         if (addresses.Count == 0)
         {
@@ -169,9 +203,14 @@ internal static class HappyEyeballs
                 failure = attempt.Exception?.InnerException ?? new OperationCanceledException(cancellationToken);
             }
 
-            ExceptionDispatchInfo.Throw(failure!);
+            var failed = FailureOf((host, failure!));
 
-            throw failure!;
+            if (failed == failure)
+            {
+                ExceptionDispatchInfo.Throw(failure);
+            }
+
+            throw failed;
         }
         finally
         {

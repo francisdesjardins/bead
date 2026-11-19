@@ -340,6 +340,30 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
 
     // definition
 
+    // spec 13.4: the platform's resolver stood in for, process-wide, as the broker's classes run alone
+    [Fact]
+    public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers()
+    {
+        using var resolver = new StandInResolver();
+        await using var listener = new HeadListener();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromSeconds(1), Uri = new Uri($"amqp://bead-probe.localhost:{listener.Port}") };
+        });
+
+        // * its protocol header reaches the listener, which answers nothing
+        await FailureOf(() =>
+        {
+            return adapter.Start();
+        });
+
+        Assert.All(await listener.Next(), (header) =>
+        {
+            Assert.StartsWith("AMQP", header, StringComparison.Ordinal);
+        });
+        Assert.Empty(resolver.Asked);
+    }
+
     [Fact]
     public async Task Fails_its_start_over_TLS_where_its_broker_s_certificate_chains_to_no_authority_it_trusts()
     {

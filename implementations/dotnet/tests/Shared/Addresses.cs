@@ -56,13 +56,11 @@ internal static class Addresses
     }
 
     /// <summary>
-    /// The loopback address of each family the name <c>localhost</c> resolves to here: the IPv4 one,
-    /// and the IPv6 one where the machine has IPv6 and its resolver answers it.
+    /// The loopback address of each family the name <c>localhost</c> reaches here, which a client
+    /// connects asking no resolver (spec 13.4): the IPv4 one, and the IPv6 one where the machine has it.
     /// </summary>
     public static IReadOnlyList<string> ReachedByLocalhost()
     {
-        var resolved = System.Net.Dns.GetHostAddresses("localhost");
-
-        return System.Net.Sockets.Socket.OSSupportsIPv6 && resolved.Contains(System.Net.IPAddress.IPv6Loopback) ? ["127.0.0.1", "::1"] : ["127.0.0.1"];
+        return HasIPv6Loopback() ? ["127.0.0.1", "::1"] : ["127.0.0.1"];
     }
 }

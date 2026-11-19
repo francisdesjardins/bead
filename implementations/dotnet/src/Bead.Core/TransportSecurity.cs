@@ -48,4 +48,22 @@ internal static class TransportSecurity
             || parsed == "[::1]"
             || (isIPv4 && parts[0] == "127");
     }
+
+    /// <summary>
+    /// Whether a host is a localhost name as the URL Standard's host parser reads it:
+    /// <c>localhost</c>, or a name that ends in <c>.localhost</c>, compared in ASCII lower case;
+    /// never <c>localhost.</c> nor a name that ends in <c>.localhost.</c>. A client connects such a
+    /// name to <c>127.0.0.1</c> and <c>::1</c> and asks no resolver (spec 13.4).
+    /// </summary>
+    public static bool IsLocalhostName(string host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        if (UrlHost.Parse(host) is not { } parsed)
+        {
+            return false;
+        }
+
+        return parsed == "localhost" || parsed.EndsWith(".localhost", StringComparison.Ordinal);
+    }
 }

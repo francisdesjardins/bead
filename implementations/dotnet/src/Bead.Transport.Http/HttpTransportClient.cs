@@ -10,8 +10,11 @@ public sealed record HttpTransportClientOptions
 {
     /// <summary>
     /// What its exchanges go through; a handler of its own when none, which follows no redirect and
-    /// races the address families of a name (RFC 8305), as Node's and a browser's do. One given
-    /// keeps its own behaviour, and follows no redirect: an <see cref="HttpClientHandler"/> or a
+    /// races the address families of a name (RFC 8305), as Node's and a browser's do, and connects
+    /// a host on the loopback to the loopback itself, through no proxy, a localhost name asking no
+    /// resolver (spec 13.4). One given keeps its own behaviour, its connect and its proxy among it,
+    /// so a localhost name is judged by the name alone, wherever its resolver sends it, and follows
+    /// no redirect: an <see cref="HttpClientHandler"/> or a
     /// <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s given,
     /// whose <c>AllowAutoRedirect</c> is true is refused as the client is built; an answer from
     /// another URL than the one asked fails the connect, and loses the connection of a send or a
@@ -717,8 +720,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // its own handler races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn, and speaks its TLS, whose credentials `tls` hands back
-    // to be let go of with the HTTP client
+    // platform's tries each address in turn, connects a host on the loopback to the loopback itself
+    // through no proxy, and speaks its TLS, whose credentials `tls` hands back to be let go of with
+    // the HTTP client
     private HttpClient NewHttp(out TlsCredentials? tls)
     {
         tls = null;
@@ -728,7 +732,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
         }
 
-        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback };
+        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
 
         if (_options.Tls is { } given)
         {

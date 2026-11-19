@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace Bead.Transcoding.Tests;
 
 /// <summary>The generated HTTP client and its caller, twins of http-caller.test.ts.</summary>
-public sealed class HttpCallerTests
+public sealed partial class HttpCallerTests
 {
     private static CancellationToken Cancelled
     {

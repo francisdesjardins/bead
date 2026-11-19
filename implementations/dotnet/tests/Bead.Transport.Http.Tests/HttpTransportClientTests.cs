@@ -17,7 +17,7 @@ namespace Bead.Transport.Http.Tests;
 /// the tests' own, the TypeScript side's fake fetch, which answers each exchange as its test says:
 /// how it draws its connection, settles its sends, closes, and listens.
 /// </summary>
-public sealed class HttpTransportClientTests
+public sealed partial class HttpTransportClientTests
 {
     // constants
 
