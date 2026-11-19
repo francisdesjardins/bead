@@ -12,7 +12,8 @@ internal sealed record HappyEyeballsOptions
 
     /// <summary>
     /// What makes one attempt at an address, a connected socket or a failure, given up when its
-    /// token is cancelled: a TCP socket of its own when none. The tests' way to watch the race.
+    /// token is cancelled: a TCP socket of its own when none. A caller's way to set its socket before
+    /// it connects, and the tests' way to watch the race.
     /// </summary>
     public Func<IPEndPoint, CancellationToken, Task<Socket>>? Connect { get; init; }
 

@@ -26,6 +26,34 @@ internal sealed class RacingStreamProvider : IMqttClientStreamProvider
     /// <summary>The one every link shares: it holds nothing of a link's.</summary>
     public static RacingStreamProvider Instance { get; } = new();
 
+    // one attempt at an address, its socket set before it connects, as MQTTnet's own channel sets it
+    private static async Task<Socket> Attempt(IPEndPoint endPoint, CancellationToken cancellationToken)
+    {
+        // ! its buffers sized before it connects: shrunk on a connected socket, they stalled a
+        // transfer of 3 MiB on Linux for good
+        var socket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+        {
+            // ! its close a reset, as MQTTnet's own channel closes it
+            LingerState = Defaults.LingerState,
+            NoDelay = Defaults.NoDelay,
+            ReceiveBufferSize = Defaults.BufferSize,
+            SendBufferSize = Defaults.BufferSize,
+        };
+
+        try
+        {
+            await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
+
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+
+            throw;
+        }
+    }
+
     /// <summary>A stream that owns the socket of the first attempt that connects to <paramref name="brokerEndPoint"/>.</summary>
     public async Task<Stream> ConnectAsync(EndPoint brokerEndPoint, CancellationToken cancellationToken)
     {
@@ -35,24 +63,13 @@ internal sealed class RacingStreamProvider : IMqttClientStreamProvider
             IPEndPoint address => new DnsEndPoint(address.Address.ToString(), address.Port),
             _ => throw new NotSupportedException($"a link connects to a name or an address, not {brokerEndPoint?.GetType().Name}"),
         };
-        var socket = await HappyEyeballs.ConnectAsync(target, new HappyEyeballsOptions { CancellationToken = cancellationToken }).ConfigureAwait(false);
-
-        try
+        var socket = await HappyEyeballs.ConnectAsync(target, new HappyEyeballsOptions
         {
-            // ! its close a reset, as MQTTnet's own channel closes it
-            socket.LingerState = Defaults.LingerState;
-            socket.NoDelay = Defaults.NoDelay;
-            socket.ReceiveBufferSize = Defaults.BufferSize;
-            socket.SendBufferSize = Defaults.BufferSize;
+            Connect = Attempt,
+            CancellationToken = cancellationToken,
+        }).ConfigureAwait(false);
 
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-
-            throw;
-        }
+        return new NetworkStream(socket, ownsSocket: true);
     }
 }
 
