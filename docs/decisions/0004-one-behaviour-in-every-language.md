@@ -246,14 +246,18 @@ same in either order, or whose order an `until` fixes. A gauge is read, and a re
 scripted, because a gauge shows what the wire does not — a listen held sends nothing — where a
 scripted refusal stands in for what the wire can show.
 
-**A WebSocket's ping and a broker's heartbeat play on the real clock.** Every side pings and drops a
-peer that leaves a ping unanswered (section 15.3); the C# side's platform times it, and the Rust
-side's `SystemClock`, which no clock given reaches. Over a broker, each side pings a connection
-silent for its `heartbeat`, and closes with 4001 one whose peer answers nothing, on its platform's clock (section 15.21). A few cases are
-marked as played in real time: over a WebSocket, at a heartbeat of 200 ms, a ping seen within its
-bounds, and a peer that never answers dropped within its own; over each broker, at a heartbeat of
-500 ms, a silent connection pinged, none whose peer sends, and one whose peer answers nothing
-closed.
+**A WebSocket's ping and a broker's heartbeat play on the real clock.** Every side pings a peer
+once nothing of it has been read for its `heartbeat`, and drops it once the echo of that ping has
+not come within another (section 15.3); the C# side's platform times it, and the Rust side's
+`SystemClock`, which no clock given reaches. Over a broker, each side pings a connection silent for
+its `heartbeat`, and closes with 4001 one whose peer answers nothing, on its platform's clock
+(section 15.21). A few cases are marked as played in real time. Over a WebSocket, at a heartbeat of
+200 ms: a silent peer pinged, again after each echo; and a peer dropped that leaves a ping
+unanswered, whose pong carries other data or none, or that, once pinged, sends a message but no
+echo. At a heartbeat of 400 ms, a peer is never pinged that sends an unsolicited pong within each
+heartbeat, or whose message comes in fragments over several heartbeats. Over each broker, at a
+heartbeat of 500 ms, a silent connection pinged, none whose peer sends, and one whose peer answers
+nothing closed.
 
 **Time is a step, on the clock every side is given**
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). `advance` steps it from due to
@@ -373,9 +377,12 @@ across languages in the interop, ahead, plays in their place
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
 there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
 the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which every
-side's HTTP server serves, an open row of the matrix; keep-alive, pipelining and a connection used
-again, which one socket per exchange leaves out; and the transport's contract with its router — its
-events, its handles, its gauges.
+side's HTTP server serves, an open row of the matrix; the keep or close of a connection after a
+refusal of the server's own, the service of a connection's requests in their order, and pipelining,
+which one request per socket leaves out; and the transport's contract with its router — its
+events, its handles, its gauges. Three framing cases over HTTP send on a socket that asks no close,
+one of them an HTTP/1.0 request that asks `connection: keep-alive`, and expect the socket's end:
+they play the close a framing refusal asks.
 
 **A twin test leaves every side one assertion at a time**, in the change that pairs that assertion
 with the case that plays it, and the cell of the matrix it proves points to that case in the same

@@ -14,6 +14,7 @@ import {
   HOST_REFUSAL,
   ORIGIN_REFUSAL,
   isAuthority,
+  isTransferEncodingFramed,
   requestTargetOf,
   type IAuthority,
 } from './hosts-and-origins';
@@ -90,6 +91,15 @@ const PREFLIGHT_MAX_AGE = '7200';
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
 
+/**
+ * The requests one HTTP/1 socket may hold unserved, pipelined behind an answer under way or behind
+ * one that closes its connection. Past it, the socket is destroyed. Node's parser reads on while the
+ * answers ahead write nothing, so behind a held listen or a stream one socket would queue requests
+ * without end. 32 is far above what a client that pipelines sends, and 32 heads at Node's 16 KB
+ * bound stay under the megabyte Kestrel buffers of a connection (`MaxRequestBufferSize`).
+ */
+export const MAXIMUM_UNSERVED_REQUESTS = 32;
+
 // the 404 that tells a client its connection is gone
 export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
   reason: HTTP_REFUSALS.CONNECTION_UNKNOWN,
@@ -138,12 +148,41 @@ export const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   return values;
 };
 
+// whether a request's `Transfer-Encoding` is one spec 15.12 takes: none, or one that frames its body
+// with no `Content-Length` beside it (RFC 9112 §6.1, §6.3 item 3)
+// ! Node's parser refuses the pair, but not a server's built with `insecureHTTPParser`
+export const isTransferEncodingTaken = (request: IHTTPRequestLike): boolean => {
+  const codings = linesOf(request, 'transfer-encoding');
+
+  return (
+    codings.length === 0 ||
+    (linesOf(request, 'content-length').length === 0 &&
+      isTransferEncodingFramed(request.httpVersion, codings))
+  );
+};
+
 // a field's lines joined in their order by `, ` (RFC 9110 §5.3, spec 15.12); none without a line
 // ! from `rawHeaders`: over HTTP/2, `headers` keeps a single-value field's first line alone
 export const joinedOf = (request: IHTTPRequestLike, name: string): string | undefined => {
   const lines = linesOf(request, name);
 
   return lines.length === 0 ? undefined : lines.join(', ');
+};
+
+// whether a body is sent as it is (spec 15.12): a Content-Encoding that lists no coding, or
+// `identity` once in any case, its empty elements ignored (RFC 9110 §5.6.1.2), as an absent one
+export const isUnencoded = (request: IHTTPRequestLike): boolean => {
+  const codings = linesOf(request, 'content-encoding')
+    .join(',')
+    .split(',')
+    .map((coding) => {
+      return coding.replace(/^[\t ]+|[\t ]+$/gu, '');
+    })
+    .filter((coding) => {
+      return coding !== '';
+    });
+
+  return codings.length === 0 || (codings.length === 1 && codings[0]?.toLowerCase() === 'identity');
 };
 
 // a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
@@ -219,15 +258,25 @@ export const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefi
   });
 };
 
-// a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
-// Content-Encoding, or one whose lines joined are `identity` (spec 15.12)
+// a body of Bead's media type, parameters aside, in one field line, and sent as it is (spec 15.12)
 export const isBeadBody = (request: IHTTPRequestLike): boolean => {
   // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
   const types = linesOf(request, 'content-type');
   const type = types.length === 1 ? types[0]?.split(';')[0]?.trim().toLowerCase() : undefined;
-  const encoding = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
 
-  return type === BEAD_MEDIA_TYPE && (encoding === undefined || encoding === 'identity');
+  return type === BEAD_MEDIA_TYPE && isUnencoded(request);
+};
+
+/**
+ * The fields of an answer that carries no length, a 204's, a 304's or a HEAD's: where Node closes a
+ * connection kept alive for want of one, over HTTP/1.0, `connection: keep-alive`, as its request
+ * asks (RFC 9112 §9.3); none otherwise, Node's own fields standing.
+ */
+export const keptAliveOf = (response: IHTTPResponseLike): Readonly<Record<string, string>> => {
+  // ! Node's own condition: it keeps an answer of no length only where it would chunk one
+  return response.shouldKeepAlive === true && response.useChunkedEncodingByDefault === false
+    ? { connection: 'keep-alive' }
+    : {};
 };
 
 // writes an exchange's end, once: its status and headers, marked when it is a refusal
@@ -237,6 +286,11 @@ export const endWith = (response: IHTTPResponseLike, { headers, reason, status }
   if (!response.headersSent) {
     response.writeHead(status, {
       ...RESPONSE_HEADERS,
+      // * its length, 0, so its connection is kept over HTTP/1.0 and its end framed by no chunk
+      // (RFC 9110 §8.6); a 204, a 304 or a HEAD's carries none, kept alive as its request asks
+      ...(status === 204 || status === 304 || response.req?.method === 'HEAD'
+        ? keptAliveOf(response)
+        : { 'content-length': '0' }),
       ...headers,
       ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
     });
@@ -269,13 +323,13 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
 };
 
 /**
- * The fields of an answer written while its request's body still comes: over HTTP/1,
- * `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes is
- * dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
- * whose stream ends alone, or once the body came whole.
+ * The fields of an answer that closes its connection behind a body it does not read whole: over
+ * HTTP/1, `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes
+ * is dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
+ * whose stream ends alone. Whether it closes is its caller's to judge.
  */
 export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<string, string>> => {
-  if (request.httpVersionMajor !== 1 || request.complete !== false) {
+  if (request.httpVersionMajor !== 1) {
     return {};
   }
 
@@ -307,6 +361,68 @@ export const refuseMalformed = ({ request, response }: IExchangeIn): void => {
 
   response.writeHead(400, { 'content-length': '0', connection: 'close' });
   response.end();
+
+  return undefined;
+};
+
+// the requests each HTTP/1 socket holds unserved, by its socket
+const unserved = new WeakMap<object, number>();
+
+// whether `socket` may hold one more request unserved, which it counts; past
+// MAXIMUM_UNSERVED_REQUESTS, it is destroyed instead
+const isHeld = (socket: IHTTPRequestLike['socket']): boolean => {
+  const count = (unserved.get(socket) ?? 0) + 1;
+
+  unserved.set(socket, count);
+
+  if (count > MAXIMUM_UNSERVED_REQUESTS) {
+    socket.destroy?.();
+
+    return false;
+  }
+
+  return true;
+};
+
+/**
+ * Serves an exchange in its turn. Over HTTP/1, Node's parser hands on every request a read holds,
+ * one pipelined behind an answer under way among them, and that request's answer holds no socket
+ * until the answers before it ended; behind one that closes its connection, it never does. So a
+ * request is served once its answer holds its socket, and none is served behind an answer that
+ * closes, whatever closed it (RFC 9112 §9.3, §9.6). A socket that holds more than
+ * {@link MAXIMUM_UNSERVED_REQUESTS} unserved is destroyed. Over HTTP/2, or for a fake of a test's,
+ * at once.
+ */
+export const inTurn = ({ request, response }: IExchangeIn, serve: () => void): void => {
+  if (request.httpVersionMajor !== 1) {
+    return (serve(), undefined);
+  }
+
+  const { socket } = request;
+
+  if (socket.destroyed === true) {
+    return undefined;
+  }
+
+  // * its socket closes behind an answer already written: a request in a later read, never served
+  if (socket.writableEnded === true) {
+    return (isHeld(socket), undefined);
+  }
+
+  // ! Node's own: `null` while an answer before it is under way, then `socket` once that one ended
+  // keeping its connection; a fake's has none, and is served at once
+  if (response.socket === null && response.once !== undefined) {
+    if (isHeld(socket)) {
+      response.once('socket', () => {
+        unserved.set(socket, (unserved.get(socket) ?? 1) - 1);
+        serve();
+      });
+    }
+
+    return undefined;
+  }
+
+  serve();
 
   return undefined;
 };

@@ -25,7 +25,7 @@ import {
   createTestClock,
   host,
   IMPLEMENTATIONS,
-  spyIntervals,
+  spyTimeouts,
   trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
@@ -61,6 +61,8 @@ import {
   createRefusingWebSocketServer,
   type IFakeSocket,
 } from './fake-websocket-server';
+import { frameOf, OPCODES, openExchange } from './http-peer';
+import { closingAnswerOf } from './http-transport-server-fixtures';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IDrawingRequest>;
 
@@ -135,6 +137,8 @@ const closeCodeOf = (received: Buffer): number | undefined => {
 
   return frame[0] === 0x88 && frame.length >= 4 ? frame.readUInt16BE(2) : undefined;
 };
+
+const encoder = new TextEncoder();
 
 const upgradeRequest = () => {
   return (
@@ -1030,6 +1034,33 @@ test.describe('WebSocketTransportServer, on the wire', () => {
   });
 
   // spec 15.3
+  test('writes 1 byte for a socket’s maximumMessageBytes of 1', async () => {
+    await server.stop();
+    server = createWebSocketTransportServer({ maxPayload: 1, WebSocketServer });
+    ({ port } = await server.start({ address: host, findOpenPort: true }));
+
+    const told: string[] = [];
+    const connection = nextServerEvent(server, 'connection');
+    const closed = nextServerEvent(server, 'close');
+    const socket = await openTcp(port);
+
+    server.on('error', (error) => {
+      told.push(error.message);
+    });
+    socket.write(upgradeRequest());
+
+    const [, connectionHandle] = await connection;
+
+    socket.write(maskedFrame(0x2, new Uint8Array(2)));
+    socket.end();
+    await closed;
+
+    expect(told).toEqual([
+      `${connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 1 byte`,
+    ]);
+    socket.destroy();
+  });
+
   test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when the peer answers 1000', async () => {
     await server.stop();
     server = createWebSocketTransportServer({ maxPayload: 64, WebSocketServer });
@@ -2393,25 +2424,23 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
 });
 
 test.describe('WebSocketTransportServer, heartbeat', () => {
-  test('pings each connection every heartbeat, and drops one that left a ping unanswered, or could not be sent one', async () => {
-    using timers = spyIntervals();
+  test('pings each connection silent for its heartbeat with data of its own, keeps one that echoes it, and drops one that left it unanswered, or could not be sent one', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({
       heartbeat: 20,
       WebSocketServer: fake.FakeWebSocketServer,
     });
+    const pinged: Uint8Array[] = [];
     const answering = createFakeSocket({ onPing: 'answer' });
     const silent = createFakeSocket();
     const closing = createFakeSocket();
     const closes: [wasClean: boolean, connectionHandle: string][] = [];
     const errors: unknown[] = [];
-    // a beat of every heartbeat still armed, in the order its connections came
-    const beat = (): void => {
-      for (const timer of timers.armed) {
-        if (!timers.cleared.includes(timer)) {
-          timer.beat();
-        }
-      }
+    const { ping } = answering;
+
+    answering.ping = (data) => {
+      pinged.push(data);
+      ping(data);
     };
 
     const starting = server.start(SCRIPTED);
@@ -2432,77 +2461,72 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     // a socket in its close handshake is sent no ping, and is dropped all the same
     (closing as { readyState: number }).readyState = 2;
 
-    expect(
-      timers.armed.map(({ delay }) => {
-        return delay;
+    // a heartbeat past the ping each left unanswered, its peer dropped
+    await expect
+      .poll(() => {
+        return closes.length;
       })
-    ).toEqual([20, 20, 20]);
-
-    beat();
-
-    expect([answering.pings, silent.pings, closing.pings]).toEqual([1, 1, 0]);
-    expect([answering.wasTerminated, silent.wasTerminated, closing.wasTerminated]).toEqual([
-      false,
-      false,
-      false,
-    ]);
-
-    // the beat after a ping left unanswered drops its peer
-    beat();
-
-    expect([answering.pings, silent.pings, closing.pings]).toEqual([2, 1, 0]);
-    expect([answering.wasTerminated, silent.wasTerminated, closing.wasTerminated]).toEqual([
-      false,
+      .toBe(2);
+    expect(
+      closes.map(([, handle]) => {
+        return handle;
+      })
+    ).toEqual(expect.arrayContaining([silentHandle, closingHandle]));
+    expect(
+      closes.map(([wasClean]) => {
+        return wasClean;
+      })
+    ).toEqual([false, false]);
+    expect([silent.pings, closing.pings, silent.wasTerminated, closing.wasTerminated]).toEqual([
+      1,
+      0,
       true,
       true,
-    ]);
-    expect(closes).toEqual([
-      [false, silentHandle],
-      [false, closingHandle],
     ]);
     // a peer the heartbeat dropped, gone without a word, is no error on its connection
     expect(errors).toEqual([]);
 
-    beat();
-
-    expect([answering.pings, answering.wasTerminated]).toEqual([3, false]);
+    // the one that echoes is pinged again once silent, each ping 8 bytes of a count from 1
+    await expect
+      .poll(() => {
+        return answering.pings;
+      })
+      .toBeGreaterThanOrEqual(3);
+    expect(answering.wasTerminated).toBe(false);
+    expect(pinged.slice(0, 3)).toEqual([
+      Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 1),
+      Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 2),
+      Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 3),
+    ]);
 
     await server.stop();
-
-    // closed, it beats no more: every heartbeat it armed is cleared
-    expect(
-      timers.armed.every((timer) => {
-        return timers.cleared.includes(timer);
-      })
-    ).toBe(true);
   });
 
-  test('beats every HEARTBEAT when told nothing', async () => {
-    using timers = spyIntervals();
+  test('pings once silent for HEARTBEAT when told nothing', async () => {
+    using timeouts = spyTimeouts();
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
+
+    const before = timeouts.delays.length;
+
     fake.connect(createFakeSocket(), { server });
 
-    expect(
-      timers.armed.map(({ delay }) => {
-        return delay;
-      })
-    ).toEqual([HEARTBEAT]);
+    expect(timeouts.delays.slice(before)).toEqual([HEARTBEAT]);
 
     await server.stop();
   });
 
   test('beats nothing with a heartbeat of Infinity', async () => {
-    // a heartbeat of 200 ms first, which beats, then Infinity, which arms nothing
+    // a heartbeat of 200 ms first, which arms its timer, then Infinity, which arms nothing
     for (const [heartbeat, delays] of [
       [200, [200]],
       [Infinity, []],
     ] as const) {
-      using timers = spyIntervals();
+      using timeouts = spyTimeouts();
       const fake = createFakeWebSocketServer();
       const server = createWebSocketTransportServer({
         heartbeat,
@@ -2514,21 +2538,11 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       fake.instances[0]?.emit('listening');
       await starting;
 
+      const before = timeouts.delays.length;
       const connectionHandle = fake.connect(socket, { server });
 
-      // no interval at all for Infinity: Node would beat one of Infinity every millisecond
-      expect([
-        heartbeat,
-        timers.armed.map(({ delay }) => {
-          return delay;
-        }),
-      ]).toEqual([heartbeat, delays]);
-
-      // each beat it armed, played once: a ping, its peer kept
-      for (const { beat } of timers.armed) {
-        beat();
-      }
-
+      // no timer at all for Infinity: Node would fire one of Infinity at once
+      expect([heartbeat, timeouts.delays.slice(before)]).toEqual([heartbeat, delays]);
       expect([
         heartbeat,
         socket.pings,
@@ -2536,9 +2550,299 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
         server.clients.map(({ connectionHandle: held }) => {
           return held;
         }),
-      ]).toEqual([heartbeat, delays.length, false, [connectionHandle]]);
+      ]).toEqual([heartbeat, 0, false, [connectionHandle]]);
 
       await server.stop();
+    }
+  });
+
+  // spec 15.3 and 15.12
+  test('drops a connection it pauses past twice its heartbeat by its own heartbeat, its peer answering every ping', async () => {
+    await using started = await startDated({ heartbeat: 200 });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange({ host, port }, encoder.encode(upgradeRequest()));
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+
+    // * paused within the hand of a message, as a router at its bound pauses: it reads nothing more
+    // of its peer, the echo of its ping among it
+    server.on('message', (_message, handle) => {
+      server.pause(handle);
+    });
+
+    try {
+      exchange.send([{ fin: true, opcode: OPCODES.BINARY, payload: Uint8Array.of(1) }]);
+
+      expect(await exchange.next(2_000)).toEqual({ ping: expect.any(Uint8Array) as unknown });
+      expect(await exchange.next(2_000)).toEqual({ end: true });
+
+      // told closed, unclean, while still paused
+      expect(await closed).toEqual([false, connectionHandle]);
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  // spec 15.3 and 15.12
+  test('drops a connection it pauses between messages past twice its heartbeat by its own heartbeat, its peer answering every ping', async () => {
+    await using started = await startDated({ heartbeat: 200 });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange({ host, port }, encoder.encode(upgradeRequest()));
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+
+    try {
+      let heard = await exchange.next(2_000);
+
+      expect(heard).toEqual({ ping: expect.any(Uint8Array) as unknown });
+
+      // * paused once it pinged, outside the hand of a message, as a router pauses on another
+      // connection's turn: its read already waits on its peer, and reads nothing more of it
+      server.pause(connectionHandle);
+
+      for (let pings = 0; heard !== undefined && 'ping' in heard && pings < 20; pings += 1) {
+        heard = await exchange.next(2_000);
+      }
+
+      expect(heard).toEqual({ end: true });
+
+      // told closed, unclean, while still paused
+      expect(await closed).toEqual([false, connectionHandle]);
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at once
+  // all the same
+  test('tells the close of a connection it pauses at once when its peer ends it, by a FIN or a reset', async () => {
+    // * no heartbeat, never resumed: its socket's end alone tells its close
+    await using started = await startDated({ heartbeat: Infinity });
+    const { port, server } = started;
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      const connection = nextServerEvent(server, 'connection');
+      const socket = await openTcp(port);
+
+      socket.on('error', () => {});
+      socket.write(upgradeRequest());
+
+      const [, connectionHandle] = await connection;
+      const closed = nextServerEvent(server, 'close');
+
+      try {
+        server.pause(connectionHandle);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+        drop(socket);
+
+        expect(await closed).toEqual([false, connectionHandle]);
+      } finally {
+        socket.destroy();
+      }
+    }
+  });
+
+  // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops nothing of
+  // one not paused
+  test('delivers each of 300 messages its peer sends in one write with its close and its end, then tells its close clean', async () => {
+    await using started = await startDated({});
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange({ host, port }, encoder.encode(upgradeRequest()));
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+    const delivered: Uint8Array[] = [];
+    const frames = Array.from({ length: 300 }, (_, index) => {
+      return {
+        fin: true,
+        opcode: OPCODES.BINARY,
+        payload: Uint8Array.of(index >> 8, index & 0xff),
+      };
+    });
+
+    server.on('message', ({ data }) => {
+      delivered.push(new Uint8Array(data as ArrayBuffer));
+    });
+
+    try {
+      exchange.send([
+        ...frames,
+        { fin: true, opcode: OPCODES.CLOSE, payload: Uint8Array.of(0x03, 0xe8) },
+      ]);
+      exchange.end();
+
+      expect(await closed).toEqual([true, connectionHandle]);
+      expect(delivered).toEqual(
+        frames.map(({ payload }) => {
+          return payload;
+        })
+      );
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  // spec 15.3
+  test('pings with 8 bytes of a count from 1, new at each ping, and drops a peer that answers with an empty pong or an earlier ping’s echo', async () => {
+    await using started = await startDated({ heartbeat: 200 });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange(
+      { answersPings: false, host, port },
+      encoder.encode(upgradeRequest())
+    );
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+    const pongOf = (payload: Uint8Array) => {
+      return { fin: true, opcode: OPCODES.PONG, payload };
+    };
+    const first = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 1);
+
+    try {
+      expect(await exchange.next(2_000)).toEqual({ ping: first });
+      exchange.send([pongOf(first)]);
+      expect(await exchange.next(2_000)).toEqual({
+        ping: Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 2),
+      });
+      exchange.send([pongOf(new Uint8Array()), pongOf(first)]);
+      expect(await exchange.next(2_000)).toEqual({ end: true });
+      expect(await closed).toEqual([false, connectionHandle]);
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  // spec 15.3: the ping goes behind what its socket holds alone, so the 400 messages of 64 KiB the
+  // transport holds pass what any loopback's buffers hold
+  test('pings ahead of what it holds unsent, so a silent reader behind a backlog reads the ping before the backlog’s end and is kept', async () => {
+    await using started = await startDated({
+      heartbeat: 1_000,
+      maximumUnsentBytes: 67_108_864,
+      minimumSendBytesPerSecond: 0,
+    });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const { socket } = await upgradeOn(port, upgradeRequest());
+    const [, connectionHandle] = await connection;
+    const closes: unknown[] = [];
+    // what it read, in order, and what it has not read whole yet
+    const order: string[] = [];
+    let rest = Buffer.alloc(0);
+
+    server.on('close', (wasClean, handle) => {
+      closes.push([wasClean, handle]);
+    });
+
+    try {
+      socket.pause();
+
+      for (let index = 0; index < 400; index += 1) {
+        void server.send({ data: new Uint8Array(65_536) }, connectionHandle);
+      }
+
+      // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
+      // of a heartbeat late, it reads all, echoing the ping as it comes
+      await sleep(1_500);
+      socket.on('data', (chunk: Buffer) => {
+        rest = Buffer.concat([rest, chunk]);
+
+        for (;;) {
+          const length = rest.length < 2 ? undefined : (rest[1] ?? 0) & 0x7f;
+          const at = length === 126 ? 4 : length === 127 ? 10 : 2;
+          const size =
+            length === 126
+              ? rest.readUInt16BE(2)
+              : length === 127
+                ? Number(rest.readBigUInt64BE(2))
+                : length;
+
+          if (size === undefined || rest.length < at + size) {
+            break;
+          }
+
+          const opcode = (rest[0] ?? 0) & 0x0f;
+          const payload = rest.subarray(at, at + size);
+
+          if (opcode === OPCODES.PING) {
+            order.push('ping');
+            socket.write(maskedFrame(OPCODES.PONG, payload));
+          } else {
+            order.push(opcode === OPCODES.BINARY ? 'binary' : String(opcode));
+          }
+
+          rest = rest.subarray(at + size);
+        }
+      });
+      socket.resume();
+
+      await expect
+        .poll(
+          () => {
+            return order.length;
+          },
+          { timeout: 10_000 }
+        )
+        .toBeGreaterThanOrEqual(401);
+
+      const ping = order.indexOf('ping');
+
+      expect([ping >= 0, ping < 400, order.length]).toEqual([true, true, 401]);
+
+      // its echo read within its heartbeat: kept
+      await sleep(1_200);
+      expect(closes).toEqual([]);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  // docs/support.md, "Leveled down": every side takes the echo alone, which waits behind the frame
+  test('drops a peer whose echo waits behind a frame longer than its heartbeat, the echo alone answering its ping', async () => {
+    await using started = await startDated({ heartbeat: 300 });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const exchange = openExchange(
+      { answersPings: false, host, port },
+      encoder.encode(upgradeRequest())
+    );
+    const [, connectionHandle] = await connection;
+    const closed = nextServerEvent(server, 'close');
+
+    try {
+      const pinged = await exchange.next(2_000);
+
+      expect(pinged).toEqual({ ping: expect.any(Uint8Array) as unknown });
+
+      // a frame of 4,096 bytes in 16 parts, one every 30 ms, past its heartbeat, its echo after it
+      const frame = frameOf({ fin: true, opcode: OPCODES.BINARY, payload: new Uint8Array(4_096) });
+      const part = Math.ceil(frame.length / 16);
+
+      for (let at = 0; at < frame.length; at += part) {
+        exchange.write(frame.subarray(at, at + part));
+        await sleep(30);
+      }
+
+      if (pinged !== undefined && 'ping' in pinged) {
+        exchange.send([{ fin: true, opcode: OPCODES.PONG, payload: pinged.ping }]);
+      }
+
+      expect(await exchange.next(2_000)).toEqual({ end: true });
+      expect(await closed).toEqual([false, connectionHandle]);
+    } finally {
+      exchange.destroy();
     }
   });
 
@@ -2582,7 +2886,6 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
   });
 
   test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
-    using timers = spyIntervals();
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({
       heartbeat: 20,
@@ -2605,9 +2908,12 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     const silent = createFakeSocket({ onTerminate: 'throw' });
     const connectionHandle = fake.connect(silent, { server });
 
-    // a ping, then the beat that drops its peer
-    timers.armed[0]?.beat();
-    timers.armed[0]?.beat();
+    // a ping, then its drop a heartbeat past it
+    await expect
+      .poll(() => {
+        return silent.wasTerminated;
+      })
+      .toBe(true);
 
     expect(silent.wasTerminated).toBe(true);
     expect(server.clients).toHaveLength(0);
@@ -3060,8 +3366,8 @@ test.describe('WebSocketTransportServer, the refusals it tells', () => {
 });
 
 test.describe('WebSocketTransportServer, the address it listens on', () => {
-  test('listens on localhost, port 80, and beats every 30 seconds when told nothing', async () => {
-    using timers = spyIntervals();
+  test('listens on localhost, port 80, and pings once silent for 30 seconds when told nothing', async () => {
+    using timeouts = spyTimeouts();
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
@@ -3076,14 +3382,12 @@ test.describe('WebSocketTransportServer, the address it listens on', () => {
 
     await fake.listenEach(2);
     await starting;
+
+    const before = timeouts.delays.length;
+
     fake.connect(createFakeSocket(), { server });
 
-    expect([
-      server.address,
-      timers.armed.map(({ delay }) => {
-        return delay;
-      }),
-    ]).toEqual(['localhost', [30_000]]);
+    expect([server.address, timeouts.delays.slice(before)]).toEqual(['localhost', [30_000]]);
 
     await server.stop();
   });
@@ -3889,6 +4193,48 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     expect(
       (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['X-Other: café']))).answer
     ).toEqual([400, null]);
+  });
+
+  // spec 15.2, 15.12; RFC 9110 §8.6
+  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const answers: unknown[] = [];
+
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
+    for (const length of [
+      '9223372036854775808',
+      '18446744073709551614',
+      '18446744073709551615',
+      '18446744073709551616',
+    ]) {
+      answers.push(
+        await closingAnswerOf(
+          started.port,
+          requestOf('GET / HTTP/1.1', [`Content-Length: ${length}`])
+        )
+      );
+    }
+
+    // and 2⁶³ and 2⁶⁴ under a host it does not take
+    for (const length of ['9223372036854775808', '18446744073709551616']) {
+      answers.push(
+        await closingAnswerOf(
+          started.port,
+          requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', `Content-Length: ${length}`])
+        )
+      );
+    }
+
+    // Node's parser counts to 2⁶⁴ − 1: an upgrade that declares content is malformed, after its
+    // host, and past it Node answers its own 400 before anything is judged
+    expect(answers).toEqual([
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, null],
+      [403, 'host-refused'],
+      [400, null],
+    ]);
   });
 
   test('waits for a head not whole', async () => {

@@ -3235,6 +3235,20 @@ public sealed class HttpTransportClientTests
         Assert.Equal([PastOf(16), PastOf(16), ["close False False"], PastOf(24)], toldOf);
     }
 
+    [Fact]
+    public async Task Writes_1_byte_for_a_maximumBodyBytes_of_1()
+    {
+        await using var faked = await ConnectFake(NotListening with { MaximumBodyBytes = 1 });
+        var told = EndOf(faked.Client);
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+
+        (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 200, Body = new byte[2], Headers = new Dictionary<string, string> { ["content-length"] = "2", ["content-type"] = HttpTransport.MediaType } });
+        await sending.WaitAsync(Patience, Cancelled);
+        await faked.Closed();
+
+        Assert.Equal(["InvalidDataException: the connection is closed: an envelope past its maximumBodyBytes, 1 byte", "close False False"], Told(told));
+    }
+
     // spec 15.1
     [Fact]
     public async Task Tells_a_batch_that_does_not_read_on_error_before_its_close_saying_what_of_it_does_not_and_a_refusal_of_its_listen_by_its_close_alone()

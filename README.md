@@ -48,8 +48,8 @@ This repository holds the protocol and its implementations, side by side:
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   each other side's generated HTTP client calls.
 
-**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
-build on a commit, pinned. Publication is ahead.
+**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry.
+Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may break.
 
 ## At a glance
 
@@ -136,18 +136,6 @@ and AMQP 1.0 on RabbitMQ 4 its second
   Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
   MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
 
-Bead is also a set of ideas that hold together, and each stands on its own: an envelope a router
-reads without decoding it; one credit that paces a subscription as it paces a transfer; a spec whose
-conformance files every language plays; a builder that writes each language's typed sides from one
-`.proto`; a DevTools panel that reads a page's calls; a dissenter bound to argue against every
-change the others agree on. Each can be taken into another project, and each has the record that
-says why it is so, in [`docs/decisions/`](docs/decisions/README.md).
-
-Bead is built to production standards: a spec every side plays, the three sides calling each other
-in CI, a weekly fuzzing campaign, coverage floors, bounds against a peer that tries to hold a side,
-and its pages held to WCAG 2.2 AA. It is not proven in production, and before 1.0.0 a minor may
-break.
-
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
 already joins services and devices, MQTT 5's and AMQP 1.0's. Think of a dashboard
@@ -160,10 +148,15 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
+- **Next**: the rules a security pass brings to every side: a `localhost` name reached on the
+  loopback without a resolver, as RFC 6761 §6.3 gives it ([0024](docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md));
+  a bound on what a server reads of a connection ahead of the request it serves, and on a
+  `Content-Length`; a transfer coding other than `chunked` refused, as RFC 9112 §6.1 asks; and a
+  malformed `Bearer` answered as RFC 6750 §3.1 gives it.
+- **Then**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   a row of the [support matrix](docs/support.md#differences) ahead.
-- **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
+- **After it**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
   a connection's close code carried on `close`
@@ -228,7 +221,7 @@ procedures, each under a version of its own. Beside them:
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                             | 474 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
-| [`transports.json`](spec/transports.json)                       | 279 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
+| [`transports.json`](spec/transports.json)                       | 296 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
 | [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
 | [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
@@ -238,7 +231,7 @@ procedures, each under a version of its own. Beside them:
 | [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 61 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 91 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 96 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
 | [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
 | [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
@@ -446,7 +439,9 @@ chooses, `?lng=`, then the choice it stored, then the browser's; its way back le
 site, francisdesjardins.ca. Its content is `src/content.en.html` and `src/content.fr.html`, its byte
 examples and tables `src/data.mjs`, its snippets `src/snippets/`; the versions, the conformance
 files' counts and the excerpts of the sources it shows are read from the repository as it builds.
-Each diagram is a Mermaid source per language under `diagrams/`, rendered at build time into an SVG
+Its contents are drawn from each section's `data-toc`, in two parts: the questions a team asks,
+then the protocol in detail, each opened by a section's `data-part`. Each diagram is a Mermaid
+source per language under `diagrams/`, rendered at build time into an SVG
 that follows both themes: drawn with sentinel colours, each replaced by a token of the page. Every
 SVG records the sha256 of its source.
 
@@ -477,7 +472,8 @@ holds the page, the privacy policy and the not-found page to their layout: the b
 one line from 320 to 1440 px, in both languages and both themes, no page wider than a phone, every
 control a finger reaches 44 px on a coarse pointer, every block of code at 13 px, no name of code in
 a table split inside its word on a phone, the keyboard's focus shown, the menu closed by Escape with
-the focus given back, and the theme set before the first paint:
+the focus given back, the contents in their two parts with every link landing on a section in the
+page's order, and the theme set before the first paint:
 
 ```sh
 cd site
@@ -541,7 +537,10 @@ each part lists the rows of `docs/support.md`'s Features and Transports it stand
 listed as not on the page, and each cell declares the stages it says are ahead. A side's cell of the
 matrix says a part ahead by the token `` ahead: `<stage>` ``, the title of a row of its differences
 of kind open; the build fails on a row in no list or in two, on "ahead" said in a cell's own words,
-and on a cell of the page that says otherwise than its rows.
+and on a cell of the page that says otherwise than its rows. The table of the transports is drawn
+from it the same way and held to the matrix's Transports: each of its rows in one transport or
+listed as not on the page, and each transport's sides those whose cells carry every row it stands
+for, a cell ahead whole or "not available" or "not tested" carrying none.
 
 ## Interop, both ways
 
@@ -1039,6 +1038,11 @@ against each server.
   reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
   where it stands by `// ! a detail of the side's own words: <why>` and counted by the tool. What
   another generator writes is left unread, what beadc writes read. Given files, those alone.
+- `node tools/check-byte-counts.mjs`: on every side, a count of bytes in a report, an error or a
+  refusal is written by the side's helper, `byteCountOf`, `FailureException.ByteCountOf` or
+  `byte_count_of`, which writes "1 byte" at 1; a count interpolated right before `bytes` fails but
+  for a constant above 1 the tool names. What another generator writes is left unread. Given
+  files, those alone.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says

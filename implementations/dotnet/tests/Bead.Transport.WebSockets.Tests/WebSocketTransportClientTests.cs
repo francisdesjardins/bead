@@ -105,6 +105,239 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // what sends a handshake over a socket whose stream the test arms: each write refused then, as
+    // a broken connection refuses it, and its first dispose, which the client's abort of its socket
+    // makes, throwing and ending nothing
+    private sealed class RefusedDrops() : DelegatingHandler(new SocketsHttpHandler { AllowAutoRedirect = false })
+    {
+        public TaskCompletionSource<ArmedStream> Stream { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+
+            response.Content = new ArmedContent(response.Content, Stream);
+
+            return response;
+        }
+    }
+
+    // the content of an upgrade answered, its stream one the test arms; it disposes the content it
+    // wraps
+    private sealed class ArmedContent(HttpContent inner, TaskCompletionSource<ArmedStream> made) : HttpContent
+    {
+        protected override Stream CreateContentReadStream(CancellationToken cancellationToken)
+        {
+            return Made(inner.ReadAsStream(cancellationToken));
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync()
+        {
+            return CreateContentReadStreamAsync(CancellationToken.None);
+        }
+
+        protected override async Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken)
+        {
+            return Made(await inner.ReadAsStreamAsync(cancellationToken));
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            return inner.CopyToAsync(stream, context);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private ArmedStream Made(Stream stream)
+        {
+            var armed = new ArmedStream(stream);
+
+            made.TrySetResult(armed);
+
+            return armed;
+        }
+    }
+
+    // a socket's stream that, once armed, refuses each write and throws at its first dispose,
+    // leaving its socket open; what it reads passes the token it is given
+    private sealed class ArmedStream(Stream inner) : Stream
+    {
+        private int _isArmed;
+        private int _refusesDrop;
+        private int _drops;
+
+        // its socket, which a dispose that threw left open
+        public Stream Inner
+        {
+            get
+            {
+                return inner;
+            }
+        }
+
+        // how many of its disposes threw
+        public int Drops
+        {
+            get
+            {
+                return Volatile.Read(ref _drops);
+            }
+        }
+
+        public override bool CanRead
+        {
+            get
+            {
+                return inner.CanRead;
+            }
+        }
+
+        public override bool CanSeek
+        {
+            get
+            {
+                return false;
+            }
+        }
+
+        public override bool CanWrite
+        {
+            get
+            {
+                return inner.CanWrite;
+            }
+        }
+
+        public override long Length
+        {
+            get
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        public override long Position
+        {
+            get
+            {
+                throw new NotSupportedException();
+            }
+
+            set
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        public void Arm()
+        {
+            ArmDrop();
+            Volatile.Write(ref _isArmed, 1);
+        }
+
+        // its first dispose alone throws, each write going through
+        public void ArmDrop()
+        {
+            Volatile.Write(ref _refusesDrop, 1);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            return inner.Read(buffer, offset, count);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            AssertWritable();
+            inner.Write(buffer, offset, count);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Volatile.Read(ref _isArmed) == 1)
+            {
+                return ValueTask.FromException(new IOException("write refused"));
+            }
+
+            return inner.WriteAsync(buffer, cancellationToken);
+        }
+
+        public override void Flush()
+        {
+            inner.Flush();
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            return inner.FlushAsync(cancellationToken);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Interlocked.Exchange(ref _refusesDrop, 0) == 1)
+            {
+                Interlocked.Increment(ref _drops);
+
+                throw new InvalidOperationException("abort refused");
+            }
+
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void AssertWritable()
+        {
+            if (Volatile.Read(ref _isArmed) == 1)
+            {
+                throw new IOException("write refused");
+            }
+        }
+    }
+
 
     private static CancellationToken Cancelled
     {
@@ -488,7 +721,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
+    public void Pings_once_silent_for_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
     {
         var options = new WebSocketTransportClientOptions();
         var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = 80 };
@@ -2323,6 +2556,47 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+    // once all the same
+    [Fact]
+    public async Task Tells_its_close_at_once_when_its_server_ends_the_connection_while_it_is_paused_by_a_FIN_or_a_reset()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+
+        foreach (var isReset in new[] { false, true })
+        {
+            // * no heartbeat, never resumed: its socket's end alone tells its close
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+            var (told, closed) = EndOf(client);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                await Listener.Upgrade(peer, head);
+                await connecting.WaitAsync(Patience, Cancelled);
+                client.Pause();
+                await Task.Delay(50, Cancelled);
+
+                if (isReset)
+                {
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    peer.Client.LingerState = new LingerOption(true, 0);
+                    peer.Client.Close();
+                }
+                else
+                {
+                    peer.Client.Shutdown(SocketShutdown.Send);
+                }
+
+                await closed.WaitAsync(Patience, Cancelled);
+
+                Assert.Equal(new object[] { (false, false) }, Described(told));
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+            }
+        }
+    }
+
     [Fact]
     public async Task Tells_a_protocol_error_on_its_connection_once_then_its_unclean_close()
     {
@@ -2484,6 +2758,81 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.1: what its socket throws as its transport drops it is the connection's error; the
+    // answer to its server's close that cannot go out is its peer's I/O, which no error tells
+    [Fact]
+    public async Task Ends_a_connection_whose_drop_throws_after_its_answer_to_a_close_fails_telling_what_it_threw_once_and_its_close()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        using var handler = new RefusedDrops();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = Timeout.InfiniteTimeSpan, Handler = handler });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = await handler.Stream.Task.WaitAsync(Patience, Cancelled);
+
+            // its answer to the close refused, and its socket's abort throwing, its socket left open
+            stream.Arm();
+            // a close of its server's, 1000, unmasked as a server's is
+            await peer.GetStream().WriteAsync(new byte[] { 0x88, 0x02, 0x03, 0xE8 }, Cancelled);
+            await closed.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1, stream.Drops);
+            Assert.Equal(new object[] { "InvalidOperationException: abort refused", (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+            // its socket, which the abort left open, ends after the connection: nothing more is told
+            await stream.Inner.DisposeAsync();
+
+            Assert.True(await IsClosed(peer));
+            Assert.Equal(2, Described(told).Length);
+        }
+    }
+
+    // spec 15.1: what its socket throws as its transport drops a server that never answered its
+    // disconnect within its close timeout is the connection's error, and its close is unclean
+    [Fact]
+    public async Task Ends_a_connection_whose_drop_throws_at_its_close_timeout_after_a_disconnect_telling_what_it_threw_once_and_its_close_unclean()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        using var handler = new RefusedDrops();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = Timeout.InfiniteTimeSpan, CloseTimeout = TimeSpan.FromMilliseconds(200), Handler = handler });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = await handler.Stream.Task.WaitAsync(Patience, Cancelled);
+
+            // its close goes out, the server never answers it, and its socket's abort throws, its
+            // socket left open
+            stream.ArmDrop();
+            await client.CloseConnection().WaitAsync(Patience, Cancelled);
+            await closed.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1000, await CloseCodeOf(peer.GetStream()));
+            Assert.Equal(1, stream.Drops);
+            Assert.Equal(new object[] { "InvalidOperationException: abort refused", (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+            // its socket, which the abort left open, ends after the connection: nothing more is told
+            await stream.Inner.DisposeAsync();
+
+            Assert.True(await IsClosed(peer));
+            Assert.Equal(2, Described(told).Length);
+        }
+    }
+
     [Fact]
     public async Task Raises_no_message_for_what_comes_after_it_sent_its_close()
     {
@@ -2580,6 +2929,178 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
             Assert.Equal(new byte[] { 7 }, (await Next(messages)).Bytes.ToArray());
         }
+    }
+
+    // the next frame the client sends on `stream`, its opcode and its payload unmasked; none once
+    // its socket ended or was reset
+    private static async Task<(int Opcode, byte[] Payload)?> FrameFrom(NetworkStream stream)
+    {
+        try
+        {
+            var head = new byte[2];
+
+            await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            var length = (long)(head[1] & 0x7F);
+
+            if (length >= 126)
+            {
+                var extended = new byte[length == 126 ? 2 : 8];
+
+                await stream.ReadExactlyAsync(extended, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                length = extended.Aggregate(0L, (sum, octet) =>
+                {
+                    return (sum << 8) | octet;
+                });
+            }
+
+            var mask = new byte[4];
+            var payload = new byte[length];
+
+            await stream.ReadExactlyAsync(mask, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            for (var index = 0; index < payload.Length; index += 1)
+            {
+                payload[index] ^= mask[index % 4];
+            }
+
+            return (head[0] & 0x0F, payload);
+        }
+        catch (Exception reason) when (reason is EndOfStreamException or IOException)
+        {
+            return null;
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_paused_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+        var (told, closed) = EndOf(client);
+
+        // * paused within the hand of a message, as a router at its intake's bound pauses: it reads
+        // nothing more of its server, the echo of its ping among it
+        client.Message += (_) =>
+        {
+            client.Pause();
+        };
+
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = peer.GetStream();
+
+            // a message, unmasked as a server sends it
+            await stream.WriteAsync(new byte[] { 0x82, 0x01, 0x01 }, Cancelled);
+
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+
+            byte[] pong = [0x8A, (byte)ping!.Value.Payload.Length, .. ping.Value.Payload];
+
+            await stream.WriteAsync(pong, Cancelled);
+            Assert.Null(await FrameFrom(stream));
+
+            // told closed, unclean, while still paused, and nothing else
+            await closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(new object[] { (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var stream = peer.GetStream();
+            var frame = await FrameFrom(stream);
+
+            Assert.Equal(0x9, frame?.Opcode);
+
+            // * paused once it pinged, outside the hand of a message, as a router pauses on its
+            // intake's bound: its read already waits on its server, and reads nothing more of it
+            client.Pause();
+
+            for (var pings = 0; frame is { Opcode: 0x9 } ping && pings < 20; pings += 1)
+            {
+                // a pong, unmasked as a server sends one
+                byte[] pong = [0x8A, (byte)ping.Payload.Length, .. ping.Payload];
+
+                await stream.WriteAsync(pong, Cancelled);
+                frame = await FrameFrom(stream);
+            }
+
+            Assert.Null(frame);
+
+            // told closed, unclean, while still paused, and nothing else
+            await closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(new object[] { (false, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // spec 15.1 and 15.12: its socket's end, which ends a paused connection, drops nothing of one
+    // not paused; a close its server made is told unclean (spec 15.3)
+    [Fact]
+    public async Task Delivers_each_of_300_messages_its_server_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient();
+        var (told, closed) = EndOf(client);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+
+        client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+        var bytes = new List<byte>();
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            // unmasked, as a server sends them
+            bytes.AddRange([0x82, 0x02, (byte)(index >> 8), (byte)index]);
+        }
+
+        bytes.AddRange([0x88, 0x02, 0x03, 0xE8]);
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+            await peer.GetStream().WriteAsync(bytes.ToArray(), Cancelled);
+            peer.Client.Shutdown(SocketShutdown.Send);
+            await closed.WaitAsync(Patience, Cancelled);
+        }
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            Assert.Equal([(byte)(index >> 8), (byte)index], (await Next(messages)).Bytes.ToArray());
+        }
+
+        Assert.Equal(new object[] { (false, false) }, Described(told));
     }
 
     // spec 15.2

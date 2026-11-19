@@ -3426,6 +3426,49 @@ async fn tells_a_server_that_drops_without_its_closing_handshake_by_a_fin_or_a_r
     }
 }
 
+// spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at once
+// all the same
+#[tokio::test]
+async fn tells_its_close_at_once_when_its_server_ends_the_connection_while_it_is_paused_by_a_fin_or_a_reset()
+ {
+    let mut server = raw().await;
+
+    for is_reset in [false, true] {
+        // * no heartbeat, never resumed: its socket's end alone tells its close
+        let client = client_of(&WebSocketTransportClientOptions {
+            heartbeat: Some(NEVER),
+            ..WebSocketTransportClientOptions::default()
+        });
+        let recorder = recorded(&client);
+
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+
+        client.pause();
+        crate::testing::rest(Duration::from_millis(50)).await;
+
+        if is_reset {
+            // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+            socket2::SockRef::from(&socket)
+                .set_linger(Some(Duration::ZERO))
+                .unwrap();
+            drop(socket);
+        } else {
+            socket.shutdown().await.unwrap();
+        }
+
+        closes_within(&recorder, 1).await;
+
+        assert_eq!(
+            told_of(&recorder),
+            ["close: false false"],
+            "its close alone"
+        );
+        assert!(is_state(&client, ReadyState::Closed), "closed");
+    }
+}
+
 // spec 15.1
 #[tokio::test]
 async fn tells_a_protocol_error_on_its_connection_once_then_its_unclean_close() {
@@ -3746,7 +3789,7 @@ async fn waits_on_its_server_without_end_for_a_close_timeout_of_infinity_closing
 // ── Its heartbeat ────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_the_beat_after_a_ping_it_left_unanswered()
+async fn pings_its_server_once_silent_for_its_heartbeat_over_a_socket_that_can_and_closes_once_its_ping_s_echo_has_not_come_within_its_heartbeat()
  {
     let mut server = raw().await;
     let platform = stepping();
@@ -3784,7 +3827,7 @@ async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_t
         }
     }
 
-    // dropped at the beat after, as a network drops it
+    // dropped a heartbeat past the ping it left unanswered, as a network drops it
     platform.advance(Duration::from_millis(20)).await;
 
     assert_eq!(
@@ -3798,7 +3841,7 @@ async fn pings_its_server_every_heartbeat_over_a_socket_that_can_and_closes_at_t
 }
 
 #[tokio::test]
-async fn beats_every_heartbeat_when_told_nothing() {
+async fn pings_once_silent_for_heartbeat_when_told_nothing() {
     let server = hearing(None).await;
     let platform = stepping();
     let client = on_platform(&platform, &WebSocketTransportClientOptions::default());
@@ -4016,6 +4059,145 @@ async fn a_paused_connection_closes_cleanly() {
         "handed once resumed"
     );
     client.dispose();
+}
+
+// pauses its client within the hand of each message, as a router at its intake's bound pauses
+struct PausingAtOnce {
+    client: Mutex<Option<WebSocketTransportClient>>,
+}
+
+impl ClientListener for PausingAtOnce {
+    fn on_message(&self, _message: TransportMessage) {
+        if let Some(client) = self.client.lock().unwrap().as_ref() {
+            client.pause();
+        }
+    }
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_paused_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+ {
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+    let pausing = Arc::new(PausingAtOnce {
+        client: Mutex::new(Some(client.clone())),
+    });
+
+    // * paused within the hand of a message: it reads nothing more of its server, the echo of its
+    // ping among it
+    client.listen(Arc::<PausingAtOnce>::clone(&pausing));
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    socket.write_all(&frame_of(0x2, &[1])).await.unwrap();
+
+    let Some((0x9, payload)) = patience(PATIENCE, frame_from(&mut socket)).await.unwrap() else {
+        panic!("a ping");
+    };
+
+    socket.write_all(&frame_of(0xa, &payload)).await.unwrap();
+
+    assert_eq!(
+        patience(PATIENCE, frame_from(&mut socket)).await.unwrap(),
+        None,
+        "dropped"
+    );
+
+    // told closed, unclean, while still paused, and nothing else
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "unclean"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
+    pausing.client.lock().unwrap().take();
+}
+
+// spec 15.3 and 15.12
+#[tokio::test]
+async fn drops_a_connection_paused_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
+ {
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut frame = patience(PATIENCE, frame_from(&mut socket)).await.unwrap();
+
+    assert!(matches!(frame, Some((0x9, _))), "a ping");
+
+    // * paused once it pinged, outside the hand of a message, as a router pauses on its intake's
+    // bound: its read already waits on its server, and reads nothing more of it
+    client.pause();
+
+    for _ in 0..20 {
+        let Some((0x9, payload)) = &frame else {
+            break;
+        };
+
+        socket.write_all(&frame_of(0xa, payload)).await.unwrap();
+        frame = patience(PATIENCE, frame_from(&mut socket)).await.unwrap();
+    }
+
+    assert_eq!(frame, None, "dropped");
+
+    // told closed, unclean, while still paused, and nothing else
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "unclean"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+}
+
+// spec 15.1 and 15.12: its socket's end, which ends a paused connection, drops nothing of one not
+// paused; a close its server made is told unclean (spec 15.3)
+#[tokio::test]
+async fn delivers_each_of_300_messages_its_server_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close()
+ {
+    let mut server = raw().await;
+    let client = client();
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let payloads: Vec<[u8; 2]> = (0_u16..300).map(u16::to_be_bytes).collect();
+    let mut bytes: Vec<u8> = payloads
+        .iter()
+        .flat_map(|payload| frame_of(0x2, payload))
+        .collect();
+
+    bytes.extend(close_frame(1000));
+    socket.write_all(&bytes).await.unwrap();
+    socket.shutdown().await.unwrap();
+
+    assert_eq!(
+        closes_within(&recorder, 1).await,
+        [(false, false)],
+        "its server's"
+    );
+    assert_eq!(
+        recorder.messages(),
+        payloads
+            .iter()
+            .map(|payload| Bytes::copy_from_slice(payload))
+            .collect::<Vec<_>>(),
+        "each, in order"
+    );
+    assert!(recorder.errors().is_empty(), "no error");
 }
 
 // ── Its runtime ──────────────────────────────────────────────────────────────────────────────
@@ -4360,7 +4542,8 @@ async fn a_connect_cancelled_before_its_handshake_changes_nothing_and_one_cancel
 }
 
 #[tokio::test]
-async fn beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing() {
+async fn pings_once_silent_for_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing()
+ {
     let options = WebSocketTransportClientOptions::default();
     assert!(options.clock.is_none(), "no supplied clock");
     assert!(

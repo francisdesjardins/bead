@@ -24,6 +24,7 @@ use crate::broker::adapter::{
 use crate::broker::parcel::LARGEST_BOUND;
 use crate::clock::{SharedClock, SystemClock};
 use crate::errors::ProgrammerError;
+use crate::failure::byte_count_of;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::BoxFuture;
 use crate::transport::Listeners;
@@ -579,7 +580,9 @@ impl AdapterInner {
                 && length > bound
             {
                 return Err(BrokerError::failed(format!(
-                    "a payload of {length} bytes, past the broker's maximumMessageBytes, {bound} bytes"
+                    "a payload of {}, past the broker's maximumMessageBytes, {}",
+                    byte_count_of(length),
+                    byte_count_of(bound)
                 )));
             }
 
@@ -594,7 +597,11 @@ impl AdapterInner {
             let is_routed = state.route((publication, is_retained), expires);
 
             Ok(
-                if !is_routed && adapter.capabilities.contains(BrokerCapabilities::NO_SUBSCRIBER) {
+                if !is_routed
+                    && adapter
+                        .capabilities
+                        .contains(BrokerCapabilities::NO_SUBSCRIBER)
+                {
                     BrokerPublished::NoSubscriber
                 } else {
                     BrokerPublished::Taken

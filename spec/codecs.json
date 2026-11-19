@@ -16,7 +16,7 @@
     "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
   ],
-  "specVersion": "0.16.0",
+  "specVersion": "0.17.0",
   "payloads": [
     {
       "name": "a string outside ASCII, written as it is",
@@ -585,6 +585,28 @@
       ],
       "bytes": "78 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
       "refused": "nested past 64"
+    },
+    {
+      "name": "a backslash and a quotation mark, then 65 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "5C 22 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a string whose quotation mark a backslash escapes, then 65 arrays opened",
+      "encoding": "json",
+      "clauses": [
+        "17.5",
+        "17.5.3",
+        "17.5.7"
+      ],
+      "bytes": "22 5C 22 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B",
+      "refused": "not JSON"
     },
     {
       "name": "an array closed before any opens, then 65 opened",

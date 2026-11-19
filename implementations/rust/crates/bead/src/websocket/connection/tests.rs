@@ -36,7 +36,7 @@ fn hooks_of(delivered: &Delivered) -> ConnectionHooks {
         deliver: Box::new(move |bytes: Bytes, is_text: bool| {
             delivered.lock().unwrap().push((bytes.to_vec(), is_text));
         }),
-        answered: Box::new(|| {}),
+        answered: Box::new(|_| {}),
     }
 }
 

@@ -162,7 +162,7 @@ const SHAPES = new WeakMap<DescMessage, IMessageShape>();
  * in its cause.
  */
 const refuseFor = (reason: string, found: string): never => {
-  throw new SyntaxError(reason, { cause: new SyntaxError(`the proto payload ${found}`) });
+  throw new SyntaxError(reason, { cause: new SyntaxError(`a proto payload ${found}`) });
 };
 
 /** A refusal of the payload as no encoding of its message, or one spec 17.9 refuses. */
@@ -452,7 +452,7 @@ const readVarint = (reader: IReader): number => {
   // * an index, not an iterator: a varint costs no object
   for (let place = 0; place < PLACES.length; place += 1) {
     if (reader.at >= end) {
-      return refuse('holds a varint past the end of its message');
+      return refuse('holds a varint cut short, or past the end of its message');
     }
 
     const byte = bytes[reader.at] ?? 0;
@@ -497,24 +497,37 @@ const int32At = (bytes: Uint8Array, at: number): number => {
 
 /** The tag at the reader: a uint32 varint, five bytes at most (Encoding, its reference card). */
 const readTag = (reader: IReader): number => {
-  const start = reader.at;
-  const tag = readVarint(reader);
+  const { bytes, end } = reader;
+  let value = 0;
 
-  if (reader.at - start > 5) {
-    refuse('holds a tag of more than 5 bytes');
+  for (let place = 0; place < INT32_PLACES; place += 1) {
+    if (reader.at >= end) {
+      return refuse('holds a tag cut short, or past the end of its message');
+    }
+
+    const byte = bytes[reader.at] ?? 0;
+
+    // ! a 5th byte past 0x0F sets a bit past the 32nd, or carries on to a 6th
+    if (place === INT32_PLACES - 1 && byte > 0x0f) {
+      break;
+    }
+
+    reader.at += 1;
+    // a sum, not a shift: bit 31 stays unsigned
+    value += (byte & 0x7f) * (PLACES[place] ?? 0);
+
+    if (byte < 0x80) {
+      return value;
+    }
   }
 
-  if (tag > 0xffff_ffff) {
-    refuse('holds a tag past 32 bits');
-  }
-
-  return tag;
+  return refuse('holds a tag of more than 5 bytes, or past 32 bits');
 };
 
 /** Moves the reader past `width` bytes of a fixed value, within its message. */
 const skipFixed = (reader: IReader, width: number): void => {
   if (reader.end - reader.at < width) {
-    refuse('holds a fixed value past the end of its message');
+    refuse('holds a record past the end of its message');
   }
 
   reader.at += width;
@@ -525,7 +538,7 @@ const readLength = (reader: IReader): number => {
   const length = readVarint(reader);
 
   if (length > reader.end - reader.at) {
-    refuse('holds a length past the end of its message');
+    refuse('holds a length past the bytes that follow it');
   }
 
   return length;
@@ -537,7 +550,7 @@ const skipPacked = (reader: IReader, packs: number): void => {
 
   if (packs !== VARINTS) {
     if (length % packs !== 0) {
-      refuse(`holds a packed record of ${String(length)} bytes, no multiple of ${String(packs)}`);
+      refuse('holds a packed record whose values do not end at its length');
     }
 
     reader.at += length;
@@ -566,7 +579,7 @@ const skipPacked = (reader: IReader, packs: number): void => {
   }
 
   if (carried !== 0) {
-    refuse('holds a packed record whose last varint runs past its end');
+    refuse('holds a varint cut short, or past the end of its message');
   }
 
   reader.at = end;
@@ -596,12 +609,12 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
     const wire = tag & 7;
 
     if (number === 0) {
-      refuse('holds a field numbered 0');
+      refuse('holds field number 0');
     }
 
     if (wire === EGROUP) {
       if (number !== reader.group) {
-        refuse(`holds an end group of ${String(number)}, which closes no group`);
+        refuse('holds an end group that closes no group open');
       }
 
       return;
@@ -610,13 +623,13 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
     const field = shape.fields.get(number);
 
     if (field === undefined && shape.isClosed) {
-      refuse("holds a map's entry with a field other than its key and its value (spec 17.9.6)");
+      refuse("holds a map's entry with a field other than its key and its value");
     }
 
     // * spec 17.9.5: protobuf's reference parsers keep such a field as unknown, protobuf-es reads it
     // as its declared type
     if (field !== undefined && (field.takes & (1 << wire)) === 0) {
-      refuse(`holds field ${String(number)} at a wire type its type does not take (spec 17.9.5)`);
+      refuse(`holds field ${String(number)} at a wire type its type does not take`);
     }
 
     switch (wire) {
@@ -670,12 +683,12 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
         break;
       }
       default:
-        refuse(`holds the wire type ${String(wire)}, which protobuf has not`);
+        refuse(`holds the wire type ${String(wire)}`);
     }
   }
 
   if (reader.group !== NO_GROUP) {
-    refuse(`holds a group of ${String(reader.group)} never closed`);
+    refuse('holds a group never closed');
   }
 };
 

@@ -2,9 +2,9 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
+    "A step is what the test does — send, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
     "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
-    "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
+    "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
@@ -22,7 +22,7 @@
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
     "Each item of differs names a row of docs/support.md a case crosses, which names the case, and the language it excuses: what that language's platform does otherwise before the transport reads the request. A harness plays every case but those a differs excuses its language from."
   ],
-  "specVersion": "0.16.0",
+  "specVersion": "0.17.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "defaults": {
     "maximumConnections": 10000,
@@ -1518,6 +1518,76 @@
       ]
     },
     {
+      "name": "a connect whose Content-Encoding is empty, identity then an empty element, or an empty element then identity is taken, identity then gzip in one line refused 415, marked",
+      "clauses": [
+        "15.6.11",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: \r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: identity,\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "trailing"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "trailing"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: , identity\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "leading"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "leading"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: identity, gzip\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "gzip"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "gzip"
+        }
+      ]
+    },
+    {
       "name": "a connect, or a POST on a connection, whose Content-Type comes in two lines, Bead's first, is refused 415, marked",
       "clauses": [
         "15.6.11",
@@ -2818,6 +2888,777 @@
             "body": ""
           },
           "on": "portless"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length frames no body — a word, nothing, two numbers in one line or in two, one number twice in one line — is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: abc\r\nconnection: close\r\n\r\n"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: \r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0, 1\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 1\r\nconnection: close\r\n\r\n"
+          },
+          "on": "numbers"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "numbers"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0, 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "twice"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length names one number in two lines is answered 400 unmarked, as section 15.12 levels it",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "differs": [
+        {
+          "row": "A `Content-Length` naming one number in several lines, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "exchange"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length frames no body before a Transfer-Encoding, or whose Transfer-Encoding's final coding is not chunked beside a Content-Length, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: abc\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ncontent-length: 1\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "numbers"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "numbers"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked, gzip\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "gzipped"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "gzipped"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: identity\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "identity"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "identity"
+        }
+      ]
+    },
+    {
+      "name": "a request carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "differs": [
+        {
+          "row": "A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked\r\ncontent-length: 0\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 8\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "38 0D 0A A1 16 00 02  00 00 00 05 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "exchange"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked\r\ncontent-length: abc\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: gzip, chunked\r\ncontent-length: 0\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "gzipped"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "gzipped"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "gzipped"
+        }
+      ]
+    },
+    {
+      "name": "an HTTP/1.0 request carrying a Content-Length beside a Transfer-Encoding is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "counted"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "counted"
+        }
+      ]
+    },
+    {
+      "name": "an HTTP/1.0 request carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nconnection: keep-alive\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\nconnection: keep-alive\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "38 0D 0A A1 16 00 02  00 00 00 05 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "exchange"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\nconnection: keep-alive\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "elsewhere"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked, chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked, chunked\r\n\r\n",
+            "body": "38 0D 0A A1 16 00 02  00 00 00 05 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "exchange"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "exchange"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "lines"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "lines"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "lines"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked, gzip, chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "between"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "between"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "between"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: chunked,\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "empty"
         }
       ]
     },
@@ -9577,6 +10418,449 @@
       ]
     },
     {
+      "name": "an upgrade whose Content-Length frames no body — a word, nothing, two numbers — or names one number twice, in one line or in two, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: abc\r\n\r\n"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: \r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 1\r\n\r\n"
+          },
+          "on": "numbers"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "numbers"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0, 0\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 0\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "twice"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ncontent-length: 00\r\n\r\n"
+          },
+          "on": "padded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "padded"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\ncontent-length: 0\r\n\r\n"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\ntransfer-encoding: chunked\r\n\r\n"
+          },
+          "on": "counted"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "counted"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\ncontent-length: abc\r\n\r\n"
+          },
+          "on": "word"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "word"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Transfer-Encoding's final coding is not chunked is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: gzip\r\n\r\n"
+          },
+          "on": "gzip"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "gzip"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: identity\r\n\r\n"
+          },
+          "on": "identity"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "identity"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked, gzip\r\n\r\n"
+          },
+          "on": "last"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "last"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked, chunked\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "twice"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\ntransfer-encoding: chunked\r\n\r\n"
+          },
+          "on": "lines"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "lines"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked,\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "empty"
+        }
+      ]
+    },
+    {
+      "name": "an HTTP/1.0 request at a WebSocket's address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "old"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "old"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "elsewhere"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nhost: {host}\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "plain"
+        }
+      ]
+    },
+    {
       "name": "a request at a WebSocket's address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken",
       "clauses": [
         "15.1",
@@ -13376,7 +14660,7 @@
       ]
     },
     {
-      "name": "a side pings its peer every heartbeat",
+      "name": "a side pings a peer silent for its heartbeat, again after each echo",
       "clauses": [
         "15.3"
       ],
@@ -13403,10 +14687,23 @@
           "on": "socket"
         },
         {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
           "expect": {
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         },
         {
@@ -13414,6 +14711,7 @@
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         }
       ]
@@ -13447,10 +14745,23 @@
           "on": "socket"
         },
         {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
           "expect": {
             "ping": true
           },
           "on": "socket",
+          "after": 150,
           "within": 1000
         },
         {
@@ -13459,6 +14770,617 @@
           },
           "on": "socket",
           "within": 2000
+        }
+      ]
+    },
+    {
+      "name": "a peer whose pong carries other data, or none, is dropped",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "answersPings": false,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "after": 150,
+          "within": 1000
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": ""
+              },
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "6F 74 68 65 72"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "socket",
+          "within": 1000
+        }
+      ]
+    },
+    {
+      "name": "a peer that, once pinged, sends a message but no echo is dropped",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "answersPings": false,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "after": 150,
+          "within": 1000
+        },
+        {
+          "send": {
+            "text": "x"
+          },
+          "on": "socket"
+        },
+        {
+          "report": 1,
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "socket",
+          "within": 1000
+        }
+      ]
+    },
+    {
+      "name": "a peer that sends an unsolicited pong within each heartbeat is never pinged",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 400
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 10,
+                "fin": true,
+                "payload": "62 65 61 74"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a peer whose message comes in fragments over several heartbeats is never pinged",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 400
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 1,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": false,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 0,
+                "fin": true,
+                "payload": "78"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "report": 1,
+          "on": "socket"
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
         }
       ]
     },

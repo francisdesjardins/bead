@@ -377,6 +377,26 @@ export const rawSocketOn = async (port: number) => {
   return { read, socket };
 };
 
+/**
+ * What `octets`, written on a raw socket of its own to `port`, are answered: its status and its
+ * mark, once its socket closed.
+ */
+export const closingAnswerOf = async (port: number, octets: string) => {
+  const { read, socket } = await rawSocketOn(port);
+
+  socket.write(octets, 'latin1');
+  await expect
+    .poll(() => {
+      return read.isClosed;
+    })
+    .toBe(true);
+
+  return [
+    Number(read.text.split(' ')[1]),
+    /\r\nbead-refusal: (?<mark>[^\r]*)\r\n/iu.exec(read.text)?.groups?.['mark'] ?? null,
+  ];
+};
+
 /** A POST's head on a connection, declaring `length` bytes of body. */
 export const postHeadOf = (connectionToken: string, length: number): string => {
   return (

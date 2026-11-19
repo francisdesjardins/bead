@@ -1682,6 +1682,31 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Writes_1_byte_for_a_socket_s_maximumMessageBytes_of_1()
+    {
+        await Start(new WebSocketTransportServerOptions { MaximumMessageBytes = 1 });
+
+        var told = Told();
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync(new byte[2], WebSocketMessageType.Binary, true, Cancelled);
+            await ReceiveOf(client);
+            await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            await Until(() =>
+            {
+                return told.Count == 2;
+            });
+
+            Assert.Equal(
+                $"{connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 1 byte",
+                Assert.IsType<InvalidDataException>(told.First().Reason).Message);
+        }
+    }
+
     // spec 15.3
     [Fact]
     public async Task Fails_with_1009_a_peer_that_never_answers_telling_one_error_then_an_unclean_close_once_its_close_timeout_passed()
@@ -2226,7 +2251,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing()
+    public async Task Listens_on_localhost_port_80_and_pings_once_silent_for_30_seconds_when_told_nothing()
     {
         var start = new TransportServerStartOptions();
         var options = new WebSocketTransportServerOptions();
@@ -3311,6 +3336,292 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // the next frame the server sends on `stream`, its opcode and its payload, unmasked as a
+    // server's is; none once its socket ended or was reset
+    private static async Task<(int Opcode, byte[] Payload)?> FrameFrom(NetworkStream stream)
+    {
+        try
+        {
+            var head = new byte[2];
+
+            await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            var length = (long)(head[1] & 0x7F);
+
+            if (length >= 126)
+            {
+                var extended = new byte[length == 126 ? 2 : 8];
+
+                await stream.ReadExactlyAsync(extended, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                length = extended.Aggregate(0L, (sum, octet) =>
+                {
+                    return (sum << 8) | octet;
+                });
+            }
+
+            var payload = new byte[length];
+
+            await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            return (head[0] & 0x0F, payload);
+        }
+        catch (Exception reason) when (reason is EndOfStreamException or IOException)
+        {
+            return null;
+        }
+    }
+
+    // a masked pong carrying `payload`, as a client sends one
+    private static byte[] PongOf(byte[] payload)
+    {
+        return FrameOf((0x8A, payload));
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_it_pauses_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        // * paused within the hand of a message, as a router at its bound pauses: it reads nothing
+        // more of its peer, the echo of its ping among it
+        _server.Message += (_, handle) =>
+        {
+            _server.Pause(handle);
+        };
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(FrameOf((0x82, [1])), Cancelled);
+
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+            await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
+            Assert.Null(await FrameFrom(stream));
+
+            // told closed, unclean, while still paused
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3 and 15.12
+    [Fact]
+    public async Task Drops_a_connection_it_pauses_between_messages_past_twice_its_heartbeat_by_its_own_heartbeat_its_peer_answering_every_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var frame = await FrameFrom(stream);
+
+            // * paused once it pinged, outside the hand of a message, as a router pauses on another
+            // connection's turn: its read already waits on its peer, and reads nothing more of it
+            _server.Pause(connectionHandle);
+
+            for (var pings = 0; frame is { Opcode: 0x9 } ping && pings < 20; pings += 1)
+            {
+                await stream.WriteAsync(PongOf(ping.Payload), Cancelled);
+                frame = await FrameFrom(stream);
+            }
+
+            Assert.Null(frame);
+
+            // told closed, unclean, while still paused
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+    // once all the same
+    [Fact]
+    public async Task Tells_the_close_of_a_connection_it_pauses_at_once_when_its_peer_ends_it_by_a_FIN_or_a_reset()
+    {
+        // * no heartbeat, never resumed: its socket's end alone tells its close
+        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+
+        foreach (var isReset in new[] { false, true })
+        {
+            var (tcp, _) = await Upgraded(UpgradeRequest());
+            var connectionHandle = await Next(_connections);
+
+            using (tcp)
+            {
+                _server.Pause(connectionHandle);
+                await Task.Delay(50, Cancelled);
+
+                if (isReset)
+                {
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    tcp.Client.LingerState = new LingerOption(true, 0);
+                    tcp.Client.Close();
+                }
+                else
+                {
+                    tcp.Client.Shutdown(SocketShutdown.Send);
+                }
+
+                Assert.Equal((false, connectionHandle), await Next(_closes));
+            }
+        }
+    }
+
+    // spec 15.1 and 15.12: its socket's end, which ends a paused connection at once, drops
+    // nothing of one not paused
+    [Fact]
+    public async Task Delivers_each_of_300_messages_its_peer_sends_in_one_write_with_its_close_and_its_end_then_tells_its_close_clean()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        var bytes = new List<byte>();
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            bytes.AddRange(FrameOf((0x82, [(byte)(index >> 8), (byte)index])));
+        }
+
+        bytes.AddRange(FrameOf((0x88, [0x03, 0xE8])));
+
+        using (tcp)
+        {
+            await tcp.GetStream().WriteAsync(bytes.ToArray(), Cancelled);
+            tcp.Client.Shutdown(SocketShutdown.Send);
+            Assert.Equal((true, connectionHandle), await Next(_closes));
+        }
+
+        for (var index = 0; index < 300; index += 1)
+        {
+            var (message, _) = await Next(_messages);
+
+            Assert.Equal([(byte)(index >> 8), (byte)index], message.Bytes.ToArray());
+        }
+    }
+
+    // spec 15.3
+    [Fact]
+    public async Task Pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_that_answers_with_an_empty_pong_or_an_earlier_ping_s_echo()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        byte[] first = [0, 0, 0, 0, 0, 0, 0, 1];
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+            Assert.Equal(first, ping!.Value.Payload);
+            await stream.WriteAsync(PongOf(first), Cancelled);
+            ping = await FrameFrom(stream);
+            Assert.Equal(0x9, ping?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 2], ping!.Value.Payload);
+            await stream.WriteAsync(PongOf([]), Cancelled);
+            await stream.WriteAsync(PongOf(first), Cancelled);
+            Assert.Null(await FrameFrom(stream));
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
+    // spec 15.3: the ping goes behind what its socket holds alone, so the 400 messages of 64 KiB the
+    // transport holds pass what any loopback's buffers hold
+    [Fact]
+    public async Task Pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(1_000), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+        var order = new List<int>();
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+
+            // it reads nothing, and is handed the backlog
+            for (var index = 0; index < 400; index += 1)
+            {
+                _ = _server.Send(new TransportMessage(new byte[65_536], false), connectionHandle);
+            }
+
+            // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
+            // of a heartbeat late, it reads all, echoing the ping as it comes
+            await Task.Delay(1_500, Cancelled);
+
+            while (order.Count < 401)
+            {
+                var frame = await FrameFrom(stream);
+
+                Assert.NotNull(frame);
+                order.Add(frame.Value.Opcode);
+
+                if (frame.Value.Opcode == 0x9)
+                {
+                    await stream.WriteAsync(PongOf(frame.Value.Payload), Cancelled);
+                }
+            }
+
+            Assert.InRange(order.IndexOf(0x9), 0, 399);
+
+            // its echo read within its heartbeat: kept
+            await Task.Delay(1_200, Cancelled);
+            Assert.Equal(0, _closes.Reader.Count);
+        }
+    }
+
+    // docs/support.md, "Leveled down": every side takes the echo alone, which waits behind the frame
+    [Fact]
+    public async Task Drops_a_peer_whose_echo_waits_behind_a_frame_longer_than_its_heartbeat_the_echo_alone_answering_its_ping()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(300) });
+
+        var (tcp, _) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            var stream = tcp.GetStream();
+            var ping = await FrameFrom(stream);
+
+            Assert.Equal(0x9, ping?.Opcode);
+
+            // a frame of 4,096 bytes in 16 parts, one every 30 ms, past its heartbeat, its echo after it
+            byte[] frame = [0x82, 0x80 | 126, 0x10, 0x00, 0, 0, 0, 0, .. new byte[4_096]];
+            var part = (frame.Length + 15) / 16;
+
+            try
+            {
+                for (var at = 0; at < frame.Length; at += part)
+                {
+                    await stream.WriteAsync(frame.AsMemory(at, Math.Min(part, frame.Length - at)), Cancelled);
+                    await Task.Delay(30, Cancelled);
+                }
+
+                await stream.WriteAsync(PongOf(ping!.Value.Payload), Cancelled);
+            }
+            catch (IOException)
+            {
+                // dropped as it wrote
+            }
+
+            Assert.Null(await FrameFrom(stream));
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+    }
+
     // an upgrade from behind a proxy that writes the client's address, as a socket of its own
     private static byte[] UpgradeFrom(string forwarded)
     {
@@ -3978,6 +4289,34 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal([101, 431, 414, 101, 431], answers);
     }
 
+    // spec 15.2, 15.12; RFC 9110 §8.6
+    [Fact]
+    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        var answers = new List<(int Status, string? Refusal)>();
+
+        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade, each read to its socket's close
+        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        {
+            var (status, fields, _) = await AnswerOf(Latin1HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"));
+
+            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+        }
+
+        // and 2⁶³ and 2⁶⁴ under a host it does not take
+        foreach (var length in new[] { "9223372036854775808", "18446744073709551616" })
+        {
+            var (status, fields, _) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", $"Content-Length: {length}"));
+
+            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+        }
+
+        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before anything is judged
+        Assert.Equal([(400, null), (400, null), (400, null), (400, null), (400, null), (400, null)], answers);
+    }
+
     [Fact]
     public async Task Refuses_400_a_head_HTTP_does_not_read_a_control_character_in_its_target_or_a_value_among_it_and_a_version_but_1_x_505()
     {
@@ -4025,7 +4364,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Beats_every_HEARTBEAT_when_told_nothing()
+    public void Pings_once_silent_for_HEARTBEAT_when_told_nothing()
     {
         Assert.Equal(TimeSpan.FromSeconds(30), new WebSocketTransportServerOptions().Heartbeat);
     }

@@ -32,7 +32,7 @@ that hold what of them a test can. The why of each rule is in the decisions:
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   a call its connection's transport does not take, counted under its procedure (7.6, 7.7, 8.3).
 
-**Version: 0.11.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.11.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -45,11 +45,10 @@ trace its calls and its envelopes, filter both, and count its calls and its noti
 document states, and trace the parcels of its participants where it carries a broker transport.
 
 1.2. A constrained profile MAY leave out, at build time, the trace and the filter, or the metrics,
-or both, as section 3.5's switches do. It conforms to `spec.md` either way, its wire by sections 1
-to 15, what it declares by section 16 and its codecs by section 17, and to this document for what it
-builds: what it leaves out is a row of the support matrix, not a difference of the protocol. A side
-built without the metrics plays `spec/debug-filters.json` alone, one built without the trace
-`spec/metrics.json` alone.
+or both, as section 3.5's switches do. It conforms to `spec.md` either way, and to this document
+for what it builds: what it leaves out is a row of the support matrix, not a difference of the
+protocol. A side built without the metrics plays `spec/debug-filters.json` alone, one built without
+the trace `spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
 3.1 and its codes by section 8. A code that `spec.md` section 8 gains adds a value to `code`
@@ -208,8 +207,8 @@ Selectors of one letter add up.
 6.4. A pattern names procedures to keep, or, after `-`, to leave out, which wins. It matches a whole
 name: `*` stands for any run of characters, none included, line terminators among them; an ASCII
 letter stands for itself in either case; every other character stands for itself alone, compared
-code point by code point, so a name outside ASCII is compared as it is. A pattern never holds a
-parenthesis.
+code point by code point, so a name outside ASCII is compared as it is. A pattern this grammar
+reads never holds a parenthesis.
 
 6.5. A call passes on its direction, its type and its procedure's name, and an envelope on its
 direction and its kind, so one filter serves both. A list left empty keeps every one: an empty
@@ -239,7 +238,9 @@ side reports a code.
 
 6.8. A filter given whole, not as a string, is refused in this grammar's names, whichever listener it
 is given to: its directions, its types and its kinds, each value held to those this grammar names.
-Its patterns and its exclusions are taken as they are given.
+Its patterns and its exclusions are taken as they are given, never read by this grammar. One that
+holds, beside `*`, a character no procedure's name holds (`spec.md` section 16.4), as a
+parenthesis, a separator or a surrogate alone, keeps or leaves out no procedure.
 
 6.9. A filter given as a function is asked as its listener is made, and again at each event. The
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function

@@ -1038,6 +1038,28 @@ async fn reports_an_outbox_that_passes_maximum_outbox_bytes_as_it_closes_its_con
     started.stop().await;
 }
 
+#[tokio::test]
+async fn writes_1_byte_for_a_maximum_outbox_bytes_of_1() {
+    let started = started(&HttpTransportServerOptions {
+        maximum_outbox_bytes: Some(1),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let (handle, _) = connect_listening(&started).await;
+
+    started.send(&notification((2, 0)), &handle).await.unwrap();
+    started.recorder.closes(1).await;
+    assert_eq!(
+        started.recorder.told().errors,
+        vec![(
+            format!("{handle} is dropped: its outbox would pass maximumOutboxBytes, 1 byte"),
+            Some(Arc::clone(&handle))
+        )],
+        "its error"
+    );
+    started.stop().await;
+}
+
 // spec 15.1
 // * an error listener that panics is caught as it tells and its panic dropped, as every side drops
 // it: the send settles as with no listener, and the listener after it, its recorder, hears the

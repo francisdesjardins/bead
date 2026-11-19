@@ -1,5 +1,5 @@
 POST /v1/ruled/Bead HTTP/1.1
-host: localhost:8081
+host: localhost
 content-type: application/json
 content-length: 11
 

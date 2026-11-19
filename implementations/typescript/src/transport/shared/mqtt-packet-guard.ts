@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { byteCountOf } from './errors';
 import {
   ACKNOWLEDGEMENT_TYPES,
   ACKNOWLEDGEMENT_VERDICTS,
@@ -337,7 +338,7 @@ export const guardPackets = (stream: IGuardedStream, options: IPacketGuardOption
 
           if (size > maximumPacketSize) {
             return trip(
-              `a packet of ${String(size)} bytes, past its Maximum Packet Size, ${String(maximumPacketSize)} bytes`
+              `a packet of ${byteCountOf(size)}, past its Maximum Packet Size, ${byteCountOf(maximumPacketSize)}`
             );
           }
 

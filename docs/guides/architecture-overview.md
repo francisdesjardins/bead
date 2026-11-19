@@ -3,7 +3,7 @@
 The mental model a team needs before it adopts Bead: what it writes, what beadc makes of it, what
 runs, and where Bead stands beside gRPC-Web, Connect and SignalR.
 
-> **Nothing is published yet.** beadc's image is built from a clone of Bead at a pinned commit,
+> **No package is published yet.** beadc's image is built from a clone of Bead at a pinned commit,
 > and the runtimes come from that clone by path; [the support matrix](../support.md) says what each
 > side plays today and what is ahead.
 
@@ -129,7 +129,7 @@ it claims nothing either way.
 | What is on the wire?                         | A binary envelope at fixed offsets; its payload `raw`, `text`, `json` or `proto`                                                                     | `grpc-web-text` by default; binary protobuf, "Only unary calls are supported"                | Binary Protobuf or JSON                                                                                                                                | JSON by default, or MessagePack                                                                |
 | After a dropped connection?                  | The application calls `reconnect`; each subscription is dropped and told, and the application subscribes again                                       | Not stated                                                                                   | Not stated                                                                                                                                             | `withAutomaticReconnect()`, off by default: 0, 2, 10 and 30 s, then stops; a new connection id |
 | Which languages?                             | TypeScript and C# at parity; Rust: its core, WebSocket, HTTP, MQTT 5 and the HTTP/JSON gateway, each part it lacks a row of the support matrix ahead | "A JavaScript implementation of gRPC for browser clients"                                    | Go, TypeScript and JavaScript, Swift, Kotlin, Python, Rust, Dart                                                                                       | An ASP.NET Core server; clients by platform                                                    |
-| How is it installed?                         | From a clone at a pinned commit; nothing is published                                                                                                | From npm, `grpc-web`                                                                         | From npm, `@connectrpc/connect` and `@connectrpc/connect-web`                                                                                          | The JavaScript client from npm, `@microsoft/signalr`                                           |
+| How is it installed?                         | From a clone at a pinned commit; no package or image is published                                                                                    | From npm, `grpc-web`                                                                         | From npm, `@connectrpc/connect` and `@connectrpc/connect-web`                                                                                          | The JavaScript client from npm, `@microsoft/signalr`                                           |
 
 The other projects' cells quote or sum up their own pages: gRPC-Web's
 [README](https://github.com/grpc/grpc-web); Connect's [introduction](https://connectrpc.com/docs/introduction),
@@ -141,15 +141,12 @@ SignalR's [overview](https://learn.microsoft.com/en-us/aspnet/core/signalr/intro
 Bead's cells come from [the root README](../../README.md), [the support matrix](../support.md),
 [the builder's README](../../builder/README.md) and the implementations' READMEs.
 
-**When Bead fits.** A client and its server hold a conversation rather than trade messages: a
-dashboard that follows state as it changes and must not fall behind, a back office whose server
-needs to ask the client something mid-call, an app that uploads large files while it keeps
-working, calls that cross a topic-based broker that already joins services and devices. A browser
-speaks it with no translating proxy in between, and the TypeScript, C# and Rust sides keep one
-behaviour.
+**What Bead is for.** Calls in which a client and its server hold a conversation rather than
+trade messages: state the client follows as it changes, a server that asks its client
+something mid-call, a large upload beside other calls, calls across a topic-based broker that
+already joins services and devices. A browser speaks it with no translating proxy in between, and
+the TypeScript, C# and Rust sides keep one behaviour.
 
-**What to weigh before adopting it.** Bead's packages are not published yet: a team builds
-beadc's image and takes the runtimes from a clone at a commit it pins. What each side plays, and
-what is ahead, is in [the support matrix](../support.md). A team whose services already speak gRPC
-behind a gRPC-Web proxy, or whose .NET hubs are already its contract, weighs that against moving
-its calls onto a new protocol.
+**Where it stands.** No package is published: beadc's image is built, and the runtimes taken, from
+a clone at a pinned commit. Bead has not run in production. What each side plays, and what is
+ahead, is in [the support matrix](../support.md).

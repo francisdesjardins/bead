@@ -47,6 +47,7 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  type IRequestTarget,
   isVisibleTarget,
   ownAuthorityOf,
   requestTargetOf,
@@ -62,7 +63,12 @@ import {
   authorityNamedBy,
   closingOf,
   headerOf,
+  type IExchangeIn,
+  inTurn,
+  isTransferEncodingTaken,
+  isUnencoded,
   joinedOf,
+  keptAliveOf,
   linesOf,
   preflightOf,
   HTTP_REFUSALS,
@@ -70,6 +76,7 @@ import {
   RESPONSE_HEADERS,
 } from '../transport/server/http-server-fields';
 import {
+  answerBeforeClose,
   boundHeadOf,
   createSendPace,
   HEADERS_TIMEOUT,
@@ -238,6 +245,15 @@ interface IExchange {
   isBodyRead: boolean;
 }
 
+/** What a request's target routes it to, judged before its turn. */
+interface IRouted {
+  readonly isDocument: boolean;
+  readonly matching: readonly IServedRoute[];
+  readonly methods: readonly string[];
+  readonly path: IRawPath | undefined;
+  readonly target: IRequestTarget | undefined;
+}
+
 // constants
 
 /** Where a gateway serves its document (transcoding 11.1). */
@@ -286,8 +302,9 @@ const RESULT_MEDIA_TYPES: Readonly<Record<Encoding, string>> = Object.freeze({
   text: 'text/plain;charset=utf-8',
 });
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`, spaces alone between the two
-const BEARER = /^bearer[ ]+([^ ].*)$/iu;
+// RFC 6750 §2.1: `"Bearer" 1*SP b64token`, spaces alone between the two, so a tab after them is no
+// separator; the token as it stands after them
+const BEARER = /^bearer[ ]+([^\t ].*)$/iu;
 
 // a weight as RFC 9110 §12.4.2's qvalue writes it
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
@@ -352,13 +369,11 @@ const asksStream = (request: IHTTPRequestLike): boolean => {
 
 /**
  * Whether a body's `content-type` is its route's (5.1): one field, its type compared
- * case-insensitively, and no parameter but `charset=utf-8`, in any case; its `content-encoding`
- * none or `identity`.
+ * case-insensitively, and no parameter but `charset=utf-8`, in any case; its body sent as it is,
+ * as spec 15.12 reads its `content-encoding`.
  */
 const isTakenType = (request: IHTTPRequestLike, encoding: Encoding): boolean => {
-  const encoded = joinedOf(request, 'content-encoding')?.trim().toLowerCase();
-
-  if (encoded !== undefined && encoded !== 'identity') {
+  if (!isUnencoded(request)) {
     return false;
   }
 
@@ -810,12 +825,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return;
     }
 
-    const closing = exchange.isBodyRead ? {} : closingOf(exchange);
+    // * a body its request declares and it did not read whole closes its connection, whatever of it
+    // came; a request that declares none keeps it (spec 15.12)
+    const closing = exchange.isBodyRead || !carriesContent(request) ? {} : closingOf(exchange);
 
     response.writeHead(status, {
       ...(isPlain
         ? { vary: RESPONSE_HEADERS.vary, 'x-content-type-options': 'nosniff' }
         : RESPONSE_HEADERS),
+      // * a 204 or a 304 carries no length
+      ...(body === undefined ? keptAliveOf(response) : {}),
       ...fields,
       ...(body === undefined ? {} : { 'content-length': String(body.length) }),
       ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
@@ -1004,7 +1023,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return { credential: { carried: value, scheme: CredentialScheme.ELSEWHERE } };
     }
 
-    const token = BEARER.exec(value)?.[1]?.trim();
+    const token = BEARER.exec(value)?.[1];
 
     if (token === undefined) {
       return {
@@ -1440,6 +1459,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             response.writeHead(200, {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
+              // ! a HEAD has no length to write
+              ...(isHead ? keptAliveOf(response) : {}),
             });
 
             if (isHead) {
@@ -1714,19 +1735,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     exchange.response.destroy();
   };
 
-  const route = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
-    const target = requestTargetOf(request.url);
-    const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
-    const path = target === undefined ? undefined : rawPathOf(target.path);
-    const { matching, methods } = isDocument
-      ? { matching: [], methods: ['GET', 'HEAD'] }
-      : routesOf(path);
-
-    // a handler mounted on another server leaves it every path it serves none of
-    if (createServer === undefined && !isDocument && matching.length === 0) {
-      return false;
-    }
-
+  // judges an exchange the gateway takes, in its socket's turn, then serves it
+  const judge = (
+    { request, response }: IExchangeIn,
+    { isDocument, matching, methods, path, target }: IRouted
+  ): void => {
     const { remoteAddress } = request.socket;
     const forwarded = linesOf(request, 'x-forwarded-for');
     const address =
@@ -1745,17 +1758,20 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     };
     writerOf(response);
 
-    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, or a #
-    // anywhere in its target, among it
+    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a # in its
+    // target, or a Transfer-Encoding 15.12 refuses, which Node hands on over HTTP/1.0 or under
+    // `insecureHTTPParser`, its refusal closing its connection (RFC 9112 §6.1)
     const named =
-      hasVisibleFields(request.rawHeaders) && isVisibleTarget(request.url)
+      hasVisibleFields(request.rawHeaders) &&
+      isVisibleTarget(request.url) &&
+      isTransferEncodingTaken(request)
         ? authorityNamedBy(request)
         : undefined;
 
     if (named === undefined || target === undefined) {
       refuseMalformed({ request, response });
 
-      return true;
+      return;
     }
 
     // 2: its host
@@ -1766,7 +1782,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 403,
       });
 
-      return true;
+      return;
     }
 
     // 3: its path
@@ -1777,7 +1793,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 404,
       });
 
-      return true;
+      return;
     }
 
     // 4: its origin
@@ -1790,7 +1806,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 403,
       });
 
-      return true;
+      return;
     }
 
     if (isListedOrigin(origin, origins) && origin !== undefined) {
@@ -1819,7 +1835,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           status: 403,
         });
 
-        return true;
+        return;
       }
     }
 
@@ -1833,7 +1849,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
       answer(exchange, { fields: headers, status });
 
-      return true;
+      return;
     }
 
     // 7: its method
@@ -1842,7 +1858,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (isDocument) {
       serveDocument(exchange, method);
 
-      return true;
+      return;
     }
 
     const chosen = path === undefined ? undefined : chosenOf(path, method);
@@ -1855,29 +1871,50 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         status: 405,
       });
 
-      return true;
+      return;
     }
 
     serve(exchange, { chosen, path, query: target.query }).catch((error: unknown) => {
       answerUnforeseen(exchange, error);
     });
-
-    return true;
   };
 
   // * a throw of its host's within its own turn, a refusal's writeHead, say, ends its exchange and
   // never reaches Node's `request` emit
   const listener = (request: IHTTPRequestLike, response: IHTTPResponseLike): boolean => {
-    try {
-      return route(request, response);
-    } catch (error) {
+    const unforeseen = (error: unknown): void => {
       answerUnforeseen(
         { address: 'local', isBodyRead: false, port: undefined, request, response },
         error
       );
+    };
 
-      return true;
+    try {
+      const target = requestTargetOf(request.url);
+      const isDocument = documentBytes !== undefined && target?.path === DOCUMENT_PATH;
+      const path = target === undefined ? undefined : rawPathOf(target.path);
+      const { matching, methods } = isDocument
+        ? { matching: [], methods: ['GET', 'HEAD'] }
+        : routesOf(path);
+
+      // a handler mounted on another server leaves it every path it serves none of, at once
+      if (createServer === undefined && !isDocument && matching.length === 0) {
+        return false;
+      }
+
+      // ! over HTTP/1, in its socket's turn, and none behind an answer that closes its connection
+      inTurn({ request, response }, () => {
+        try {
+          judge({ request, response }, { isDocument, matching, methods, path, target });
+        } catch (error) {
+          unforeseen(error);
+        }
+      });
+    } catch (error) {
+      unforeseen(error);
     }
+
+    return true;
   };
 
   /** Serves the document (11.1): `GET` and `HEAD`, its tag, and a 304 to a request that holds it. */
@@ -1968,6 +2005,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         };
 
         boundHeadOf(instance, headersTimeout);
+        answerBeforeClose(instance);
         listening.add(instance);
 
         return new Promise((resolve, reject) => {

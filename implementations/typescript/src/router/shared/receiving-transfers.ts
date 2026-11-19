@@ -3,6 +3,7 @@
 // dependencies
 
 import type { IClock, TimeoutId } from '../../transport/shared/clock';
+import { byteCountOf } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import {
@@ -275,7 +276,7 @@ export const createReceivingTransfers = <Handle extends string>({
   const waitedOf = (total: number): IProtocolFailure => {
     return {
       ...failures.capacityExceeded,
-      detail: `a total of ${String(total)} bytes waited ${String(budgetWait)} milliseconds for the budget`,
+      detail: `a total of ${byteCountOf(total)} waited ${String(budgetWait)} milliseconds for the budget`,
     };
   };
 
@@ -364,7 +365,7 @@ export const createReceivingTransfers = <Handle extends string>({
       if (total > limits.maximumPayloadBytes) {
         return {
           ...failures.payloadTooLarge,
-          detail: `a payload is ${String(limits.maximumPayloadBytes)} bytes at most, not ${String(total)}`,
+          detail: `a payload is ${byteCountOf(limits.maximumPayloadBytes)} at most, not ${String(total)}`,
         };
       }
 
@@ -401,7 +402,7 @@ export const createReceivingTransfers = <Handle extends string>({
       if (openingBytes !== undefined && opening.length !== openingBytes) {
         return {
           ...failures.chunkInvalid,
-          detail: `an opening carries ${String(openingBytes)} bytes of its payload, not ${String(opening.length)}`,
+          detail: `an opening carries ${byteCountOf(openingBytes)} of its payload, not ${String(opening.length)}`,
         };
       }
 

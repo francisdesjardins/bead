@@ -62,7 +62,9 @@ same conformance files and proves against the others in the interop. Where a lan
 or its platform cannot have it at all, the difference is a row of the support matrix,
 `docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
-- A test missing on one side is added to the others.
+- A test missing on one side is added to the others. `tools/check-twins.mjs` holds it in CI: every
+  TypeScript and C# test has a Rust twin under its title's key, or a row of `tools/twins.tsv` gives
+  its class and why; `--write` adds a new one as `pending`, for a reader to classify.
 - A term renamed on one side is renamed on every side, wherever it applies.
 - No implementation is the reference: the set evolves together, wherever it can. Where one does Y
   and another can do Y and Z, every one does Y: the second keeps to Y, or comes back to it, and Z
@@ -197,11 +199,12 @@ see the README's "The page".
 
 ## The agents' effort
 
-Each workflow sets the effort of each agent.
+Each workflow sets the effort of each agent. A step of a process is never left out to save its
+cost; its cost is lowered by its effort, its model or how it runs, serially say.
 
 | Effort     | For what                                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **medium** | The verifiable mechanics: copying, re-pointing paths, renaming, configuring, the CI                                                                            |
 | **high**   | Implementation and tests, interop, the demo and its build, verifying a layer, fixes                                                                            |
 | **xhigh**  | What is hard to undo: the builder's design, the spec's identity rules, the audit before the first commit, the concurrent core of a new language, the Tenth Man |
-| **max**    | The adversarial review before a freeze: the `.proto` options v1, a version of the spec                                                                         |
+| **max**    | The adversarial review before a freeze that cannot be revised: the `.proto` options v1, the spec's 1.0                                                         |

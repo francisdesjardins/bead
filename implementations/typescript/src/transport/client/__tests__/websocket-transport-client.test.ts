@@ -42,7 +42,7 @@ import {
   reachedByLocalhost,
   sendRefusalOf,
   sockets,
-  spyIntervals,
+  spyTimeouts,
   startServer,
   stopServer,
   trapUncaught,
@@ -2868,6 +2868,43 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     }
   });
 
+  // spec 15.3 and 15.12: a paused connection reads nothing of its socket, whose end it meets at
+  // once all the same
+  test('tells its close at once when its server ends the connection while it is paused, by a FIN or a reset', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      // * no heartbeat, never resumed: its socket's end alone tells its close
+      const client = createWebSocketTransportClient({ heartbeat: Infinity, WebSocket: TrackedWs });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const socket = await upgraded;
+      const closed = nextEvent(client, 'close');
+
+      client.pause();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      drop(socket);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+      expect(client.isClosed()).toBe(true);
+    }
+  });
+
   test('tells a protocol error on its connection once, then its unclean close', async () => {
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
@@ -3353,7 +3390,7 @@ test.describe('WebSocketTransportClient, its close timeout', () => {
 });
 
 test.describe('WebSocketTransportClient, heartbeat', () => {
-  test('pings its server every heartbeat over a socket that can, and closes at the beat after a ping it left unanswered', async () => {
+  test('pings its server once silent for its heartbeat over a socket that can, and closes once its ping’s echo has not come within its heartbeat', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
     const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
@@ -3368,7 +3405,7 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     socket?.fireOpen();
     await connecting;
 
-    // dropped at the beat after, as a network drops it
+    // dropped a heartbeat past the ping it left unanswered, as a network drops it
     expect(await closed).toEqual([false, false]);
     expect([socket?.pings, socket?.wasTerminated]).toEqual([4, true]);
     expect(client.isClosed()).toBe(true);
@@ -3409,20 +3446,18 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     expect(told).toHaveLength(2);
   });
 
-  test('beats every HEARTBEAT when told nothing', async () => {
-    using timers = spyIntervals();
+  test('pings once silent for HEARTBEAT when told nothing', async () => {
+    using timeouts = spyTimeouts();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
     const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
+    // what is armed once open, its connect's own timeout armed before
+    const before = timeouts.delays.length;
 
     made[0]?.fireOpen();
     await connecting;
 
-    expect(
-      timers.armed.map(({ delay }) => {
-        return delay;
-      })
-    ).toEqual([HEARTBEAT]);
+    expect(timeouts.delays.slice(before)).toEqual([HEARTBEAT]);
     // asks for the root over ws within 30 seconds, and names no host nor port of its own
     expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
 
@@ -3785,6 +3820,101 @@ test.describe('WebSocketTransportClient, paused by its router', () => {
       await stopServer(server);
       await allClosed();
     }
+  });
+
+  // spec 15.3 and 15.12
+  test('drops a connection paused past twice its heartbeat by its own heartbeat, its server answering every ping', async () => {
+    const server = await startServer();
+    const client = createWebSocketTransportClient({ heartbeat: 200, WebSocket: TrackedWs });
+    const connection = nextConnection(server);
+    const told = toldBy(client);
+
+    // * paused within the hand of a message, as a router at its intake's bound pauses: it reads
+    // nothing more of its server, the echo of its ping among it
+    client.on('message', () => {
+      client.pause();
+    });
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const closed = nextEvent(client, 'close');
+
+      // its server's end answers every ping it reads
+      socket.send(Uint8Array.of(1));
+      await closed;
+
+      // told closed, unclean, while still paused, and nothing else
+      expect(told).toEqual([['close', false, false]]);
+      expect(client.isClosed()).toBe(true);
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+
+  // spec 15.3 and 15.12
+  test('drops a connection paused between messages past twice its heartbeat by its own heartbeat, its server answering every ping', async () => {
+    const server = await startServer();
+    const client = createWebSocketTransportClient({ heartbeat: 200, WebSocket: TrackedWs });
+    const connection = nextConnection(server);
+    const told = toldBy(client);
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const closed = nextEvent(client, 'close');
+
+      // its server's end answers every ping it reads
+      await once(socket, 'ping');
+
+      // * paused once it pinged, outside the hand of a message, as a router pauses on its intake's
+      // bound: its socket reads nothing more of its server
+      client.pause();
+      await closed;
+
+      // told closed, unclean, while still paused, and nothing else
+      expect(told).toEqual([['close', false, false]]);
+      expect(client.isClosed()).toBe(true);
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+
+  // spec 15.1 and 15.12: its socket's end, which ends a paused connection, drops nothing of one not
+  // paused; a close its server made is told unclean (spec 15.3)
+  test('delivers each of 300 messages its server sends in one write with its close and its end, then tells its close', async () => {
+    await using raw = await startRaw();
+    const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const delivered: number[][] = [];
+    const upgraded = raw.next();
+    const payloads = Array.from({ length: 300 }, (_, index) => {
+      return [index >> 8, index & 0xff];
+    });
+
+    client.on('message', ({ data }) => {
+      delivered.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const closed = nextEvent(client, 'close');
+
+    (await upgraded).end(
+      Buffer.concat([
+        ...payloads.map((payload) => {
+          return frameOf(0x2, Uint8Array.from(payload));
+        }),
+        frameOf(0x8, Uint8Array.of(0x03, 0xe8)),
+      ])
+    );
+    await closed;
+
+    expect(delivered).toEqual(payloads);
+    expect(told).toEqual([['close', false, false]]);
   });
 });
 

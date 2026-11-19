@@ -105,6 +105,50 @@ public sealed class BrokerSequenceTests
     }
 
     [Fact]
+    public async Task Writes_1_byte_for_a_bound_a_budget_and_a_rate_of_1()
+    {
+        var clock = new SteppingClock(Epoch);
+        var bounds = new BrokerPartsBounds
+        {
+            BodyGracePeriod = TimeSpan.FromSeconds(5),
+            Budget = new BrokerBudget(1),
+            Clock = clock,
+            MaximumEnvelopePartsBytes = 1,
+            MinimumBodyBytesPerSecond = 1,
+        };
+
+        // past its participant's budget, which another connection's part holds whole
+        var other = new BrokerParts(bounds, () =>
+        {
+        });
+
+        other.Take(((byte[])[0], true, null));
+        Assert.Equal((4000, "a part would pass its participant's heldBytesBudget, 1 byte"), new BrokerParts(bounds, () =>
+        {
+        }).Take(((byte[])[0], true, null)).Lost!.Value);
+        other.Stop();
+
+        // past its bound
+        var bounded = new BrokerParts(bounds, () =>
+        {
+        });
+
+        bounded.Take(((byte[])[0], true, null));
+        Assert.Equal((1009, "an envelope's parts would pass maximumEnvelopePartsBytes, 1 byte"), bounded.Take(((byte[])[0], true, null)).Lost!.Value);
+
+        // slower than its rate once its grace passed
+        var slow = new BrokerParts(bounds, () =>
+        {
+        });
+
+        slow.Take(((byte[])[0], true, null));
+        await clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.True(slow.IsLate());
+        Assert.Equal("an envelope's parts came slower than minimumBodyBytesPerSecond, 1 byte a second, past bodyGracePeriod, 5000 ms", slow.LateOf());
+        slow.Stop();
+    }
+
+    [Fact]
     public void Keeps_no_room_for_an_envelope_s_parts_once_its_envelope_is_whole_or_its_parts_let_go()
     {
         var bounds = BoundsOf((new SteppingClock(Epoch), 100));

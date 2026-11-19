@@ -7,6 +7,214 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-18
+
+### Changed
+
+- The spec moves to 0.17.0 (`spec-v0.17.0`), its companion, `spec/debugging.md`, to 0.11.1
+  (`debugging-v0.11.1`), and the transcoding's companion, `spec/transcoding.md`, to 0.7.0
+  (`transcoding-v0.7.0`).
+- The DevTools extension is on the Chrome Web Store, and the page and the TypeScript side's README
+  link its listing.
+- The `bead-adversarial-review` workflow reviews every lens at xhigh, the spec's and its
+  companion's at max only before a freeze that cannot be revised, and its verifier reruns the proof
+  of a blocker and a major, a minor's only where reading cannot settle it.
+- The page beadproto.dev serves, in English and in French, answers a team's questions in order: one
+  contract for every team, the teams that do not speak Bead, evolving without breaking, the
+  transports, the same behaviour on every side, debugging and observing, and security. Where Bead
+  stands opens it, under a new lede, and the protocol in detail follows, its sections unchanged. Its
+  contents come in those two parts; the table of the transports is drawn from `site/src/data.mjs`
+  and held to the support matrix's Transports, as the implementations' is; the French page keeps a
+  number whole and with its unit by no-break spaces. How Bead is made moves to
+  francisdesjardins.ca, and README's "Why Bead" drops the two paragraphs the page dropped.
+- Spec 15.3: a side pings a WebSocket connection once nothing of it has been read for `heartbeat`, a
+  part of a frame, a control frame and an unsolicited pong each counting. Its ping carries data of
+  its own, never empty nor an earlier ping's, and goes ahead of what the side holds unsent; it drops
+  the connection once the pong that echoes that data has not come within `heartbeat`, no other frame
+  answering it. A peer that keeps sending is never pinged, and a side that pauses a connection past
+  about twice `heartbeat` drops it by its own heartbeat (15.12). The TypeScript and Rust sides ping
+  so, as the C# side's .NET keep-alive does, each with 8 bytes of a count from 1: the TypeScript
+  side counts its raw socket's reads and holds its own send queue in front of `ws`, the Rust side
+  counts its stream's reads and queues its ping at the front. The WebSocket cases of
+  `spec/transports.json` take a `wait` step, and four cases more play the rule; the support matrix's
+  open heartbeat row closes, a pong that waits behind a frame longer than `heartbeat` is a row of
+  its "Leveled down", and `UNTESTED_OPEN` is 44.
+- The spec, its transcoding and its companion say what holds where the 0.15.0 review found them
+  short: `PAYLOAD_INVALID`'s detail as the one a requester reads (7.6); which of step 7's failed
+  checks a detail names (5.2); a `localhost` name trusted without Secure Contexts' condition on its
+  user agent (13.4); a WebSocket client's extensions (15.2); which request fields are read with
+  their lines joined, and which never are (15.12); a backslash that escapes within a string alone
+  (17.5); a gateway's `Bearer` separator (2.4), its `content-encoding` (5.1), the order of its
+  `proto` reader's refusals (5.2.1) and a `sec-fetch-*` value compared in its case (10.1); and a
+  whole debug filter's patterns (6.4, 6.8).
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request's body is framed as HTTP frames it. In a
+  request without a `Transfer-Encoding`, a `Content-Length` that frames no body — not digits alone,
+  an empty one among them, or two numbers in one line or across its lines — is answered as HTTP
+  answers it, 400 unmarked over HTTP/1.1 and at a WebSocket's address, its stream reset
+  `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged; so is one number
+  named more than once, which RFC 9110 §8.6 lets a recipient read as that number, a row of the
+  support matrix's "Leveled down". A WebSocket's step 6 reads content as a `Content-Length` past 0
+  or a `Transfer-Encoding`. Every side's WebSocket judgement refuses so at its step 1, where the
+  Rust side's marked these `malformed`, and the Rust HTTP transport and gateway reset over HTTP/2
+  the stream of a `Content-Length` in more than one line. Three platform rows of the matrix's
+  differences say the rest: the Rust side over HTTP/1.1, whose hyper reads one number in two lines
+  as that number; HTTP/2, where Kestrel ends the session; and a signed `Content-Length`, which
+  Kestrel reads as its number. Three cases of `spec/transports.json`, an exchange of
+  `spec/transcoding.json` and three steps of another play the rule, and the transports'
+  generator's `send` takes a list of lengths.
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request that carries a `Content-Length` beside a
+  `Transfer-Encoding`, in either order and whatever the `Content-Length` holds, is answered as RFC
+  9112 §6.3 asks, 400 unmarked over HTTP/1.1 and at a WebSocket's address, before anything else of
+  it is judged, and its connection closes once answered (§6.1); so is a request whose
+  `Transfer-Encoding` does not end in `chunked` (§6.3 item 4). Over HTTP/2 a `Transfer-Encoding`
+  resets its stream `PROTOCOL_ERROR` (RFC 9113 §8.2.2). Every side's WebSocket judgement refuses
+  both at its step 1, where the TypeScript and Rust sides marked an upgrade whose final coding is
+  not `chunked` `malformed`. A platform row of the support matrix's differences says the rest: the
+  Rust side over HTTP/1.1, whose hyper drops the `Content-Length`, reads the body by its
+  `Transfer-Encoding` alone and closes. Five cases of `spec/transports.json`, one of them on a
+  socket that asks no close, an exchange and a step of `spec/transcoding.json` play the rule, and
+  the transports' generator's `send` takes `close`.
+- Spec 15.12, 15.2 and the transcoding's 10.1: a request whose `Transfer-Encoding` lists anything
+  after its first `chunked`, in one line or across its lines, is answered 400 unmarked over HTTP/1.1
+  and at a WebSocket's address, before anything else of it is judged, and its connection closes once
+  answered: another `chunked` is one a sender never applies (RFC 9112 §6.1), and a recipient cannot
+  tell how a body that names it twice was coded. An empty element after it is refused alike, a row
+  of the support matrix's "Leveled down", since Node's parser and hyper refuse it where RFC 9110
+  §5.6.1.2 has a recipient ignore it. So is an HTTP/1.0 request that carries a `Transfer-Encoding`,
+  whose framing §6.1 calls faulty, at every address. Each side judges both by one predicate,
+  `isTransferEncodingFramed`, `RequestFields.IsTransferEncodingFramed` and
+  `is_transfer_encoding_framed`, at its HTTP transport, its gateway and its WebSocket judgement,
+  where the C# and Rust sides took another `chunked` and every side marked one `malformed` or
+  answered an HTTP/1.0 upgrade 426. Four cases of `spec/transports.json`, two of them on a socket
+  that asks no close, the HTTP/1.0 one kept alive, and four steps of an exchange of
+  `spec/transcoding.json` play the rule, and the transcoding's generator's `framed_by` takes `http`.
+- The check of a `proto` payload's records, `checkProtoRecords`, `ProtoRecords.Check` and
+  `check_proto_records`, says the record it refused in one set of words on every side: its cause is
+  "a proto payload holds" followed by the case, a field's number in 17.9.5's, and its depth cause
+  "a proto payload nests a message more than 100 deep below the top one". The TypeScript side reads
+  a tag as a varint of 5 bytes at most, as the C# and Rust sides do, so every input reaches the same
+  case; no payload's outcome moves (decision 0028).
+- The companion's 1.2 points to the spec for what a constrained profile conforms to, in place of a
+  list of its sections, and the spec's 9.2, step 3, drops its comparison with two HTTP/2 servers,
+  the bound and Rapid Reset's CVE unchanged.
+- Spec 15.12 says when a server closes over HTTP/1: a refusal of its own of a request that declares
+  a body carries `connection: close`, whatever of the body was read, and closes in stages; one of a
+  request that declares none carries no `connection: close` of its own over HTTP/1.1 (RFC 9112
+  §9.5); what HTTP refuses of its own closes. A server answers a connection's requests in their
+  order and serves none behind an answer that closes it, none judged, handed on or told (§9.3.2,
+  §9.6), so it serves a request once the answers before it ended. The transcoding's 10.2 holds a
+  gateway to it. The gateways' twins carry the same closing cases on every side, and new twins hold
+  a bodiless refusal that keeps its connection, a refusal of a body still coming closed in stages,
+  and a stream asked over HTTP/1.0 closed for want of a length, nothing served behind it.
+- The documents are brought to 0.16.0: the records, the matrix and the READMEs state the heartbeat
+  on silence, the HTTP framing refusals and the service of a connection's requests in their order
+  as what holds.
+- The guides for teams are brought to 0.16.0, their scenario built and run again in Node: the
+  DevTools extension comes from the Chrome Web Store or is built from the clone, the guides say no
+  package or image is published, and getting started says that Bead has not run in production and
+  that before 1.0.0 a minor may break.
+
+### Fixed
+
+- The C# HTTP transport and gateway close the connection of a request that carries a
+  `Content-Length` beside a `Transfer-Encoding` over HTTP/1.x on every 10.0 patch of ASP.NET Core:
+  on Kestrel 10.0.0 to 10.0.9, or under its switch `AllowKeepAliveAfterCLTE`, they served it by its
+  `Transfer-Encoding` and kept its connection, so a request smuggled behind its chunked body was
+  served too (RFC 9112 §6.1, §11.2). Each refuses it 400 unmarked by its own `connection: close`,
+  reading the `X-Content-Length` Kestrel leaves in place of the `Content-Length` it removes, and so
+  does the WebSocket server; a client's own `X-Content-Length` beside a `Transfer-Encoding` is
+  refused alike. Over HTTP/2, the transport and the gateway reset the stream of a request that
+  carries a `transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC
+  9113 §8.2.2 makes malformed and Kestrel hands on, where they answered it.
+- The TypeScript gateway and the C# HTTP transport and gateway close the connection of an HTTP/1.0
+  request that carries a `Transfer-Encoding`, as RFC 9112 §6.1 requires: under
+  `Connection: keep-alive` they read it as chunked, kept its connection and served a request
+  pipelined behind its body. Each refuses it 400 unmarked with `connection: close`.
+- The TypeScript HTTP transport and gateway serve no request pipelined behind an answer that closes
+  its connection, as RFC 9112 §9.6 requires and as Kestrel and hyper read none: a refusal of a body
+  that still comes, a 413, an answer Node closes over HTTP/1.0 for want of a length, a drop and
+  HTTP's own 400 among them. Node's parser hands such a request on, and the transport drew its
+  connection or the gateway served its route, its answer never written. Over HTTP/1, each now serves
+  a request once Node gives its answer the socket, the answers before it ended.
+- The TypeScript HTTP transport and gateway destroy a socket that holds more than 32 requests
+  unserved, pipelined behind an answer under way or behind one that closes its connection. Node's
+  parser reads on while those answers write nothing, so one socket, unauthenticated, behind a held
+  listen or a stream, queued requests until the process ran out of heap; the C# and Rust sides stop
+  reading such a connection, and a twin on every side holds the bound.
+- The TypeScript HTTP transport and gateway refuse 400 unmarked, and close, a request that carries a
+  `Content-Length` beside a `Transfer-Encoding` on a server built with `insecureHTTPParser` or a
+  process run with `--insecure-http-parser`. Node's parser hands such a request on, and they served
+  it by its `Transfer-Encoding` and kept its connection, so a request smuggled behind its chunked
+  body was served too (RFC 9112 §6.1); they refuse it themselves, as their WebSocket judgement does.
+- The C# gateway closes, in stages, the connection of a refusal of its own of a request that
+  declares a body: it kept it, and Kestrel read the refused body on with no bound, a declared 413's
+  among it, then reset the connection 6 to 7 seconds later, no `connection: close` telling its
+  client to stop. Every answer it writes before its body is whole, a 413 by count, a 408 and a 503
+  on the body budget among them, is flushed, then what still comes is read and dropped until its
+  client closes or 2 seconds pass, as its transport does, where its completion left Kestrel to read
+  a body on and reset it.
+- The C# HTTP transport closes the socket of an answer written before its body is whole once its 2
+  seconds of reading on pass, its client still sending, as its gateway does: it stopped reading and
+  left Kestrel to read a chunked body on, then reset the connection about 8 seconds after the
+  answer. Kestrel's connection has no half-close, and a shutdown of its socket races the answer
+  Kestrel still sends, so the C# side ends such a socket's write side with its close rather than
+  first, a row of the support matrix. New twins hold a refusal of a chunked body still coming, read
+  whole by its client as it goes on sending, on every side.
+- The TypeScript gateway keeps the connection of a refusal of a request that declares no body,
+  wherever the request stands on its socket: it closed one that came first, judging by whether
+  Node's parser had reached the request's end.
+- The TypeScript HTTP transport and gateway write their own answer to a request that carries
+  `Connection: close` when bytes come behind it: Node's parser refused those bytes and wrote a bare
+  400 in place of the answer, its request already handed on. The answer under way now ends, and
+  Node closes the connection behind it.
+- The TypeScript HTTP transport and gateway keep an HTTP/1.0 connection kept alive behind an answer
+  of no body, as the C# and Rust sides do: the transport writes `content-length: 0` on an empty
+  answer (RFC 9110 §8.6), where Node closed it over HTTP/1.0 and framed it in chunks over HTTP/1.1,
+  and both write `connection: keep-alive` on a 204, a 304 or a HEAD's answer, which carries no
+  length.
+- The Rust side gives an answer to an HTTP/1.0 request whose body has no length version 1.0 and
+  `connection: close`, as the TypeScript and C# sides write it, where hyper wrote
+  `connection: keep-alive` before delimiting the body by its close.
+- `tools/flow.mjs finish` says what is left when a process still holds a worktree it removes: the
+  branch merged, pushed and deleted on `origin`, then the folder, `git worktree prune` and
+  `git branch -d` to do by hand, rather than an `EPERM` alone.
+- The C# WebSocket server tells the close of a connection it paused and its own heartbeat dropped
+  at once, while still paused, as the TypeScript and Rust sides do (spec 15.3, 15.12). Its
+  request's abort tells the connection's read gate that its socket ended, so a peer's FIN or a reset
+  ends a paused connection as soon, what it held dropped with it; one not paused reads on and drops
+  nothing. A pause also holds against a read already waiting on the socket, each read of the
+  upgrade's stream passing the gate: a paused connection reads nothing more of its peer, whose
+  pongs no longer keep it open.
+- The C# WebSocket client does the same with a connection its router paused (spec 15.3, 15.12):
+  the stream its upgrade's answer carries is read through the connection's read gate, so a read
+  already waiting reads nothing more of its server, pongs among it, and its heartbeat drops a
+  connection paused past about twice `heartbeat`, its close told at once, while still paused, as
+  the TypeScript and Rust clients do.
+- The C# WebSocket client tells what its socket throws as it drops a server that never answered its
+  disconnect within its close timeout as the connection's error, then its close, unclean (spec
+  15.1), as it does for a drop after its answer to the server's close, rather than its close as the
+  disconnect asked, what the socket threw dropped.
+- The Rust WebSocket client and server tell the close of a connection they paused at once when its
+  peer ends it by a FIN or a reset, while still paused, as the TypeScript and C# sides do (spec
+  15.3, 15.12), rather than on its resume or when their heartbeat drops it. The paused connection
+  peeks one byte of its TCP socket, which reads nothing of it; an end behind bytes that wait is met
+  once resumed.
+- A report, an error or a refusal in a side's own words that counts 1 byte says "1 byte", not
+  "1 bytes", on every side: past `maximumOutboxBytes`, `maximumHeldEnvelopeBytes`,
+  `maximumEnvelopePartsBytes`, a participant's `heldBytesBudget`, `minimumBodyBytesPerSecond`,
+  `maximumBodyBytes`, a memory broker's `maximumMessageBytes`, a WebSocket's `maximumMessageBytes`,
+  `maximumPayloadBytes`, and an MQTT Maximum Packet Size, its broker's or its own; a parcel's room;
+  and the bounds and lengths an envelope, a header, a transfer or a chunk is refused by.
+  protovalidate's messages keep their own words. `tools/check-byte-counts.mjs` holds every side to
+  it in CI.
+- A `Content-Encoding` is read as the list RFC 9110 makes it, its empty elements ignored: an empty
+  field, `identity,` or `, identity` sends a body as it is, on every side, at the transport and the
+  gateway. `identity` twice is still an encoding.
+- Under `bearer-jwt`, a tab after `Bearer`'s spaces is answered 401 `invalid_request`, as one right
+  after `Bearer` is, on every gateway, and the token is taken as it stands.
+- The TypeScript side's memory broker refuses a `maximumMessageBytes` or a `maximumQueuedMessages`
+  under 1, as the C# and Rust sides do.
+
 ## [0.15.0] - 2026-11-17
 
 ### Added
@@ -3271,7 +3479,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.15.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.16.0...develop
+[0.16.0]: https://github.com/francisdesjardins/bead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0

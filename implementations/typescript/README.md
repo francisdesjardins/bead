@@ -49,11 +49,13 @@ fails the connect, the platform's error its cause. The certificate authenticates
 terminates TLS, and the credential authenticates its calls to the router: the client takes both, and
 binds neither to the other.
 
-Each WebSocket end beats: every `heartbeat` milliseconds — 30,000 by default, `Infinity` for none —
-it sends WebSocket's own PING control frame (RFC 6455 §5.5.2), and drops a connection that left the
-one before unanswered, whose `close` then says it was not clean. A peer gone without a word — a
-cable pulled, a machine asleep, a NAT that forgot — ends in a `close` within two beats rather than
-never. A browser's socket cannot ping, but answers the server's pings by itself, so the server's
+Each WebSocket end beats: once nothing of a connection has been read for `heartbeat` milliseconds —
+30,000 by default, `Infinity` for none — it sends WebSocket's own PING control frame (RFC 6455
+§5.5.2), 8 bytes of a count of its own, ahead of what it holds unsent, and drops the connection once
+the pong that echoes them has not come within `heartbeat`; its `close` then says it was not clean. A
+peer gone without a word — a cable pulled, a machine asleep, a NAT that forgot — ends in a `close`
+within two heartbeats rather than never; one that keeps sending within each heartbeat is never
+pinged. A browser's socket cannot ping, but answers the server's pings by itself, so the server's
 heartbeat covers it; the client beats over `ws`. A heartbeat keeps nothing of a session alive: a
 session's timers count what the peer says, not that it answers. Bead has no ping of its own: whether
 a connection is alive is its transport's to know.
@@ -1062,7 +1064,9 @@ The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 pe
 `maximumAnsweringCalls` in `createHTTPServer`; `bodyBytesBudget`, 256 MiB of body read at once
 across them all. A head comes whole within `headersTimeout`, 30 seconds, or Node's own parser
 answers it 408: the transport sets `headersTimeout`, a `requestTimeout` of 0 and a
-`connectionsCheckingInterval` of a second on every server `createServer` builds, before it listens.
+`connectionsCheckingInterval` of a second on every server `createServer` builds, before it listens,
+and a `clientError` listener that lets the answer under way end where Node's parser refuses bytes
+behind a request that asked its connection closed, Node's own answer to every other refusal kept.
 A body comes at `minimumBodyBytesPerSecond`, 240, once `bodyGracePeriod`, 5 seconds, passed since
 its head, on the server's clock, or is refused 408 `too-slow`, its Bead connection kept. An answer
 written before its body is whole carries `connection: close`, and its socket closes in stages, its
@@ -1071,6 +1075,16 @@ pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and
 are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: one
 past its deadline is an exchange lost, its connection dropped at both ends, reported on `error` as
 its connection closes, naming its bounds and their values.
+Over HTTP/1, the transport and the gateway serve a socket's requests in their order, each once
+the answers before it ended, and none behind an answer that closes its connection (RFC 9112 §9.3,
+§9.6). Behind an answer under way or one that closes its connection, a socket holds at most 32
+requests unserved, `MAXIMUM_UNSERVED_REQUESTS`. At the 33rd it is destroyed
+([`docs/support.md`](../../docs/support.md#differences),
+`Requests pipelined behind an answer under way, over HTTP/1.1`). A request carrying a
+`Content-Length` beside a `Transfer-Encoding` is refused 400 unmarked by Node's parser. On a server
+built with `insecureHTTPParser`, or in a process run with `--insecure-http-parser`, Node's parser
+hands it on. The transport and the gateway then refuse it themselves, 400 unmarked, and close its
+connection (RFC 9112 §6.1).
 
 A request names its authority by its target when the target is in absolute-form, its scheme `http`
 or `https` in any ASCII case, `HTTP://` among them, then `://` (spec 15.12, RFC 3986 §3.1), its
@@ -2180,7 +2194,8 @@ first.
 ## The DevTools extension
 
 `devtools/` is Bead's DevTools extension, Chrome's first
-([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
+([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)),
+installed from the [Chrome Web Store](https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc).
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
 `chrome://extensions`, its developer mode on, by "Load unpacked"; `yarn devtools:package` zips that
 build for the Chrome Web Store, into `devtools/release/`, the same bytes for the same commit. Its

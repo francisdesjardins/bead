@@ -1074,7 +1074,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // * dropped, its client behind, then reported naming its bound and its value (spec 15.9)
         if (overflowing is not null)
         {
-            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {_options.MaximumOutboxBytes} bytes")));
+            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {FailureException.ByteCountOf(_options.MaximumOutboxBytes)}")));
         }
 
         // its body still coming: its answer goes now, and it is never handed on
@@ -1242,10 +1242,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         await Linger(context);
     }
 
-    // ! an answer written before its body is whole closes its socket in stages, its write side
-    // first (RFC 9112 §9.6): what still comes is read and dropped until its client closes or 2
-    // seconds pass, on the real clock, since what it waits on is the network's, so a reset never
-    // erases an answer its client has not read yet. A body read whole ends at once
+    // ! an answer written before its body is whole closes its socket in stages (RFC 9112 §9.6):
+    // what still comes is read and dropped until its client closes or 2 seconds pass, on the real
+    // clock, since what it waits on is the network's, so no reset comes at once to erase an answer
+    // its client has not read yet; a client still sending past 2 seconds may still be reset. A body
+    // read whole ends at once. Kestrel's connection has no half-close, and
+    // a shutdown of its socket races the answer Kestrel still sends: its write side ends with its
+    // close, never first
     private static async Task Linger(HttpContext context)
     {
         if (!HttpServerFields.IsLingering(context))
@@ -1265,9 +1268,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 // dropped
             }
         }
+        catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! its 2 seconds passed, its client still sending: its socket closed now, where Kestrel
+            // would read on a chunked body itself once the exchange returned, then reset it
+            context.Abort();
+        }
         catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or Microsoft.AspNetCore.Http.BadHttpRequestException)
         {
-            // its client gone, its 2 seconds passed, or its body no more to read
+            // its client gone, or its body no more to read
         }
     }
 
@@ -1359,8 +1368,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // them, and takes a control character, or a value with a space or a tab at either end over
         // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
         // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own; and so a
-        // target past visible ASCII, which Kestrel takes as it takes a control character in a field
-        if (!HttpServerFields.HasVisibleFields(request) || !HttpServerFields.IsVisibleTarget(context))
+        // target past visible ASCII, which Kestrel takes as it takes a control character in a field,
+        // a Content-Length beside a Transfer-Encoding, or a Transfer-Encoding that lists anything
+        // after its first chunked or that an HTTP/1.0 request carries, its connection closed behind
+        // it over HTTP/1.x, and a connection-specific field over HTTP/2, which Kestrel hands on
+        if (!HttpServerFields.HasVisibleFields(request)
+            || !HttpServerFields.IsVisibleTarget(context)
+            || HttpServerFields.IsLengthBesideTransferEncoding(request)
+            || !RequestFields.IsTransferEncodingFramed(request.Protocol, request.Headers.TransferEncoding)
+            || HttpServerFields.HasConnectionSpecificFields(request))
         {
             if (HttpServerFields.ResetMalformedFields(context))
             {

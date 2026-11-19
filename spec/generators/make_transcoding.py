@@ -3604,6 +3604,18 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
+def framed_by(fields, *, on='a', http='HTTP/1.1'):
+    """A POST of {} to the echo route, of HTTP/1.1 unless told otherwise, framed by the field lines
+    given, each a name and a value written as it is, a Content-Length's value alone standing for its
+    line; its body in one chunk beside a Transfer-Encoding."""
+    lines = [field if isinstance(field, tuple) else ('content-length', field) for field in fields]
+    head = f'POST /api/Transcoding/echo {http}\r\nhost: {{host}}\r\ncontent-type: application/json\r\n'
+    head += ''.join(f'{name}: {value}\r\n' for name, value in lines)
+    coded = any(name == 'transfer-encoding' for name, _ in lines)
+    body = hexadecimal(b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}')
+    return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': body}, 'on': on}
+
+
 def json_post(path, body, fields=(), *, on='a'):
     return send('POST', path, ['content-type: application/json', *fields], body, on=on)
 
@@ -3728,6 +3740,22 @@ EXCHANGES = [
               send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: identity',
                                                      'content-encoding: gzip'], '{}', on='b'),
               refused_own(415, 'type-refused', TYPE_WORDS, on='b')]),
+    # a list's empty elements are ignored (RFC 9110 §5.6.1.2): a field that lists nothing, or identity
+    # once, sends its body as it is
+    exchange('a content-encoding empty, identity then an empty element, or an empty element then identity is taken, '
+             'identity then gzip in one line 415', ['5.1', '10.1.8'],
+             [send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: '], '{}',
+                   on='a'),
+              answered('{}', on='a'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: identity,'],
+                   '{}', on='b'),
+              answered('{}', on='b'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: , identity'],
+                   '{}', on='c'),
+              answered('{}', on='c'),
+              send('POST', '/api/Transcoding/echo', ['content-type: application/json',
+                                                     'content-encoding: identity, gzip'], '{}', on='d'),
+              refused_own(415, 'type-refused', TYPE_WORDS, on='d')]),
     exchange('a body the mapping refuses, 400 PAYLOAD_UNDECODABLE, unmarked', ['5.2', '5.2.2', '7.6.12', '7.7'],
              [json_post('/api/Transcoding/echo', '{"nope":1}'),
               call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a key no field names', 'pointer': '#/nope'})]),
@@ -3781,6 +3809,15 @@ EXCHANGES = [
              options={'authorization': 'bearer-jwt'}),
     exchange("under bearer-jwt, a tab after Bearer: 401, invalid_request", ['2.4.2', '7.6.26'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer\ta.b.c']),
+              {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': None,
+                                                    'www-authenticate': 'Bearer error="invalid_request"'},
+                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
+             options={'authorization': 'bearer-jwt'}),
+    # one or more spaces and nothing else separate Bearer from its token (RFC 6750 §2.1's 1*SP): a tab
+    # after them is no separator, and no b64token starts with one
+    exchange("under bearer-jwt, a tab after Bearer's space: 401, invalid_request", ['2.4.2', '7.6.26'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer \ta.b.c']),
               {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
                                                     'bead-refusal': None,
                                                     'www-authenticate': 'Bearer error="invalid_request"'},
@@ -3910,6 +3947,18 @@ EXCHANGES = [
               send('GET', '/api/Transcoding/getOperation?name=operations/a',
                    ['sec-fetch-site: cross-site, cross-site', 'sec-fetch-mode: no-cors'], on='b'),
               answered(result('Operation', {'name': 'operations/a', 'done': True}), on='b')]),
+    # a value is compared as it came, in its case: Fetch Metadata's tokens are lower-case words, and one
+    # in upper case is none of them
+    exchange("a sec-fetch-site, a sec-fetch-mode or a sec-fetch-dest in upper case is read as absent", ['10.1.5'],
+             [send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: CROSS-SITE', 'sec-fetch-mode: no-cors'], on='a'),
+              answered(result('Operation', {'name': 'operations/a', 'done': True}), on='a'),
+              send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: NAVIGATE'], on='b'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='b'),
+              send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate', 'sec-fetch-dest: OBJECT'], on='c'),
+              answered(result('Operation', {'name': 'operations/a', 'done': True}), on='c')]),
     exchange("a sec-fetch-dest in two lines, object first, is read as absent: a navigation from another site is taken",
              ['10.1.5'],
              [send('GET', '/api/Transcoding/getOperation?name=operations/a',
@@ -3927,13 +3976,53 @@ EXCHANGES = [
              [send('GET', '/nope'), refused_own(404, 'path-unknown', 'a path no route matches')]),
     exchange("a command has no route", ['3.1', '3.10'],
              [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown', 'a path no route matches')]),
-    exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty", ['10.1', '10.1.1'],
+    # * a chunk's size that is no number, then a Content-Length spec 15.12 refuses: a word, two numbers
+    # in one line or in two; then a Transfer-Encoding it refuses: one that lists anything after its
+    # first chunked, in one line or in two, and one an HTTP/1.0 request carries
+    exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
                         + chr(13) + chr(10) + 'connection: close' + chr(13) + chr(10) + chr(13) + chr(10),
                         'body': hexadecimal(b'zz\r\n{}\r\n0\r\n\r\n')}, 'on': 'a'},
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'a'}]),
+               'on': 'a'},
+              *[step for on, lengths in (('b', ['abc']), ('c', ['2, 3']), ('d', ['2', '3']),
+                                         ('e', ['abc', ('transfer-encoding', 'chunked')]),
+                                         ('f', [('transfer-encoding', 'chunked, chunked')]),
+                                         ('g', [('transfer-encoding', 'chunked'), ('transfer-encoding', 'chunked')]),
+                                         ('h', [('transfer-encoding', 'chunked,')]))
+                for step in (framed_by(lengths, on=on),
+                             {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                         'body': ''}, 'on': on})],
+              framed_by([('transfer-encoding', 'chunked')], on='i', http='HTTP/1.0'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'i'}]),
+    # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
+    # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
+    # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)
+    exchange("a body whose Content-Length names one number in two lines, refused as HTTP refuses it, unmarked, "
+             "its body empty, as section 15.12 levels it",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [framed_by(['2', '2']),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'a'}],
+             differs=[{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1',
+                       'language': 'Rust'}]),
+    # ! an exchange of its own, so that the side whose HTTP reads a Content-Length beside a
+    # Transfer-Encoding by the Transfer-Encoding alone (hyper drops the Content-Length, the row A
+    # `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1) is excused by its differs from it
+    # alone (spec 15.12); its connection's close is each side's own test
+    exchange("a body whose Content-Length comes beside a Transfer-Encoding, in either order, refused as HTTP "
+             "refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, fields in (('a', [('transfer-encoding', 'chunked'), '2']),
+                                      ('b', ['2', ('transfer-encoding', 'chunked')]))
+              for step in (framed_by(fields, on=on),
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})],
+             differs=[{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1',
+                       'language': 'Rust'}]),
     exchange("what HTTP refuses of its own, unmarked, its body empty", ['7.7', '10.1', '10.1.1'],
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},

@@ -579,6 +579,87 @@ async fn resets_over_http_2_the_stream_of_a_request_with_a_field_holding_an_octe
 }
 
 #[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_one_number_twice() {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * h2 keeps every line of one number, and the transport resets the stream (spec 15.12); h2
+    // resets that of a list in one line itself, and two numbers are reset alike, PROTOCOL_ERROR,
+    // nothing written
+    for lengths in [&["0", "0"][..], &["0", "00"], &["0, 0"], &["0", "1"]] {
+        let mut fields = vec![own, bead];
+
+        fields.extend(lengths.iter().map(|length| ("content-length", *length)));
+        assert_eq!(
+            http2_of(port, &fields).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{lengths:?}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // one line is a length
+    assert_eq!(
+        http2_of(port, &[own, bead, ("content-length", "0")]).await,
+        TlsAnswer::of(201, None),
+        "one line"
+    );
+    started.stop().await;
+}
+
+// spec 15.12
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specific_field_a_transfer_encoding_with_a_content_length_beside_it_or_none_a_keep_alive_a_proxy_connection_or_an_upgrade()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * h2 resets each before the transport reads the request (RFC 9113 §8.2.2), PROTOCOL_ERROR,
+    // nothing written
+    for carried in [
+        &[("transfer-encoding", "chunked")][..],
+        &[("transfer-encoding", "chunked"), ("content-length", "0")],
+        &[("content-length", "0"), ("transfer-encoding", "chunked")],
+        &[("transfer-encoding", "identity")],
+        &[("keep-alive", "timeout=5")],
+        &[("proxy-connection", "keep-alive")],
+        &[("upgrade", "websocket")],
+    ] {
+        let mut fields = vec![own, bead];
+
+        fields.extend_from_slice(carried);
+        assert_eq!(
+            http2_of(port, &fields).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{carried:?}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // none of them, a connect drawn
+    assert_eq!(
+        http2_of(port, &[own, bead]).await,
+        TlsAnswer::of(201, None),
+        "none"
+    );
+    started.stop().await;
+}
+
+#[tokio::test]
 async fn resets_over_http_2_the_stream_of_a_request_whose_target_holds_a_control_character_a_space_del_or_an_octet_past_ascii_protocol_error_and_tells_nothing()
  {
     let started = started_secure(&HttpTransportServerOptions::default()).await;

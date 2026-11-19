@@ -27,6 +27,7 @@ use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
+use crate::failure::byte_count_of;
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
@@ -977,8 +978,8 @@ impl RouterClientTransport for BrokerTransportClient {
         // byte of the envelope beside its credential (spec 15.20)
         if !fits((held.room, credential)) {
             return Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
-                "a parcel of {} bytes leaves no byte of an envelope beside its credential",
-                held.room
+                "a parcel of {} leaves no byte of an envelope beside its credential",
+                byte_count_of(held.room)
             )))));
         }
 

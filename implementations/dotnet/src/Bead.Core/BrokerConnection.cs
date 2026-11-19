@@ -266,7 +266,7 @@ internal sealed class BrokerConnection
 
         if (_heldBytes + message.Bytes.Length > bound)
         {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {bound} bytes")));
+            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {FailureException.ByteCountOf(bound)}")));
 
             return;
         }

@@ -47,7 +47,7 @@ public sealed class WebSocketServer<TData> : IBeadServer<TData>
         if (maximumMessageBytes < limits.MaximumEnvelopeBytes)
         {
             throw new ArgumentException(
-                $"a message is an envelope's limit at least, {limits.MaximumEnvelopeBytes} bytes, not {maximumMessageBytes}",
+                $"a message is an envelope's limit at least, {FailureException.ByteCountOf(limits.MaximumEnvelopeBytes)}, not {maximumMessageBytes}",
                 nameof(options));
         }
 

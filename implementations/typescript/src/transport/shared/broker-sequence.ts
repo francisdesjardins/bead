@@ -4,7 +4,7 @@
 
 import { CloseCode, PARCEL_PREFIX_BYTES } from './broker-parcel';
 import type { IClock, TimeoutId } from './clock';
-import { GenericError } from './errors';
+import { byteCountOf, GenericError } from './errors';
 
 // interfaces
 
@@ -106,7 +106,7 @@ export const partsOf = (
 
   if (first < 1 || next < 1) {
     throw new GenericError(
-      `a parcel of ${String(room)} bytes leaves no byte of an envelope beside its credential`
+      `a parcel of ${byteCountOf(room)} leaves no byte of an envelope beside its credential`
     );
   }
 
@@ -215,7 +215,7 @@ export const createBrokerParts = (
         stop();
         slow({
           code: CloseCode.LOST,
-          reason: `an envelope's parts came slower than minimumBodyBytesPerSecond, ${String(minimumBodyBytesPerSecond)} bytes a second, past bodyGracePeriod, ${String(bodyGracePeriod)} ms`,
+          reason: `an envelope's parts came slower than minimumBodyBytesPerSecond, ${byteCountOf(minimumBodyBytesPerSecond)} a second, past bodyGracePeriod, ${String(bodyGracePeriod)} ms`,
         });
       },
       // ! a millisecond at least, counted whole: no timer is armed for less (decision 0011)
@@ -252,7 +252,7 @@ export const createBrokerParts = (
         return {
           lost: {
             code: CloseCode.TOO_BIG,
-            reason: `an envelope's parts would pass maximumEnvelopePartsBytes, ${String(maximumEnvelopePartsBytes)} bytes`,
+            reason: `an envelope's parts would pass maximumEnvelopePartsBytes, ${byteCountOf(maximumEnvelopePartsBytes)}`,
           },
         };
       }
@@ -263,7 +263,7 @@ export const createBrokerParts = (
         return {
           lost: {
             code: CloseCode.LOST,
-            reason: `a part would pass its participant's heldBytesBudget, ${String(held.budget)} bytes`,
+            reason: `a part would pass its participant's heldBytesBudget, ${byteCountOf(held.budget)}`,
           },
         };
       }

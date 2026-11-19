@@ -140,9 +140,9 @@ internal sealed record AnsweringCallsOptions
 ///
 /// A call whose resolver, or verifier, still runs as the call ends, answered or cancelled, outlives
 /// it: it counts on its connection until that resolver settles, and the two counts together are
-/// held to twice <see cref="RouterLimits.MaximumAnsweringCalls"/> (spec 9.2, step 3), as Go's
-/// HTTP/2 server counts a handler until it returns. One its connection outlives counts side-wide
-/// alone. Touched on its router's scheduler alone, but for <see cref="Run"/>.
+/// held to twice <see cref="RouterLimits.MaximumAnsweringCalls"/> (spec 9.2, step 3). One its
+/// connection outlives counts side-wide alone. Touched on its router's scheduler alone, but for
+/// <see cref="Run"/>.
 /// </summary>
 internal sealed class AnsweringCalls(AnsweringCallsOptions options)
 {

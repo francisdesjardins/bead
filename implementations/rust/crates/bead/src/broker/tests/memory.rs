@@ -654,6 +654,52 @@ async fn refuses_a_publication_given_up_on_before_it_goes() {
 }
 
 #[tokio::test]
+async fn refuses_a_maximum_message_bytes_or_a_maximum_queued_messages_of_0_in_its_bound_s_words() {
+    for (name, options) in [
+        (
+            "maximumMessageBytes",
+            MemoryBrokerOptions {
+                maximum_message_bytes: Some(0),
+                ..MemoryBrokerOptions::default()
+            },
+        ),
+        (
+            "maximumQueuedMessages",
+            MemoryBrokerOptions {
+                maximum_queued_messages: Some(0),
+                ..MemoryBrokerOptions::default()
+            },
+        ),
+    ] {
+        assert_eq!(
+            MemoryBroker::new(&options)
+                .err()
+                .map(|error| error.to_string()),
+            Some(format!("{name} is a whole number above 0, not 0")),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn writes_1_byte_for_a_maximum_message_bytes_of_1() {
+    let (broker, _clock) = broker_on(&MemoryBrokerOptions {
+        maximum_message_bytes: Some(1),
+        ..MemoryBrokerOptions::default()
+    });
+    let (bob, _) = linked_of((&broker, "bob")).await;
+
+    assert_eq!(
+        bob.publish(BrokerPublication::new(topic(), Bytes::from_static(b"xy")))
+            .await
+            .expect_err("refused")
+            .to_string(),
+        "a payload of 2 bytes, past the broker's maximumMessageBytes, 1 byte",
+        "past its bound"
+    );
+}
+
+#[tokio::test]
 async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_message_bytes_or_of_a_link_not_up_drops_what_a_link_lost_held_and_a_loss_of_a_link_not_up_does_nothing()
  {
     let (broker, clock) = broker_on(&MemoryBrokerOptions {

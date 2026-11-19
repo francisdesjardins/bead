@@ -492,7 +492,9 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `MaximumOutboxBytes` is. A head is Kestrel's `RequestHeadersTimeout`, the transport's
   `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Every answer written
   before its body is whole closes its socket in stages (RFC 9112 §9.6): its end flushed, what still
-  comes read and dropped until its client closes or 2 seconds pass, so a reset never erases it.
+  comes read and dropped until its client closes or 2 seconds pass, then its socket closed, so a
+  reset never erases it. Kestrel's connection has no half-close, and a shutdown of its socket races
+  the answer Kestrel still sends: the socket's write side ends with that close, not first.
 - **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
   10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
   101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs
@@ -699,6 +701,18 @@ them unencoded (spec 15.12).
 So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
 over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
 strips it first (RFC 9110 §5.5).
+So is one that carries a `Content-Length` beside a `Transfer-Encoding` over HTTP/1.x, which Kestrel
+hands on with the `Content-Length` removed and its value kept in an `X-Content-Length`: both
+transports and the gateway read that field back beside a `Transfer-Encoding`, a client's own among
+it, and refuse the request with `connection: close`, so its connection closes on every 10.0 patch
+(RFC 9112 §6.1). So is one whose `Transfer-Encoding` lists anything after its first `chunked`, in
+one line or across its lines: Kestrel hands it on and reads it by its final `chunked`. So is an
+HTTP/1.0 request that carries a `Transfer-Encoding`: Kestrel reads its body as chunked, and keeps
+its connection open under `Connection: keep-alive`. `RequestFields.IsTransferEncodingFramed` refuses
+both at the HTTP transport, at the gateway and in the WebSocket judgement, 400 unmarked with
+`connection: close`, so no request pipelined behind either is read (RFC 9112 §6.1). Over HTTP/2, a
+`transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC 9113 §8.2.2
+calls malformed and Kestrel hands on, has its stream reset by the transport and the gateway.
 
 A request names its authority by its target when the target is in absolute-form, its `Host` judged
 as one field line alone, which an HTTP/1.0 request may leave out (RFC 9112 §3.2.2), for which both

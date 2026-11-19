@@ -49,6 +49,8 @@ export interface IExchange {
   readonly localPort: number | undefined;
   readonly reader: IResponseReader;
   destroy(): void;
+  /** Ends its socket's writing, a FIN, what the server sends still heard. */
+  end(): void;
   /**
    * The next thing the server sends on its WebSocket, or none within `within` milliseconds; rejects
    * once a frame of a reserved opcode came, which ends the socket.
@@ -56,6 +58,8 @@ export interface IExchange {
   next(within: number): Promise<Heard | undefined>;
   /** Writes frames on its WebSocket, each masked, as a client's must be. */
   send(frames: readonly IFrame[]): void;
+  /** Writes `bytes` on its socket as they are: a part of a frame, say. */
+  write(bytes: Uint8Array): void;
 }
 
 // types
@@ -534,6 +538,12 @@ export const openExchange = (
     },
     destroy: () => {
       socket.destroy();
+    },
+    end: () => {
+      socket.end();
+    },
+    write: (bytes) => {
+      socket.write(bytes);
     },
     next: (within) => {
       const first = heard.shift();

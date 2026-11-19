@@ -20,7 +20,7 @@ import {
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { GenericError, ProgrammerError } from '../shared/errors';
+import { byteCountOf, GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { createHold, type IHold } from '../shared/hold';
 import type { Data } from '../shared/types';
@@ -44,6 +44,7 @@ import {
   listenOn,
 } from './transport-server';
 import {
+  answerBeforeClose,
   assertCount,
   boundHeadOf,
   createSendPace,
@@ -72,7 +73,9 @@ import {
   headerOf,
   type IEnd,
   type IExchangeIn,
+  inTurn,
   isBeadBody,
+  isTransferEncodingTaken,
   joinedOf,
   linesOf,
   listeningOf,
@@ -639,7 +642,7 @@ export const createHTTPTransportServer = (
           return (
             drop(
               connection,
-              `its outbox would pass maximumOutboxBytes, ${String(maximumOutboxBytes)} bytes`
+              `its outbox would pass maximumOutboxBytes, ${byteCountOf(maximumOutboxBytes)}`
             ),
             undefined
           );
@@ -1018,13 +1021,19 @@ export const createHTTPTransportServer = (
         { bodyGracePeriod, clock, maximumBodyBytes, minimumBodyBytesPerSecond }
       );
 
-      const onExchange: HTTPRequestListener = (request, response) => {
+      const serveExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
         // * a field or a target past visible ASCII, or a target holding a #, before anything else:
         // Node's parser answers a control character itself and hands a # on, nghttp2 in :path too,
         // and drops a padded field over HTTP/2 unless `strictFieldWhitespaceValidation` is false
-        if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
+        if (
+          !hasVisibleFields(request.rawHeaders) ||
+          !isVisibleTarget(request.url) ||
+          // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0, or one
+          // beside a Content-Length, which it hands on under `insecureHTTPParser`
+          !isTransferEncodingTaken(request)
+        ) {
           return (refuseMalformed(exchange), undefined);
         }
 
@@ -1122,6 +1131,13 @@ export const createHTTPTransportServer = (
         return (receive(exchange, connection), undefined);
       };
 
+      // ! over HTTP/1, an exchange in its socket's turn, and none behind an answer that closes
+      const onExchange: HTTPRequestListener = (request, response) => {
+        inTurn({ request, response }, () => {
+          serveExchange(request, response);
+        });
+      };
+
       return {
         clock,
         defaults: START_DEFAULTS,
@@ -1158,6 +1174,7 @@ export const createHTTPTransportServer = (
             // * its head within `headersTimeout`, judged each second, its 408 the server's own; no
             // time for the whole request, which a body's rate holds instead (spec 15.12)
             boundHeadOf(instance, headersTimeout);
+            answerBeforeClose(instance);
 
             const entry = {
               instance,
@@ -1378,7 +1395,8 @@ export const createHTTPTransportServer = (
             if (!response.headersSent) {
               response.writeHead(200, {
                 ...RESPONSE_HEADERS,
-                ...closingOf(exchange),
+                // its body still coming: its connection closed in stages behind it
+                ...(exchange.request.complete === false ? closingOf(exchange) : {}),
                 'content-length': String(bytes.length),
                 'content-type': BEAD_MEDIA_TYPE,
               });

@@ -442,6 +442,148 @@ fn refuses_first_unmarked_a_target_holding_an_octet_other_than_visible_ascii_or_
 }
 
 #[test]
+fn refuses_first_unmarked_a_content_length_other_than_one_line_of_digits_alone_in_a_request_with_no_transfer_encoding_whatever_else_the_request_holds()
+ {
+    // a word, nothing, a sign, a space, a list, one number twice in one line or in two, two
+    // numbers; from a host it does not take, under another method, with no upgrade
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Content-Length", "abc")]),
+            plain(&[("Content-Length", "")]),
+            plain(&[("Content-Length", "+0")]),
+            plain(&[("Content-Length", "-0")]),
+            plain(&[("Content-Length", "0 0")]),
+            plain(&[("Content-Length", "0, 0")]),
+            plain(&[("Content-Length", "0, 1")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "0")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "00")]),
+            plain(&[("Content-Length", "0"), ("Content-Length", "5")]),
+            without(
+                &[("Host", "elsewhere.test"), ("Content-Length", "abc")],
+                &["host"]
+            ),
+            request_of(
+                &[("Content-Length", "abc")],
+                Shape {
+                    method: Some("POST"),
+                    without: &["upgrade"],
+                    ..Shape::default()
+                }
+            ),
+        ]),
+        each(HOST, 12),
+        "each refused unmarked"
+    );
+    // one line of digits alone is a length, read as the number it is
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Content-Length", "000")]),
+            plain(&[("Content-Length", "7")])
+        ]),
+        [TAKEN, MALFORMED],
+        "a length"
+    );
+}
+
+#[test]
+fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_order_whatever_either_holds_or_a_transfer_encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_http_1_0_request_carries_whatever_else_the_request_holds()
+ {
+    let old = |fields: &[(&str, &str)], without: &[&str]| {
+        request_of(
+            fields,
+            Shape {
+                http_version: Some("1.0"),
+                without,
+                ..Shape::default()
+            },
+        )
+    };
+
+    // the pair in either order, a Content-Length of no number among it; a final coding but
+    // chunked, across two lines among it, or none; anything after the first chunked, an empty
+    // element among it; HTTP/1.0's; from a host it does not take, under another method
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "0")]),
+            plain(&[("Content-Length", "0"), ("Transfer-Encoding", "chunked")]),
+            plain(&[("Transfer-Encoding", "chunked"), ("Content-Length", "abc")]),
+            plain(&[
+                ("Transfer-Encoding", "gzip, chunked"),
+                ("Content-Length", "0")
+            ]),
+            plain(&[("Transfer-Encoding", "gzip")]),
+            plain(&[("Transfer-Encoding", "identity")]),
+            plain(&[("Transfer-Encoding", "chunked, gzip")]),
+            plain(&[
+                ("Transfer-Encoding", "chunked"),
+                ("Transfer-Encoding", "gzip")
+            ]),
+            plain(&[("Transfer-Encoding", ",")]),
+            plain(&[("Transfer-Encoding", "chunked, chunked")]),
+            plain(&[
+                ("Transfer-Encoding", "chunked"),
+                ("Transfer-Encoding", "chunked")
+            ]),
+            plain(&[("Transfer-Encoding", "Chunked, CHUNKED")]),
+            plain(&[("Transfer-Encoding", "chunked, gzip, chunked")]),
+            plain(&[("Transfer-Encoding", "chunked, , chunked")]),
+            plain(&[("Transfer-Encoding", "chunked,")]),
+            plain(&[("Transfer-Encoding", "chunked ,  ")]),
+            old(&[("Transfer-Encoding", "chunked")], &[]),
+            without(
+                &[
+                    ("Host", "elsewhere.test"),
+                    ("Transfer-Encoding", "chunked"),
+                    ("Content-Length", "0")
+                ],
+                &["host"]
+            ),
+            without(
+                &[("Host", "elsewhere.test"), ("Transfer-Encoding", "gzip")],
+                &["host"]
+            ),
+            without(
+                &[
+                    ("Host", "elsewhere.test"),
+                    ("Transfer-Encoding", "chunked, chunked")
+                ],
+                &["host"]
+            ),
+            old(
+                &[("Host", "elsewhere.test"), ("Transfer-Encoding", "chunked")],
+                &["host"]
+            ),
+            request_of(
+                &[("Transfer-Encoding", "gzip")],
+                Shape {
+                    method: Some("POST"),
+                    without: &["upgrade"],
+                    ..Shape::default()
+                }
+            ),
+        ]),
+        each(HOST, 22),
+        "each refused unmarked"
+    );
+    // a final coding chunked and nothing after it, in any case, the empty elements before it
+    // ignored, is content, at step 6
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Transfer-Encoding", "Chunked")]),
+            plain(&[("Transfer-Encoding", ", chunked")]),
+            plain(&[("Transfer-Encoding", "gzip, , chunked")]),
+            plain(&[("Transfer-Encoding", "gzip, chunked")]),
+            plain(&[
+                ("Transfer-Encoding", "gzip"),
+                ("Transfer-Encoding", "chunked")
+            ]),
+        ]),
+        each(MALFORMED, 5),
+        "content"
+    );
+}
+
+#[test]
 fn refuses_a_host_it_does_not_take_before_anything_else_of_the_request_is_read() {
     let elsewhere = ("Host", "elsewhere.test");
     let shaped = |fields: &[(&str, &str)], shape: Shape<'_>| request_of(fields, shape);
@@ -673,8 +815,6 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
             plain(&[("Sec-WebSocket-Protocol", "")]),
             plain(&[("Sec-WebSocket-Protocol", "bead/1")]),
             plain(&[("Content-Length", "5")]),
-            plain(&[("Content-Length", "abc")]),
-            plain(&[("Content-Length", "0"), ("Content-Length", "5")]),
             plain(&[("Transfer-Encoding", "chunked")]),
             without(
                 &[
@@ -684,7 +824,7 @@ fn refuses_an_upgrade_of_version_13_malformed_400_by_its_key_its_subprotocols_or
                 &["sec-websocket-key"]
             ),
         ]),
-        each(MALFORMED, 21),
+        each(MALFORMED, 19),
         "each refused malformed"
     );
 }

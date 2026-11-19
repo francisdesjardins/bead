@@ -21,7 +21,7 @@ FailureError {
   …
 }
 
-// a notification: no outgoing step, no options, no duration; its start, when it arrives
+// a notification heard: one step in, no options, no duration; its start, when it arrives
 null, {
   direction: 'rx',
   duration: undefined,

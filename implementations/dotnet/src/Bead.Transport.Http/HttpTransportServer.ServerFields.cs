@@ -20,16 +20,15 @@ public sealed partial class HttpTransportServer
             return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
         }
 
-        // a body of Bead's media type, parameters aside, in one field line, and sent as it is: no
-        // Content-Encoding, or one whose lines joined are identity (spec 15.12)
+        // a body of Bead's media type, parameters aside, in one field line, and sent as it is (spec
+        // 15.12)
         internal static bool IsBeadBody(HttpRequest request)
         {
             // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
             var types = request.Headers.ContentType;
             var type = (types.Count == 1 ? types[0] : null)?.Split(';')[0].Trim().ToLowerInvariant();
-            var encoding = HeaderOf(request, HeaderNames.ContentEncoding)?.Trim().ToLowerInvariant();
 
-            return type == HttpTransport.MediaType && encoding is null or "identity";
+            return type == HttpTransport.MediaType && FieldLines.IsUnencoded(request.Headers.ContentEncoding);
         }
 
         // whether a connect says its client listens: an Item whose bare item is a Boolean, its
@@ -137,6 +136,22 @@ public sealed partial class HttpTransportServer
                     return HostsAndOrigins.IsVisibleField(value ?? "");
                 });
             });
+        }
+
+        // whether a request over HTTP/1.x carried a Content-Length beside its Transfer-Encoding, which
+        // Kestrel hands on as an X-Content-Length (spec 15.12)
+        internal static bool IsLengthBesideTransferEncoding(HttpRequest request)
+        {
+            return (HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol))
+                && RequestFields.HasLengthBesideTransferEncoding(request.Headers.TransferEncoding, request.Headers["X-Content-Length"]);
+        }
+
+        // whether a request over HTTP/2 carries a connection-specific field Kestrel hands on, which
+        // makes it malformed (RFC 9113 §8.2.2): a transfer-encoding, a keep-alive, a proxy-connection
+        // or an upgrade
+        internal static bool HasConnectionSpecificFields(HttpRequest request)
+        {
+            return HttpProtocol.IsHttp2(request.Protocol) && RequestFields.ConnectionSpecific.Any(request.Headers.ContainsKey);
         }
 
         // whether an exchange's end leaves its body still to come behind a close: over HTTP/1, its

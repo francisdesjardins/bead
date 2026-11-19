@@ -169,7 +169,7 @@ internal static partial class EnvelopeCodec
                 throw FailureException.OfProtocol(
                     ProtocolCode.EnvelopeTooLarge,
                     side,
-                    $"a {what} is {chunkBytes} bytes at most, not {bytes.Length}");
+                    $"a {what} is {FailureException.ByteCountOf(chunkBytes)} at most, not {bytes.Length}");
             }
         }
         else if (bytes.Length > options.MaximumEnvelopeBytes)
@@ -177,7 +177,7 @@ internal static partial class EnvelopeCodec
             throw FailureException.OfProtocol(
                 ProtocolCode.EnvelopeTooLarge,
                 side,
-                $"an envelope is {options.MaximumEnvelopeBytes} bytes at most, not {bytes.Length}");
+                $"an envelope is {FailureException.ByteCountOf(options.MaximumEnvelopeBytes)} at most, not {bytes.Length}");
         }
 
         if (ReadHeader(bytes, side) is not var (header, headerBytes))

@@ -9,7 +9,7 @@ use ::http::uri::Uri;
 
 use crate::judgement::hosts::{
     Authority, HOST_REFUSAL, HostRequest, ORIGIN_REFUSAL, RequestTarget, authority_of,
-    is_authority, request_target_of,
+    is_authority, is_transfer_encoding_framed, request_target_of,
 };
 use crate::judgement::items::{BareItem, parse_item};
 
@@ -203,6 +203,25 @@ impl Request<'_> {
         (!lines.is_empty()).then(|| lines.join(", "))
     }
 
+    /// Whether its body is sent as it is (spec 15.12): its `Content-Encoding` a list of no coding,
+    /// or of `identity` once, in any case; its lines joined, each element trimmed of its
+    /// whitespace, an empty one ignored (RFC 9110 §5.6.1.2), so an absent field and an empty one
+    /// list nothing.
+    pub(crate) fn is_unencoded(&self) -> bool {
+        let lines = self.lines_of("content-encoding");
+        let mut codings = lines
+            .iter()
+            .flat_map(|line| line.split(','))
+            .map(|coding| coding.trim_matches([' ', '\t']))
+            .filter(|coding| !coding.is_empty());
+
+        match (codings.next(), codings.next()) {
+            (None, _) => true,
+            (Some(coding), None) => coding.eq_ignore_ascii_case("identity"),
+            (Some(_), Some(_)) => false,
+        }
+    }
+
     /// Its fields, each name then its value, as `has_visible_fields` reads them; none when a value
     /// holds an octet that is not visible ASCII, SP or HTAB.
     pub(crate) fn raw_fields(&self) -> Option<Vec<&str>> {
@@ -244,6 +263,33 @@ impl Request<'_> {
             || self.headers.contains_key("transfer-encoding")
     }
 
+    /// Whether its `Content-Length` comes in one line at most (spec 15.12): one that names one
+    /// number in several lines frames no body, as h2 hands it on over HTTP/2.
+    pub(crate) fn has_one_length(&self) -> bool {
+        // ! never false over HTTP/1.1: hyper keeps the first of the lines that name one number and
+        // drops the others before the transport reads the request, the row "A `Content-Length`
+        // naming one number in several lines, over HTTP/1.1" of docs/support.md
+        self.headers
+            .get_all("content-length")
+            .iter()
+            .nth(1)
+            .is_none()
+    }
+
+    /// Whether its `Transfer-Encoding`, across its lines, frames its body as spec 15.12 takes it:
+    /// none, or one that ends in one `chunked`, over HTTP/1.1.
+    pub(crate) fn is_transfer_encoding_framed(&self) -> bool {
+        let version = match (self.is_http1, self.is_http11) {
+            (true, true) => "1.1",
+            (true, false) => "1.0",
+            (false, _) => "2.0",
+        };
+
+        // ! hyper refuses one over HTTP/1.0 itself, and `chunked,` with it, before the transport
+        // reads the request; it hands on another `chunked` after the first, its body read by the last
+        is_transfer_encoding_framed(version, &self.lines_of("transfer-encoding"))
+    }
+
     /// The length its `Content-Length` declares, when it declares one.
     pub(crate) fn declared_length(&self) -> Option<u64> {
         self.first_line_of("content-length")
@@ -251,7 +297,7 @@ impl Request<'_> {
     }
 
     /// Whether its body is of Bead's media type, parameters aside, in one field line, and sent as
-    /// it is: no `Content-Encoding`, or one whose lines joined are `identity` (spec 15.12).
+    /// it is (spec 15.12).
     pub(crate) fn is_bead_body(&self) -> bool {
         // ! a singleton field (RFC 9110 §8.3): two Content-Type lines are no type, whatever the first
         let [line] = self.lines_of("content-type")[..] else {
@@ -264,10 +310,7 @@ impl Request<'_> {
             .trim()
             .to_ascii_lowercase();
 
-        media_type == BEAD_MEDIA_TYPE
-            && self
-                .joined_of("content-encoding")
-                .is_none_or(|coding| coding.trim().eq_ignore_ascii_case("identity"))
+        media_type == BEAD_MEDIA_TYPE && self.is_unencoded()
     }
 
     /// Its authority (spec 15.12): over HTTP/1, as `authority_of` reads its `Host` and `target`;

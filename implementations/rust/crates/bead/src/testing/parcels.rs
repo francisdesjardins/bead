@@ -10,6 +10,7 @@ use crate::broker::parcel::{
     LARGEST_BOUND, LAYOUT, LEAST_BOUND, Parcel, ParcelRead, encode_parcel, is_token, kinds,
     read_parcel, write_parcel,
 };
+use crate::failure::byte_count_of;
 use crate::testing::hexadecimal;
 
 /// A parcel by its fields, as `spec/vectors.json` and `spec/transports.json` write one.
@@ -102,7 +103,8 @@ fn bytes_of(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn number_of<const N: usize>(text: &str) -> Result<[u8; N], String> {
-    <[u8; N]>::try_from(bytes_of(text)?).map_err(|bytes| format!("{} bytes, not {N}", bytes.len()))
+    <[u8; N]>::try_from(bytes_of(text)?)
+        .map_err(|bytes| format!("{}, not {N}", byte_count_of(bytes.len())))
 }
 
 /// A half's 8 bytes, in hexadecimal, as a number.

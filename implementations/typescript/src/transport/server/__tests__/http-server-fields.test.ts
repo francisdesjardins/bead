@@ -1,4 +1,4 @@
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind } from '../../../router/shared/constants';
@@ -18,12 +18,18 @@ import {
   countOf,
   hasBody,
   headerOf,
+  inTurn,
+  MAXIMUM_UNSERVED_REQUESTS,
   isBeadBody,
   joinedOf,
   linesOf,
   listeningOf,
 } from '../http-server-fields';
-import type { TransportServerConnectionHandle } from '../types';
+import type {
+  IHTTPRequestLike,
+  IHTTPResponseLike,
+  TransportServerConnectionHandle,
+} from '../types';
 import {
   BEARER,
   PAGE,
@@ -349,7 +355,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(namesOf(started.events, 'connection')).toEqual([]);
   });
 
-  test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {
+  test('tells a header given empty from one absent: an empty token is malformed, an empty origin refused, an empty encoding taken as one absent, an empty listen none', async () => {
     const { connectScripted, fake, server } = await startScripted();
     const { connectionToken } = connectScripted();
     const statusOf = (headers: Record<string, string>) => {
@@ -368,7 +374,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ]).toEqual([
       [400, HTTP_REFUSALS.MALFORMED],
       [403, HTTP_REFUSALS.ORIGIN],
-      [415, HTTP_REFUSALS.TYPE],
+      statusOf({ [CONNECTION_TOKEN_HEADER]: connectionToken }),
       [400, HTTP_REFUSALS.MALFORMED],
     ]);
     await server.stop();
@@ -1020,5 +1026,112 @@ test.describe('the fields a request carries', () => {
         return isBeadBody(requestLikeOf(fields as [string, string][]));
       })
     ).toEqual([true, true, false, false, false, false]);
+  });
+});
+
+test.describe('an exchange in its turn', () => {
+  // RFC 9112 §9.3, §9.6
+  test('serves an exchange at once over HTTP/2, over HTTP/1 once its answer holds its socket, and none on a socket whose write side ended', () => {
+    const served: string[] = [];
+    const exchangeOf = ({
+      held,
+      major = 1,
+      socket = {},
+    }: {
+      held: object | null;
+      major?: number;
+      socket?: IHTTPRequestLike['socket'];
+    }) => {
+      const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: major, socket };
+      const response = Object.assign(new EventEmitter(), { socket: held });
+
+      return { request, response: response as unknown as IHTTPResponseLike & EventEmitter };
+    };
+    const serving = (name: string, exchange: ReturnType<typeof exchangeOf>) => {
+      inTurn(exchange, () => {
+        served.push(name);
+      });
+
+      return exchange.response;
+    };
+
+    serving('HTTP/2', exchangeOf({ held: null, major: 2 }));
+    serving('held', exchangeOf({ held: {} }));
+
+    const waiting = serving('waiting', exchangeOf({ held: null }));
+
+    serving('ended', exchangeOf({ held: {}, socket: { writableEnded: true } }));
+    serving('destroyed', exchangeOf({ held: null, socket: { destroyed: true } }));
+
+    expect(served).toEqual(['HTTP/2', 'held']);
+
+    // * the answers before it ended, keeping its connection: Node hands it its socket
+    waiting.emit('socket');
+
+    expect(served).toEqual(['HTTP/2', 'held', 'waiting']);
+  });
+
+  // RFC 9112 §9.3
+  test('destroys a socket that holds more than MAXIMUM_UNSERVED_REQUESTS requests unserved, behind an answer under way or one that closes its connection, and counts each served one off', () => {
+    const served: number[] = [];
+    const socketOf = (socket: Partial<IHTTPRequestLike['socket']> = {}) => {
+      const destroyed = { count: 0 };
+
+      return {
+        destroyed,
+        socket: {
+          ...socket,
+          destroy: () => {
+            destroyed.count += 1;
+          },
+        },
+      };
+    };
+    const serving = (socket: IHTTPRequestLike['socket'], index: number) => {
+      const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: 1, socket };
+      const response = Object.assign(new EventEmitter(), { socket: null });
+
+      inTurn({ request, response: response as unknown as IHTTPResponseLike }, () => {
+        served.push(index);
+      });
+
+      return response;
+    };
+
+    // * behind an answer under way, its bound waiting
+    const waiting = socketOf();
+    const responses = Array.from({ length: MAXIMUM_UNSERVED_REQUESTS }, (_, index) => {
+      return serving(waiting.socket, index);
+    });
+
+    expect(waiting.destroyed.count).toBe(0);
+
+    // one served counts off, so one more waits, and the next is past the bound
+    responses[0]?.emit('socket');
+    serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS);
+
+    expect([served, waiting.destroyed.count]).toEqual([[0], 0]);
+
+    const past = serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS + 1);
+
+    expect(waiting.destroyed.count).toBe(1);
+
+    // the one past it is never served
+    past.emit('socket');
+
+    expect(served).toEqual([0]);
+
+    // * behind an answer that closes its connection, none served, its bound dropped
+    const closing = socketOf({ writableEnded: true });
+
+    for (let index = 0; index < MAXIMUM_UNSERVED_REQUESTS; index += 1) {
+      serving(closing.socket, index);
+    }
+
+    expect(closing.destroyed.count).toBe(0);
+
+    serving(closing.socket, MAXIMUM_UNSERVED_REQUESTS);
+
+    expect([served, closing.destroyed.count]).toEqual([[0], 1]);
   });
 });

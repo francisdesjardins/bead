@@ -27,7 +27,7 @@ use crate::broker::participant::{BODY_GRACE_PERIOD, MINIMUM_BODY_BYTES_PER_SECON
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::ProgrammerError;
-use crate::failure::ProcedureAddress;
+use crate::failure::{ProcedureAddress, byte_count_of};
 use crate::http::exchange::{BodyBuffer, ExchangeState, Facts, Prefix, Responder};
 use crate::http::fields::{
     AFTER_HEADER, CANCEL, CONNECTION_TOKEN_HEADER, End, FAILURE, FIRST_LAYOUT, HTTP_REFUSALS,
@@ -863,11 +863,15 @@ impl ServerInner {
         };
         let target = fields.target();
 
-        // * a field or a target past visible ASCII before anything else, as HTTP answers it
+        // * a field or a target past visible ASCII, a Content-Length that frames no body, or a
+        // Transfer-Encoding spec 15.12 refuses, before anything else, as HTTP answers it, its
+        // connection closed behind it
         let is_visible = fields
             .raw_fields()
             .is_some_and(|raw| has_visible_fields(&raw))
-            && is_visible_target(Some(&target));
+            && is_visible_target(Some(&target))
+            && fields.has_one_length()
+            && fields.is_transfer_encoding_framed();
         let Some(authority) = is_visible.then(|| fields.authority(&target)).flatten() else {
             return ready(malformed(&flow));
         };
@@ -2686,8 +2690,8 @@ impl ServerTransport for HttpTransportServer {
                     inner.drop_drawn(
                         connection_handle,
                         &format!(
-                            "its outbox would pass maximumOutboxBytes, {} bytes",
-                            inner.settings.maximum_outbox_bytes
+                            "its outbox would pass maximumOutboxBytes, {}",
+                            byte_count_of(inner.settings.maximum_outbox_bytes)
                         ),
                     );
                 }

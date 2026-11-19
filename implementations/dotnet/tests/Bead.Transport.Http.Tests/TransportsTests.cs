@@ -966,6 +966,11 @@ public sealed class TransportsTests
             {
                 _served.Clock.Wall(TimeOf(wall));
             }
+            else if (step.TryGetProperty("wait", out var wait))
+            {
+                // on the real clock, which a case marked realTime plays on
+                await Task.Delay(TimeOf(wait), Cancelled);
+            }
             else if (step.TryGetProperty("report", out var report))
             {
                 await Report((report, on));

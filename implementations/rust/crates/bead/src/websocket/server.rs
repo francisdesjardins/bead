@@ -21,7 +21,7 @@ use tungstenite::protocol::Role;
 use crate::clock::{SharedClock, SystemClock};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
-use crate::failure::ProcedureAddress;
+use crate::failure::{ProcedureAddress, byte_count_of};
 use crate::identity::procedures_taken_of;
 use crate::judgement::handshake::{
     HandshakeRefusal, HandshakeRequest, HandshakeTaken, busy_handshake, refusal_of_handshake,
@@ -53,7 +53,7 @@ use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
     GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL,
 };
-use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, hold_heartbeat};
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, Stamped, hold_heartbeat};
 use crate::{
     HEARTBEAT, MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS, MAXIMUM_UNSENT_BYTES,
 };
@@ -106,9 +106,9 @@ pub struct WebSocketTransportServerOptions {
     /// stands in front of it (spec 13.4): by the address it listens on when none, the loopback
     /// secure and any other not.
     pub secure: Option<bool>,
-    /// How often each connection is pinged, past which one that left a ping unanswered is dropped,
-    /// its close unclean, no error told: [`HEARTBEAT`] when none; [`crate::NEVER`] beats none. On
-    /// the platform's clock, whatever clock it is given.
+    /// How long a connection is silent before it is pinged, and a ping waits for its echo, past
+    /// which the connection is dropped, its close unclean, no error told (spec 15.3): [`HEARTBEAT`]
+    /// when none; [`crate::NEVER`] beats none. On the platform's clock, whatever clock it is given.
     pub heartbeat: Option<Duration>,
     /// What may wait for one connection's socket, past which the connection is dropped, its close
     /// unclean, and reported naming the bound (spec 15.12): [`MAXIMUM_UNSENT_BYTES`] when none.
@@ -215,8 +215,9 @@ pub(crate) struct ServerInner {
 /// and any other protocol error, failed with 1002. A peer that drops without its closing handshake
 /// tells its unclean close alone. A close is clean when its peer's carried 1000.
 ///
-/// Each connection is pinged every `heartbeat`, and dropped, unclean and with no error told, when
-/// it left a ping unanswered. What waits for its socket is held to its pace and to
+/// Each connection is pinged once nothing of it has been read for `heartbeat`, its ping ahead of
+/// what it holds unsent, and dropped, unclean and with no error told, once the pong that echoes that
+/// ping has not come within `heartbeat` (spec 15.3). What waits for its socket is held to its pace and to
 /// `maximum_unsent_bytes` (spec 15.12): a connection behind either is dropped, unclean, and reported
 /// on `on_error` naming the bound and its value. A connection its router paused reads no more of
 /// its socket, so TCP's window paces its peer, and reads on once resumed; one this side closes reads
@@ -622,7 +623,13 @@ impl ServerInner {
             pacing: Some(self.settings.pacing),
             platform: Arc::clone(&self.platform),
         };
-        let (connection, commands) = Connection::open((socket, read), (Role::Server, bounds)).await;
+        // what is read of it, each read of its socket, what its heartbeat counts its silence from
+        let reads = Reads::new(Arc::clone(&self.platform));
+        let (connection, commands) = Connection::open(
+            (Stamped::new(socket, Arc::clone(&reads)), read),
+            (Role::Server, bounds),
+        )
+        .await;
         // * drawn as it is taken, never from the peer's address alone, which another socket may
         // share (spec 15.1, decision 0025)
         let handle: ConnectionHandle = {
@@ -668,10 +675,10 @@ impl ServerInner {
         let dropping = commands.clone();
         let heartbeat = Heartbeat::new(
             HeartbeatHooks {
-                ping: Box::new(move || pinging.ping()),
+                ping: Box::new(move |data| pinging.ping(data)),
                 drop: Box::new(move || dropping.drop_now()),
             },
-            (self.settings.heartbeat, &self.platform),
+            (self.settings.heartbeat, &reads),
         );
         let answering = heartbeat.clone();
         let delivering = Arc::clone(&self);
@@ -680,7 +687,7 @@ impl ServerInner {
             deliver: Box::new(move |data: Bytes, is_text: bool| {
                 delivering.deliver((&delivered, &peer), (data, is_text));
             }),
-            answered: Box::new(move || answering.answer()),
+            answered: Box::new(move |data: Bytes| answering.answer(&data)),
         };
         let ended = connection.run(hooks).await;
 
@@ -726,7 +733,8 @@ impl ServerInner {
         if let Some(failure) = &ended.failure {
             let error = match failure {
                 Failed::TooBig(maximum) => RouterError::Other(Arc::new(io::Error::other(format!(
-                    "{handle} is closed with 1009: a message past its maximumMessageBytes, {maximum} bytes"
+                    "{handle} is closed with 1009: a message past its maximumMessageBytes, {}",
+                    byte_count_of(*maximum)
                 )))),
                 Failed::Protocol(why) => RouterError::Other(Arc::new(io::Error::other(format!(
                     "{handle} is closed with 1002: {why}"

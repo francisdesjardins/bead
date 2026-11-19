@@ -17,7 +17,7 @@ use crate::constants::CredentialScheme;
 use crate::duration::{LONGEST_TIMER, hold_finite};
 use crate::envelope::{FailureRecord, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTES, ResultHeader};
 use crate::errors::{CallError, ProgrammerError, ReadyStateError};
-use crate::failure::{Failure, ProcedureAddress};
+use crate::failure::{Failure, ProcedureAddress, byte_count_of};
 use crate::identity::Procedure;
 use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
@@ -615,7 +615,7 @@ impl fmt::Debug for TransportMessage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("TransportMessage")
-            .field("data", &format_args!("{} bytes", self.data.len()))
+            .field("data", &format_args!("{}", byte_count_of(self.data.len())))
             .field("address", &self.address)
             .field("port", &self.port)
             .field("may_overtake", &self.may_overtake)

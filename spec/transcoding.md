@@ -48,7 +48,7 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read raw and refused as a page's browser writes it (3.6).
 
-**Version: 0.6.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.7.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
@@ -102,10 +102,10 @@ its exchange's client, the address read as section 15.12 of `spec.md` reads a cl
 /bead`'s: whole, its auth-scheme included, its surrounding white space removed, and none when it is
 empty or absent. Its option `authorization` says what a call presents of it:
 
-| `authorization`         | What a call presents                                                                                                                                                                                                                                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `elsewhere`, by default | `ELSEWHERE`, the field's value carried beside the request, as `POST /bead` carries one (section 15.5 of `spec.md`); its server's verifier makes of it what its application trusts (section 13.11)                                                                                                                            |
-| `bearer-jwt`            | a `JWT`, the token of a `Bearer` field ([RFC 6750 §2.1](https://www.rfc-editor.org/rfc/rfc6750#section-2.1)), its auth-scheme in any case, in the request's `CREDENTIAL` block, which its server verifies (section 13.8); a field of any other auth-scheme is answered 401, a token the block cannot hold (section 4.4), 431 |
+| `authorization`         | What a call presents                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `elsewhere`, by default | `ELSEWHERE`, the field's value carried beside the request, as `POST /bead` carries one (section 15.5 of `spec.md`); its server's verifier makes of it what its application trusts (section 13.11)                                                                                                                                                                                                                                                        |
+| `bearer-jwt`            | a `JWT`, the token of a `Bearer` field ([RFC 6750 §2.1](https://www.rfc-editor.org/rfc/rfc6750#section-2.1)), its auth-scheme in any case, then one or more spaces and nothing else, the token as it stands after them, in the request's `CREDENTIAL` block, which its server verifies (section 13.8); a field of any other auth-scheme, or with a tab between `Bearer` and its token, is answered 401, a token the block cannot hold (section 4.4), 431 |
 
 A gateway never reads a token to choose between them: its application chooses, once.
 
@@ -279,10 +279,10 @@ _Transcoding: `spec/transcoding.json`._
 | `raw`    | `application/octet-stream`: the payload's bytes                                                         | `application/octet-stream`: the payload's bytes            | the bytes as a JSON string in base64 |
 
 A gateway MUST refuse, 415 `type-refused`, a request to a route that takes a body, whether a body
-comes or none, whose `content-type` is absent or in two fields, or whose type, compared
-case-insensitively, is not its route's, or which carries a parameter but `charset`, or a `charset`
-but `utf-8` in any case, a token or a quoted string, or whose `content-encoding`, its lines joined
-as section 15.12 of `spec.md` reads it, is not `identity`, as section 15.6 of `spec.md` refuses a
+comes or none, whose `content-type` is absent or in more than one field line, or whose type,
+compared case-insensitively, is not its route's, or which carries a parameter but `charset`, or a
+`charset` but `utf-8` in any case, a token or a quoted string, or whose `content-encoding` says its
+body is encoded, as section 15.12 of `spec.md` reads it, as section 15.6 of `spec.md` refuses a
 `POST` of no type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no
 variable or query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never
 messages that section 5.6 writes.
@@ -303,11 +303,11 @@ messages that section 5.6 writes.
 
 1. the text, as section 17.5 of `spec.md` reads a `json` payload — UTF-8, no byte order mark, one
    JSON text, no member named twice, no surrogate alone, no number past the largest double — but for
-   its depth, and keeping the digits of each number beside its double: its depth is counted by the
-   message's descriptor, as section 17.9.3 counts a message's, each message's object, an `Any`'s
-   message's among them, each map's entry and each `Struct`, `Value` and `ListValue` a message, an
-   array none, and a message nested more than 100 deep below the request is refused before anything
-   deeper is built;
+   its depth and for the order of its refusals, and keeping the digits of each number beside its
+   double: its depth is counted by the message's descriptor, as section 17.9.3 counts a message's,
+   each message's object, an `Any`'s message's among them, each map's entry and each `Struct`,
+   `Value` and `ListValue` a message, an array none, and a message nested more than 100 deep below
+   the request is refused before anything deeper is built;
 2. its value, an object of the message's fields, or the field's JSON where a `body` names one, and
    each of its members by the message's fields: each by its JSON name or its proto name, never by
    both, as protobuf's JSON mapping has its parsers take both; a member that names no field
@@ -545,7 +545,7 @@ codes of its server's answer, which its HTTP client cannot mend:
 | its exchange's connection closed before its answer                                                                                  | the gateway                                                    |    502 | a failure of its own, its detail `the connection closed`                                                                                                                                                                                             |
 | a result section 5.7 refuses to write                                                                                               | the gateway                                                    |    500 | a failure of its own, its detail the words its mapping gives what it holds no form of                                                                                                                                                                |
 | a `JWT` its request's block cannot hold                                                                                             | the gateway, under `bearer-jwt`                                |    431 | a failure of its own, its detail `a token past 1004 bytes`, 1004 the bytes of a `JWT` its block holds ([RFC 6585 §5](https://www.rfc-editor.org/rfc/rfc6585#section-5))                                                                              |
-| an `authorization` of an auth-scheme but `Bearer`                                                                                   | the gateway, under `bearer-jwt`                                |    401 | a failure of its own, its detail `an auth-scheme but Bearer`; `www-authenticate`, its challenge and `error="invalid_request"` after it                                                                                                               |
+| an `authorization` of an auth-scheme but `Bearer`, or with a tab before its token (section 2.4)                                     | the gateway, under `bearer-jwt`                                |    401 | a failure of its own, its detail `an auth-scheme but Bearer`; `www-authenticate`, its challenge and `error="invalid_request"` after it                                                                                                               |
 | a body read before it took its request, wholly or in part, by the server it is mounted on, a chunked one that came empty among them | the gateway, of where its application mounted it               |    500 | a failure of its own, with no detail, its call never made                                                                                                                                                                                            |
 | what no gate foresaw                                                                                                                | the gateway                                                    |    500 | a failure of its own, with no detail                                                                                                                                                                                                                 |
 
@@ -664,8 +664,8 @@ _Transcoding: `spec/transcoding.json`._
 10.1. A gateway MUST judge a request in this order, by the gates and the options of section 15.12 of
 `spec.md`, and answer the first that applies:
 
-1. what HTTP refuses of its own, unmarked (section 15.12), a body HTTP cannot frame among it,
-   whenever it comes;
+1. what HTTP refuses of its own, unmarked (section 15.12), a body HTTP cannot frame, or a
+   `Content-Length` or a `Transfer-Encoding` section 15.12 refuses, among it, whenever it comes;
 2. a host it does not take, 403 `host-refused` (`hosts`);
 3. a path no route matches, 404 `path-unknown` (section 3.10);
 4. an `origin` neither its own nor one `origins` names, its lines joined as section 15.12 of
@@ -679,9 +679,9 @@ _Transcoding: `spec/transcoding.json`._
    is a subresource or a navigation, which web.dev's
    [resource isolation policy](https://web.dev/articles/fetch-metadata) refuses but a `GET`
    navigation no `object` or `embed` makes; a request with no `sec-fetch-site` is taken; each of the
-   three fields read with its lines joined as section 15.12 reads one, and one whose value is none
-   of its tokens, two lines of it among them, read as absent, as
-   [Fetch Metadata](https://w3c.github.io/webappsec-fetch-metadata/#sec-fetch-site-header) asks a
+   three fields read with its lines joined as section 15.12 reads one, its value compared as it
+   came, in its case, and one whose value is none of its tokens, two lines of it among them, read
+   as absent, as [Fetch Metadata](https://w3c.github.io/webappsec-fetch-metadata/#sec-fetch-site-header) asks a
    server to ignore an invalid value;
 6. a preflight, an `OPTIONS` that carries `access-control-request-method`, from an origin `origins`
    names: 204, its `access-control-allow-methods` the methods its path's routes take in section
@@ -706,6 +706,10 @@ names and their defaults: `bodyBytesBudget`, `maximumBodyBytes`, `headersTimeout
 `minimumBodyBytesPerSecond` and `bodyGracePeriod` for what comes; `minimumSendBytesPerSecond`,
 `sendGracePeriod` and `maximumUnsentBytes` for an answer and a stream that go out, a stream's
 response dropped past either as a WebSocket's connection is, which closes its exchange's connection.
+A gateway closes a connection, and serves the requests on it in their order, as section 15.12 of
+`spec.md` has a server do: a refusal of its own of a request that declares a body closes it, in
+stages, and an answer to a call, written once its body was read, carries no `connection: close` of
+its own.
 
 10.3. A gateway counts its calls and its streams apart, each holding one Bead connection while it
 lasts: a call, which lives one request, by `maximumExchanges`, 10,000, those of every caller, and

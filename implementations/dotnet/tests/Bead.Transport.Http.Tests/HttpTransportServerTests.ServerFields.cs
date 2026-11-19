@@ -236,7 +236,7 @@ public sealed partial class HttpTransportServerTests
     }
 
     [Fact]
-    public async Task Tells_a_header_given_empty_from_one_absent_an_empty_token_is_malformed_an_empty_origin_or_encoding_refused_an_empty_listen_none()
+    public async Task Tells_a_header_given_empty_from_one_absent_an_empty_token_is_malformed_an_empty_origin_refused_an_empty_encoding_taken_as_one_absent_an_empty_listen_none()
     {
         await Start();
 
@@ -254,7 +254,7 @@ public sealed partial class HttpTransportServerTests
         }
 
         Assert.Equal(
-            [(400, HttpRefusals.Malformed), (403, HttpRefusals.Origin), (415, HttpRefusals.Type), (400, HttpRefusals.Malformed)],
+            [(400, HttpRefusals.Malformed), (403, HttpRefusals.Origin), await StatusOf($"{HttpTransport.ConnectionTokenHeader}: {connectionToken}"), (400, HttpRefusals.Malformed)],
             [
                 await StatusOf($"{HttpTransport.ConnectionTokenHeader}:"),
                 await StatusOf("Origin:"),

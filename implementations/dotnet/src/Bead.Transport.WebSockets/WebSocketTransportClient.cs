@@ -454,8 +454,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="TransportClientDisconnectOptions.IsClean"/> does: with 1000, settling once the server
     /// answered or its close timeout passed; or, <see cref="TransportClientDisconnectOptions.IsQuick"/>,
     /// at once, the socket dropped, its close going out going away, 1001, unwaited. Refused with a
-    /// <see cref="ReadyStateException"/> unless Open, as the TypeScript side's ReadyStateError. A
-    /// dispose meanwhile drops the socket, and no close is raised. It ends Closed.
+    /// <see cref="ReadyStateException"/> unless Open, as the TypeScript side's ReadyStateError. What
+    /// its socket throws as it is dropped past the close timeout is raised as its error, and its
+    /// close is unclean (spec 15.1). A dispose meanwhile drops the socket, and no close is raised.
+    /// It ends Closed.
     /// </summary>
     public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
@@ -505,10 +507,22 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         // a dispose dropped the socket meanwhile, without a handshake: it tells no close, as a
         // dispose never does
-        if (!isDropped)
+        if (isDropped)
         {
-            _listeners.Tell(Close, (isClean, isQuick));
+            return;
         }
+
+        // * what its socket threw as it was dropped, its server never answering within its close
+        // timeout, is the connection's error, and its close is unclean (spec 15.1)
+        if (connection.AbortFailure is { } failure)
+        {
+            ListenerGuard.TellError(Error, failure);
+            _listeners.Tell(Close, (false, isQuick));
+
+            return;
+        }
+
+        _listeners.Tell(Close, (isClean, isQuick));
     }
 
     /// <summary>
@@ -938,6 +952,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         WebSocketConnection connection;
         var attempt = new CancellationTokenSource();
 
+        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12)
+        var gate = new ReadGate();
+
         try
         {
             socket.Options.KeepAliveInterval = _options.Heartbeat;
@@ -968,7 +985,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 linked.Token.ThrowIfCancellationRequested();
-                var opening = socket.ConnectAsync(UriOf(options), InvokerOf(), linked.Token);
+                using var upgrading = gate.Upgrading(InvokerOf());
+                var opening = socket.ConnectAsync(UriOf(options), upgrading, linked.Token);
                 _ = opening.ContinueWith((completed) => { _ = completed.Exception; }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 await opening.WaitAsync(linked.Token);
             }
@@ -1022,7 +1040,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
                 _connecting = null;
                 _connectDisposed = null;
-                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, CloseTimeout));
+                _connection = connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+                {
+                    MaximumMessageBytes = MaximumMessageBytes,
+                    CloseTimeout = CloseTimeout,
+                    Gate = gate,
+                });
 
                 // a pause outlasts the connection it was made on
                 if (_isPaused)

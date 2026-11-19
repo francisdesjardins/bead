@@ -331,7 +331,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         // byte of the envelope beside its credential (spec 15.20)
         if (!BrokerParts.Fits((connection.Room, string.IsNullOrEmpty(message.Credential) ? null : message.Credential)))
         {
-            return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {connection.Room} bytes leaves no byte of an envelope beside its credential"), nameof(message)));
+            return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {FailureException.ByteCountOf(connection.Room)} leaves no byte of an envelope beside its credential"), nameof(message)));
         }
 
         // * copied as it is sent: the sender's buffer stays its own

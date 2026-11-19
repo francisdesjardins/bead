@@ -38,8 +38,8 @@ const HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
 // ! every key of a step and of an option this player reads over a socket: one it does not know
 // fails the case, rather than pass it unplayed
-const STEP_KEYS: [&str; 9] = [
-    "advance", "after", "expect", "on", "report", "send", "stop", "until", "within",
+const STEP_KEYS: [&str; 10] = [
+    "advance", "after", "expect", "on", "report", "send", "stop", "until", "wait", "within",
 ];
 
 // the keys that time a step or name its exchange rather than make an act
@@ -1073,6 +1073,11 @@ async fn play_steps(played: &mut Played, steps: &[Value]) -> Result<(), String> 
 
         if let Some(advance) = step.get("advance").and_then(Value::as_u64) {
             played.clock.advance(Duration::from_millis(advance)).await;
+        }
+
+        // on the real clock, which a case marked realTime plays on
+        if let Some(wait) = step.get("wait").and_then(Value::as_u64) {
+            tokio::time::sleep(Duration::from_millis(wait)).await;
         }
 
         if let Some(report) = step.get("report") {

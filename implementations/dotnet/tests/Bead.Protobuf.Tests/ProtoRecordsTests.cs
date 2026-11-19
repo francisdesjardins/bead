@@ -253,15 +253,8 @@ public sealed class ProtoRecordsTests
             "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
         })
         {
-            // * the check's refusal, where Google.Protobuf would drop the bits past the 64th: its
-            // reason 17.2's words, the record it refused in its inner exception
-            var refusal = Assert.Throws<FormatException>(() =>
-            {
-                ProtoRecords.Check(BytesOf(hex), Probe.Descriptor);
-            });
-
-            Assert.Equal("not its message", refusal.Message);
-            Assert.Equal("a proto payload is not its message: a varint past 64 bits", refusal.InnerException?.Message);
+            // * the check's refusal, where Google.Protobuf would drop the bits past the 64th
+            Refuses(hex);
         }
 
         // a 10th byte of 0x01 is the 64th bit, within
@@ -366,6 +359,44 @@ public sealed class ProtoRecordsTests
         Refuses("62 04 08 02 12 00");
         Refuses("62 04 0A 00 10 01");
         Refuses("62 04 0A 00 13 14");
+    }
+
+    [Fact]
+    public void Says_the_record_it_refused_in_its_cause_each_case_in_its_own_words()
+    {
+        // * one row a case, in the same words on every side: its payloads, its reason, its cause
+        var cases = new (byte[][] Payloads, string Reason, string Cause)[]
+        {
+            ([BytesOf("90")], "not its message", "a proto payload holds a tag cut short, or past the end of its message"),
+            ([BytesOf("90 80 80 80 80 00 07"), BytesOf("90 80 80 80 40 07")], "not its message", "a proto payload holds a tag of more than 5 bytes, or past 32 bits"),
+            ([BytesOf("00 01")], "not its message", "a proto payload holds field number 0"),
+            ([BytesOf("24"), BytesOf("6B 0A 01 61 74")], "not its message", "a proto payload holds an end group that closes no group open"),
+            ([BytesOf("23"), BytesOf("6B 0A 01 61")], "not its message", "a proto payload holds a group never closed"),
+            ([BytesOf("62 05 0A 00 1A 01 7A")], "not its message", "a proto payload holds a map's entry with a field other than its key and its value"),
+            ([BytesOf("08 61")], "not its message", "a proto payload holds field 1 at a wire type its type does not take"),
+            ([BytesOf("A6 06")], "not its message", "a proto payload holds the wire type 6"),
+            ([BytesOf("A7 06")], "not its message", "a proto payload holds the wire type 7"),
+            ([BytesOf("10 80"), BytesOf("1A 02 20 80 01"), BytesOf("52 01 81")], "not its message", "a proto payload holds a varint cut short, or past the end of its message"),
+            ([BytesOf("10 FF FF FF FF FF FF FF FF FF 02"), BytesOf("52 0A FF FF FF FF FF FF FF FF FF 02")], "not its message", "a proto payload holds a varint past 64 bits"),
+            ([BytesOf("10 80 80 80 80 80 80 80 80 80 80 00")], "not its message", "a proto payload holds a varint of more than 10 bytes"),
+            ([BytesOf("5D 01 00")], "not its message", "a proto payload holds a record past the end of its message"),
+            ([BytesOf("0A 05 61"), BytesOf("1A 02 0A 03 61 62 63")], "not its message", "a proto payload holds a length past the bytes that follow it"),
+            ([BytesOf("5A 05 01 00 00 00 02")], "not its message", "a proto payload holds a packed record whose values do not end at its length"),
+            ([Nested(101, Child)], "nested past 100", "a proto payload nests a message more than 100 deep below the top one"),
+        };
+
+        foreach (var (payloads, reason, cause) in cases)
+        {
+            foreach (var payload in payloads)
+            {
+                var refusal = Assert.Throws<FormatException>(() =>
+                {
+                    ProtoRecords.Check(payload, Probe.Descriptor);
+                });
+
+                Assert.Equal((reason, cause), (refusal.Message, refusal.InnerException?.Message));
+            }
+        }
     }
 
     // spec 17.9.6

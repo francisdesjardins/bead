@@ -45,7 +45,7 @@ stands for all of them ([CI](../README.md#ci), [`ci.yml`](../.github/workflows/c
 | Validators' differential | `node tools/protovalidate-differential.mjs oracle\|typescript\|csharp\|rust`                                       | a side's violations that differ from protovalidate-es's                                                                                       | `protovalidate-differential`   |
 | Coverage                 | `node tools/coverage-report.mjs <report> --under <src> --floor <side>`                                             | a side under its floor in `tools/coverage-floors.json` ([Coverage](../README.md#coverage))                                                    | `typescript`, `dotnet`, `rust` |
 | Accessibility            | `node site/deploy.mjs --assemble`, then `node tools/check-a11y.mjs --serve site/out …`                             | a WCAG 2.2 AA violation on the page, the privacy policy, the not-found page or the demo ([The page](../README.md#the-page))                   | `typescript`                   |
-| The page's layout        | `node layout.mjs`, from `site/`                                                                                    | the top bar, the widths, the targets or the menu off their layout                                                                             | `site`                         |
+| The page's layout        | `node layout.mjs`, from `site/`                                                                                    | the top bar, the widths, the targets, the menu or the contents' parts off their layout                                                        | `site`                         |
 
 Each side's own gates and suites are its section of the README: [TypeScript](../README.md#typescript),
 [C#](../README.md#c), [Rust](../README.md#rust), [the builder](../README.md#the-builder),
@@ -152,8 +152,9 @@ By hand:
    looked at and found sound, and gives each finding its evidence (file and line, or a probe run and
    its output), a severity and a remedy. A blocker stops the version; a major ships only fixed or
    declared, as a row of the matrix or an open point; a minor is the rest.
-2. A second reader reruns each proof and gives it a verdict, confirmed, in part or refuted, and its
-   own severity. What does not reproduce is refuted.
+2. A second reader puts each finding to the code and gives it a verdict, confirmed, in part or
+   refuted, and its own severity. It reruns the proof of a blocker and a major, and of a minor only
+   where reading cannot settle it. What does not reproduce is refuted.
 3. One synthesis merges the duplicates, states whether the version can ship and under what
    conditions, and lists the work by severity.
 

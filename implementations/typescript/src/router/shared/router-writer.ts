@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { toError } from '../../transport/shared/errors';
+import { byteCountOf, toError } from '../../transport/shared/errors';
 import type { IGauges } from '../../transport/shared/types';
 import { createAnnouncements } from './announcements';
 import { EnvelopeKind } from './constants';
@@ -117,7 +117,7 @@ export const createRouterWriter = <Handle extends string>(
         throw new FailureError(
           {
             ...failures.payloadTooLarge,
-            detail: `an envelope is ${String(limits.maximumEnvelopeBytes)} bytes at most, not ${String(bytes.length)}`,
+            detail: `an envelope is ${byteCountOf(limits.maximumEnvelopeBytes)} at most, not ${String(bytes.length)}`,
           },
           { header: outgoing.header }
         );

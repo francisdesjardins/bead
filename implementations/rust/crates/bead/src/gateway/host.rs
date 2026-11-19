@@ -742,12 +742,10 @@ fn asks_stream(fields: &Fields<'_>) -> bool {
 }
 
 // whether a body's `content-type` is its route's (5.1): one field, its type compared
-// case-insensitively, no parameter but `charset=utf-8`; its `content-encoding` none or `identity`
+// case-insensitively, no parameter but `charset=utf-8`; its body sent as it is, as spec 15.12 reads
+// its `content-encoding`
 fn is_taken_type(fields: &Fields<'_>, encoding: Encoding) -> bool {
-    if fields
-        .joined_of("content-encoding")
-        .is_some_and(|coding| !coding.trim().eq_ignore_ascii_case("identity"))
-    {
+    if !fields.is_unencoded() {
         return false;
     }
 
@@ -792,7 +790,8 @@ fn matches_tag(fields: &Fields<'_>, etag: &str) -> bool {
 }
 
 // a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it: `"Bearer" 1*SP
-// b64token`, spaces alone between the two
+// b64token`, spaces alone between the two, so a tab after them is no separator; the token as it
+// stands after them
 fn bearer_of(value: &str) -> Option<&str> {
     let scheme = value.get(..6)?;
     let rest = value.get(6..)?;
@@ -803,7 +802,7 @@ fn bearer_of(value: &str) -> Option<&str> {
 
     let token = rest.trim_start_matches(' ');
 
-    (!token.is_empty()).then(|| token.trim())
+    (!token.is_empty() && !token.starts_with('\t')).then_some(token)
 }
 
 // ── An exchange ───────────────────────────────────────────────────────────────────────────────
@@ -1258,11 +1257,15 @@ impl Inner {
         };
         let target = fields.target();
 
-        // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII
+        // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a
+        // Content-Length that frames no body, or a Transfer-Encoding spec 15.12 refuses, its
+        // connection closed behind it
         let is_visible = fields
             .raw_fields()
             .is_some_and(|raw| has_visible_fields(&raw))
-            && is_visible_target(Some(&target));
+            && is_visible_target(Some(&target))
+            && fields.has_one_length()
+            && fields.is_transfer_encoding_framed();
         let authority = is_visible.then(|| fields.authority(&target)).flatten();
         let named = request_target_of(Some(&target));
         let (Some(authority), Some(named)) = (authority, named) else {

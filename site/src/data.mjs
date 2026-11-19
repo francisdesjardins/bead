@@ -1,6 +1,7 @@
 // What the page draws from data rather than prose, in both its languages: the byte examples, the
-// header's words, the protocol's failures and the status a gateway answers each with, and the table
-// of the three implementations, each part by the rows of the support matrix it stands for. Each
+// header's words, the protocol's failures and the status a gateway answers each with, and the tables
+// of the three implementations and of the transports, each part or transport by the rows of the
+// support matrix it stands for. Each
 // label is a pair, `[english, french]`; a byte's role is one of prefix, kind, block, record or
 // payload.
 
@@ -294,9 +295,9 @@ export const HEADER = Object.freeze({
     [
       ['bytes 0-3', 'octets 0-3'],
       [
-        [['layout', 'layout'], 8],
-        [['kind', 'kind'], 8],
-        [['flags', 'flags'], 8],
+        [['layout', 'disposition'], 8],
+        [['kind', 'genre'], 8],
+        [['flags', 'drapeaux'], 8],
         [['length', 'longueur'], 8],
       ],
     ],
@@ -351,8 +352,8 @@ export const FAILURES = Object.freeze([
     1,
     'gate',
     [
-      'The bytes do not form an envelope this layout reads.',
-      'Les octets ne forment pas une enveloppe que cette disposition lit.',
+      'The bytes do not form an envelope this layout reads, or an envelope that reads comes where none can, such as a REQUEST or a CANCEL of the receiver’s own parity, or a REQUEST on an open callId.',
+      'Les octets ne forment pas une enveloppe que cette disposition lit, ou une enveloppe lisible arrive là où aucune ne peut, comme une REQUEST ou un CANCEL de la parité du récepteur, ou une REQUEST sur un callId ouvert.',
     ],
   ],
   [
@@ -396,8 +397,8 @@ export const FAILURES = Object.freeze([
     17,
     ['answered', 'rejected'],
     [
-      'The request could not leave, so nothing was tried: its destination gone, for one, or a credential its transport cannot carry.',
-      'La requête n’a pas pu partir, donc rien n’a été tenté : sa destination partie, par exemple, ou un justificatif que son transport ne peut porter.',
+      'The request could not leave, so nothing was tried: its destination is gone, its transport cannot carry its credential, or another error stopped it before it went.',
+      'La requête n’a pas pu partir, donc rien n’a été tenté : sa destination est partie, son transport ne peut porter son justificatif, ou une autre erreur l’a arrêtée avant son départ.',
     ],
   ],
   [
@@ -557,8 +558,8 @@ export const STATUSES = Object.freeze([
   [
     400,
     [
-      'PAYLOAD_UNDECODABLE, a reading refused; an application’s failure',
-      'PAYLOAD_UNDECODABLE, une lecture refusée ; un échec de l’application',
+      'PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure',
+      'PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application',
     ],
   ],
   [
@@ -586,8 +587,8 @@ export const STATUSES = Object.freeze([
   [
     502,
     [
-      'an answer the gateway could not take; DESTINATION_LOST',
-      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST',
+      'an answer the gateway could not take; DESTINATION_LOST; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request',
+      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto',
     ],
   ],
   [503, ['DESTINATION_UNREACHABLE, retry-after: 1', 'DESTINATION_UNREACHABLE, retry-after: 1']],
@@ -665,7 +666,7 @@ export const WIRE = Object.freeze([
   [
     'implementations/typescript/src/transport/shared/amqp-messages.ts',
     [
-      'An AMQP 1.0 message counted to the byte, its profile, its subjects and its addresses',
+      'An AMQP 1.0 message counted to the byte, its profile, its topics and its addresses',
       'Un message d’AMQP 1.0 compté à l’octet, son profil, ses sujets et ses adresses',
     ],
   ],
@@ -863,4 +864,80 @@ export const OFF_THE_PAGE = Object.freeze([
   'An output of beadc that holds what it selects: `server`, `client`, `gateway`, each class over its own pick, and the procedures each transport of its server takes, `SERVED_PROCEDURES` and `ServedProcedures`, under the rules `SELECTOR_UNMATCHED`, `SELECTION_EMPTY` and `GATEWAY_EMPTY`',
   "The HTTP transport's and a gateway's policy: one object of hosts, origins, proxies and bounds, built and checked once and frozen, which either takes, a member given in it and beside it refused, its three durations held as 1.4 states, a way of their places",
   "Each side's public surface, pinned to its list with its members: what an application and generated code call, the envelope's codec and a router's core internal; an options object required exactly when a member of it is, at most two members required; no tuple taken or given, a parameter list and a map's entries aside; every public name mapped term for term, each with its kind ([0047](decisions/0047-every-side-shows-one-public-surface.md)). `tools/check-names.mjs` holds the three sides' lists to `tools/names.tsv`, its cases in `tools/__tests__/check-names.test.mjs`",
+]);
+
+// ── The transports, each held to the support matrix's Transports ─────────────
+
+// ! every row of docs/support.md's Transports is in exactly one list, a transport's `rows` or
+// TRANSPORTS_OFF, by its title; a transport's `sides` are those that carry every row it stands for,
+// which the build holds to the matrix; `detail`, where a section of the page says more, is that
+// section, which the transport's name then leads to
+export const TRANSPORT_HEADINGS = Object.freeze([
+  ['Where the call runs', 'Où passe l’appel'],
+  ['Transport', 'Transport'],
+  ['Sides', 'Côtés'],
+]);
+
+export const TRANSPORTS = Object.freeze([
+  {
+    where: ['A page or a service', 'Une page ou un service'],
+    name: ['WebSocket', 'WebSocket'],
+    rows: ['WebSocket', 'WebSocket over TLS (`wss`)'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#http',
+  },
+  {
+    where: ['Where WebSocket cannot pass', 'Là où WebSocket ne passe pas'],
+    name: [
+      'HTTP, a long poll for what the server sends',
+      'HTTP, une longue écoute pour ce qu’envoie le serveur',
+    ],
+    rows: ['HTTP/1.1'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#http-ecoute',
+  },
+  {
+    where: ['A page and its Web Worker', 'Une page et son Web Worker'],
+    name: ['Web Worker', 'Web Worker'],
+    rows: ['Web Worker'],
+    sides: ['TypeScript'],
+  },
+  {
+    where: ['Two routers of one process', 'Deux routeurs d’un même processus'],
+    name: ['In memory', 'En mémoire'],
+    rows: ['In memory'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#memoire',
+  },
+  {
+    where: ['One server over several transports', 'Un serveur sur plusieurs transports'],
+    name: ['Joined', 'Joints'],
+    rows: ["Joined, a server's transports through one"],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#memoire',
+  },
+  {
+    where: ['Devices and services', 'Des appareils et des services'],
+    name: ['MQTT 5', 'MQTT 5'],
+    rows: ['MQTT 5', 'MQTT 5 over TLS (`mqtts`, `wss`), a client certificate among it'],
+    sides: ['TypeScript', 'C#', 'Rust'],
+    detail: '#courtier',
+  },
+  {
+    where: ['Services behind RabbitMQ\u00A04', 'Des services derrière RabbitMQ\u00A04'],
+    name: ['AMQP 1.0', 'AMQP 1.0'],
+    rows: ['AMQP 1.0 on RabbitMQ 4', 'AMQP 1.0 over TLS (`amqps`), SASL EXTERNAL among it'],
+    sides: ['TypeScript', 'C#'],
+    detail: '#courtier',
+  },
+]);
+
+// the rows of the matrix's Transports the table stands for none of: a client's certificate, HTTP/2
+// beside HTTP/1.1, and the broker in memory each side's tests play
+export const TRANSPORTS_OFF = Object.freeze([
+  'A client certificate and the authorities trusted over WebSocket (`tls`)',
+  'A client certificate and the authorities trusted over HTTP (`tls`)',
+  'HTTP/2 over TLS, beside HTTP/1.1 by ALPN',
+  'HTTP/2 in clear',
+  'Broker, in memory (the core)',
 ]);

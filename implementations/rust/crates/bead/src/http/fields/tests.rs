@@ -418,7 +418,7 @@ async fn reads_any_target_without_throwing_a_content_type_given_twice_as_no_type
 }
 
 #[tokio::test]
-async fn tells_a_header_given_empty_from_one_absent_an_empty_token_is_malformed_an_empty_origin_or_encoding_refused_an_empty_listen_none()
+async fn tells_a_header_given_empty_from_one_absent_an_empty_token_is_malformed_an_empty_origin_refused_an_empty_encoding_taken_as_one_absent_an_empty_listen_none()
  {
     let started = started(&HttpTransportServerOptions::default()).await;
     let (_, token) = connect(&started).await;
@@ -450,7 +450,7 @@ async fn tells_a_header_given_empty_from_one_absent_an_empty_token_is_malformed_
         vec![
             (400, Some(HTTP_REFUSALS.malformed.to_owned())),
             (403, Some(HTTP_REFUSALS.origin.to_owned())),
-            (415, Some(HTTP_REFUSALS.type_refused.to_owned())),
+            status_of(vec![format!("{CONNECTION_TOKEN_HEADER}: {token}")]).await,
             (400, Some(HTTP_REFUSALS.malformed.to_owned())),
         ],
         "each given empty"

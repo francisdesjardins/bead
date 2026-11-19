@@ -39,6 +39,7 @@ fn intake_of((envelopes, bytes): (u64, u64)) -> Arc<Intake> {
     })
 }
 
+// spec 15.12.17, 15.12.18
 #[test]
 fn pauses_a_connection_once_what_it_handed_within_one_task_reaches_either_bound_once() {
     let intake = intake_of((3, 100));
@@ -49,7 +50,7 @@ fn pauses_a_connection_once_what_it_handed_within_one_task_reaches_either_bound_
     }
     assert_eq!(*locked(&calls.0), ["pause b"]);
     assert_eq!(intake.paused(), [Arc::clone(&b)]);
-    // The source's ArrayBuffer and ASCII text carry ten and four bytes here.
+    // The TypeScript twin's ArrayBuffer and ASCII text carry ten and four bytes here.
     for (connection, bytes) in [(&a, 10), (&a, 4), (&b, 1)] {
         assert!(intake.handed((connection, bytes), |held| calls.pause(held)));
     }
@@ -58,6 +59,7 @@ fn pauses_a_connection_once_what_it_handed_within_one_task_reaches_either_bound_
     intake.end(|held| calls.resume(held));
 }
 
+// spec 15.12.17
 #[tokio::test]
 async fn resumes_what_it_paused_as_it_ends_and_counts_nothing_after() {
     let intake = intake_of((1, 1_048_576));

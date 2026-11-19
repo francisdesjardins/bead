@@ -4,15 +4,15 @@ This guide builds one Bead service from an empty folder to a running C# (.NET 10
 TypeScript client, in Node and in a browser page. Every file below is a file of a project built
 and run this way outside the repository; every output quoted is what that project printed.
 
-> **Nothing is published yet.** No Bead package is on npm, NuGet or crates.io, and beadc's image
-> is on no registry. A team clones Bead at a commit it pins, builds beadc's image from that clone,
-> and takes the runtimes from the same clone by path, so the generator and the runtimes are one
-> commit. Publication is ahead; [the support matrix](../support.md) says what each side plays
-> today and what is ahead.
+> **No package is published yet.** No Bead package is on npm, NuGet or crates.io, and beadc's
+> image is on no registry. A team clones Bead at a commit it pins, builds beadc's image from that
+> clone, and takes the runtimes from the same clone by path, so the generator and the runtimes are
+> one commit. Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may
+> break. [The support matrix](../support.md) says what each side plays today and what is ahead.
 
 ## What you build
 
-One service, `StationService`, with the three kinds of call that make Bead worth adopting:
+One service, `StationService`, with three kinds of call:
 
 1. **A request**, `GetStationStatus`, whose payload carries
    [protovalidate](https://github.com/bufbuild/protovalidate) rules: a request they refuse is
@@ -86,12 +86,12 @@ $env:BEADC_IMAGE = 'beadc:local'
 ```
 
 `init` writes `beadc.yaml`, `proto/station/v1/station.proto` with one service, `buf.yaml`, the
-editor's copy of Bead's options and protovalidate's under `.beadc/include/`, and lines of
-`.gitignore` (`.beadc/` is git's to ignore) and `.gitattributes`. It writes over no file: a
-wrapper already there, byte for byte its own, it keeps. Without `--language`, it writes an output
-for every language beadc targets, Rust's included; name the two you use. When you commit the
-project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since git on Windows records
-no mode.
+editor's copy of the options, Bead's, protovalidate's and googleapis', under `.beadc/include/`,
+and lines of `.gitignore` (`.beadc/` is git's to ignore) and `.gitattributes`. It writes over no
+file: a wrapper already there, byte for byte its own, it keeps. Without `--language`, it writes an
+output for every language beadc targets, Rust's included; name the two you use. When you commit
+the project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since git on Windows
+records no mode.
 
 To run the image with no `BEADC_IMAGE`, tag it with the name the wrappers carry, `docker tag
 beadc:local ghcr.io/francisdesjardins/beadc:<version>`; `./beadc.sh version` prints the version.

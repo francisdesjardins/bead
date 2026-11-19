@@ -158,8 +158,6 @@ public sealed class WebSocketHandshakeTests
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,,chat"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 5"]),
-        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: abc"]),
-        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Transfer-Encoding: chunked"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"]),
 
@@ -311,6 +309,97 @@ public sealed class WebSocketHandshakeTests
 
         // what a target percent-encodes is no octet of it, NUL in a query among them
         Assert.Equal((101, (string?)null), AnswerOf(("GET /?a%01%00 HTTP/1.1", []), Options));
+    }
+
+    [Fact]
+    public void Refuses_first_unmarked_a_Content_Length_other_than_one_line_of_digits_alone_in_a_request_with_no_Transfer_Encoding_whatever_else_the_request_holds()
+    {
+        // a word, a sign, a space, a list, one number twice in one line or in two, two numbers; from a
+        // host it does not take, under another method, with no upgrade; an empty one the wire's cases
+        // hold, a request no socket carries dropping an empty field
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET / HTTP/1.1", ["Content-Length: abc"]),
+            ("GET / HTTP/1.1", ["Content-Length: +0"]),
+            ("GET / HTTP/1.1", ["Content-Length: -0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0, 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0, 1"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 00"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Content-Length: abc"]),
+            ("POST / HTTP/1.1", ["Content-Length: abc", "Upgrade"]),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // one line of digits alone is a length, read as the number it is
+        Assert.Equal((101, (string?)null), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 000"]), Options));
+        Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 7"]), Options));
+    }
+
+    [Fact]
+    public void Refuses_first_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_whatever_either_holds_or_a_Transfer_Encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_HTTP_1_0_request_carries_whatever_else_the_request_holds()
+    {
+        // the pair in either order, a Content-Length of no number among it, and over HTTP/1.x the
+        // X-Content-Length Kestrel writes in its place, whoever wrote it; a final coding but chunked,
+        // across two lines among it, or none; anything after the first chunked, an empty element
+        // among it; HTTP/1.0's; from a host it does not take, under another method
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Content-Length: 0", "Transfer-Encoding: chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Content-Length: abc"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, chunked", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "X-Content-Length: 0"]),
+            ("GET / HTTP/1.0", ["Transfer-Encoding: chunked", "X-Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: identity"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, gzip"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Transfer-Encoding: gzip"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: ,"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked", "Transfer-Encoding: chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: Chunked, CHUNKED"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, gzip, chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked, , chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked,"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: chunked ,  "]),
+            ("GET / HTTP/1.0", ["Transfer-Encoding: chunked"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: chunked", "Content-Length: 0"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: gzip"]),
+            ("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: chunked, chunked"]),
+            ("GET / HTTP/1.0", ["Host: elsewhere.test", "Transfer-Encoding: chunked"]),
+            ("POST / HTTP/1.1", ["Transfer-Encoding: gzip", "Upgrade"]),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // a final coding chunked and nothing after it, in any case, the empty elements before it
+        // ignored, is content, at step 6
+        (string Start, string[] Fields)[] content =
+        [
+            ("GET / HTTP/1.1", ["Transfer-Encoding: Chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: , chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, , chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, chunked"]),
+            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip", "Transfer-Encoding: chunked"]),
+        ];
+
+        Assert.All(content, (request) =>
+        {
+            Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(request, Options));
+        });
+
+        // an X-Content-Length with no Transfer-Encoding is a field like any other
+        Assert.Equal((101, (string?)null), AnswerOf(("GET / HTTP/1.1", ["X-Content-Length: 5"]), Options));
     }
 
     [Fact]

@@ -73,6 +73,13 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub(crate) trait Wire: AsyncRead + AsyncWrite + Unpin + Send + 'static {
     /// Readies its drop: once dropped, its peer is reset rather than ended.
     fn abort(&self) {}
+
+    /// Ready once its socket ended, its peer's FIN or a reset, seen without reading it; pending
+    /// while it holds bytes to read, which keep that end behind them. A socket that cannot tell
+    /// never ends here.
+    fn poll_ended(&self, _context: &mut Context<'_>) -> Poll<()> {
+        Poll::Pending
+    }
 }
 
 impl Wire for tokio::net::TcpStream {
@@ -81,6 +88,24 @@ impl Wire for tokio::net::TcpStream {
         socket2::SockRef::from(self)
             .set_linger(Some(Duration::ZERO))
             .ok();
+    }
+
+    fn poll_ended(&self, context: &mut Context<'_>) -> Poll<()> {
+        ended_of(self, context)
+    }
+}
+
+/// Ready once `socket` ended, by a peek of one byte, which takes nothing from it: its FIN or a
+/// reset, with no byte before it.
+pub(crate) fn ended_of(socket: &tokio::net::TcpStream, context: &mut Context<'_>) -> Poll<()> {
+    let mut byte = [0_u8; 1];
+    let mut buffer = ReadBuf::new(&mut byte);
+
+    match socket.poll_peek(context, &mut buffer) {
+        Poll::Ready(Ok(0) | Err(_)) => Poll::Ready(()),
+        // ! a byte waits, its end behind it if it came: nothing wakes for it, or its owner would
+        // spin on a socket that stays readable
+        Poll::Ready(Ok(_)) | Poll::Pending => Poll::Pending,
     }
 }
 
@@ -112,8 +137,8 @@ pub(crate) struct ConnectionBounds {
 pub(crate) struct ConnectionHooks {
     /// A message whole: its bytes, and whether it came as text.
     pub(crate) deliver: Box<dyn FnMut(Bytes, bool) + Send>,
-    /// Its peer answered a ping.
-    pub(crate) answered: Box<dyn FnMut() + Send>,
+    /// A pong read, and the data it carries: its heartbeat's, which takes its ping's echo alone.
+    pub(crate) answered: Box<dyn FnMut(Bytes) + Send>,
 }
 
 /// How a connection ended.
@@ -152,7 +177,7 @@ pub(crate) enum Failed {
 
 enum Command {
     Send(Bytes),
-    Ping,
+    Ping(Bytes),
     Close(u16),
     Drop,
     Resume,
@@ -239,9 +264,10 @@ impl Commands {
         }
     }
 
-    /// Pings its peer, behind what was sent before, unless it closes.
-    pub(crate) fn ping(&self) {
-        self.sender.send(Command::Ping).ok();
+    /// Pings its peer with `data`, ahead of what it holds unsent, behind the message under way and
+    /// what its socket holds (spec 15.3), unless it closes.
+    pub(crate) fn ping(&self, data: Bytes) {
+        self.sender.send(Command::Ping(data)).ok();
     }
 
     /// Drops it at once, its close unclean, no error told: its heartbeat's word.
@@ -521,8 +547,13 @@ impl<S: Wire> Connection<S> {
                 }
             }
             // * no message read while its router paused it but once this side closes, which
-            // reads on to its peer's close (spec 15.12)
-            Closing::No if self.shared.paused.load(Ordering::SeqCst) => Poll::Pending,
+            // reads on to its peer's close (spec 15.12); its socket's end, seen without reading
+            // it, ends it at once, what it held dropped with it
+            Closing::No if self.shared.paused.load(Ordering::SeqCst) => self
+                .socket
+                .get_ref()
+                .poll_ended(context)
+                .map(|()| Step::Read(None)),
             Closing::No | Closing::ByUs => Pin::new(&mut self.socket)
                 .poll_next(context)
                 .map(Step::Read),
@@ -621,9 +652,10 @@ impl<S: Wire> Connection<S> {
                     self.taken(length);
                 }
             }
-            Command::Ping => {
+            // * ahead of what waits, as .NET's keep-alive sends its own between messages
+            Command::Ping(data) => {
                 if self.closing == Closing::No && self.writing != Writing::Broken {
-                    self.queue.push_back((Message::Ping(Bytes::new()), 0));
+                    self.queue.push_front((Message::Ping(data), 0));
                 }
             }
             Command::Close(code) => self.close(code),
@@ -710,7 +742,7 @@ impl<S: Wire> Connection<S> {
                     (hooks.deliver)(Bytes::from(text), true);
                 }
             }
-            Some(Ok(Message::Pong(_))) => (hooks.answered)(),
+            Some(Ok(Message::Pong(data))) => (hooks.answered)(data),
             // tungstenite answers it, and its close, of its own, flushed as it reads on
             Some(Ok(Message::Ping(_) | Message::Frame(_))) => {}
             // * its answer flushed by its next read, which ends it

@@ -2,6 +2,7 @@
 { connectionHandle: 'server', direction: 'tx', header: { callId: 1, kind: 0x10, procedureId: 1, serviceId: 1 } }
 { connectionHandle: 'server', direction: 'rx', header: { callId: 1, credentialScheme: 1, kind: 0x11 } }  // the session announced, OPAQUE
 { connectionHandle: 'server', direction: 'tx', header: { callId: 7, kind: 0x10, opensSubscription: true, procedureId: 4, serviceId: 1 } }
+{ connectionHandle: 'server', direction: 'rx', header: { callId: 7, kind: 0x11 } }  // its result, the subscription open
 { connectionHandle: 'server', direction: 'rx', header: { callId: 7, kind: 0x13 } }  // the notification
 { connectionHandle: 'server', direction: 'tx', header: { callId: 7, kind: 0x16 } }  // the subscription dropped
 

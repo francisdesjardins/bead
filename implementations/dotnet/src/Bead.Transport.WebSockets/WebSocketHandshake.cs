@@ -156,22 +156,41 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
-    // no content: each Content-Length line is zeros alone, as written, never a length the platform
-    // read from it, which a line it cannot read leaves absent
-    private static bool IsNoContent(StringValues lines)
+    // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
+    // Transfer-Encoding alone that ends in one chunked, over HTTP/1.1, or a Content-Length of one line
+    // of digits alone (RFC 9110 §8.6), or neither
+    private static bool IsFramed(HttpRequest request)
     {
-        foreach (var line in lines)
+        var headers = request.Headers;
+        var lengths = headers["Content-Length"];
+
+        // ! a Content-Length beside a Transfer-Encoding, whatever it holds, is an error (RFC 9112
+        // §6.3 item 3), never a length the Transfer-Encoding overrides: over HTTP/1.x, Kestrel hands
+        // it on as an X-Content-Length
+        if (headers.TransferEncoding.Count > 0)
         {
-            if (string.IsNullOrEmpty(line) || line.Any((digit) =>
-            {
-                return digit != '0';
-            }))
-            {
-                return false;
-            }
+            var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+
+            return lengths.Count == 0
+                && !(isHttp1 && RequestFields.HasLengthBesideTransferEncoding(headers.TransferEncoding, headers["X-Content-Length"]))
+                && RequestFields.IsTransferEncodingFramed(request.Protocol, headers.TransferEncoding);
         }
 
-        return true;
+        return lengths.Count == 0
+            || (lengths.Count == 1 && ValueOf(lengths[0]) is { Length: > 0 } length && length.All(char.IsAsciiDigit));
+    }
+
+    // whether a request has content: a Content-Length past 0, as written, never a length the
+    // platform read from it, or a Transfer-Encoding
+    private static bool HasContent(IHeaderDictionary headers)
+    {
+        return headers.TransferEncoding.Count > 0 || headers["Content-Length"].Any((line) =>
+        {
+            return ValueOf(line).Any((digit) =>
+            {
+                return digit != '0';
+            });
+        });
     }
 
     // whether a Sec-WebSocket-Key is one field line of 16 bytes in base64 (RFC 6455 §4.2.1 item 5,
@@ -220,8 +239,7 @@ internal static class WebSocketHandshake
         return IsKey(headers.SecWebSocketKey)
             && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
             && headers.Authorization.Count <= 1
-            && IsNoContent(headers["Content-Length"])
-            && headers.TransferEncoding.Count == 0;
+            && !HasContent(headers);
     }
 
     // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
@@ -252,10 +270,14 @@ internal static class WebSocketHandshake
     /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
     /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
     /// character past ASCII, a target that holds an octet other than visible ASCII or a path whose
-    /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, or an authority that is no
-    /// host, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
+    /// a <c>Content-Length</c> other than one line of digits alone, one beside a
+    /// <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
+    /// <c>chunked</c> or that lists anything after its first <c>chunked</c>, or one an HTTP/1.0
+    /// request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
-    /// <c>Authorization</c> lines among it, 400; an origin not taken, 403.
+    /// <c>Authorization</c> lines and content, a <c>Content-Length</c> past 0 or a
+    /// <c>Transfer-Encoding</c>, among it, 400; an origin not taken, 403.
     /// </summary>
     public static HandshakeRefusal? RefusalOf(HttpRequest request, WebSocketTransportServerOptions options)
     {
@@ -276,7 +298,12 @@ internal static class WebSocketHandshake
             });
         });
 
-        if (!isVisible)
+        // and a body HTTP cannot frame, judged alike: a Content-Length that frames no body, and a
+        // Transfer-Encoding whose final coding is not chunked, which Kestrel refuses before the
+        // application runs, a Content-Length beside a Transfer-Encoding, and a Transfer-Encoding that
+        // lists anything after its first chunked or that an HTTP/1.0 request carries, which it hands
+        // on
+        if (!isVisible || !IsFramed(request))
         {
             return BadRequest;
         }

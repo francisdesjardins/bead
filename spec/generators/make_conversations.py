@@ -1160,8 +1160,8 @@ conversations = [
     ('a message shorter than a prefix is reported', ['2.2', '9.6', '9.6.1'], None, [raw('A1 10 00'), report(MALFORMED)]),
     ('a first byte no layout is, is reported', ['9.6', '9.6.1'], None, [
         raw('0A 10 00 03  00 00 00 03  00 01 00 01'), report(MALFORMED)]),
-    ('a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id', ['9.6', '9.6.2'], None, [
-        raw('A2 10 00 03  00 00 00 07  00 01 00 01'), failure(7, LAYOUT_UNSUPPORTED)]),
+    ('a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id', ['2.3', '9.6', '9.6.2'], None, [
+        raw('A2 10 00 03  00 00 00 07  00 01 00 01'), failure(7, LAYOUT_UNSUPPORTED, detail='0xA1')]),
     ('a request of a layout to come, on the server\'s own parity, is reported', ['9.6', '9.6.6'], None, [
         raw('A2 10 00 03  00 00 00 08  00 01 00 01'), report(LAYOUT_UNSUPPORTED)]),
     ('a malformed request is answered ENVELOPE_MALFORMED, on its call id', ['9.6', '9.6.2'], None, [

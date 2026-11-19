@@ -1,8 +1,9 @@
-//! A socket closed in stages once the answer written on it ends (RFC 9112 §9.6), as the other
-//! sides' `lingerOn` and Kestrel close one: its write side shut, then what still comes read and
-//! dropped until its client closes, or [`LINGER`] passes on the platform's clock, which bounds the
-//! platform's own close; closing it at once would reset a client still sending, and may erase the
-//! answer it has not read yet.
+//! A socket closed in stages once the answer written on it ends (RFC 9112 §9.6): its write side
+//! shut, then what still comes read and dropped until its client closes, or [`LINGER`] passes on
+//! the platform's clock, which bounds the platform's own close. Closing it at once would reset a
+//! client still sending, and may erase the answer it has not read yet; a client still sending once
+//! [`LINGER`] passes may still be reset. The TypeScript side's `lingerOn` reads the same way; the
+//! C# side reads too, but Kestrel has no half-close, so its write side ends with its close.
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::oneshot;
