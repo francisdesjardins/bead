@@ -352,8 +352,8 @@ export const FAILURES = Object.freeze([
     1,
     'gate',
     [
-      'The bytes do not form an envelope this layout reads.',
-      'Les octets ne forment pas une enveloppe que cette disposition lit.',
+      'The bytes do not form an envelope this layout reads, or an envelope that reads comes where none can, such as a REQUEST or a CANCEL of the receiver’s own parity, or a REQUEST on an open callId.',
+      'Les octets ne forment pas une enveloppe que cette disposition lit, ou une enveloppe lisible arrive là où aucune ne peut, comme une REQUEST ou un CANCEL de la parité du récepteur, ou une REQUEST sur un callId ouvert.',
     ],
   ],
   [
@@ -397,8 +397,8 @@ export const FAILURES = Object.freeze([
     17,
     ['answered', 'rejected'],
     [
-      'The request could not leave, so nothing was tried: its destination gone, for one, or a credential its transport cannot carry.',
-      'La requête n’a pas pu partir, donc rien n’a été tenté : sa destination partie, par exemple, ou un justificatif que son transport ne peut porter.',
+      'The request could not leave, so nothing was tried: its destination is gone, its transport cannot carry its credential, or another error stopped it before it went.',
+      'La requête n’a pas pu partir, donc rien n’a été tenté : sa destination est partie, son transport ne peut porter son justificatif, ou une autre erreur l’a arrêtée avant son départ.',
     ],
   ],
   [
@@ -558,8 +558,8 @@ export const STATUSES = Object.freeze([
   [
     400,
     [
-      'PAYLOAD_UNDECODABLE, a reading refused; an application’s failure',
-      'PAYLOAD_UNDECODABLE, une lecture refusée ; un échec de l’application',
+      'PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure',
+      'PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application',
     ],
   ],
   [
@@ -587,8 +587,8 @@ export const STATUSES = Object.freeze([
   [
     502,
     [
-      'an answer the gateway could not take; DESTINATION_LOST',
-      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST',
+      'an answer the gateway could not take; DESTINATION_LOST; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request',
+      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto',
     ],
   ],
   [503, ['DESTINATION_UNREACHABLE, retry-after: 1', 'DESTINATION_UNREACHABLE, retry-after: 1']],
@@ -666,7 +666,7 @@ export const WIRE = Object.freeze([
   [
     'implementations/typescript/src/transport/shared/amqp-messages.ts',
     [
-      'An AMQP 1.0 message counted to the byte, its profile, its subjects and its addresses',
+      'An AMQP 1.0 message counted to the byte, its profile, its topics and its addresses',
       'Un message d’AMQP 1.0 compté à l’octet, son profil, ses sujets et ses adresses',
     ],
   ],
