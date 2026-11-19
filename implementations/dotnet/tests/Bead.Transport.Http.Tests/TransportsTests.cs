@@ -452,6 +452,7 @@ public sealed class TransportsTests
             Closing => "close with no code",
             Ping => "ping",
             Pong => "pong",
+            _ when heard.Bytes.Length > 0 => $"{heard.Bytes.Length} octets past its responses, then its end: {Encoding.Latin1.GetString(heard.Bytes[..Math.Min(heard.Bytes.Length, 120)])}",
             _ => "end",
         };
     }
@@ -760,21 +761,30 @@ public sealed class TransportsTests
         })]);
         var reader = new Reader(pieces.Read);
 
-        var head = await reader.ReadHead();
-        var body = await reader.ReadBody(head);
-        var fields = response.GetProperty("fields").EnumerateObject().ToList();
+        // * one response, or several one after another, each read whole after the one before
+        List<JsonElement> expected = response.TryGetProperty("responses", out var several) ? [.. several.EnumerateArray()] : [response];
 
-        Assert.Equal(response.GetProperty("status").GetInt32(), head.Status);
-        Assert.Equal(
-            fields.Select((field) =>
-            {
-                return $"{field.Name}: {field.Value.GetString()}";
-            }),
-            fields.Select((field) =>
-            {
-                return $"{field.Name}: {head.Fields.GetValueOrDefault(field.Name) ?? "absent"}";
-            }));
-        Assert.Equal(BodyOf(BytesOf(response.GetProperty("body").GetString()!)), BodyOf(body));
+        foreach (var each in expected)
+        {
+            var head = await reader.ReadHead();
+            var body = await reader.ReadBody(head);
+            var fields = each.GetProperty("fields").EnumerateObject().ToList();
+
+            Assert.Equal(each.GetProperty("status").GetInt32(), head.Status);
+            Assert.Equal(
+                fields.Select((field) =>
+                {
+                    return $"{field.Name}: {field.Value.GetString()}";
+                }),
+                fields.Select((field) =>
+                {
+                    return $"{field.Name}: {head.Fields.GetValueOrDefault(field.Name) ?? "absent"}";
+                }));
+            Assert.Equal(BodyOf(BytesOf(each.GetProperty("body").GetString()!)), BodyOf(body));
+        }
+
+        // and nothing past them
+        Assert.Empty(await reader.UntilEnd());
     }
 
     [Fact]
@@ -948,6 +958,11 @@ public sealed class TransportsTests
             {
                 await (expected.TryGetProperty("status", out _) ? Expect((expected, on, timing)) : Hear((expected, on, timing)));
             }
+            else if (step.TryGetProperty("behind", out var behind))
+            {
+                NothingMore();
+                Behind((behind, on));
+            }
             else if (step.TryGetProperty("close", out _))
             {
                 NothingMore();
@@ -1014,11 +1029,11 @@ public sealed class TransportsTests
             _exchanges.Clear();
         }
 
-        // a request's octets, on a socket of its own: its head, the server's host and each value
-        // captured put in, a name nothing captured refused, then its body
-        private async Task Send((JsonElement Request, string On) step)
+        // a request's octets: its head, the server's host and each value captured put in, a name
+        // nothing captured refused, then its body
+        private byte[] OctetsOf(JsonElement request)
         {
-            var head = step.Request.GetProperty("head").GetString()!.Replace("{host}", $"{Host}:{_port}", StringComparison.Ordinal);
+            var head = request.GetProperty("head").GetString()!.Replace("{host}", $"{Host}:{_port}", StringComparison.Ordinal);
 
             foreach (var (name, value) in _captured)
             {
@@ -1031,16 +1046,33 @@ public sealed class TransportsTests
                 throw new InvalidOperationException($"nothing captured under {uncaptured.Groups[1].Value}");
             }
 
-            byte[] body = step.Request.TryGetProperty("body", out var given) ? BytesOf(given.GetString()!) : [];
+            byte[] body = request.TryGetProperty("body", out var given) ? BytesOf(given.GetString()!) : [];
+
+            // ! one octet per character, its code point (ISO-8859-1), as the file says: a character
+            // past U+007F is an octet past ASCII
+            return [.. Encoding.Latin1.GetBytes(head), .. body];
+        }
+
+        // a request, on a socket of its own
+        private async Task Send((JsonElement Request, string On) step)
+        {
+            var octets = OctetsOf(step.Request);
 
             if (_exchanges.Remove(step.On, out var before))
             {
                 before.Dispose();
             }
 
-            // ! one octet per character, its code point (ISO-8859-1), as the file says: a character
-            // past U+007F is an octet past ASCII
-            _exchanges[step.On] = await Exchange.Send((_port, [.. Encoding.Latin1.GetBytes(head), .. body], _isAnsweringPings));
+            _exchanges[step.On] = await Exchange.Send((_port, octets, _isAnsweringPings));
+        }
+
+        // requests on the socket an exchange's send opened, behind what it carried: in their order,
+        // in one write that no step awaits
+        private void Behind((JsonElement Requests, string On) step)
+        {
+            var requests = step.Requests.EnumerateArray().ToList();
+
+            _exchanges[step.On].Behind(([.. requests.SelectMany(OctetsOf)], requests.Count));
         }
 
         // a message on an exchange that is a WebSocket: binary or text, in one final frame; frames
@@ -1128,19 +1160,21 @@ public sealed class TransportsTests
             }
         }
 
-        // the response on an exchange: its head timed as its step says, then, when the case expects
-        // anything of it, its body within what is left of the step's wait, or that its socket was
-        // cut first; each written alike as expected and as it came
+        // the next response on an exchange, in the order of the requests written on its socket: its
+        // head timed as its step says, then, when the case expects anything of it, its body within
+        // what is left of the step's wait, or that its socket was cut first; each written alike as
+        // expected and as it came
         private async Task Expect((JsonElement Response, string On, Timing Timing) step)
         {
             var (response, on, timing) = step;
             var exchange = _exchanges[on];
+            var next = exchange.Next();
             var expected = new List<string> { $"status {response.GetProperty("status").GetInt32()}" };
             Head head;
 
             try
             {
-                head = await CameOf(exchange.Head, (timing, "the response's head"));
+                head = await CameOf(next.Head, (timing, "the response's head"));
             }
             catch (IOException reason)
             {
@@ -1175,12 +1209,12 @@ public sealed class TransportsTests
             if (response.TryGetProperty("body", out var body))
             {
                 expected.Add(BodyOf(BytesOf(body.GetString()!)));
-                came.Add(await exchange.BodyWithin(timing.Left) is { } bytes ? BodyOf(bytes) : "body: cut");
+                came.Add(await next.BodyWithin(timing.Left) is { } bytes ? BodyOf(bytes) : "body: cut");
             }
 
             if (response.TryGetProperty("envelope", out var envelope))
             {
-                var bytes = await exchange.BodyWithin(timing.Left);
+                var bytes = await next.BodyWithin(timing.Left);
 
                 expected.Add(ExpectedOf(envelope));
                 came.Add(bytes is not null ? OutOf(bytes) : "body: cut");
@@ -1206,7 +1240,7 @@ public sealed class TransportsTests
                     }
                 }
 
-                came.AddRange(await exchange.BodyWithin(timing.Left) is { } bytes ? BatchOf(bytes, items) : ["body: cut"]);
+                came.AddRange(await next.BodyWithin(timing.Left) is { } bytes ? BatchOf(bytes, items) : ["body: cut"]);
             }
 
             var (wanted, got) = (string.Join("; ", expected), string.Join("; ", came));
@@ -1286,6 +1320,10 @@ public sealed class TransportsTests
                 _ => expected.Name,
             };
             var exchange = _exchanges[on];
+
+            // * over HTTP, its end is read once asked, past the responses read
+            exchange.Ending();
+
             var came = await exchange.NextWithin(timing.Wait);
             var cameAt = timing.Elapsed;
             string seen;
@@ -1389,8 +1427,25 @@ public sealed class TransportsTests
     /// <summary>A response's head: its status, and its fields by their names in lower case.</summary>
     private sealed record Head(int Status, IReadOnlyDictionary<string, string> Fields);
 
-    /// <summary>What the server sent on a WebSocket: a message whole, a close, a ping or a pong, by its opcode; or its socket's end.</summary>
+    /// <summary>What the server sent on a WebSocket: a message whole, a close, a ping or a pong, by its opcode; or its socket's end, with what came past its responses.</summary>
     private sealed record Heard(int Kind, byte[] Bytes);
+
+    /// <summary>A response on an exchange's socket: its head, then its body, each read as it comes.</summary>
+    private sealed record Response(Task<Head> Head, Task<byte[]> Body)
+    {
+        // its body within a wait; none when its socket was cut before it came whole
+        public async Task<byte[]?> BodyWithin(TimeSpan wait)
+        {
+            try
+            {
+                return await Body.WaitAsync(wait, Cancelled);
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+    }
 
     /// <summary>
     /// How an expect is timed, from its step's start, on the real clock: its <c>within</c>, its wait,
@@ -1440,9 +1495,10 @@ public sealed class TransportsTests
         }
     }
 
-    // an exchange: the socket of its own a request went on, and its response, read as it comes —
-    // its head at once, its body after it; answered 101, a WebSocket, whose frames the peer writes
-    // and hears itself
+    // an exchange: the socket of its own a request went on, and the response of each request
+    // written on it, read as they come, one after another — a head at once, its body after it, the
+    // next head after that body; answered 101, a WebSocket, whose frames the peer writes and hears
+    // itself
     private sealed class Exchange : IDisposable
     {
         // a socket's end, which no opcode names
@@ -1453,14 +1509,29 @@ public sealed class TransportsTests
         private readonly Reader _reader;
         private readonly bool _isAnsweringPings;
 
+        // its first response's head, which says whether it became a WebSocket
+        private readonly Task<Head> _head;
+
+        // the responses of the requests written on it that no expect read yet, in their order
+        private readonly Queue<Response> _responses = new();
+
         // what the peer writes on it, a frame at a time: its own, and its pongs
         private readonly SemaphoreSlim _writing = new(1, 1);
 
-        // what the server sent on it once a WebSocket, in the order it came
+        // what the server sent on it once a WebSocket, in the order it came; over HTTP, its end
         private readonly Channel<Heard> _heard = Channel.CreateUnbounded<Heard>();
+
+        // over HTTP, an end expected, which its end is read for
+        private readonly TaskCompletionSource _ending = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // whether the peer sent its close, which the server's close answers
         private volatile bool _isClosing;
+
+        // the last response read, after which the next one's head is read
+        private Task _read;
+
+        // the last write behind, after which the next one goes
+        private Task _written = Task.CompletedTask;
 
         private Exchange((TcpClient Tcp, bool IsAnsweringPings) socket)
         {
@@ -1475,8 +1546,12 @@ public sealed class TransportsTests
             });
 
             _reader = reader;
-            Head = reader.ReadHead();
-            Body = BodyAfter((reader, Head));
+            _head = reader.ReadHead();
+
+            var first = new Response(_head, BodyAfter((reader, _head)));
+
+            _responses.Enqueue(first);
+            _read = first.Body;
             _ = HearAfter(reader);
         }
 
@@ -1491,10 +1566,6 @@ public sealed class TransportsTests
 
         // its own port, which the server sees as its peer's
         public int Port { get; }
-
-        public Task<Head> Head { get; }
-
-        public Task<byte[]> Body { get; }
 
         // the request's octets written whole, its response read from before they go: a refusal on
         // the head alone comes before the server lets go of the socket
@@ -1520,17 +1591,44 @@ public sealed class TransportsTests
             }
         }
 
-        // its body within a wait; none when its socket was cut before it came whole
-        public async Task<byte[]?> BodyWithin(TimeSpan wait)
+        // the next response no expect read yet; one past the requests written on it fails its case
+        public Response Next()
         {
-            try
+            if (!_responses.TryDequeue(out var response))
             {
-                return await Body.WaitAsync(wait, Cancelled);
+                throw new InvalidOperationException("a response past the requests written on its socket");
             }
-            catch (IOException)
+
+            return response;
+        }
+
+        // requests written behind what it carried, in one write from a task of its own that no step
+        // awaits, after any written behind before it, each response read after the one before it; a
+        // write its socket refuses, its server having ended it, fails no step
+        public void Behind((byte[] Octets, int Count) requests)
+        {
+            for (var index = 0; index < requests.Count; index += 1)
             {
-                return null;
+                var head = HeadAfter(_read);
+                var response = new Response(head, BodyAfter((_reader, head)));
+
+                _responses.Enqueue(response);
+                _read = response.Body;
             }
+
+            _written = WriteAfter((_written, requests.Octets));
+        }
+
+        // over HTTP, its end expected: read once its responses were, as HearAfter reads it; a
+        // response no expect read fails it, as what comes past them does
+        public void Ending()
+        {
+            if (_responses.Count > 0)
+            {
+                throw new InvalidOperationException($"{_responses.Count} responses no expect read before its end");
+            }
+
+            _ending.TrySetResult();
         }
 
         // a frame of the peer's, whole, after any other it writes
@@ -1581,6 +1679,28 @@ public sealed class TransportsTests
             return await response.Reader.ReadBody(await response.Head);
         }
 
+        // ! a head read once the response before it was read whole: one reader, one read at a time
+        private async Task<Head> HeadAfter(Task before)
+        {
+            await before;
+
+            return await _reader.ReadHead();
+        }
+
+        private async Task WriteAfter((Task Before, byte[] Octets) write)
+        {
+            await write.Before;
+
+            try
+            {
+                await _stream.WriteAsync(write.Octets, Cancelled);
+            }
+            catch (Exception reason) when (reason is IOException or ObjectDisposedException or OperationCanceledException)
+            {
+                // refused, its socket ended or the case done
+            }
+        }
+
         // once answered 101, what the server sends, frame by frame: a message whole, its fragments
         // put together; a ping, answered with a pong of its payload unless the case leaves it
         // unanswered; a pong, which no case expects, so that it fails the step it comes in, as the
@@ -1590,13 +1710,14 @@ public sealed class TransportsTests
         {
             try
             {
-                if ((await Head).Status != 101)
+                if ((await _head).Status != 101)
                 {
-                    // * past its response, the socket's end alone: what its server ends of it, which
-                    // an answer written before its body is whole has it do in stages (spec 15.12)
-                    await Body;
-                    await reader.UntilEnd();
-                    _heard.Writer.TryWrite(new Heard(Ended, []));
+                    // * past its responses, once an end is expected, the socket's end alone: what its
+                    // server ends of it, which an answer written before its body is whole has it do
+                    // in stages (spec 15.12), and nothing past them
+                    await _ending.Task;
+                    await _read;
+                    _heard.Writer.TryWrite(new Heard(Ended, await reader.UntilEnd()));
 
                     return;
                 }
@@ -1652,19 +1773,26 @@ public sealed class TransportsTests
     // its fields, and its body by its length, de-chunked, or to the end of what comes
     private sealed class Reader(Func<Memory<byte>, ValueTask<int>> read)
     {
-        // what comes past a response, dropped, until its socket ends
-        public async Task UntilEnd()
-        {
-            var dropped = new byte[ReadBytes];
-
-            while (await read(dropped) > 0)
-            {
-                // dropped
-            }
-        }
-
         // what came and is not read yet
         private readonly List<byte> _came = [];
+
+        // what comes past the responses read, until its socket ends, a reset ending it as its end does
+        public async Task<byte[]> UntilEnd()
+        {
+            try
+            {
+                while (await Fill())
+                {
+                    // to its end
+                }
+            }
+            catch (IOException)
+            {
+                // its reset
+            }
+
+            return Take(_came.Count);
+        }
 
         // whether its status line came: a socket that ends before it is an exchange lost
         public bool IsStatusRead { get; private set; }
