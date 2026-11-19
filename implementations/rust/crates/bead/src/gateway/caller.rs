@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::clock::{HyperTimer, SharedClock, SystemClock};
+use crate::clock::{HyperTimer, SystemClock};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::MAXIMUM_ENVELOPE_BYTES;
 use crate::errors::{CallError, ProgrammerError};
@@ -38,7 +38,7 @@ use crate::json::{self, integer_of};
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::listening::unless_cancelled;
-use crate::net::racing::RacingOptions;
+use crate::net::racing::{RacingOptions, Resolve};
 use crate::net::tls::ClientTls;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::platform::{self, Handle};
@@ -313,6 +313,16 @@ impl HttpCaller {
     /// information, a query or a fragment; for a bound of 0; outside a tokio runtime, given none, or
     /// on one without its time or its IO driver.
     pub fn new(url: &str, options: &HttpCallerOptions) -> Result<Self, ProgrammerError> {
+        Self::resolving(url, None, options)
+    }
+
+    // a caller whose connects ask `resolve` for a name's addresses: the platform's resolver when
+    // none, a test's otherwise
+    fn resolving(
+        url: &str,
+        resolve: Option<Resolve>,
+        options: &HttpCallerOptions,
+    ) -> Result<Self, ProgrammerError> {
         let (scheme, authority, path) =
             base_of(url).ok_or_else(|| ProgrammerError::new(URL_REFUSED))?;
         let maximum_body_bytes = hold_count(
@@ -320,14 +330,17 @@ impl HttpCaller {
             options.maximum_body_bytes.unwrap_or(MAXIMUM_BODY_BYTES),
         )?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP caller")?;
-        let clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let tls = options
             .client_config
             .as_ref()
             .map_or_else(ClientTls::default, |config| {
                 ClientTls::Given(Arc::clone(config))
             });
-        let connector = Connector::new(tls, &RacingOptions::on(clock));
+        let racing = RacingOptions {
+            resolve,
+            ..RacingOptions::on(Arc::new(SystemClock::on(runtime.clone())))
+        };
+        let connector = Connector::new(tls, &racing);
         // * HTTP/1.1, a pooled connection let go once idle on Bead's timer, its executor Bead's;
         // hyper follows no redirect and keeps no cookie
         let client = Client::builder(Spawner::on(runtime.clone()))

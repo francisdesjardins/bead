@@ -28,6 +28,7 @@ use crate::mqtt::packets::{
     LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE, MqttPublishShapeOptions, largest_payload,
 };
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
+use crate::net::racing::recording;
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::testing::mqtt_script::{
     Connack, Kind, MqttScript, MqttScriptOptions, Publish, Scripted, ScriptedLink, connack,
@@ -486,6 +487,72 @@ async fn fails_its_start_where_its_broker_cannot_be_reached_over_tcp_tls_or_a_we
         assert!(!adapter.is_linked(), "{url}: not linked");
         assert_eq!(heard.downs(), Vec::new(), "{url}: no down");
     }
+}
+
+// an adapter of `url` whose resolver answers 192.0.2.7 and records each name it is asked
+fn resolving_adapter(url: &str, asked: &Arc<Mutex<Vec<String>>>) -> MqttBrokerAdapter {
+    let mut options = MqttBrokerAdapterOptions::new(url, ID);
+
+    options.password = Some(PASSWORD.to_owned());
+
+    MqttBrokerAdapter::resolving(Some(recording(asked)), &options).unwrap()
+}
+
+// what `future` gives, within patience
+async fn within<T, F: Future<Output = T>>(future: F) -> T {
+    crate::testing::patience(PATIENCE, future)
+        .await
+        .expect("what was waited for, within patience")
+}
+
+// the port of a raw listener on 127.0.0.1, which answers nothing, and the first bytes a link to a
+// localhost name on it writes, of `scheme` and `path`, its adapter's resolver never asked
+async fn first_bytes_by_a_localhost_name((scheme, path): (&str, &str)) -> (u16, Vec<u8>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let adapter = resolving_adapter(
+        &format!("{scheme}://bead-probe.localhost:{port}{path}"),
+        &asked,
+    );
+    let starting = adapter.start(BrokerStart::default());
+    let (mut socket, _) = within(listener.accept()).await.unwrap();
+    let mut read = vec![0_u8; 256];
+    let count = within(socket.read(&mut read)).await.unwrap();
+
+    read.truncate(count);
+    drop(socket);
+    within(adapter.stop()).await;
+    drop(starting);
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+
+    (port, read)
+}
+
+// spec 13.4
+#[tokio::test]
+async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_tcp()
+{
+    let (_, read) = first_bytes_by_a_localhost_name(("mqtt", "")).await;
+
+    assert_eq!(read.first(), Some(&0x10), "a CONNECT: {read:?}");
+}
+
+// spec 13.4
+#[tokio::test]
+async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_a_websocket()
+ {
+    let (port, read) = first_bytes_by_a_localhost_name(("ws", "/mqtt")).await;
+    let head = String::from_utf8_lossy(&read);
+
+    assert!(
+        head.starts_with("GET /mqtt HTTP/1.1\r\n"),
+        "an upgrade: {head}"
+    );
+    assert!(
+        head.contains(&format!("Host: bead-probe.localhost:{port}\r\n")),
+        "its name kept: {head}"
+    );
 }
 
 #[tokio::test]

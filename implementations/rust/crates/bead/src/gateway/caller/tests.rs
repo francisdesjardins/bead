@@ -1153,3 +1153,83 @@ async fn calls_its_gateway_over_the_client_config_it_is_given() {
     gateway.dispose().await.expect("the gateway disposed");
     server.dispose().await.expect("the server disposed");
 }
+
+// ── A localhost name ─────────────────────────────────────────────────────────────────────────
+
+// a caller of `url` whose resolver answers 192.0.2.7 and records each name it is asked
+fn resolving_caller(url: &str, asked: &Arc<Mutex<Vec<String>>>) -> HttpCaller {
+    HttpCaller::resolving(
+        url,
+        Some(crate::net::racing::recording(asked)),
+        &HttpCallerOptions::default(),
+    )
+    .expect("the caller")
+}
+
+// the whole chain of what a call failed with, each cause's words in turn
+fn chain_of(error: &CallError) -> String {
+    let mut words = error.to_string();
+    let mut source = Error::source(error);
+
+    while let Some(cause) = source {
+        words.push_str(": ");
+        words.push_str(&cause.to_string());
+        source = cause.source();
+    }
+
+    words
+}
+
+// spec 13.4
+#[tokio::test]
+async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
+    let service = Service::new();
+    let routes = service.routes();
+    let scripted = Scripted::new(vec![whole_answer_of(("200 OK", "text/plain"), "hi!")]).await;
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let caller = resolving_caller(
+        &format!("http://bead-probe.localhost:{}", scripted.port),
+        &asked,
+    );
+    let echo = caller
+        .requester_of(&routes[0], &service.echo)
+        .expect("echo's requester");
+    let answered = settled(echo.call(&"hi".to_owned(), &HttpCallOptions::default()))
+        .await
+        .expect("its answer");
+
+    assert_eq!(answered, "hi!", "answered");
+    assert!(
+        scripted.requests()[0].contains(&format!("host: bead-probe.localhost:{}", scripted.port)),
+        "its name kept: {:?}",
+        scripted.requests()
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
+
+// spec 13.4
+#[tokio::test]
+async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
+    let service = Service::new();
+    let routes = service.routes();
+    let closed = TcpListener::bind((HOST, 0)).await.expect("bound");
+    let port = closed.local_addr().expect("its address").port();
+
+    drop(closed);
+
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let caller = resolving_caller(&format!("http://bead-probe.localhost:{port}"), &asked);
+    let echo = caller
+        .requester_of(&routes[0], &service.echo)
+        .expect("echo's requester");
+    let failed = settled(echo.call(&String::new(), &HttpCallOptions::default()))
+        .await
+        .expect_err("no connection");
+
+    assert!(
+        chain_of(&failed).contains("no resolver asked"),
+        "{}",
+        chain_of(&failed)
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}

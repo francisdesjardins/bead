@@ -32,7 +32,7 @@ use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
 use crate::net::dial::{ClientSocket, dial};
-use crate::net::racing::{RacingOptions, host_of};
+use crate::net::racing::{RacingOptions, Resolve, host_of};
 use crate::net::tls::{ClientTls, NO_TLS, TlsOptions, client_tls_of, http1_config_of};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
@@ -111,7 +111,9 @@ pub struct WebSocketTransportClientOptions {
 #[non_exhaustive]
 pub struct WebSocketTransportClientConnectOptions {
     /// The server's host: a name, which is turned to ASCII as the URL Standard's host parser reads
-    /// it (UTS #46) and resolved, or an IP address, an IPv6 one bracketed or not.
+    /// it (UTS #46) and resolved, or an IP address, an IPv6 one bracketed or not. `localhost`, or a
+    /// name that ends in `.localhost`, is connected to the loopback itself, no resolver asked (spec
+    /// 13.4).
     pub host: String,
     /// The server's port.
     pub port: u16,
@@ -927,6 +929,20 @@ impl WebSocketTransportClient {
         (runtime, platform): (Handle, SharedClock),
         options: &WebSocketTransportClientOptions,
     ) -> Result<Self, ProgrammerError> {
+        Self::resolving((runtime, platform), None, options)
+    }
+
+    // a client on `runtime` and `platform` whose connects ask `resolve` for a name's addresses:
+    // the platform's resolver when none, a test's otherwise
+    fn resolving(
+        (runtime, platform): (Handle, SharedClock),
+        resolve: Option<Resolve>,
+        options: &WebSocketTransportClientOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let racing = RacingOptions {
+            resolve,
+            ..RacingOptions::on(Arc::clone(&platform))
+        };
         let close_timeout = hold(
             "a close timeout",
             options.close_timeout.unwrap_or(CLOSE_TIMEOUT),
@@ -942,7 +958,6 @@ impl WebSocketTransportClient {
             .clock
             .clone()
             .unwrap_or_else(|| Arc::clone(&platform));
-        let racing = RacingOptions::on(Arc::clone(&platform));
         let tls = client_tls_of(
             options.client_config.as_ref(),
             options.tls.as_ref().unwrap_or(&NO_TLS),
