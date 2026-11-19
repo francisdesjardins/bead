@@ -11,7 +11,12 @@ namespace Bead.Transcoding;
 /// <summary>A generated HTTP client's handler, default authorization and body bound.</summary>
 public sealed record HttpCallerOptions
 {
-    /// <summary>Its HTTP handler, which follows no redirect; a handler of its own when none.</summary>
+    /// <summary>
+    /// Its HTTP handler, which follows no redirect; a handler of its own when none, which connects a
+    /// host on the loopback to the loopback itself, through no proxy, a localhost name asking no
+    /// resolver (spec 13.4). One given keeps its own connect and proxy, so a localhost name is judged
+    /// by the name alone, wherever its resolver sends it.
+    /// </summary>
     public HttpMessageHandler? Handler { get; init; }
 
     /// <summary>The Authorization field every call presents unless it gives its own or omits it.</summary>
@@ -99,7 +104,7 @@ public sealed class HttpCaller : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options), "maximumBodyBytes is a whole number above 0");
         }
 
-        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback };
+        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
         HttpRedirects.AssertHandler(handler, nameof(options));
 
         _url = url;

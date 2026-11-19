@@ -30,11 +30,15 @@ internal sealed record MqttPacketGuardOptions
 
 /// <summary>
 /// The adapters of a client of MQTTnet, each over its channel under a <see cref="MqttPacketGuard"/>:
-/// what MQTTnet's own factory builds, the guard between its channel and its reader.
+/// what MQTTnet's own factory builds, the guard between its channel and its reader, a WebSocket's
+/// upgrade sent through <paramref name="upgrading"/>.
 /// </summary>
-internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IMqttClientAdapterFactory
+internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded, HttpMessageInvoker upgrading) : IMqttClientAdapterFactory
 {
-    /// <summary>A channel over TCP or a WebSocket, as its options say, guarded, under MQTTnet's own reader.</summary>
+    /// <summary>
+    /// A channel over TCP or a WebSocket, as its options say, guarded, under MQTTnet's own reader: a
+    /// WebSocket's a channel of Bead's, which connects through the adapter's handler.
+    /// </summary>
     public IMqttChannelAdapter CreateClientAdapter(MqttClientOptions options, MqttPacketInspector packetInspector, IMqttNetLogger logger)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -43,7 +47,7 @@ internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IM
         IMqttChannel channel = options.ChannelOptions switch
         {
             MqttClientTcpOptions => new MqttTcpChannel(options),
-            MqttClientWebSocketOptions webSocket => new MqttWebSocketChannel(webSocket),
+            MqttClientWebSocketOptions webSocket => new RacingWebSocketChannel(webSocket, upgrading),
             _ => throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture, $"MQTTnet carries no channel of {options.ChannelOptions?.GetType().Name}")),
         };
         var formatter = new MqttPacketFormatterAdapter(options.ProtocolVersion, new MqttBufferWriter(options.WriterBufferSize, options.WriterBufferSizeMax));

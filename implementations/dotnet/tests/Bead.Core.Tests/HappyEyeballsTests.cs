@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -32,6 +33,17 @@ public sealed class HappyEyeballsTests
     {
         return (_, _) =>
         {
+            return Task.FromResult(addresses);
+        };
+    }
+
+    // a resolver that answers every name with the addresses given, and records each name it is asked
+    private static Func<string, CancellationToken, Task<IPAddress[]>> Recording(ConcurrentQueue<string> asked, params IPAddress[] addresses)
+    {
+        return (name, _) =>
+        {
+            asked.Enqueue(name);
+
             return Task.FromResult(addresses);
         };
     }
@@ -159,5 +171,135 @@ public sealed class HappyEyeballsTests
         });
 
         Assert.Equal((SocketError.ConnectionRefused, SocketError.HostNotFound), (refused.SocketErrorCode, unknown.SocketErrorCode));
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task Connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var asked = new ConcurrentQueue<string>();
+
+        foreach (var name in new[] { "localhost", "bead-probe.localhost", "BEAD-PROBE.LocalHost" })
+        {
+            using var socket = await HappyEyeballs.ConnectAsync(new DnsEndPoint(name, port), new HappyEyeballsOptions
+            {
+                Resolve = Recording(asked, IPAddress.Parse("192.0.2.7")),
+                CancellationToken = Cancelled,
+            }).WaitAsync(Patience, Cancelled);
+            using var accepted = await listener.AcceptSocketAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((name, IPAddress.Loopback), (name, ((IPEndPoint)socket.RemoteEndPoint!).Address));
+        }
+
+        Assert.Empty(asked);
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task Tries_the_IPv4_loopback_first_for_a_localhost_name_then_the_IPv6_one_an_attempt_delay_after()
+    {
+        var clock = new FakeTimeProvider();
+        var started = clock.GetUtcNow();
+        var attempts = new ConcurrentQueue<(IPAddress Address, TimeSpan At)>();
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var connecting = HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", 9), new HappyEyeballsOptions
+        {
+            Resolve = Recording(new ConcurrentQueue<string>(), Unanswered),
+            Clock = clock,
+            Connect = async (endPoint, cancellationToken) =>
+            {
+                attempts.Enqueue((endPoint.Address, clock.GetUtcNow() - started));
+
+                if (attempts.Count == 2)
+                {
+                    second.TrySetResult();
+                }
+
+                // an attempt nothing answers, until it is given up
+                await Task.Delay(Timeout.InfiniteTimeSpan, TimeProvider.System, cancellationToken);
+
+                throw new InvalidOperationException("never reached");
+            },
+            CancellationToken = cancelling.Token,
+        });
+
+        Assert.Equal([IPAddress.Loopback], attempts.Select((attempt) =>
+        {
+            return attempt.Address;
+        }));
+
+        // the next family once the attempt delay has passed, not before
+        clock.Advance(TimeSpan.FromMilliseconds(249));
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+        Assert.Single(attempts);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        await second.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(IPAddress.Loopback, TimeSpan.Zero), (IPAddress.IPv6Loopback, TimeSpan.FromMilliseconds(250))], attempts);
+
+        await cancelling.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task Asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var asked = new ConcurrentQueue<string>();
+        string[] names = ["localhost.", "bead-probe.localhost.", "localhost.example", "bead.test"];
+
+        foreach (var name in names)
+        {
+            using var socket = await HappyEyeballs.ConnectAsync(new DnsEndPoint(name, port), new HappyEyeballsOptions
+            {
+                Resolve = Recording(asked, IPAddress.Loopback),
+                CancellationToken = Cancelled,
+            }).WaitAsync(Patience, Cancelled);
+            using var accepted = await listener.AcceptSocketAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        }
+
+        Assert.Equal(names, asked);
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
+    {
+        var asked = new ConcurrentQueue<string>();
+        var tried = new ConcurrentQueue<IPAddress>();
+        var refused = await Assert.ThrowsAsync<SocketException>(() =>
+        {
+            return HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", 9), new HappyEyeballsOptions
+            {
+                Resolve = Recording(asked, Unanswered),
+                Connect = (endPoint, _) =>
+                {
+                    tried.Enqueue(endPoint.Address);
+
+                    return Task.FromException<Socket>(new SocketException((int)SocketError.ConnectionRefused));
+                },
+                CancellationToken = Cancelled,
+            });
+        });
+
+        // * the platform's cause kept, its code and its words, beside the sentence
+        Assert.Equal(SocketError.ConnectionRefused, refused.SocketErrorCode);
+        Assert.Equal($"{new SocketException((int)SocketError.ConnectionRefused).Message}; bead-probe.localhost names the loopback: connected to 127.0.0.1 and ::1, no resolver asked", refused.Message);
+        Assert.Equal([IPAddress.Loopback, IPAddress.IPv6Loopback], tried);
+        Assert.Empty(asked);
     }
 }

@@ -533,6 +533,84 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
+    // spec 13.4: the platform's resolver stood in for, process-wide, as the broker's classes run alone
+    [Fact]
+    public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_TCP()
+    {
+        using var resolver = new StandInResolver();
+        await using var listener = new HeadListener();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { Uri = new Uri($"mqtt://bead-probe.localhost:{listener.Port}") };
+        });
+
+        // * its CONNECT reaches the listener, which answers nothing
+        await FailureOf(() =>
+        {
+            return adapter.Start();
+        });
+
+        Assert.All(await listener.Next(), (connect) =>
+        {
+            Assert.Equal(0x10, connect[0]);
+        });
+        Assert.Empty(resolver.Asked);
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_a_WebSocket()
+    {
+        using var resolver = new StandInResolver();
+        await using var listener = new HeadListener();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { Uri = new Uri($"ws://bead-probe.localhost:{listener.Port}/mqtt") };
+        });
+
+        // * its upgrade reaches the listener, which answers nothing
+        await FailureOf(() =>
+        {
+            return adapter.Start();
+        });
+
+        Assert.All(await listener.Next(), (head) =>
+        {
+            Assert.StartsWith("GET /mqtt HTTP/1.1\r\n", head, StringComparison.Ordinal);
+            Assert.Contains($"Host: bead-probe.localhost:{listener.Port}\r\n", head, StringComparison.Ordinal);
+        });
+        Assert.Empty(resolver.Asked);
+    }
+
+    // spec 13.4: the platform's proxy stood in for, process-wide, as the broker's classes run alone
+    [Fact]
+    public async Task Sends_nothing_through_the_platforms_proxy_to_a_host_on_the_loopback()
+    {
+        await using var proxy = new StandInProxy();
+
+        foreach (var host in new[] { "bead-probe.localhost", "127.0.0.1" })
+        {
+            await using var listener = new HeadListener();
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { Uri = new Uri($"ws://{host}:{listener.Port}/mqtt") };
+            });
+
+            await FailureOf(() =>
+            {
+                return adapter.Start();
+            });
+
+            Assert.All(await listener.Next(), (head) =>
+            {
+                Assert.Contains($"Host: {host}:{listener.Port}\r\n", head, StringComparison.Ordinal);
+            });
+        }
+
+        Assert.Empty(proxy.Asked);
+        Assert.Empty(proxy.Listener.Heads);
+    }
+
     [Fact]
     public async Task Fails_its_start_over_TLS_where_its_broker_s_certificate_chains_to_no_authority_it_trusts()
     {

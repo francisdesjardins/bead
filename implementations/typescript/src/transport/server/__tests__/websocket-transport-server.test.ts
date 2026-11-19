@@ -2762,6 +2762,12 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
         for (;;) {
           const length = rest.length < 2 ? undefined : (rest[1] ?? 0) & 0x7f;
           const at = length === 126 ? 4 : length === 127 ? 10 : 2;
+
+          // ! a chunk may end inside a header's extended length: read it once it is whole
+          if (length === undefined || rest.length < at) {
+            break;
+          }
+
           const size =
             length === 126
               ? rest.readUInt16BE(2)
@@ -2769,7 +2775,7 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
                 ? Number(rest.readBigUInt64BE(2))
                 : length;
 
-          if (size === undefined || rest.length < at + size) {
+          if (rest.length < at + size) {
             break;
           }
 

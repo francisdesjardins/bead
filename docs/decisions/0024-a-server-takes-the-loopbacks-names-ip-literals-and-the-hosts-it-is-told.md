@@ -12,8 +12,11 @@
   address families; and a gateway's own listener, on `localhost`, both loopbacks, by default, as a
   transport's, its hosts judged by the same rules (transcoding 10.1,
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
-  What `origins` takes, and a client's loopback (13.4), are
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; a connection's handle is
+  What `origins` takes, and a client's judgement of the loopback (13.4), are
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and a client's connect of the
+  loopback's names
+  [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)'s;
+  a connection's handle is
   [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)'s; the refusal a
   server tells, and a request's fields,
   [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s.
@@ -105,7 +108,10 @@ Windows 11, Node's `http.request`, `fetch`, `ws` and global `WebSocket` connect 
 2012–2054 ms, against 0–81 ms by `127.0.0.1`: .NET tries `::1` first and waits out Windows'
 refusal. The same holds against `0.0.0.0`, and none against `::`. A server on `127.0.0.1:p` and
 another process on `[::1]:p`: `fetch`, `ws` and `HttpClient` by `localhost` all reach the other
-process on Windows; in a Linux container, whose resolver orders `127.0.0.1` first, ours.
+process on Windows; in a Linux container, whose resolver orders `127.0.0.1` first, ours. Over a
+dialer it owns, a Bead client connects a localhost name itself, `127.0.0.1` first, asking no
+resolver
+([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 **Both loopbacks, measured** on Windows 11 and in Linux containers, IPv6 on and off, with Node 26.5
 and .NET 10. A port drawn on `127.0.0.1`, then bound on `::1` with `ipv6Only`: in 3,000 pairs on
@@ -313,9 +319,12 @@ refused, so 13.4 meets none.
 **The C# and Rust clients race the address families of a name**, as RFC 8305 asks and as Node's
 clients and the browsers do: one connect resolves the name in the platform's order (RFC 6724),
 interleaves the families, starts an attempt every 250 ms until one connects, and cancels the rest,
-under the HTTP client's default handler and the WebSocket client's connect; a `Handler` the
-application gives keeps its own behaviour; the Rust side's HTTP and WebSocket clients, which take no
-handler, by a connector of their own. The TypeScript side has it from Node.
+under the HTTP client's default handler and the WebSocket client's connect, and under the C# MQTT 5
+and AMQP 1.0 adapters through Bead's connect; a `Handler` the application gives keeps its own
+behaviour; the Rust side's HTTP and WebSocket clients, which take no handler, by a connector of
+their own. The TypeScript side has it from Node. A localhost name's two addresses are Bead's own,
+`127.0.0.1` first
+([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 ## Consequences
 
@@ -361,9 +370,14 @@ behind any server it reaches on the loopback.
 **A server on its defaults leaves no loopback port to another process**: no other process binds
 `[::1]:p` beside it, on Windows or Linux, under `SO_REUSEADDR` on Windows too, nor any wildcard on
 Linux, and on Windows a wildcard binds but takes no loopback client. **A server given one loopback
-keeps the residual**: another process listening on the other family's loopback, on the same port,
-answers every client by `localhost` that tries that family first, a bearer credential presented
-there by default since 13.4 judges `ws://localhost` secure; 15.12 names it.
+keeps the residual**, which 15.12 names; a bearer credential goes there by default, since 13.4
+judges `ws://localhost` secure. Beside a server given `::1` alone, another process on
+`127.0.0.1:p` answers every Bead client by a localhost name over a dialer it owns, which tries
+`127.0.0.1` first
+([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
+Beside a server given `127.0.0.1` alone, another process on `[::1]:p` answers a client that tries
+the IPv6 loopback first: a browser, a client of another library, or a Bead client over a dialer it
+does not own.
 
 **Where the IPv6 loopback is absent**, a container with IPv6 off, a server on its defaults listens
 on `127.0.0.1` alone and reports it, and no process can take `::1` there either.
@@ -374,7 +388,8 @@ factory that ignores the argument builds them alike.
 
 **A client of another library that does not race** pays Windows' refusal of `::1`, about two
 seconds a connect by `localhost`, against a server given `127.0.0.1` alone; every Bead client and
-every browser races.
+every browser races, the C# broker adapters among them
+([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 **The gate.** The cases of `spec/transports.json` that cite 15.12, played by every side but where a
 case's `differs` excuses one by a platform row of `docs/support.md`, the C# side from an
@@ -418,7 +433,10 @@ on a server's hosts and origins is kept below, the round told in
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md); and the one on an upgrade's
 credential, both loopbacks and the proxies a server counts, told in
 [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md), whose
-row on both loopbacks is kept below. Each objection, with the answer that holds:
+row on both loopbacks is kept below. The round on a client's connect of the loopback's names, which
+revised this record's answer on a client's `localhost`, is told in
+[0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md).
+Each objection, with the answer that holds:
 
 ### On a server's hosts and a connection's handle
 
@@ -443,4 +461,4 @@ row on both loopbacks is kept below. Each objection, with the answer that holds:
 | Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | On `localhost` the TypeScript HTTP transport calls the application's `createServer` twice, unsaid: an application that keeps "the" server rotates one family's certificate, adds one family's SNI context, sets one family's timeouts. And the draft's reason against one instance fed by two listeners is wrong: the feed reaches an `http2` server's sessions (measured); its trap is that `node:http` starts its slow-headers guard only on its own `listening` (O8) | Accepted: two instances stay, relying on no internals of Node, and the contract is stated: `createServer(listener, { address })`, called once per address bound, `127.0.0.1` then `::1`, every instance configured alike; a port drawn again listens again on the instances built. A twin counts the calls; the C# side, one Kestrel application binding both, holds `Serves_every_address_it_binds_by_one_configuration`. The reason against one instance fed by two listeners is the measured one, which holds as well against one `WebSocketServer` fed by both. |
-| A client judges `localhost` and a name under `.localhost` on the loopback by the name, but connects it through its platform's resolver: under Linux, glibc's and musl's send a name under `.localhost` on to the network's DNS server, measured, and a credential judged secure crosses to whatever answers, in the clear (m24)                                                                                                                                         | Accepted as a statement: 13.4 says that a client judges such a name by the name alone and connects it through its platform's resolver, as RFC 6761 §6.3 lets application software do (item 2), and that an application whose platform resolves so names the loopback by its address, `127.0.0.1` or `[::1]`. Connecting such a name to the loopback without a resolver, on every dialer Bead owns, is a hardening of its own round, ahead.                                                                                                                          |
+| A client judges `localhost` and a name under `.localhost` on the loopback by the name, but connects it through its platform's resolver: under Linux, glibc's and musl's send a name under `.localhost` on to the network's DNS server, measured, and a credential judged secure crosses to whatever answers, in the clear (m24)                                                                                                                                         | Accepted as a statement; the hardening is [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)'s: every dialer Bead owns connects such a name to the loopback, asking no resolver and through no proxy.                                                                                                                                                                                                                                                                                                    |

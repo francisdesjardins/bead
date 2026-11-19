@@ -10,12 +10,21 @@ import { FailureError } from '../router/shared/errors';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
 import { isFieldValue } from '../transport/client/transport-client';
-import { isSecureUrl } from '../transport/shared/secure';
+import { createUndiciDialer, loopbackFailureOf } from '../transport/shared/loopback';
+import { isLoopbackUrl, isSecureUrl } from '../transport/shared/secure';
+import { isNode } from '../transport/shared/tls';
 import { base64Of, createJsonForm } from './json-form';
 import type { HttpPayload, IHttpRouteInit } from './routes';
 
 /** Its fetch and default Authorization field. */
 export interface IHTTPCallerOptions {
+  /**
+   * Defaults to the global `fetch`; in Node, a gateway on the loopback is reached through undici's
+   * own, where the package resolves, which connects a localhost name to the loopback asking no
+   * resolver, and goes through no proxy (spec 13.4). One given, and a page's, connect as their
+   * platform does: a resolver that sends a localhost name off the machine takes a credential judged
+   * secure there.
+   */
   readonly fetch?: typeof fetch | undefined;
   readonly authorization?: string | undefined;
   /** The largest unary body or event, in bytes; the gateway's body bound by default. */
@@ -63,6 +72,35 @@ export interface IHTTPCaller {
 }
 
 const ENCODER = new TextEncoder();
+
+/**
+ * In Node, the fetch of a caller given none: a URL on the loopback through undici's own fetch and
+ * the caller's agent, which asks no resolver for a localhost name and goes through no proxy (spec
+ * 13.4); any other, and every URL where undici does not resolve, through the global fetch.
+ */
+const nodeFetchOf = (platformFetch: typeof fetch): typeof fetch => {
+  const dialer = createUndiciDialer({});
+
+  return (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+    if (!isLoopbackUrl(url)) {
+      return platformFetch(input, init);
+    }
+
+    return dialer.draw().then(async (drawn) => {
+      if (drawn === undefined) {
+        return platformFetch(input, init);
+      }
+
+      try {
+        return (await drawn.undici.fetch(url, { ...init, dispatcher: drawn.agent })) as Response;
+      } catch (reason) {
+        throw loopbackFailureOf(reason, { host: new URL(url).hostname, signal: init?.signal });
+      }
+    });
+  };
+};
 const MAXIMUM_BODY_BYTES = LIMIT_DEFAULTS.maximumEnvelopeBytes;
 
 const localFailure = (
@@ -255,7 +293,7 @@ export const createHTTPCaller = (
     });
   });
   const form = createJsonForm(schemas);
-  const fetcher = options.fetch ?? globalThis.fetch;
+  const fetcher = options.fetch ?? (isNode() ? nodeFetchOf(globalThis.fetch) : globalThis.fetch);
   const bounded = (payload: HttpPayload, value: unknown): unknown => {
     const bytes =
       typeof payload === 'string'

@@ -3452,8 +3452,9 @@ message CountDownRequest {
     A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
     <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
     are enough. The loopback is judged by the host the client names, never by what that name
-    resolves to. A resolver may send a <code>localhost</code> name elsewhere, and the credential
-    then crosses there in the clear. Naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it.
+    resolves to. A client connects a <code>localhost</code> name to the loopback itself, asking no
+    resolver, and a host on the loopback through no proxy. A page leaves that connect to its
+    browser, and Node without undici to its platform.
     Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.
@@ -5793,9 +5794,10 @@ message CountDownRequest {
     Un justificatif porteur ne quitte la machine que sous TLS (RFC 6750 §5.3) : <code>wss</code>,
     <code>https</code>, ou un courtier que chaque pair joint sous TLS. Sur la machine, la boucle locale, un Web Worker ou un routeur du même
     processus suffisent. La boucle locale se juge à l’hôte que le client nomme, jamais à l’adresse
-    vers laquelle ce nom se résout. Un résolveur peut envoyer un nom <code>localhost</code>
-    ailleurs, et le justificatif y passe alors en clair. Nommer <code>127.0.0.1</code> ou
-    <code>[::1]</code> l’évite. Ailleurs, l’appel échoue avant de partir avec
+    vers laquelle ce nom se résout. Un client connecte un nom <code>localhost</code> à la boucle
+    locale elle-même, sans rien demander à un résolveur, et un hôte de la boucle locale sans passer
+    par un mandataire. Une page laisse cette connexion à son navigateur, et Node sans undici à sa
+    plateforme. Ailleurs, l’appel échoue avant de partir avec
     <code>DESTINATION_UNREACHABLE</code>, et le justificatif reste. Un serveur derrière un
     mandataire TLS se déclare sûr par l’option <code>secure</code>.
   </p>

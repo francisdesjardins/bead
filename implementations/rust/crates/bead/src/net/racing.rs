@@ -6,6 +6,11 @@
 //! them connects after closed with it. A connect that tries each address in turn waits out the
 //! refusal of a loopback family a server does not listen on, two seconds on Windows, before it
 //! tries the other.
+//!
+//! A localhost name, `localhost` or a name that ends in `.localhost`, is the loopback's own
+//! (spec 13.4; RFC 6761 §6.3): its addresses are `127.0.0.1`, then `::1`, its resolver never asked.
+//! IPv4 comes first, where RFC 6724's default policy puts `::1` first, because a Bead server on its
+//! defaults listens on `127.0.0.1` (spec 15.12).
 
 use core::fmt;
 use core::future::Future;
@@ -13,7 +18,7 @@ use core::future::poll_fn;
 use core::task::Poll;
 use core::time::Duration;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
@@ -23,6 +28,7 @@ use tokio::sync::oneshot;
 
 use crate::clock::{Schedule, SharedClock};
 use crate::errors::{ConnectError, TransportError};
+use crate::judgement::security::is_localhost_name;
 use crate::judgement::url_host::url_host_of;
 use crate::platform;
 use crate::router::types::BoxFuture;
@@ -71,6 +77,22 @@ impl RacingOptions {
             attempt: None,
         }
     }
+}
+
+/// A resolver that answers every name with 192.0.2.7, of TEST-NET-1 (RFC 5737), which no host
+/// answers, and records each name it is asked: a test's proof that a name never went to one.
+#[cfg(test)]
+pub(crate) fn recording(asked: &Arc<std::sync::Mutex<Vec<String>>>) -> Resolve {
+    let asked = Arc::clone(asked);
+
+    Arc::new(move |name| {
+        asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(name);
+
+        Box::pin(async { Ok(vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7))]) })
+    })
 }
 
 // the addresses in the order they are tried: the first answer's family first, then the families in
@@ -139,13 +161,20 @@ pub(crate) fn host_of(host: &str) -> Result<(String, String), TransportError> {
     Ok((parsed, bare))
 }
 
+/// The loopback's addresses, which a localhost name connects to in this order: IPv4 first.
+const LOOPBACKS: [IpAddr; 2] = [
+    IpAddr::V4(Ipv4Addr::LOCALHOST),
+    IpAddr::V6(Ipv6Addr::LOCALHOST),
+];
+
 /// Connects to `host`, an IP address, bracketed or not, or a name in ASCII, and `port`: the name
-/// resolved and its addresses raced; the socket of the first attempt that connects.
+/// resolved and its addresses raced; the socket of the first attempt that connects. A localhost
+/// name is connected to `127.0.0.1`, then `::1`, its resolver never asked.
 ///
 /// # Errors
 ///
-/// When every attempt fails, the last failure; a name that resolves to none,
-/// [`io::ErrorKind::NotFound`].
+/// When every attempt fails, the last failure, which says of a localhost name that it went to the
+/// loopback, its kind kept; a name that resolves to none, [`io::ErrorKind::NotFound`].
 pub(crate) async fn connect_racing(
     (host, port): (&str, u16),
     options: &RacingOptions,
@@ -154,6 +183,20 @@ pub(crate) async fn connect_racing(
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(host);
+
+    // ! the loopback's own names, never a resolver's: one that answers elsewhere would take a
+    // credential judged secure off the machine (spec 13.4)
+    if is_localhost_name(bare) {
+        return raced((&LOOPBACKS, port), options).await.map_err(|failure| {
+            io::Error::new(
+                failure.kind(),
+                format!(
+                    "{failure}; {bare} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked"
+                ),
+            )
+        });
+    }
+
     let found = match bare.parse::<IpAddr>() {
         Ok(literal) => vec![literal],
         Err(_name) => match &options.resolve {
@@ -161,7 +204,21 @@ pub(crate) async fn connect_racing(
             None => resolved(bare.to_owned()).await?,
         },
     };
-    let addresses = interleaved(&found);
+
+    if found.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{host} resolves to no address"),
+        ));
+    }
+
+    raced((&found, port), options).await
+}
+
+// the addresses found raced on `port`: the socket of the first attempt that connects, or the last
+// failure
+async fn raced((found, port): (&[IpAddr], u16), options: &RacingOptions) -> io::Result<TcpStream> {
+    let addresses = interleaved(found);
     let mut attempts = FuturesUnordered::new();
     let mut next = addresses.iter();
     let mut failure: Option<io::Error> = None;
@@ -228,10 +285,5 @@ pub(crate) async fn connect_racing(
         }
     }
 
-    Err(failure.unwrap_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{host} resolves to no address"),
-        )
-    }))
+    Err(failure.unwrap_or_else(|| io::Error::from(io::ErrorKind::NotFound)))
 }

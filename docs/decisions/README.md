@@ -63,11 +63,10 @@ document, `examples/hello`'s Rust half serves a gateway, and the interop runs bo
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **the rules a security pass brings to every side**: a `localhost` name reached on the loopback
-  without a resolver, as RFC 6761 §6.3 gives it ([0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)); a bound on what a server reads of
-  a connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other
-  than `chunked` refused, as RFC 9112 §6.1 asks; and a malformed `Bearer` answered as RFC 6750 §3.1
-  gives it;
+- **the rules a security pass brings to every side**: a bound on what a server reads of a
+  connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other than
+  `chunked` refused, as RFC 9112 §6.1 asks; and a malformed `Bearer` answered as RFC 6750 §3.1 gives
+  it;
 - **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, under a record of its own
@@ -164,11 +163,6 @@ that meets the Tenth Man:
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
-- what
-  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)
-  keeps ahead of a client's `localhost`: such a name, and one under `.localhost`, connected to the
-  loopback with no resolver asked, on every dialer Bead owns
-  ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3));
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
   ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));
@@ -266,6 +260,7 @@ table.
 | [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                                    | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
 | [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)                 | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
 | [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md) | A client presents the TLS certificate and trusts the authorities its application names, in one shape on every side                                                 | accepted |
+| [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)                     | A client connects the loopback's names to the loopback itself, through no resolver and no proxy                                                                    | accepted |
 
 ### Over a broker
 
@@ -325,7 +320,7 @@ table.
 
 ## Writing one
 
-The next decision is 0054. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0055. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

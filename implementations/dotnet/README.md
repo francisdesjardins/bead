@@ -531,10 +531,20 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
   client or a WebSocket client given a `Handler` keeps the handler's behaviour, the WebSocket
-  client's held in an invoker of its own and never disposed by it. Neither follows a redirect: one
-  answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
-  listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
-  `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
+  client's held in an invoker of its own and never disposed by it. A client connects a host it
+  judges on the loopback to the loopback itself, through no proxy (spec 13.4, decision 0054): it
+  connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to `::1` 250 ms later or as
+  soon as the first fails, and asks no resolver. Its request names the host as given, in its `Host`
+  and in its TLS server name, and a connect that fails says where it went: "…; api.localhost names
+  the loopback: connected to 127.0.0.1 and ::1, no resolver asked". Both clients' own handlers, a
+  gateway's `HttpCaller`'s, the MQTT 5 adapter over TCP and over a WebSocket, and the AMQP 1.0
+  adapter connect so; the handlers take a host off the machine through the platform's proxy,
+  `HttpClient.DefaultProxy`. A `Handler` given connects as it does: over it, a resolver that sends
+  a name under `.localhost` on to its DNS server, or a proxy, takes a credential judged secure
+  wherever it answers, in the clear. Neither follows a redirect: one answered to a connect or an
+  upgrade fails it, its status named, and one answered to a send or a listen is lost, its
+  `bead-refusal` unread (spec 15.6), each client's own handler built with `AllowAutoRedirect =
+  false`. A `Handler` given follows none either: an `HttpClientHandler` or a
   `SocketsHttpHandler`, innermost of the `DelegatingHandler`s given, whose `AllowAutoRedirect` is
   true is an `ArgumentException` naming it as the client is built, where the TypeScript side,
   which cannot read a `fetch` before it answers, catches one at its first answer; a handler of

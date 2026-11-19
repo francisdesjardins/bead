@@ -1460,8 +1460,9 @@
     A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
     <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
     are enough. The loopback is judged by the host the client names, never by what that name
-    resolves to. A resolver may send a <code>localhost</code> name elsewhere, and the credential
-    then crosses there in the clear. Naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it.
+    resolves to. A client connects a <code>localhost</code> name to the loopback itself, asking no
+    resolver, and a host on the loopback through no proxy. A page leaves that connect to its
+    browser, and Node without undici to its platform.
     Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.

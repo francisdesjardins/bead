@@ -184,6 +184,12 @@ container's loopback is its own, which a published port never reaches. An addres
 that serves the network in the clear, its options say `secure: Some(false)`
 ([decision 0024](../../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)).
 
+A client connects `localhost`, or a name that ends in `.localhost`, to the loopback itself and
+asks no resolver: `127.0.0.1` first, then `::1` 250 ms later or once the first fails, whatever its
+scheme. Its `Host` and its TLS server name keep the name. It reads no proxy, for any host. A connect
+that fails says the name went to the loopback
+([decision 0054](../../docs/decisions/0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
+
 Behind a proxy, a server over HTTP or WebSocket believes `X-Forwarded-For` from the proxies
 `trusted_proxies` names, each an IP address or a network in CIDR, `10.0.0.0/8` say, or the compose
 network's, and as many more as `unnamed_proxies` counts. From the socket's address it walks the

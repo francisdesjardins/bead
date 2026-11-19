@@ -42,7 +42,7 @@ use crate::http::wire::Spawner;
 use crate::judgement::items::{BareItem, parse_item};
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
-use crate::net::racing::{RacingOptions, connect_racing, host_of};
+use crate::net::racing::{RacingOptions, Resolve, connect_racing, host_of};
 use crate::net::tls::{ClientTls, NO_TLS, TlsOptions, client_tls_of, connect_tls, http1_config_of};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
@@ -140,7 +140,9 @@ pub struct HttpTransportClientOptions {
 #[non_exhaustive]
 pub struct HttpTransportClientConnectOptions {
     /// The server's host: a name, which is turned to ASCII as the URL Standard's host parser reads
-    /// it (UTS #46) and resolved, or an IP address, an IPv6 one bracketed or not.
+    /// it (UTS #46) and resolved, or an IP address, an IPv6 one bracketed or not. `localhost`, or a
+    /// name that ends in `.localhost`, is connected to the loopback itself, no resolver asked (spec
+    /// 13.4).
     pub host: String,
     /// The server's port.
     pub port: u16,
@@ -1526,6 +1528,20 @@ impl HttpTransportClient {
         (runtime, platform): (Handle, SharedClock),
         options: &HttpTransportClientOptions,
     ) -> Result<Self, ProgrammerError> {
+        Self::resolving((runtime, platform), None, options)
+    }
+
+    // a client on `runtime` and `platform` whose connects ask `resolve` for a name's addresses:
+    // the platform's resolver when none, a test's otherwise
+    fn resolving(
+        (runtime, platform): (Handle, SharedClock),
+        resolve: Option<Resolve>,
+        options: &HttpTransportClientOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let racing = RacingOptions {
+            resolve,
+            ..RacingOptions::on(Arc::clone(&platform))
+        };
         let settings = Settings {
             exchange_timeout: hold(
                 "exchangeTimeout",
@@ -1554,7 +1570,7 @@ impl HttpTransportClient {
                 options.client_config.as_ref(),
                 options.tls.as_ref().unwrap_or(&NO_TLS),
             )?,
-            &RacingOptions::on(Arc::clone(&platform)),
+            &racing,
         );
         // * HTTP/1.1 alone, a pooled connection let go once idle on Bead's timer, its executor
         // Bead's; a request no byte of which was written, on a reused connection found closed, sent

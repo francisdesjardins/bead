@@ -71,3 +71,11 @@ export const isSecureUrl = (url: string): boolean => {
     return false;
   }
 };
+
+/**
+ * Whether the host `url` names is on the loopback, as {@link isSecureUrl} judges it, whatever its
+ * scheme: what a client's dialer connects to the loopback itself (spec 13.4).
+ */
+export const isLoopbackUrl = (url: string): boolean => {
+  return isLoopback(hostOf(url));
+};

@@ -42,8 +42,11 @@ public sealed record WebSocketTransportClientOptions
 
     /// <summary>
     /// What sends its opening handshakes, one of its own when none, which races the address families
-    /// of a name (RFC 8305) and follows no redirect. One given keeps its own behaviour, held by the
-    /// client and never disposed by it, and follows no redirect: an <see cref="HttpClientHandler"/>
+    /// of a name (RFC 8305), connects a host on the loopback to the loopback itself, through no
+    /// proxy, a localhost name asking no resolver (spec 13.4), and follows no redirect. One given
+    /// keeps its own behaviour, its connect and its proxy among it, so a localhost name is judged by
+    /// the name alone, wherever its resolver sends it; it is held by the client and never disposed by
+    /// it, and follows no redirect: an <see cref="HttpClientHandler"/>
     /// or a <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s
     /// given, whose <c>AllowAutoRedirect</c> is true is refused as the client is built, an
     /// <see cref="ArgumentException"/>. The tests' way to open a socket from an address and a port
@@ -150,12 +153,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 {
     // constants
 
-    // what sends the opening handshake of every client given neither a handler nor a TLS: the
-    // platform's handler for a socket with no proxy, cookie, credential or certificate of its own,
-    // as a ClientWebSocket builds it, but for its connect, which races the address families of a
-    // name, as RFC 8305 asks, where the platform's tries each address in turn and waits out a
-    // family's refusal, two seconds on Windows. A client under its own TLS sends its handshakes
-    // through a handler of these settings, and of its TLS.
+    // what sends the opening handshake of every client given neither a handler nor a TLS: a
+    // handler with no cookie, credential or certificate of its own, as a ClientWebSocket builds it,
+    // which follows the platform's proxy for a host off the machine and none for one on the
+    // loopback, and races a name's families, as RFC 8305 asks, where the platform's tries each
+    // address in turn and waits out a family's refusal, two seconds on Windows, connecting a
+    // localhost name to the loopback itself (spec 13.4). A client under its own TLS sends its
+    // handshakes through a handler of these settings, and of its TLS.
     // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
     // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
     // credential and its security were never judged
@@ -164,6 +168,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         AllowAutoRedirect = false,
         ConnectCallback = HappyEyeballs.ConnectCallback,
         PooledConnectionLifetime = TimeSpan.Zero,
+        Proxy = LoopbackBypassProxy.Instance,
         UseCookies = false,
     });
 
@@ -701,6 +706,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                     AllowAutoRedirect = false,
                     ConnectCallback = HappyEyeballs.ConnectCallback,
                     PooledConnectionLifetime = TimeSpan.Zero,
+                    Proxy = LoopbackBypassProxy.Instance,
                     SslOptions = _ownTls.SslOptions(),
                     UseCookies = false,
                 });
@@ -1011,6 +1017,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 // (spec 15.6), as the platform's message, "The server returned status code…", never
                 // names the mark
                 throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
+            }
+            catch (WebSocketException reason) when (_handed is null && TransportSecurity.IsLocalhostName(options.Host) && reason.InnerException is HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError } cause)
+            {
+                // * a localhost name's connect that failed says where it went, as its cause says it
+                // (spec 13.4): the platform's own message names no cause
+                throw new WebSocketException(reason.WebSocketErrorCode, $"{reason.Message}: {cause.Message}", reason);
             }
 
             // ! ClientWebSocket opens on a 101 that names an extension it never offered: the client

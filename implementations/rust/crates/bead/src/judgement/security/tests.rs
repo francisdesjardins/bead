@@ -29,6 +29,7 @@ const PARSED_HOSTS: &[(&str, bool)] = &[
     ("[::1]", true),
     ("localhost", true),
     ("localhost.", false),
+    ("a.localhost.", false),
     ("127.0.0.1 ", false),
     ("localhost ", false),
     ("[::1] ", false),

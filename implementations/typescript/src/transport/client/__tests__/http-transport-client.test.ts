@@ -54,6 +54,15 @@ import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, type IFakeCall, responseOf } from './fake-fetch';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
+import {
+  PROBE,
+  replaceResolver,
+  settledOf,
+  startDropping,
+  startHeard,
+  startPlatformProxy,
+  withoutUndici,
+} from '../../shared/__tests__/loopback-fixtures';
 
 // helpers
 
@@ -3529,5 +3538,146 @@ test.describe('createHTTPTransportClient, a client certificate', () => {
     } finally {
       process.getBuiltinModule = getBuiltinModule;
     }
+  });
+});
+
+// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+test.describe('createHTTPTransportClient, on the loopback', () => {
+  /** A server on 127.0.0.1 that draws a connection on a POST, answers an exchange on it with 204, and notes each. */
+  const startDrawing = () => {
+    return startHeard((request) => {
+      return request.headers[CONNECTION_TOKEN_HEADER] === undefined
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 };
+    });
+  };
+
+  /** Connects a client of the default fetch to `target`, sends one envelope with a credential, and disconnects. */
+  const exchangeWith = async (target: { host: string; port: number }) => {
+    await using client = createHTTPTransportClient({ isListening: false });
+
+    await client.connect(target);
+    await client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+    await client.disconnect({ isQuick: true });
+  };
+
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    await using server = await startDrawing();
+    using resolver = replaceResolver();
+
+    await exchangeWith({ host: PROBE, port: server.port });
+
+    expect(resolver.asked).toEqual([]);
+    expect(
+      server.heard.slice(0, 2).map(({ authorization, host: named, line }) => {
+        return [line.split(' ')[0], named, authorization];
+      })
+    ).toEqual([
+      ['POST', `${PROBE}:${String(server.port)}`, undefined],
+      ['POST', `${PROBE}:${String(server.port)}`, BEARER],
+    ]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using server = await startDrawing();
+    await using proxy = await startPlatformProxy();
+
+    for (const named of [PROBE, host]) {
+      await exchangeWith({ host: named, port: server.port });
+    }
+
+    // * the proxy stands for every request of the platform's, one off the machine among them, in the
+    // clear so that it reads its line
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
+    expect((await fetch('http://bead.invalid/')).status).toBe(502);
+    expect(proxy.received).toEqual(['GET http://bead.invalid/ HTTP/1.1']);
+    expect(
+      server.heard.filter(({ authorization }) => {
+        return authorization === BEARER;
+      }).length
+    ).toBe(2);
+  });
+
+  test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
+    const port = await (async () => {
+      await using server = await startDrawing();
+
+      return server.port;
+    })();
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({ isListening: false });
+    const refused = await settledOf(() => {
+      return client.connect({ host: PROBE, port });
+    });
+
+    expect(refused).toBeInstanceOf(ConnectError);
+    expect((refused as ConnectError).message).toContain(
+      `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+    );
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * its socket closed unanswered
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({ isListening: false });
+    const failed = await settledOf(() => {
+      return client.connect({ host: PROBE, port: dropping.port });
+    });
+
+    expect(failed).toBeInstanceOf(ConnectError);
+    expect((failed as ConnectError).message).not.toContain('no resolver asked');
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4, 15.39
+  test('keeps a localhost name in its Host and its TLS server name while it connects the loopback', async () => {
+    await using server = await startDrawing();
+    await using front = await createTlsFront(server.port, { serves: 'named' });
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({
+      isListening: false,
+      tls: { authorities: PKI.root },
+    });
+
+    // * the front's certificate names localhost alone, which the handshake checked
+    await client.connect({ host: 'localhost', port: front.port, secured: true });
+    await client.disconnect({ isQuick: true });
+
+    expect([resolver.asked, server.heard[0]?.host]).toEqual([
+      [],
+      `localhost:${String(front.port)}`,
+    ]);
+  });
+
+  test('reaches a host on the loopback through undici’s own dialer where undici resolves, and through Node’s global one where it does not', async () => {
+    await using server = await startDrawing();
+    // * a resolver that answers the loopback, so that the global fetch connects all the same
+    using resolver = replaceResolver('127.0.0.1');
+
+    await exchangeWith({ host: PROBE, port: server.port });
+    expect(resolver.asked).toEqual([]);
+
+    {
+      using _absent = withoutUndici();
+
+      await exchangeWith({ host: PROBE, port: server.port });
+    }
+
+    // * asked by the global fetch, once for each connection it opened
+    expect([...new Set(resolver.asked)]).toEqual([PROBE]);
+    expect(
+      server.heard.filter(({ authorization }) => {
+        return authorization === BEARER;
+      }).length
+    ).toBe(2);
   });
 });

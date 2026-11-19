@@ -597,7 +597,10 @@ sources, so the project compiles them under its own options and bundles them wit
 The client registers its answer to `promptOperator` before it connects, since the server may ask
 as soon as a call is under way. A call stays curried, `station.getStationStatus(payload)()`: the
 second call sends it, with its options when it has any. The window of 1 credits the next sample
-only once the callback before it has settled, the promise it returns included.
+only once the callback before it has settled, the promise it returns included. It connects by
+`127.0.0.1`; by `localhost`, a client with undici installed connects the name to the loopback
+without asking a resolver, and without it Node's global `WebSocket` resolves the name as the
+platform does.
 
 `typescript/src/main.ts`:
 

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using MQTTnet;
@@ -43,6 +44,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private readonly bool _isSecure;
     // what its TLS holds, its key among it, read once and let go of at its dispose
     private readonly TlsCredentials? _tls;
+    // what sends a WebSocket's upgrade, under its TLS, let go of at its dispose
+    private readonly HttpMessageInvoker _upgrading;
     private readonly Lock _gate = new();
     private Link? _link;
 
@@ -110,6 +113,19 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         };
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
+
+        // * a handler of its own: no cookie, no redirect followed, a host on the loopback connected to
+        // the loopback itself through no proxy, and under wss its TLS, which judges its broker's name
+        // and its authorities as over TCP (spec 13.4, 15.39)
+        _upgrading = new HttpMessageInvoker(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            ConnectCallback = HappyEyeballs.ConnectCallback,
+            PooledConnectionLifetime = TimeSpan.Zero,
+            Proxy = LoopbackBypassProxy.Instance,
+            UseCookies = false,
+            SslOptions = _tls?.SslOptions() ?? new SslClientAuthenticationOptions(),
+        });
     }
 
     /// <inheritdoc/>
@@ -259,7 +275,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     ReadsEnded(guarded);
                 }
             },
-        }));
+        }, _upgrading));
         var client = _options.ClientOf?.Invoke(made) ?? made;
         var link = guarded = new Link(client);
 
@@ -823,6 +839,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
             finally
             {
+                _upgrading.Dispose();
                 _tls?.Dispose();
             }
         }
@@ -1017,8 +1034,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 // ! each message one binary frame (spec 15.25): MQTTnet sends a payload as a
                 // continuation by default, and Mosquitto 2.1.2 frames what it writes amid one as one
                 .WithoutPacketFragmentation()
-            : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port);
+            : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port)
+                // * its broker's name raced, a localhost name connected to the loopback (spec 13.4)
+                .WithStreamProvider(RacingStreamProvider.Instance);
 
+        // * what its channel over TCP reads; over a WebSocket, the adapter's handler speaks its TLS
         if (isTls)
         {
             builder = builder.WithTlsOptions((tls) =>
@@ -1033,8 +1053,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     tls.WithClientCertificates(certificates);
                 }
 
-                // ! a handler, never a trust chain, which MQTTnet's WebSocket channel does not read:
-                // its broker's name, then a chain to its authorities alone, as the AMQP adapter judges
+                // ! a handler, never a trust chain: its broker's name, then a chain to its authorities
+                // alone, as the AMQP adapter judges
                 if (_tls is { Authorities: not null } trusting)
                 {
                     tls.WithCertificateValidationHandler((presented) =>

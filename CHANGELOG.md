@@ -7,6 +7,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The C# side's MQTT 5 and AMQP 1.0 adapters race a name's address families, as its WebSocket and
+  HTTP clients do, through Bead's own connect: a connect by `localhost` to a server on `127.0.0.1`
+  alone no longer waits out Windows' two-second refusal of `::1`.
+- In Node, the TypeScript side's default WebSocket client, HTTP client and caller reach a host on
+  the loopback through undici's own `WebSocket` and `fetch`, with an `Agent` of the client's, where
+  the optional peer undici resolves. Where it does not, they keep Node's global `WebSocket` and
+  `fetch`, which a client does not own: it judges a localhost name by its name, as over a dialer its
+  application gives, and the support matrix's row `A host on the loopback connected directly, a
+  localhost name asking no resolver` says so.
+- The support matrix gains an open row, `The platform's proxy, for a host off the machine`: the C#
+  side's handlers read `HttpClient.DefaultProxy`, Node's global dialers the environment's proxy
+  under `NODE_USE_ENV_PROXY`, MQTT.js the SOCKS proxy `MQTTJS_SOCKS_PROXY` names, and the Rust side
+  none. `UNTESTED_OPEN` is 45.
+
+### Security
+
+- A client connects `localhost` and a name under `.localhost` to the loopback itself, `127.0.0.1`
+  then `::1`, raced as RFC 8305 races a name's families, asking no resolver, and every host it
+  judges on the loopback through no proxy, on every dialer it owns (spec 13.4, decision 0054). A
+  credential judged secure no longer crosses where a resolver or a proxy sends such a name. Over a
+  dialer the client does not own, one its application gives, a page's, or its platform's own, Node's
+  global ones where undici does not resolve, it judges the name by its name, and spec 13.4 states
+  that residual.
+- A `.localhost` name that a hosts file or a container's `extra_hosts` maps elsewhere reaches the
+  loopback, and a connect whose every attempt failed there says that it went to the loopback and
+  asked no resolver; no option points such a name elsewhere.
+
 ## [0.16.0] - 2026-11-18
 
 ### Changed

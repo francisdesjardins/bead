@@ -509,7 +509,11 @@ export interface IWebSocketTransportClientOptions extends ITransportClientOption
   tls?: ITlsOptions | undefined;
   /**
    * Defaults to the global `WebSocket`; pass `ws`'s where there is none, where a connect gives a
-   * credential, which `ws` alone writes on the upgrade, and where `tls` is given.
+   * credential, which `ws` alone writes on the upgrade, and where `tls` is given. In Node, a host on
+   * the loopback is reached through undici's own, where the package resolves, which connects a
+   * localhost name to the loopback asking no resolver, and goes through no proxy (spec 13.4); `ws`
+   * given connects it so too. Another given, and a page's, connect as their platform does: a resolver
+   * that sends a localhost name off the machine takes a credential judged secure there.
    */
   WebSocket?: IWebSocketConstructor | undefined;
 }
@@ -579,9 +583,12 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   exchangeTimeout?: number | undefined;
   /**
-   * Defaults to the global `fetch`, or with `tls` to undici's. One given honours `redirect`, and
-   * follows no redirect: one whose answer says it followed one fails the connect, and loses the
-   * connection of a send or a listen.
+   * Defaults to the global `fetch`, or with `tls` to undici's. In Node, a host on the loopback is
+   * reached through undici's own, where the package resolves, which connects a localhost name to the
+   * loopback asking no resolver, and goes through no proxy (spec 13.4). One given, and a page's,
+   * connect as their platform does: a resolver that sends a localhost name off the machine takes a
+   * credential judged secure there. One given honours `redirect`, and follows no redirect: one whose
+   * answer says it followed one fails the connect, and loses the connection of a send or a listen.
    */
   fetch?: FetchLike | undefined;
   /**

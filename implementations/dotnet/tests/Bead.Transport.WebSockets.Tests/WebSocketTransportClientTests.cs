@@ -24,7 +24,7 @@ namespace Bead.Transport.WebSockets.Tests;
 /// refuses it, or never answers it: how it connects, what it delivers, how its connection closes,
 /// and how it reconnects.
 /// </summary>
-public sealed class WebSocketTransportClientTests : IAsyncLifetime
+public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
 {
     // constants
 

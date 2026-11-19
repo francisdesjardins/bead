@@ -35,10 +35,15 @@ pub fn is_loopback_host(host: &str) -> bool {
             (1..=3).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_digit())
         });
 
-    parsed == "localhost"
-        || parsed.ends_with(".localhost")
-        || parsed == "[::1]"
-        || (is_ipv4 && parts.first() == Some(&"127"))
+    is_localhost_name(&parsed) || parsed == "[::1]" || (is_ipv4 && parts.first() == Some(&"127"))
+}
+
+/// Whether a host is a localhost name as the URL Standard's host parser reads it: `localhost`, or
+/// a name that ends in `.localhost`, compared in ASCII lower case; never `localhost.` nor a name
+/// that ends in `.localhost.`, which the parser keeps as given. A client connects such a name to
+/// the loopback itself, asking no resolver (spec 13.4).
+pub(crate) fn is_localhost_name(host: &str) -> bool {
+    url_host_of(host).is_some_and(|parsed| parsed == "localhost" || parsed.ends_with(".localhost"))
 }
 
 /// Whether a transport given these is secure: under TLS, or its host on the loopback.

@@ -6,6 +6,12 @@ import { ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPCaller, type HTTPEvent } from '../http-caller';
 import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, TranscodingHttpClient } from './generated/bead_http';
+import {
+  PROBE,
+  replaceResolver,
+  settledOf,
+  startPlatformProxy,
+} from '../../transport/shared/__tests__/loopback-fixtures';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
 const urlOf = (port: number): string => {
@@ -1353,4 +1359,68 @@ test('refuses a stream failure with an invalid HTTP problem status and no Bead c
     expect(sent).toBe(1);
     expect(cancelled).toBe(1);
   }
+});
+
+// spec 13.4: a caller connects a gateway it judges on the loopback to the loopback itself
+test.describe('createHTTPCaller, on the loopback', () => {
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    await using fixture = await startTranscoding();
+    using resolver = replaceResolver();
+    const client = new TranscodingHttpClient(`http://${PROBE}:${String(fixture.port)}`);
+
+    expect(await client.whoAmI({}, { authorization: GOOD_CREDENTIAL })).toMatchObject({
+      session: SESSION,
+    });
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using fixture = await startTranscoding();
+    await using proxy = await startPlatformProxy();
+
+    for (const host of [PROBE, '127.0.0.1']) {
+      const client = new TranscodingHttpClient(`http://${host}:${String(fixture.port)}`);
+
+      expect(await client.whoAmI({}, { authorization: GOOD_CREDENTIAL })).toMatchObject({
+        session: SESSION,
+      });
+    }
+
+    // * the proxy stands for every request of the platform's, one off the machine among them, in the
+    // clear so that it reads its line
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
+    expect((await fetch('http://bead.invalid/')).status).toBe(502);
+    expect(proxy.received).toEqual(['GET http://bead.invalid/ HTTP/1.1']);
+  });
+
+  test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
+    const port = await (async () => {
+      await using fixture = await startTranscoding();
+
+      return fixture.port;
+    })();
+    using resolver = replaceResolver();
+    const client = new TranscodingHttpClient(`http://${PROBE}:${String(port)}`);
+    const refused = await settledOf(() => {
+      return client.json(null);
+    });
+
+    expect(refused).toBeInstanceOf(TypeError);
+    expect((refused as TypeError).message).toContain(
+      `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+    );
+    expect(resolver.asked).toEqual([]);
+
+    // * a call its caller aborted rejects with the abort's own reason, whatever its type
+    for (const reason of [new Error('given up'), new TypeError('given up')]) {
+      const controller = new AbortController();
+
+      controller.abort(reason);
+      expect(
+        await settledOf(() => {
+          return client.json(null, { signal: controller.signal });
+        })
+      ).toBe(reason);
+    }
+  });
 });

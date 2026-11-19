@@ -1159,7 +1159,11 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var uri = _options.Uri;
         var isTls = uri.Scheme == "amqps";
         var certificates = _tls?.Certificates;
-        var factory = new ConnectionFactory();
+
+        // * a connect of Bead's: its broker's name raced, a localhost name connected to the loopback
+        // asking no resolver (spec 13.4), its TLS the settings set on its factory below
+        var connecting = new RacingTransportProvider(token);
+        var factory = new ConnectionFactory([connecting]);
 
         factory.AMQP.ContainerId = Id;
 
@@ -1181,6 +1185,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 factory.SSL.ClientCertificates.AddRange(certificates);
             }
         }
+
+        connecting.Ssl = isTls ? factory.SSL : null;
 
         // ! under a client certificate, which a password never stands beside, EXTERNAL: its broker
         // maps the certificate to its user; PLAIN otherwise, its password one octet at least

@@ -2078,6 +2078,64 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
     }
 }
 
+// a client whose resolver answers 192.0.2.7 and records each name it is asked
+fn resolving_client(asked: &Arc<Mutex<Vec<String>>>) -> WebSocketTransportClient {
+    let runtime = platform::socket_runtime_of(None, "a test's client").unwrap();
+    let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+
+    WebSocketTransportClient::resolving(
+        (runtime, platform),
+        Some(crate::net::racing::recording(asked)),
+        &WebSocketTransportClientOptions::default(),
+    )
+    .unwrap()
+}
+
+// spec 13.4
+#[tokio::test]
+async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
+    let server = hearing(None).await;
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let client = resolving_client(&asked);
+
+    settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+        "bead-probe.localhost",
+        server.port,
+    )))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        server.heard.lock().unwrap()[0]
+            .headers()
+            .get("host")
+            .and_then(|host| host.to_str().ok())
+            .map(str::to_owned),
+        Some(format!("bead-probe.localhost:{}", server.port)),
+        "its name kept"
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+    client.dispose();
+}
+
+// spec 13.4
+#[tokio::test]
+async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let client = resolving_client(&asked);
+    let failed = settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+        "bead-probe.localhost",
+        closed_port().await,
+    )))
+    .await;
+
+    assert!(
+        matches!(&failed, Err(TransportError::Connect(error)) if error.message().contains("no resolver asked")),
+        "{failed:?}"
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
+
 // ── A raw server ─────────────────────────────────────────────────────────────────────────────
 
 /// A server that completes each upgrade by hand and hands the test its socket, raw: what goes

@@ -194,3 +194,153 @@ async fn cancels_the_attempts_left_once_one_connects() {
         "the last failure, then none found"
     );
 }
+
+// spec 13.4
+#[tokio::test]
+async fn connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let options = RacingOptions {
+        resolve: Some(recording(&asked)),
+        ..RacingOptions::on(platform())
+    };
+
+    for host in ["localhost", "bead-probe.localhost", "Bead-Probe.LOCALHOST"] {
+        let socket = patience(PATIENCE, connect_racing((host, port), &options))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            socket.peer_addr().unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            "{host}: the loopback's"
+        );
+    }
+
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
+
+// spec 13.4
+#[tokio::test]
+async fn tries_the_ipv4_loopback_first_for_a_localhost_name_then_the_ipv6_one_an_attempt_delay_after()
+ {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let started = Instant::now();
+    let attempts: Arc<Mutex<Vec<(IpAddr, Duration)>>> = Arc::default();
+    let recording = Arc::clone(&attempts);
+    let options = RacingOptions {
+        attempt: Some(Arc::new(move |address: SocketAddr| {
+            recording
+                .lock()
+                .unwrap()
+                .push((address.ip(), started.elapsed()));
+
+            Box::pin(async move {
+                if address.is_ipv4() {
+                    // an attempt nothing answers, until it is given up
+                    core::future::pending::<()>().await;
+                }
+
+                // * the IPv6 one taken on the IPv4 listener, which a machine without ::1 has too
+                TcpStream::connect((Ipv4Addr::LOCALHOST, address.port())).await
+            })
+        })),
+        ..RacingOptions::on(platform())
+    };
+
+    patience(
+        PATIENCE,
+        connect_racing(("bead-probe.localhost", port), &options),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let tried = attempts.lock().unwrap().clone();
+
+    assert_eq!(
+        tried
+            .iter()
+            .map(|(address, _)| *address)
+            .collect::<Vec<_>>(),
+        [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        ],
+        "IPv4 first"
+    );
+
+    let gap = tried[1].1.saturating_sub(tried[0].1);
+
+    assert!(
+        (Duration::from_millis(240)..=Duration::from_secs(2)).contains(&gap),
+        "250 ms apart: {gap:?}"
+    );
+}
+
+// spec 13.4
+#[tokio::test]
+async fn asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let names = [
+        "localhost.",
+        "a.localhost.",
+        "localhost.example",
+        "bead.test",
+    ];
+    let options = RacingOptions {
+        resolve: Some(recording(&asked)),
+        // * each answer's address taken on the loopback's listener
+        attempt: Some(Arc::new(|address: SocketAddr| {
+            Box::pin(async move { TcpStream::connect((Ipv4Addr::LOCALHOST, address.port())).await })
+        })),
+        ..RacingOptions::on(platform())
+    };
+
+    for name in names {
+        patience(PATIENCE, connect_racing((name, port), &options))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    assert_eq!(*asked.lock().unwrap(), names, "each asked");
+}
+
+// spec 13.4
+#[tokio::test]
+async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let options = RacingOptions {
+        resolve: Some(recording(&asked)),
+        attempt: Some(Arc::new(|_address| {
+            Box::pin(async { Err(io::Error::from(io::ErrorKind::ConnectionRefused)) })
+        })),
+        ..RacingOptions::on(platform())
+    };
+    let failed = patience(
+        PATIENCE,
+        connect_racing(("bead-probe.localhost", 9), &options),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert_eq!(
+        failed.kind(),
+        io::ErrorKind::ConnectionRefused,
+        "the platform's cause kept"
+    );
+    assert!(
+        failed.to_string().contains(
+            "bead-probe.localhost names the loopback: connected to 127.0.0.1 and ::1, no resolver asked"
+        ),
+        "{failed}"
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
