@@ -4,7 +4,7 @@ Recipes for the questions a team meets once [the getting-started project](gettin
 runs: who may call, what happens when a connection drops, how to watch the server, and how to see
 a page's calls. Each builds on `StationService` and its C# server over WebSocket.
 
-> **Nothing is published yet.** The runtimes come from a clone of Bead at a pinned commit, and
+> **No package is published yet.** The runtimes come from a clone of Bead at a pinned commit, and
 > beadc's image is built from it, as [the getting-started guide](getting-started.md) shows.
 
 ## Authenticate calls with a JWT and admission hooks
@@ -149,9 +149,9 @@ A connection's life, on the client:
 - **A peer gone without a word** is dropped within four heartbeats at most by an end that pings.
   That end pings a connection silent for a heartbeat, 30 s by default. It drops the connection once
   the pong echoing that ping has not come within another heartbeat. Each step may come up to one
-  heartbeat late, as its platform's timer runs. The C# server pings. A client on the global `WebSocket` cannot ping,
-  in a page or in Node; it answers the server's pings by itself, so the server's heartbeat covers
-  it.
+  heartbeat late, as its platform's timer runs. The C# server pings. A client on the global
+  `WebSocket` cannot ping, in a page or in Node; it answers the server's pings by itself, so the
+  server's heartbeat covers it.
 
 This client, run against the getting-started server on port 8080 while that server was killed and
 started again, reconnected, subscribed again, and answered the server's command on the new
@@ -300,9 +300,9 @@ ASP.NET Core comes with `Bead.Transport.WebSockets`, which references its framew
 `Exposition()` gives the text in Prometheus's text format 0.0.4 with its content type,
 `text/plain; version=0.0.4; charset=utf-8`, which a Prometheus 3 scrape requires. The walkthrough's
 host binds `http://127.0.0.1:0`, a free port on the loopback drawn at each start, which its first
-line reports; a deployment gives `UseUrls` the fixed address its Prometheus scrapes. The families, each labelled by `service` (its id in decimal) and
-`procedure`, a call's by `type` (`request` or `command`), an ended one's by `outcome` and a
-failure's by `code`:
+line reports; a deployment gives `UseUrls` the fixed address its Prometheus scrapes. The families,
+each labelled by `service` (its id in decimal) and `procedure`, a call's by `type` (`request` or
+`command`), an ended one's by `outcome` and a failure's by `code`:
 
 | Family                              | Counts                                                       |
 | ----------------------------------- | ------------------------------------------------------------ |
@@ -331,8 +331,10 @@ gives `{ contentType, text }`
 
 Bead's DevTools extension adds a **Bead** panel to Chrome's DevTools, which shows each client a
 page builds: its calls and their envelopes, the server's commands among them, its subscriptions
-and their credit, and what its metrics registry counts. It is built from the clone, as nothing is
-published:
+and their credit, and what its metrics registry counts. It is installed from the
+[Chrome Web Store](https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc).
+
+It is also built from the clone, so the panel and the page's runtime come from one commit:
 
 ```sh
 cd bead-pinned/implementations/typescript
@@ -355,6 +357,7 @@ loads: open DevTools on the page, show the Bead tab, then reload the page. The p
 - **Timeline**: every call on one axis of time, a notification a ring, a credit a tick.
 - **Metrics**: what the client's registry counts. A client given none says so; one is given
   as its `metricsRegistry` option, made by `createMetricsRegistry()`.
+- **Broker**: each broker participant the page builds. The getting-started page builds none.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges, read with
   the package's codec.
 

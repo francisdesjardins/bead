@@ -7,6 +7,6 @@ flowchart TB
   route["procedure known?<br/>no: 18 or 19, …_UNKNOWN"]
   cred["credential holds?<br/>no: 36 or 32, like a 401"]
   adm["admission accepted?<br/>no: 33 ACCESS_DENIED, like a 403,<br/>or 32"]
-  pay["payload read and valid?<br/>no: 50 or 52"]
+  pay["payload within its limits, read and valid?<br/>no: 34, 50 or 52"]
   proc("the procedure runs")
   rq --> sock -- yes --> host -- yes --> orig -- yes --> cap -- yes --> route -- yes --> cred -- yes --> adm -- yes --> pay -- yes --> proc

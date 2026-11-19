@@ -18,15 +18,15 @@
   <section id="statut" class="status" data-toc="Où en est Bead">
     <h2 id="methode-h">Où en est Bead</h2>
     <p>
-      Bead est le projet d’une personne, mené au rythme de son auteur, avant 1.0.0, et il n’a pas
-      tourné en production. Il n’est pas offert comme un produit dont dépendre : c’est une vision du
+      Bead est le projet d’une personne, mené au rythme de son auteur. Il n’a pas atteint 1.0.0, et
+      il n’a pas tourné en production. Il n’est pas offert comme un produit dont dépendre : c’est une vision du
       protocole propre à une entreprise, un seul contrat typé d’un appareil à un service, puis à
       une page. Une équipe le reprend en entier et le fait sien, protocole compris : elle change la
       spécification selon ses besoins, et les fichiers de conformance et
       <a href="{{blob path="docs/maintaining.md"}}">la méthode</a> tiennent ses implantations à un même
-      comportement pendant qu’elle le fait. Cette méthode, ses portes,
+      comportement pendant qu’elle le fait. Cette méthode est dans le dépôt, avec ses portes,
       <a href="{{tree path=".claude/workflows"}}">ses workflows</a> et les consignes de ses agents,
-      est dans le dépôt, si bien qu’une équipe peut poursuivre Bead avec un agent.
+      si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
       Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
@@ -38,8 +38,9 @@
       le revoit comme son propre code.
     </p>
     <p id="methode">
-      Comment Bead se fait, l’expérience derrière cette méthode et ce qu’elle montre jusqu’ici, son
-      auteur le raconte sur <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>.
+      Sur <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>, son auteur
+      raconte comment Bead se fait : l’expérience derrière cette méthode, et ce qu’elle montre
+      jusqu’ici.
     </p>
   </section>
   <div class="invite invite-open">
@@ -214,15 +215,16 @@
     du serveur, comme ceux de tout client.
   </p>
   <p>
-    Un compagnon de la spécification la décrit, <code>spec/transcoding.md</code>, sous sa propre
+    Un compagnon de la spécification, <code>spec/transcoding.md</code>, la décrit sous sa propre
     version, {{fact of="transcoding"}}. La passerelle écoute sur son propre port,
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <p>
     Ce que le fil peut et qu’une passerelle ne porte pas est listé, pas caché : la session d’une
-    connexion, une commande, la reprise d’un flux et sa fenêtre, chacune une ligne du registre
+    connexion, une commande et la fenêtre d’un flux, chacune une ligne du registre
     <a href="{{blob path="docs/support.md"}}#leveled-down">« Leveled down »</a> de la matrice (§2.5,
-    §2.6, §8.3 et §8.8 du compagnon).
+    §2.6 et §8.8 du compagnon). La reprise d’un flux y a aussi sa ligne (§8.3) : les Server-Sent
+    Events l’offrent, et un abonnement Bead ne garde aucune notification après sa fin.
   </p>
   <figure class="figure">
     <figcaption>Une connexion par échange : ce qu’elle tient finit avec lui</figcaption>
@@ -231,7 +233,8 @@
   <p class="space">
     Le justificatif d’un appel est le champ <code>authorization</code> de sa requête. Par défaut,
     la passerelle le présente ELSEWHERE, et le vérificateur du serveur en fait ce que l’application
-    décide. Avec l’option <code>bearer-jwt</code>, elle présente le jeton d’un champ
+    décide. Avec son option <code>authorization</code> à <code>bearer-jwt</code>, elle présente le
+    jeton d’un champ
     <code>Bearer</code> comme un JWT, que le serveur vérifie. Elle ne lit aucun justificatif d’un
     cookie ni d’une chaîne de requête, et n’offre aucune commande.
   </p>
@@ -285,8 +288,10 @@
   <p class="space">
     Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
     <code>pointer</code> dans le corps, ou <code>parameter</code> pour une variable du chemin ou de
-    la chaîne de requête. Ici, <code>from</code> dépasse 10 dans le corps, et <code>title</code>,
-    une variable du chemin, dépasse 3 caractères.
+    la chaîne de requête. La requête ci-dessous appelle la route <code>/v1/ruled/{title}</code> du
+    service des fichiers de conformance. Son corps met <code>from</code> au-delà de 10, et sa
+    variable de chemin <code>title</code> dépasse 3 caractères. La passerelle écrit le problème
+    sur une ligne ; il est montré indenté ici.
   </p>
   {{code of="problem-request" language="plaintext"}}
   {{code of="problem" language="json"}}
@@ -303,21 +308,21 @@
   <details class="more" id="transcodage-portes">
     <summary>Ses portes et ses bornes</summary>
     <p>
-      La passerelle juge une requête par les portes du transport HTTP, dans le même ordre, et
-      ajoute après celle de l’origine une porte de Fetch Metadata : une requête sans
-      <code>origin</code> venue d’un autre site est refusée
-      403, sauf une navigation vers le document ou vers le <code>GET</code> d’une procédure
-      marquée <code>NO_SIDE_EFFECTS</code>. Un appel attend
+      La passerelle juge une requête par les portes du transport HTTP, dans le même ordre. Après
+      celle de l’origine, elle ajoute une porte de Fetch Metadata : une requête sans
+      <code>origin</code> dont le <code>sec-fetch-site</code> est <code>same-site</code> ou
+      <code>cross-site</code> est refusée 403, sauf une navigation <code>GET</code> vers
+      <code>/openapi.json</code> ou vers une procédure marquée <code>NO_SIDE_EFFECTS</code>. Un appel attend
       sa réponse 5 s par défaut, puis reçoit 504, et aucun champ de la requête ne change ce délai.
       Une requête abandonnée ferme sa connexion, et le serveur annule ses appels.
     </p>
   </details>
   <h3 id="transcodage-client">Le client qu’écrit beadc</h3>
   <p>
-    Avec <code>gateway</code>, <code>beadc</code> écrit aussi un client typé des routes par
-    défaut des procédures qu’elle choisit : sur <code>fetch</code> côté TypeScript, sur
-    <code>HttpClient</code> côté C# et sur hyper côté Rust. Il lit chaque problème comme un échec
-    Bead, et un flux comme une suite asynchrone. L’interop appelle la passerelle de chaque côté
+    Pour une sortie avec <code>gateway</code>, <code>beadc</code> écrit aussi un client typé des
+    routes par défaut des procédures que choisit cette <code>gateway</code> : sur
+    <code>fetch</code> côté TypeScript, sur <code>HttpClient</code> côté C# et sur hyper côté Rust.
+    Le client lit chaque problème comme un échec Bead, et un flux comme une suite asynchrone. L’interop appelle la passerelle de chaque côté
     avec le client de chacun des autres.
   </p>
 </section>
@@ -397,9 +402,10 @@
   {{transports}}
   <p class="space">
     Les côtés s’appellent les uns les autres dans la CI sur WebSocket, HTTP et MQTT 5, et les côtés
-    TypeScript et C# aussi sur AMQP 1.0. Dans une page ou dans Node, le côté TypeScript n’a besoin
-    de rien d’installé, et prend un pair facultatif pour ce qu’un projet utilise : protobuf-es,
-    MQTT.js, rhea ou undici.
+    TypeScript et C# aussi sur AMQP 1.0. Dans une page ou dans Node, le côté TypeScript ne dépend
+    d’aucun paquet. Un projet ajoute les pairs facultatifs qu’il utilise : protobuf-es, MQTT.js,
+    rhea ou undici. Un serveur WebSocket dans Node prend aussi le <code>WebSocketServer</code> de
+    <code>ws</code>, que son application installe et lui passe.
   </p>
 </section>
 
@@ -586,10 +592,9 @@
   <p>
     Un panneau Bead dans les DevTools de Chrome montre les appels, les enveloppes et les métriques
     de chaque client qu’une page construit. Il montre aussi les appels qu’une page fait à un
-    serveur dans un Web Worker. L’onglet Réseau ne voit pas ces messages. Sa vue Broker suit les
-    participants d’un
-    courtier et leurs parcelles. Un client s’y annonce de lui-même, sauf avec
-    <code>devtools: false</code>. L’extension est sur le <a href="https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc">Chrome Web Store</a>, et se
+    serveur dans un Web Worker. L’onglet Réseau ne voit pas ces messages. Le panneau Bead a aussi
+    une vue Broker, qui suit les participants d’un courtier et leurs parcelles. Un client s’annonce
+    de lui-même à l’extension, sauf avec <code>devtools: false</code>. L’extension est sur le <a href="https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc">Chrome Web Store</a>, et se
     construit aussi depuis <a href="{{tree path="implementations/typescript/devtools"}}">le dépôt</a>.
   </p>
 
@@ -686,7 +691,7 @@
   <p class="gist">
     Un serveur Bead se garde par six portes, de la plus extérieure à la plus intérieure. Chaque
     porte répond à une question, et chaque refus, sauf celui de l’adresse, dit pourquoi. Rien de
-    tout cela n’a encore été revu par un expert indépendant en sécurité.
+    tout cela n’a été revu par un expert indépendant en sécurité.
   </p>
   <p>
     L’adresse d’écoute dit qui peut atteindre le serveur. Les hôtes et les origines disent quelle
@@ -877,8 +882,8 @@
   <details class="more" id="securite-adresse">
     <summary>L’adresse où il écoute</summary>
     <p>
-      Un serveur écoute sur <code>localhost</code> par défaut, sur les deux boucles locales,
-      <code>127.0.0.1</code> puis <code>::1</code>, et le réseau ne le joint pas (CWE-1327). Un
+      Par défaut, un serveur écoute sur <code>localhost</code>, sur les deux boucles locales :
+      <code>127.0.0.1</code> puis <code>::1</code>. Le réseau ne le joint pas (CWE-1327). Un
       conteneur, ou un serveur qu’une autre machine joint, écoute sur <code>0.0.0.0</code> ou
       <code>::</code>, et nomme ses hôtes. L’adresse tient le réseau dehors, et <code>hosts</code>
       les pages de la machine même.
@@ -953,7 +958,7 @@
           <tr>
             <td><code>maximumUnsentBytes</code></td>
             <td class="code-num">184 551 424</td>
-            <td>Ce qui attend le socket d’un client WebSocket</td>
+            <td>Ce qui attend le socket d’un client WebSocket, ou un courtier</td>
           </tr>
           <tr>
             <td><code>headersTimeout</code></td>
@@ -963,7 +968,7 @@
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>Le rythme d’un corps, sur HTTP</td>
+            <td>Le rythme d’un corps sur HTTP, ou des parties d’une enveloppe sur un courtier</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
@@ -1074,8 +1079,8 @@
     le seul bloc de longueur variable. Il se dispose comme une extension de TLS : un schéma sur 2
     octets, une longueur sur 2, les octets, puis des zéros jusqu’au mot suivant. Les drapeaux du
     quartet haut n’ajoutent rien : SUBSCRIPTION (<code>0x10</code>), PACED (<code>0x20</code>) et
-    MORE (<code>0x40</code>). Les bits <code>0x01</code> et <code>0x80</code> sont gardés pour des
-    drapeaux à venir. Un en-tête tient 1 020 octets au plus (§2 à §4).
+    MORE (<code>0x40</code>). Le bit <code>0x01</code> est gardé pour un bloc à venir, et
+    <code>0x80</code> pour un drapeau à venir. Un en-tête tient 1 020 octets au plus (§2 à §4).
   </p>
   {{header}}
   <div class="table-wrap" tabindex="0">
@@ -1177,7 +1182,7 @@
   <p>
     Par défaut, au plus 64 appels d’un pair attendent leur réponse à la fois sur une connexion :
     <code>maximumAnsweringCalls</code>. HTTP/2 borne de même les flux qu’un pair ouvre. Rien
-    n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient, et le
+    n’annonce ce nombre : les deux bouts le règlent pareil. Le demandeur s’y tient. Le
     récepteur refuse une requête de plus avec <code>CAPACITY_EXCEEDED</code> dès que son en-tête
     se lit, avant d’en regarder la route, le justificatif ou la charge (§9.2). Un résolveur qui
     tourne encore après la réponse ou l’annulation de son appel compte jusqu’à ce qu’il se règle.
@@ -1262,7 +1267,7 @@
   <p class="gist">
     Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
     63 caractères. Ces règles s’écrivent dans le <code>.proto</code> avec les options de
-    protovalidate, la norme de l’écosystème protobuf, et <code>beadc</code> les compile en
+    protovalidate, la norme de l’écosystème protobuf. <code>beadc</code> les compile en
     validateurs natifs, en TypeScript, en C# et en Rust.
   </p>
   {{code of="rules-proto" language="plaintext"}}
@@ -1283,7 +1288,8 @@
   <p class="space">
     Chaque ligne est un objet JSON à la forme canonique de la RFC 8785 : le chemin du champ, l’id
     de la règle tiré de protovalidate, ses bornes et son message. La dernière ligne compte les
-    violations laissées de côté, <code>{"more":N}</code>. La valeur fautive ne voyage jamais, car
+    violations laissées de côté, <code>{"more":N}</code>, ou dit que le côté s’est arrêté à la
+    première, <code>{"stopped":true}</code>. La valeur fautive ne voyage jamais, car
     elle peut être un secret. La clé d’une map fait seule exception : le chemin nomme une entrée
     par sa clé, 64 octets au plus (§18.4).
   </p>
@@ -1330,7 +1336,7 @@
     abonnement. L’autre bout oublie l’appel, défait l’abonnement et interrompt le signal de son
     résolveur. Le demandeur réserve ensuite le callId le temps du délai de l’appel, 5 s s’il n’en
     avait pas, et ignore ce qui arrive en retard dessus. C’est le <code>RST_STREAM</code> de
-    HTTP/2, restreint au demandeur, comme l’annulation d’un client gRPC. Celui qui répond termine
+    HTTP/2, restreint au demandeur. Celui qui répond termine
     un appel par une FAILURE, qui porte un code, et n’a donc pas besoin de CANCEL.
   </p>
   <figure class="figure">
@@ -1362,7 +1368,7 @@
     fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
     porte au-delà de ce qu’ils ont fini, et accorde de nouveau à la moitié de la fenêtre. Il
     accorde par un CREDIT qui porte PACED. Ce crédit compte des notifications, comme le
-    <code>REQUEST_N</code> de RSocket, mais il est absolu, comme le crédit d’un transfert.
+    <code>REQUEST_N</code> de RSocket. Mais il est absolu, comme le crédit d’un transfert.
   </p>
   <p>
     Au-delà de son crédit, une notification attend dans une file. Le serveur peut lui donner une
@@ -1552,9 +1558,10 @@
   <p>
     Un justificatif porteur ne quitte la machine que sous TLS (RFC 6750 §5.3) : <code>wss</code>,
     <code>https</code>, ou un courtier que chaque pair joint sous TLS. Sur la machine, la boucle locale, un Web Worker ou un routeur du même
-    processus suffisent. La boucle locale se juge à l’hôte que le client nomme, jamais à ce qu’il
-    résout : là où un résolveur envoie un nom <code>localhost</code> ailleurs, le justificatif y
-    passe en clair, et nommer <code>127.0.0.1</code> ou <code>[::1]</code> l’évite. Ailleurs, l’appel échoue avant de partir avec
+    processus suffisent. La boucle locale se juge à l’hôte que le client nomme, jamais à l’adresse
+    vers laquelle ce nom se résout. Un résolveur peut envoyer un nom <code>localhost</code>
+    ailleurs, et le justificatif y passe alors en clair. Nommer <code>127.0.0.1</code> ou
+    <code>[::1]</code> l’évite. Ailleurs, l’appel échoue avant de partir avec
     <code>DESTINATION_UNREACHABLE</code>, et le justificatif reste. Un serveur derrière un
     mandataire TLS se déclare sûr par l’option <code>secure</code>.
   </p>
@@ -1584,9 +1591,9 @@
   </p>
   <p>
     Un transfert est refusé avant que sa masse ne passe. Son ouverture passe la route, le
-    justificatif, l’admission et les limites avant qu’un seul octet soit accordé. Un récepteur
-    tient au plus quatre transferts par connexion, et 256 Mio pour tous ceux qu’il reçoit, sur
-    toutes ses connexions.
+    justificatif, l’admission et les limites avant qu’un seul octet soit accordé. Par défaut, un
+    récepteur prend quatre transferts à la fois par connexion, et 256 Mio pour tous ceux qu’il
+    reçoit, sur toutes ses connexions.
   </p>
   <figure class="figure">
     <figcaption>Un transfert, puis un refus à l’ouverture</figcaption>
@@ -1686,7 +1693,7 @@
           <tr>
             <td><code>maximumUntakenEnvelopes</code>, <code>maximumUntakenBytes</code></td>
             <td class="code-num">64, 1 048 576</td>
-            <td>Ce qu’un routeur n’a pas encore pris d’une connexion, au-delà de quoi son transport suspend les lectures de cette connexion</td>
+            <td>Ce qu’un routeur n’a pas encore pris d’une connexion. Atteindre l’une des deux bornes suspend cette connexion jusqu’à ce que chaque compte soit revenu à la moitié.</td>
           </tr>
         </tbody>
       </table>
@@ -1716,8 +1723,8 @@
   </p>
   <p>
     Le relais fait suivre un justificatif porteur, et la destination le vérifie. Une destination
-    est inscrite avec l’audience qu’elle vérifie, comme une ressource est nommée pour un jeton
-    (RFC 8707), ou sans audience. Une destination inscrite sans audience ne prend aucun
+    est inscrite avec l’audience qu’elle vérifie, ou sans audience. Cette audience la nomme comme
+    la RFC 8707 nomme une ressource pour un jeton. Une destination inscrite sans audience ne prend aucun
     justificatif porteur. Par défaut,
     l’admission du relais, <code>requireCredential</code>,
     n’admet qu’un justificatif qu’il peut faire suivre. Un appel sans justificatif, ou OPAQUE,
@@ -1776,7 +1783,7 @@
     <p>
       Tous les demandeurs d’un relais partagent sa jambe B : un seul espace de callId, les mêmes 64
       appels à la fois, la même capacité de transferts. C’est donc l’admission du relais, qui voit
-      la procédure et la destination, qui vérifie les droits. Par défaut, il ne vérifie pas un JWT
+      la procédure et la destination, qui vérifie les droits. Par défaut, le relais ne vérifie pas un JWT
       qu’il fait suivre, et un jeton forgé apprend ainsi quelles destinations existent avant que la
       destination le refuse. Avec l’option <code>verifies</code>, le relais vérifie le jeton
       lui-même, dès sa première étape.
@@ -1798,9 +1805,9 @@
   </p>
   <p>
     WebSocket fait tout ce que Bead demande à un transport : il délimite les messages, porte les
-    deux sens et livre dans l’ordre. Chaque bout, là où sa plateforme le permet, envoie un PING
-    sur une connexion restée silencieuse 30 s et la coupe si le PONG qui lui fait écho ne vient pas : un pair
-    parti sans un mot est coupé, au lieu de rester ouvert pour toujours. Le <code>WebSocket</code> global, celui d’une
+    deux sens et livre dans l’ordre. Là où sa plateforme le permet, chaque bout envoie un PING sur
+    une connexion restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
+    sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455).
   </p>
@@ -1855,10 +1862,10 @@
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur répond 408. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur répond 408, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
-      reste, 400 sur HTTP/1.1 (§15.12).
+      reste, 400 non marqué sur HTTP/1.1 (§15.12).
     </p>
     <p>
       La poignée de main de WebSocket est une requête HTTP. Le serveur WebSocket la juge par ses
@@ -2027,8 +2034,8 @@
     </li>
     <li>
       <strong>Le coût d’un appel compté</strong
-      ><span>Mesuré contre un appel qui ne l’est pas, de chaque côté, une mesure à côté de celles
-        que prennent les bancs.</span>
+      ><span>De chaque côté, un appel compté mesuré contre un appel qui ne l’est pas. Cette mesure
+        vient à côté de celles des bancs.</span>
     </li>
     <li>
       <strong>Un côté C contraint</strong

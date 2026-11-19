@@ -7,6 +7,6 @@ flowchart TB
   route["procédure connue ?<br/>non : 18 ou 19, …_UNKNOWN"]
   cred["justificatif tenu ?<br/>non : 36 ou 32, comme un 401"]
   adm["admission acceptée ?<br/>non : 33 ACCESS_DENIED, comme un 403,<br/>ou 32"]
-  pay["charge lue et valide ?<br/>non : 50 ou 52"]
+  pay["charge dans ses limites, lue et valide ?<br/>non : 34, 50 ou 52"]
   proc("la procédure tourne")
   rq --> sock -- oui --> host -- oui --> orig -- oui --> cap -- oui --> route -- oui --> cred -- oui --> adm -- oui --> pay -- oui --> proc

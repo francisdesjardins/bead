@@ -218,9 +218,9 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
   passes the same gate, so a `ReceiveAsync` already waiting as the pause comes reads nothing more
   of the socket: its server wraps the stream ahead of ASP.NET Core's WebSocket middleware, its
   client the content of the answer to its upgrade, which `ClientWebSocket` reads. The stream's
-  dispose, as .NET's keep-alive drops it, lets every wait at the gate go, and so does a server's
-  request's abort: a paused connection its heartbeat drops ends at once, and on a server so does
-  one whose peer ends it, what it held dropped with it.
+  dispose, as .NET's keep-alive drops it, lets every wait at the gate go; on a server, so does its
+  request's abort. So a paused connection its heartbeat drops ends at once, and on a server so does
+  one whose peer ends it. What it held is dropped with it.
   The TypeScript side keeps `ws`'s synchronous events: `pause` calls `ws`'s `pause()`, which stops
   the socket, and what `ws` still emits from the read it parsed is held in order, one socket read at
   most, 64 KiB; on resume the transport hands what it holds from a microtask, the router pausing it
@@ -352,9 +352,11 @@ every side:
 - **A pause costs the peer what a reader that stops costs it.** Past the peer's own bounds the
   peer loses the connection: a client whose router is paused, over WebSocket, is dropped by its
   server's send pace as soon as `sendGracePeriod` after the server's socket stops taking, or past
-  `maximumUnsentBytes` (spec 15.12); a server whose router is paused, over WebSocket, is dropped by
-  no Bead client's pace, since no client keeps one, but its paused read takes no pong, so its own
-  heartbeat closes the connection as one that left its ping unanswered; over HTTP, a client whose
+  `maximumUnsentBytes` (spec 15.12). Over WebSocket, either end's own heartbeat drops a connection
+  it pauses past about twice `heartbeat`, since its paused read takes no pong: a server's, and a
+  client's where its platform sends a ping (spec 15.3, 15.12). A server whose router is paused is
+  dropped by no Bead client's pace, since no client keeps one; a heartbeat drops it, its own or its
+  client's. Over HTTP, a client whose
   router is paused asks no listen, and its server's outbox past `maximumOutboxBytes` closes the
   connection (spec 15.9); over a broker, the receiving participant's `maximumHeldEnvelopeBytes`
   loses it. The TypeScript side, its event loop held by its router, already behaves so.

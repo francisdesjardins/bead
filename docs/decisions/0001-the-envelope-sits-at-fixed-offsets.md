@@ -119,9 +119,11 @@ messages; it knows the envelope's size at both ends, since nothing announces it;
 chunk and every credit, in any order, a copy tolerated, since Bead retransmits nothing and a loss
 ends in the transfer's inactivity; and it carries both ways, the credit against the chunks. The
 router copies what it reads, so a transport may use its buffers again. Whether a connection is alive
-is the transport's to know, not Bead's, which has no ping: over WebSocket, each end sends the
-protocol's own PING control frame at an interval and drops a connection that leaves one unanswered
-(RFC 6455 §5.5.2), so a peer gone without a word ends in a close, as every loss does.
+is the transport's to know, not Bead's, which has no ping. Over WebSocket, an end pings a
+connection once nothing of it has been read for its heartbeat, with WebSocket's own PING control
+frame. It drops the connection once the pong that echoes that ping has not come within another
+heartbeat (RFC 6455 §5.5.2, §5.5.3; spec 15.3), so a peer gone without a word ends in a close, as
+every loss does. A page's `WebSocket` sends no ping: its browser answers the server's.
 
 **A transport carries each envelope whole, and once.** Order is what its connection gives, a
 WebSocket's and HTTP's outbox's, and not HTTP's exchanges, and the router needs none: a chunk and a

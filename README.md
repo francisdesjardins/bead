@@ -148,10 +148,15 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
+- **Next**: the rules a security pass brings to every side: a `localhost` name reached on the
+  loopback without a resolver, as RFC 6761 §6.3 gives it ([0024](docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md));
+  a bound on what a server reads of a connection ahead of the request it serves, and on a
+  `Content-Length`; a transfer coding other than `chunked` refused, as RFC 9112 §6.1 asks; and a
+  malformed `Bearer` answered as RFC 6750 §3.1 gives it.
+- **Then**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   a row of the [support matrix](docs/support.md#differences) ahead.
-- **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
+- **After it**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
   a connection's close code carried on `close`

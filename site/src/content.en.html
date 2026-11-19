@@ -17,14 +17,14 @@
   <section id="statut" class="status" data-toc="Where Bead stands">
     <h2 id="methode-h">Where Bead stands</h2>
     <p>
-      Bead is one person’s project, kept at its author’s pace, before 1.0.0, and it has not run in
-      production. It is not offered as a product to depend on: it is a vision of a company’s own
+      Bead is one person’s project, kept at its author’s pace. It has not reached 1.0.0, and it has
+      not run in production. It is not offered as a product to depend on: it is a vision of a company’s own
       protocol, one typed contract from a device to a service to a page. A team takes it whole and
       makes it its own, the protocol included: it changes the specification to its needs, and the
       conformance files and <a href="{{blob path="docs/maintaining.md"}}">the method</a> keep its
-      implementations in step as it does. That method, its gates,
-      <a href="{{tree path=".claude/workflows"}}">its workflows</a> and its agents’ instructions, is
-      in the repository, so a team can carry it on with an agent.
+      implementations in step as it does. That method is in the repository, with its gates,
+      <a href="{{tree path=".claude/workflows"}}">its workflows</a> and its agents’ instructions, so
+      a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
       The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
@@ -35,8 +35,8 @@
       been reviewed by independent experts; a team that takes it reviews it as its own code.
     </p>
     <p id="methode">
-      How Bead is made, the experiment behind that method and what it shows so far, is told by its
-      author on <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>.
+      On <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>, its author
+      tells how Bead is made: the experiment behind that method, and what it shows so far.
     </p>
   </section>
   <div class="invite invite-open">
@@ -199,15 +199,16 @@
     and rules, like any client’s.
   </p>
   <p>
-    A companion of the specification describes it, <code>spec/transcoding.md</code>, under its own
+    A companion of the specification, <code>spec/transcoding.md</code>, describes it under its own
     version, {{fact of="transcoding"}}. The gateway listens on its own port,
     <code>localhost</code> by default, or mounts into the application’s web server.
   </p>
   <p>
     What the wire can do and a gateway does not carry is listed, not hidden: a connection’s
-    session, a command, a stream’s resumption and its window, each a row of the support matrix’s
+    session, a command and a stream’s window, each a row of the support matrix’s
     <a href="{{blob path="docs/support.md"}}#leveled-down">“Leveled down”</a> (the companion’s §2.5,
-    §2.6, §8.3 and §8.8).
+    §2.6 and §8.8). A stream’s resumption has its row there too (§8.3): Server-Sent Events offer
+    it, and a Bead subscription keeps no notification past its end.
   </p>
   <figure class="figure">
     <figcaption>One connection per exchange: what it holds ends with it</figcaption>
@@ -216,7 +217,8 @@
   <p class="space">
     A call’s credential is its request’s <code>authorization</code> field. By default, the gateway
     presents it ELSEWHERE, and the server’s verifier makes of it what the application decides. With
-    the <code>bearer-jwt</code> option, it presents a <code>Bearer</code> field’s token as a JWT,
+    its option <code>authorization</code> at <code>bearer-jwt</code>, it presents a
+    <code>Bearer</code> field’s token as a JWT,
     which the server verifies. It reads no credential from a cookie or a query string, and offers no
     command.
   </p>
@@ -269,8 +271,10 @@
   <p class="space">
     A <code>PAYLOAD_INVALID</code> gives a 422 whose <code>errors</code> place each violation:
     <code>pointer</code> into the body, or <code>parameter</code> for a variable of the path or of
-    the query string. Here, <code>from</code> is past 10 in the body, and <code>title</code>, a
-    path variable, is past 3 characters.
+    the query string. The request below calls the route <code>/v1/ruled/{title}</code> of the
+    conformance files’ service. Its body puts <code>from</code> past 10, and its path variable
+    <code>title</code> is past 3 characters. The gateway writes the problem on one line; it is
+    shown indented here.
   </p>
   {{code of="problem-request" language="plaintext"}}
   {{code of="problem" language="json"}}
@@ -287,21 +291,21 @@
   <details class="more" id="transcodage-portes">
     <summary>Its gates and its bounds</summary>
     <p>
-      The gateway judges a request by the HTTP transport’s gates, in the same order, and adds a gate
-      of Fetch Metadata after the origin’s: a request with no <code>origin</code> from another site
-      is refused 403, unless it is a
-      navigation to the document or to the <code>GET</code> of a procedure marked
-      <code>NO_SIDE_EFFECTS</code>. A call waits 5 s for its answer by
+      The gateway judges a request by the HTTP transport’s gates, in the same order. After the
+      origin’s gate, it adds one of Fetch Metadata: a request with no <code>origin</code> whose
+      <code>sec-fetch-site</code> is <code>same-site</code> or <code>cross-site</code> is refused
+      403, unless it is a <code>GET</code> navigation to <code>/openapi.json</code> or to a
+      procedure marked <code>NO_SIDE_EFFECTS</code>. A call waits 5 s for its answer by
       default, then receives 504, and no field of the request changes that timeout. A request
       abandoned closes its connection, and the server cancels its calls.
     </p>
   </details>
   <h3 id="transcodage-client">The client beadc writes</h3>
   <p>
-    With <code>gateway</code>, <code>beadc</code> also writes a typed client of the default
-    routes of the procedures it selects: over <code>fetch</code> on the TypeScript side, over
-    <code>HttpClient</code> on the C# side, and over hyper on the Rust side. It reads each problem
-    as a Bead failure, and a stream as an async sequence. The interop calls each side’s gateway with
+    For an output with <code>gateway</code>, <code>beadc</code> also writes a typed client of the
+    default routes of the procedures that <code>gateway</code> selects: over <code>fetch</code> on
+    the TypeScript side, over <code>HttpClient</code> on the C# side, and over hyper on the Rust
+    side. The client reads each problem as a Bead failure, and a stream as an async sequence. The interop calls each side’s gateway with
     the client of each other side.
   </p>
 </section>
@@ -377,8 +381,10 @@
   {{transports}}
   <p class="space">
     The sides call each other in CI over WebSocket, HTTP and MQTT 5, and the TypeScript and C# sides
-    over AMQP 1.0 too. In a page or in Node, the TypeScript side needs nothing installed, and takes
-    an optional peer for what a project uses: protobuf-es, MQTT.js, rhea or undici.
+    over AMQP 1.0 too. In a page or in Node, the TypeScript side depends on no package. A project
+    adds the optional peers it uses: protobuf-es, MQTT.js, rhea or undici. A WebSocket server in
+    Node also takes <code>ws</code>’s <code>WebSocketServer</code>, which its application installs
+    and passes to it.
   </p>
 </section>
 
@@ -544,9 +550,9 @@
   <p>
     A Bead panel in Chrome’s DevTools shows the calls, the envelopes and the metrics of each client
     a page builds. It also shows the calls a page makes to a server in a Web Worker. The Network
-    panel does not see those messages. Its Broker view follows a broker’s participants and their
-    parcels. A client
-    announces itself to it on its own, unless its options say <code>devtools: false</code>. The
+    panel does not see those messages. The Bead panel also has a Broker view, which follows a
+    broker’s participants and their parcels. A client announces itself to the extension on its own,
+    unless its options say <code>devtools: false</code>. The
     extension is on the <a href="https://chromewebstore.google.com/detail/bead-devtools/pdlhlgpjgmcckfahnhmankffnpjkgplc">Chrome Web Store</a>, and is built from
     <a href="{{tree path="implementations/typescript/devtools"}}">the repository</a> as well.
   </p>
@@ -642,7 +648,7 @@
   <h2 id="securite-h">Security, plainly</h2>
   <p class="gist">
     A Bead server keeps itself behind six gates, from the outermost to the innermost. Each gate
-    answers one question, and each refusal but the address’s says why. None of it has yet been
+    answers one question, and each refusal but the address’s says why. None of it has been
     reviewed by an independent security expert.
   </p>
   <p>
@@ -828,8 +834,8 @@
   <details class="more" id="securite-adresse">
     <summary>The address it listens on</summary>
     <p>
-      A server listens on <code>localhost</code> by default, on both loopbacks,
-      <code>127.0.0.1</code> then <code>::1</code>, and the network does not reach it (CWE-1327). A
+      By default a server listens on <code>localhost</code>, on both loopbacks:
+      <code>127.0.0.1</code> then <code>::1</code>. The network does not reach it (CWE-1327). A
       container, or a server another machine reaches, listens on <code>0.0.0.0</code> or
       <code>::</code>, and names its hosts. The address keeps the network out, and
       <code>hosts</code> the pages of the machine itself.
@@ -902,7 +908,7 @@
           <tr>
             <td><code>maximumUnsentBytes</code></td>
             <td class="code-num">184,551,424</td>
-            <td>What waits for a WebSocket client’s socket</td>
+            <td>What waits for a WebSocket client’s socket, or for a broker</td>
           </tr>
           <tr>
             <td><code>headersTimeout</code></td>
@@ -912,7 +918,7 @@
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>A body’s pace, over HTTP</td>
+            <td>The pace of a body over HTTP, or of an envelope’s parts over a broker</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
@@ -1022,7 +1028,8 @@
     block whose length varies. It is laid out as a TLS extension is: a scheme on 2 bytes, a length
     on 2, the bytes, then zeros up to the next word. The flags of the high nibble add nothing:
     SUBSCRIPTION (<code>0x10</code>), PACED (<code>0x20</code>) and MORE (<code>0x40</code>). The
-    bits <code>0x01</code> and <code>0x80</code> are kept for flags to come. A header holds 1,020
+    bit <code>0x01</code> is kept for a block to come, and <code>0x80</code> for a flag to come. A
+    header holds 1,020
     bytes at most (§2 to §4).
   </p>
   {{header}}
@@ -1125,7 +1132,7 @@
   <p>
     By default, at most 64 of a peer’s calls wait for their answer at once on a connection:
     <code>maximumAnsweringCalls</code>. HTTP/2 bounds the streams a peer opens the same way. Nothing
-    announces this number: both ends set it alike. The requester keeps to it, and the receiver
+    announces this number: both ends set it alike. The requester keeps to it. The receiver
     refuses one more request with <code>CAPACITY_EXCEEDED</code> once its header reads, before it
     looks at its route, its credential or its payload (§9.2). A resolver that still runs once its
     call was answered or cancelled counts until it settles. Together, the calls being answered and
@@ -1208,8 +1215,8 @@
   <p class="gist">
     A request must often hold more than its encoding says: a count of 10 at most, a name of 1 to 63
     characters. Those rules are written in the <code>.proto</code> with protovalidate’s options,
-    the protobuf ecosystem’s standard, and <code>beadc</code> compiles them into native validators,
-    in TypeScript, in C# and in Rust.
+    the protobuf ecosystem’s standard. <code>beadc</code> compiles them into native validators, in
+    TypeScript, in C# and in Rust.
   </p>
   {{code of="rules-proto" language="plaintext"}}
   <p class="space">
@@ -1222,14 +1229,15 @@
   </p>
   <div class="example">
     <h3 id="exemple-invalide">A PAYLOAD_INVALID FAILURE</h3>
-    <p>The detail carries a line a violation, then a line that closes.</p>
+    <p>The detail carries one line a violation, then a line that closes.</p>
     {{bytes of="invalid"}}
   </div>
   {{code of="rules-detail" language="json"}}
   <p class="space">
     Each line is a JSON object in RFC 8785’s canonical form: the field’s path, the rule’s id as
     protovalidate names it, its bounds and its message. The last line counts the violations left
-    out, <code>{"more":N}</code>. The offending value never travels, since it may be a secret. A
+    out, <code>{"more":N}</code>, or says the side stopped at the first,
+    <code>{"stopped":true}</code>. The offending value never travels, since it may be a secret. A
     map’s key is the one exception: the path names an entry by its key, 64 bytes of it at most
     (§18.4).
   </p>
@@ -1275,7 +1283,7 @@
     subscription. The other end forgets the call, undoes the subscription and aborts its
     resolver’s signal. The requester then reserves the callId for the call’s timeout, 5 s if it had
     none, and drops what arrives late on it. It is HTTP/2’s <code>RST_STREAM</code>, kept to the
-    requester, as a gRPC client cancels. The side that answers ends a call with a FAILURE, which
+    requester. The side that answers ends a call with a FAILURE, which
     carries a code, and so needs no CANCEL.
   </p>
   <figure class="figure">
@@ -1305,7 +1313,7 @@
     With a window of one, it grants the next notification once they are done with the previous
     one. With a wider window, it grants as far as the window reaches past what they finished, and
     grants again at half the window. It grants with a CREDIT that carries PACED.
-    That credit counts notifications, as RSocket’s <code>REQUEST_N</code> does, but it is absolute,
+    That credit counts notifications, as RSocket’s <code>REQUEST_N</code> does. But it is absolute,
     as a transfer’s credit is.
   </p>
   <p>
@@ -1489,9 +1497,10 @@
   <p>
     A bearer credential leaves the machine only under TLS (RFC 6750 §5.3): <code>wss</code>,
     <code>https</code>, or a broker that each peer reaches under TLS. On the machine, the loopback, a Web Worker or a router of the same process
-    are enough. The loopback is judged by the host the client names, never by what it resolves to:
-    where a resolver sends a <code>localhost</code> name elsewhere, the credential crosses there in
-    the clear, and naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it. Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
+    are enough. The loopback is judged by the host the client names, never by what that name
+    resolves to. A resolver may send a <code>localhost</code> name elsewhere, and the credential
+    then crosses there in the clear. Naming <code>127.0.0.1</code> or <code>[::1]</code> avoids it.
+    Elsewhere, the call fails before it goes with <code>DESTINATION_UNREACHABLE</code>,
     and the credential stays. A server behind a TLS proxy declares itself secure by the
     <code>secure</code> option.
   </p>
@@ -1520,8 +1529,8 @@
   </p>
   <p>
     A transfer is refused before its mass goes by. Its opening passes the route, the credential,
-    the admission and the limits before a single byte is granted. A receiver holds four transfers
-    per connection at most, and 256 MiB for all it receives, on all its connections.
+    the admission and the limits before a single byte is granted. By default, a receiver takes four
+    transfers at once per connection, and 256 MiB for all it receives, on all its connections.
   </p>
   <figure class="figure">
     <figcaption>A transfer, then a refusal at the opening</figcaption>
@@ -1621,7 +1630,7 @@
           <tr>
             <td><code>maximumUntakenEnvelopes</code>, <code>maximumUntakenBytes</code></td>
             <td class="code-num">64, 1,048,576</td>
-            <td>What a router has not yet taken of one connection, past which its transport pauses that connection’s reads</td>
+            <td>What a router has not yet taken of one connection. Reaching either bound pauses that connection until each count is back at half.</td>
           </tr>
         </tbody>
       </table>
@@ -1651,8 +1660,8 @@
   </p>
   <p>
     The relay forwards a bearer credential, and the destination verifies it. A destination is
-    registered with the audience it verifies, as a resource is named for a token (RFC 8707), or
-    with none. One registered with none takes no bearer credential. By
+    registered with the audience it verifies, or with none. That audience names it as RFC 8707
+    names a resource for a token. A destination registered with none takes no bearer credential. By
     default, the relay’s admission, <code>requireCredential</code>, admits only a credential it can
     forward. A call with no credential, or with OPAQUE, receives <code>ACCESS_DENIED</code>.
     Otherwise all these requesters would share leg B’s session, and the relay would lend its own
@@ -1726,9 +1735,9 @@
   </p>
   <p>
     WebSocket does all that Bead asks of a transport: it delimits messages, carries both directions
-    and delivers in order. Each end, where its platform lets it, sends a PING on a connection silent
-    for 30 s and drops it if the pong echoing it does not come: a peer gone without a word is dropped, instead of
-    staying open forever. The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
+    and delivers in order. Where its platform lets it, each end sends a PING on a connection silent
+    for 30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
+    The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
   </p>
   <p>
@@ -1779,9 +1788,9 @@
     <summary>A request’s timeouts, and WebSocket’s handshake</summary>
     <p>
       A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the server
-      answers 408. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
+      answers 408, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
       receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
-      or a byte past ASCII, is refused before anything else, 400 over HTTP/1.1 (§15.12).
+      or a byte past ASCII, is refused before anything else, 400 unmarked over HTTP/1.1 (§15.12).
     </p>
     <p>
       WebSocket’s handshake is an HTTP request. The WebSocket server judges it by its own
@@ -1943,8 +1952,8 @@
     </li>
     <li>
       <strong>A counted call’s cost</strong
-      ><span>Measured against a call that is not counted, on each side, a measure beside those the
-        benches take.</span>
+      ><span>On each side, a counted call measured against one that is not. This measure comes
+        beside the benches’ own.</span>
     </li>
     <li>
       <strong>A constrained C side</strong

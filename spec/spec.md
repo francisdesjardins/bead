@@ -100,7 +100,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
   a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
 
-**Version: 0.16.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.17.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

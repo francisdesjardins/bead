@@ -1075,6 +1075,16 @@ pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and
 are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: one
 past its deadline is an exchange lost, its connection dropped at both ends, reported on `error` as
 its connection closes, naming its bounds and their values.
+Over HTTP/1, the transport and the gateway serve a socket's requests in their order, each once
+the answers before it ended, and none behind an answer that closes its connection (RFC 9112 §9.3,
+§9.6). Behind an answer under way or one that closes its connection, a socket holds at most 32
+requests unserved, `MAXIMUM_UNSERVED_REQUESTS`. At the 33rd it is destroyed
+([`docs/support.md`](../../docs/support.md#differences),
+`Requests pipelined behind an answer under way, over HTTP/1.1`). A request carrying a
+`Content-Length` beside a `Transfer-Encoding` is refused 400 unmarked by Node's parser. On a server
+built with `insecureHTTPParser`, or in a process run with `--insecure-http-parser`, Node's parser
+hands it on. The transport and the gateway then refuse it themselves, 400 unmarked, and close its
+connection (RFC 9112 §6.1).
 
 A request names its authority by its target when the target is in absolute-form, its scheme `http`
 or `https` in any ASCII case, `HTTP://` among them, then `://` (spec 15.12, RFC 3986 §3.1), its

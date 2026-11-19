@@ -1244,8 +1244,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
     // ! an answer written before its body is whole closes its socket in stages (RFC 9112 §9.6):
     // what still comes is read and dropped until its client closes or 2 seconds pass, on the real
-    // clock, since what it waits on is the network's, so a reset never erases an answer its client
-    // has not read yet. A body read whole ends at once. Kestrel's connection has no half-close, and
+    // clock, since what it waits on is the network's, so no reset comes at once to erase an answer
+    // its client has not read yet; a client still sending past 2 seconds may still be reset. A body
+    // read whole ends at once. Kestrel's connection has no half-close, and
     // a shutdown of its socket races the answer Kestrel still sends: its write side ends with its
     // close, never first
     private static async Task Linger(HttpContext context)
