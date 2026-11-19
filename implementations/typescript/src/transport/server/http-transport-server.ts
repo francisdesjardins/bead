@@ -1131,7 +1131,8 @@ export const createHTTPTransportServer = (
         return (receive(exchange, connection), undefined);
       };
 
-      // ! over HTTP/1, an exchange in its socket's turn, and none behind an answer that closes
+      // ! over HTTP/1, an exchange in its socket's turn, none behind an answer that closes, and its
+      // socket read no further than its bound
       const onExchange: HTTPRequestListener = (request, response) => {
         inTurn({ request, response }, () => {
           serveExchange(request, response);

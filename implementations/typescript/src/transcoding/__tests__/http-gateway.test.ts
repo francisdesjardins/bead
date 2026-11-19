@@ -31,7 +31,14 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
-import { closingAnswerOf } from '../../transport/server/__tests__/http-transport-server-fixtures';
+import {
+  closingAnswerOf,
+  MOST_TAKEN,
+  rawSocketOn,
+  settled,
+  statusesOf,
+  takenUntilStalled,
+} from '../../transport/server/__tests__/http-transport-server-fixtures';
 import {
   GOOD_CREDENTIAL,
   type ITranscodingFixture,
@@ -72,6 +79,10 @@ interface IOwnCase {
 
 /** The origin of another site the gateways here name. */
 const ORIGIN = 'https://app.example';
+
+// the requests pipelined behind a call in one write: past one read of Node's, so that its socket's
+// read stops and resumes
+const PIPELINED = 6_000;
 
 // helpers
 
@@ -2284,31 +2295,30 @@ test('answers a Content-Length too large to count as its platform does, and clos
   ]);
 });
 
-// RFC 9112 §9.3
-test('bounds what it reads of requests pipelined behind a stream', async () => {
+// spec 15.12; RFC 9112 §9.3
+test('stops reading requests pipelined behind a stream, and keeps its socket', async () => {
   await using fixture = await startTranscoding();
   const own = `127.0.0.1:${String(fixture.port)}`;
-  // * a stream that never ends, then a thousand requests pipelined behind it, in one write
-  const socket = opened(
-    fixture.port,
-    `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n` +
-      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
+  const { read, socket } = await rawSocketOn(fixture.port);
+
+  // * a stream that never ends, then a thousand requests pipelined behind it at a time, until a
+  // write is not taken
+  socket.write(`GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n`);
+
+  const taken = await takenUntilStalled(
+    socket,
+    `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
   );
-  const chunks: Buffer[] = [];
-  let isClosed = false;
 
-  socket.on('data', (chunk: Buffer) => {
-    chunks.push(chunk);
-  });
-  socket.on('close', () => {
-    isClosed = true;
-  });
-  await until(() => {
-    return isClosed;
-  }, 5_000);
+  const stalledAt = taken.octets;
 
-  // its socket closed, none of them answered, and the gateway still serves
-  expect(Buffer.concat(chunks).toString('latin1')).not.toContain('A tale');
+  expect(stalledAt).toBeLessThan(MOST_TAKEN);
+
+  // its socket neither ended nor reset, nothing more taken of it, and the gateway still serves
+  await sleep(1_000);
+  await settled();
+
+  expect([read.isClosed, taken.octets]).toEqual([false, stalledAt]);
   expect(
     (
       await exchanged(
@@ -2317,6 +2327,142 @@ test('bounds what it reads of requests pipelined behind a stream', async () => {
       )
     ).status
   ).toBe(200);
+  socket.destroy();
+});
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.3
+test('answers every request pipelined behind a call in its turn once its timeout ends it, and keeps its socket', async () => {
+  await using fixture = await startTranscoding({ timeout: 500 });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const { read, socket } = await rawSocketOn(fixture.port);
+  const book = `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`;
+
+  // * a call that hangs, then 6,000 requests behind it in one write: past one read of Node's
+  socket.write(
+    `POST /api/Transcoding/hang HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+      `content-length: 2\r\n\r\n{}${book.repeat(PIPELINED)}`
+  );
+  await expect
+    .poll(
+      () => {
+        return statusesOf(read.text).length;
+      },
+      { timeout: 8_000 }
+    )
+    .toBe(PIPELINED + 1);
+
+  // the socket kept: one more answered on it
+  socket.write(book);
+  await expect
+    .poll(() => {
+      return statusesOf(read.text).length;
+    })
+    .toBe(PIPELINED + 2);
+
+  expect(statusesOf(read.text)).toEqual([
+    '504',
+    ...Array.from({ length: PIPELINED + 1 }, () => {
+      return '200';
+    }),
+  ]);
+  expect(read.isClosed).toBe(false);
+  socket.destroy();
+});
+
+// spec 15.12; transcoding 8.6, 8.7
+test('frees the place of a stream within two heartbeats once its client leaves with a request pipelined behind it', async () => {
+  await using fixture = await startTranscoding({ heartbeat: 250, maximumConnectionsPerAddress: 1 });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const watch = `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n`;
+  // the status a stream from the same address is answered, once its head came
+  const streamStatus = async (): Promise<string | undefined> => {
+    const socket = opened(fixture.port, watch);
+
+    try {
+      return statusesOf(await readUntil(socket, '\r\n\r\n'))[0];
+    } finally {
+      socket.destroy();
+    }
+  };
+
+  // * a stream, then a request pipelined behind it in the same write, then its client gone
+  const stream = opened(fixture.port, `${watch}GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`);
+
+  await readUntil(stream, '\r\n\r\n');
+  stream.destroy();
+
+  const closedAt = performance.now();
+  const within = 2 * 250 + 1_000;
+  let status = await streamStatus();
+
+  // its place freed as its exchange ends, which no event of this side tells: asked again until a
+  // stream is taken, never decided by a delay
+  while (status !== '200' && performance.now() - closedAt < within) {
+    status = await streamStatus();
+  }
+
+  expect(status).toBe('200');
+  expect(performance.now() - closedAt).toBeLessThan(within);
+});
+
+// spec 15.12; RFC 9112 §9.3
+test('answers every request pipelined behind a call on a mounted gateway in its turn, the application’s own among them', async () => {
+  await using fixture = await startTranscoding();
+  await using mounted = createHTTPGateway({
+    routes: HTTP_ROUTES,
+    timeout: 500,
+    transport: fixture.memory,
+  });
+  // * the application answers its own path 202, so that its answers and the gateway's alternate
+  const application = createNodeServer((request, response) => {
+    if (!mounted.listener(request, response)) {
+      response.writeHead(202, { 'content-length': '0' });
+      response.end();
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    application.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = application.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const own = `127.0.0.1:${String(port)}`;
+    const { read, socket } = await rawSocketOn(port);
+    const pair =
+      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n` +
+      `GET /own HTTP/1.1\r\nhost: ${own}\r\n\r\n`;
+
+    // a call that hangs, then 6,000 requests behind it in one write, the gateway's and the
+    // application's in turn
+    socket.write(
+      `POST /api/Transcoding/hang HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+        `content-length: 2\r\n\r\n{}${pair.repeat(PIPELINED / 2)}`
+    );
+    await expect
+      .poll(
+        () => {
+          return statusesOf(read.text).length;
+        },
+        { timeout: 8_000 }
+      )
+      .toBe(PIPELINED + 1);
+
+    expect(statusesOf(read.text)).toEqual([
+      '504',
+      ...Array.from({ length: PIPELINED }, (_, index) => {
+        return index % 2 === 0 ? '200' : '202';
+      }),
+    ]);
+    expect(read.isClosed).toBe(false);
+    socket.destroy();
+  } finally {
+    application.closeAllConnections();
+    await new Promise((resolve) => {
+      application.close(resolve);
+    });
+  }
 });
 
 // spec 15.12; transcoding 10.2; RFC 9112 §9.5

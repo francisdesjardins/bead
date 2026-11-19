@@ -8,7 +8,8 @@ import {
   createServer as createHTTP2Server,
 } from 'node:http2';
 import { request as requestHTTPS } from 'node:https';
-import { connect as connectTcp } from 'node:net';
+import { connect as connectTcp, type Socket } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { connect as connectTLS } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
@@ -78,6 +79,7 @@ import {
   envelopeOf,
   fieldsOf,
   host,
+  MOST_TAKEN,
   namesOf,
   post,
   preflightAnswerOf,
@@ -89,8 +91,11 @@ import {
   postHeadOf,
   rawSocketOn,
   refusalsOf,
+  settled,
   startScripted,
   startTransport,
+  statusesOf,
+  takenUntilStalled,
 } from './http-transport-server-fixtures';
 
 // helpers
@@ -1406,6 +1411,61 @@ test.describe('createHTTPTransportServer, over HTTP/2', () => {
   });
 });
 
+/** A listen on the connection of `connectionToken`, from its start, held `wait` milliseconds. */
+const listenOf = (connectionToken: string, wait: number): string => {
+  return (
+    `GET /bead HTTP/1.1\r\nHost: ${host}\r\n${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n` +
+    `${AFTER_HEADER}: 0\r\n${WAIT_HEADER}: ${String(wait)}\r\n\r\n`
+  );
+};
+
+// the requests pipelined behind a held listen, in one write: past one read of Node's, so that its
+// socket's read stops and resumes
+const PIPELINED = 6_000;
+
+/**
+ * Writes a listen held a second on `socket`, then {@link PIPELINED} requests behind it in one write,
+ * and checks each is answered in its turn once the listen ends, then one more on the same socket.
+ */
+const pipelinedBehindListen = async ({
+  connectionToken,
+  read,
+  socket,
+}: {
+  connectionToken: string;
+  read: { isClosed: boolean; text: string };
+  socket: Socket;
+}): Promise<void> => {
+  const other = `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`;
+
+  socket.write(`${listenOf(connectionToken, 1_000)}${other.repeat(PIPELINED)}`, 'latin1');
+  await expect
+    .poll(
+      () => {
+        return statusesOf(read.text).length;
+      },
+      { timeout: 8_000 }
+    )
+    .toBe(PIPELINED + 1);
+
+  // the socket kept: one more answered on it
+  socket.write(other, 'latin1');
+  await expect
+    .poll(() => {
+      return statusesOf(read.text).length;
+    })
+    .toBe(PIPELINED + 2);
+
+  expect(statusesOf(read.text)).toEqual([
+    '204',
+    ...Array.from({ length: PIPELINED + 1 }, () => {
+      return '404';
+    }),
+  ]);
+  expect(read.isClosed).toBe(false);
+  socket.destroy();
+};
+
 /** A `POST` over HTTP/1.1 and TLS, trusting the fixture's certificate alone: its status, head and body. */
 const postHTTPS = (
   port: number,
@@ -2549,29 +2609,120 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ]);
   });
 
-  // RFC 9112 §9.3
-  test('bounds what it reads of requests pipelined behind a held listen', async () => {
+  // spec 15.12; RFC 9112 §9.3
+  test('stops reading requests pipelined behind a held listen, and keeps its socket', async () => {
     await using started = await startTransport();
     const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
     const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
     const { read, socket } = await rawSocketOn(portOf(started.url));
 
-    // * a listen held 30 s, then a thousand requests pipelined behind it, in one write
+    // * a listen held 30 s, then a thousand requests pipelined behind it at a time, until a write is
+    // not taken
+    socket.write(listenOf(connectionToken, 30_000), 'latin1');
+
+    const taken = await takenUntilStalled(
+      socket,
+      `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000)
+    );
+
+    const stalledAt = taken.octets;
+
+    expect(stalledAt).toBeLessThan(MOST_TAKEN);
+
+    // its socket neither ended nor reset, nothing more taken of it, and the transport still serves
+    await sleep(1_000);
+    await settled();
+
+    expect([read.isClosed, taken.octets]).toEqual([false, stalledAt]);
+    expect((await post(started.url)).status).toBe(201);
+    socket.destroy();
+  });
+
+  // spec 15.12; RFC 9112 §9.3
+  test('answers every request pipelined behind a held listen in its turn once the listen ends, and keeps its socket', async () => {
+    await using started = await startTransport();
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    await pipelinedBehindListen({ connectionToken, read, socket });
+  });
+
+  // spec 15.12; RFC 9112 §9.3
+  test('answers every request pipelined behind a held listen over TLS in its turn once the listen ends', async () => {
+    await using started = await startSecure();
+    const drawn = await postHTTPS(started.port, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = String(drawn.headers[CONNECTION_TOKEN_HEADER] ?? '');
+    const socket = connectTLS({
+      ALPNProtocols: ['http/1.1'],
+      ca: TLS_FIXTURE.cert,
+      host,
+      port: started.port,
+      servername: 'localhost',
+    });
+    const read = { isClosed: false, text: '' };
+
+    socket.on('data', (chunk: Buffer) => {
+      read.text += chunk.toString('latin1');
+    });
+    socket.on('error', () => {});
+    socket.on('close', () => {
+      read.isClosed = true;
+    });
+    await once(socket, 'secureConnect');
+
+    // * Node's TLS socket reaches its parser by its `data` events, never consumed by it
+    await pipelinedBehindListen({ connectionToken, read, socket });
+  });
+
+  // spec 15.12; docs/support.md, Differences, platform row `What a server reads of an HTTP/1.1
+  // socket behind the answer under way, and when it sees its client leave`
+  test('resets a socket whose listen is held past headersTimeout with more requests pipelined behind it than it holds unserved, a head cut across its reads still timed', async () => {
+    const parsed = { count: 0 };
+
+    await using started = await startTransport({
+      createServer: (listener) => {
+        const server = createServer(listener);
+
+        server.on('request', () => {
+          parsed.count += 1;
+        });
+
+        return server;
+      },
+      headersTimeout: 1_000,
+    });
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+    const other = `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`;
+
+    parsed.count = 0;
+
+    // * a listen held 8 s and 40 requests behind it in one read, its socket's read stopped past 32,
+    // then the start of a head, which Node's parser holds; its end written once that read was
+    // parsed, and never read
     socket.write(
-      `GET /bead HTTP/1.1\r\nHost: ${host}\r\n${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n` +
-        `${AFTER_HEADER}: 0\r\n${WAIT_HEADER}: 30000\r\n\r\n` +
-        `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000),
+      `${listenOf(connectionToken, 8_000)}${other.repeat(40)}GET /other HTTP/1.1\r\n`,
       'latin1'
     );
     await expect
       .poll(() => {
-        return read.isClosed;
+        return parsed.count;
       })
-      .toBe(true);
+      .toBe(41);
+    socket.write(`Host: ${host}\r\n\r\n`, 'latin1');
 
-    // its socket closed, none of them answered, and the transport still serves
-    expect(read.text).not.toContain(' 404 ');
-    expect((await post(started.url)).status).toBe(201);
+    // Node's head timer, judged each second, ends the socket before the listen does
+    await expect
+      .poll(
+        () => {
+          return read.isClosed;
+        },
+        { timeout: 6_000 }
+      )
+      .toBe(true);
+    expect(statusesOf(read.text)).not.toContain('204');
   });
 
   // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3

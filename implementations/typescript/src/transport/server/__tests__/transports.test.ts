@@ -169,6 +169,8 @@ interface IMessage {
 interface IStep {
   advance?: number;
   after?: number;
+  /** Requests written in one write on the socket of the exchange named, behind what it carried. */
+  behind?: IRequest[];
   close?: true;
   expect?: IExpectation | IHeardExpectation;
   on?: string;
@@ -266,13 +268,18 @@ interface IBrokerWorld {
 }
 
 /** A response cut across reads, as every side's reader reads it. */
-interface IResponseCase {
+/** A response a reader reads: its status, its fields, and its body. */
+interface IResponseRead {
   body: string;
   fields: Record<string, string>;
-  name: string;
-  pieces: string[];
   status: number;
 }
+
+/** Responses in pieces, whatever reads they come in: one, or several on one socket, in order. */
+type IResponseCase = { name: string; pieces: string[] } & (
+  | IResponseRead
+  | { responses: IResponseRead[] }
+);
 
 /** What the server reported to its application, and the connection it came with. */
 interface IReport {
@@ -380,6 +387,7 @@ const BROKER_MODIFIERS: ReadonlySet<string> = new Set([
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
   'after',
+  'behind',
   'close',
   'expect',
   'on',
@@ -887,13 +895,15 @@ const expectResponse = async (
   const { orLost, told, ...expected } = expectation;
   const hasBody =
     expected.body !== undefined || expected.envelope !== undefined || expected.batch !== undefined;
-  const head = await cameOf(exchange.reader.head, {
+  // * the next response on its socket, in the order of the requests written on it
+  const reading = exchange.reader.next();
+  const head = await cameOf(reading.head, {
     timing,
     what: `${at}: the response's head`,
   }).catch((reason: unknown) => {
     // a cut that overtook the head, where the case allows it; a head that did not come in time, or
     // came unreadable, is no loss
-    if (orLost === true && exchange.reader.isLost) {
+    if (orLost === true && reading.isLost) {
       return undefined;
     }
 
@@ -905,7 +915,7 @@ const expectResponse = async (
   }
 
   const response = hasBody
-    ? await within(exchange.reader.response, {
+    ? await within(reading.response, {
         milliseconds: Math.max(0, (timing.within ?? PATIENCE) - sinceOf(timing.startedAt)),
         what: `${at}: the response`,
       })
@@ -1917,28 +1927,42 @@ test.describe('the transports', () => {
     expect(MAXIMUM_UNSENT_BYTES).toBe(TRANSPORTS.defaults['maximumUnsentBytes']);
   });
 
-  for (const { body, fields, name, pieces, status } of TRANSPORTS.responses) {
+  for (const entry of TRANSPORTS.responses) {
+    const { name, pieces } = entry;
+    // * one response, or several on one socket, each read whole after the one before
+    const expected = 'responses' in entry ? entry.responses : [entry];
+
     test(`reads ${name}, by its length or de-chunked, whatever reads it comes in`, async () => {
       const reader = createResponseReader();
+      const read: unknown[] = [];
 
       for (const piece of pieces) {
         reader.feed(fromHexadecimal(piece));
       }
 
-      const response = await within(reader.response, {
-        milliseconds: PATIENCE,
-        what: 'the response',
-      });
+      for (const { fields } of expected) {
+        const response = await within(reader.next().response, {
+          milliseconds: PATIENCE,
+          what: `response ${String(read.length + 1)}`,
+        });
 
-      expect({
-        body: hexadecimalOf(response.body),
-        fields: Object.fromEntries(
-          Object.keys(fields).map((field) => {
-            return [field, response.fields.get(field) ?? null];
-          })
-        ),
-        status: response.status,
-      }).toEqual({ body: canonicalOf(body), fields, status });
+        read.push({
+          body: hexadecimalOf(response.body),
+          fields: Object.fromEntries(
+            Object.keys(fields).map((field) => {
+              return [field, response.fields.get(field) ?? null];
+            })
+          ),
+          status: response.status,
+        });
+      }
+
+      expect(read).toEqual(
+        expected.map(({ body, fields, status }) => {
+          return { body: canonicalOf(body), fields, status };
+        })
+      );
+      expect(reader.unread, 'the octets past the responses').toBe(0);
     });
   }
 
@@ -2034,8 +2058,19 @@ test.describe('the transports', () => {
             `${at}: the acts it holds`
           ).toHaveLength(1);
 
-          if (step.send !== undefined || step.close === true) {
+          if (step.send !== undefined || step.behind !== undefined || step.close === true) {
             expectNothingReported(`before ${at}`);
+          }
+
+          // * never awaited: the next step starts as it is written, whatever its socket took
+          if (step.behind !== undefined) {
+            exchangeOf(step.on, at).write(
+              Buffer.concat(
+                step.behind.map((request) => {
+                  return requestOf(request, values);
+                })
+              )
+            );
           }
 
           if (step.send !== undefined && 'head' in step.send) {
@@ -2059,6 +2094,14 @@ test.describe('the transports', () => {
             );
           } else if (step.expect !== undefined) {
             await expectHeard({ at, exchange: exchangeOf(step.on, at), timing }, step.expect);
+
+            // an end over HTTP reads that nothing came past the responses read
+            if ('end' in step.expect) {
+              expect(
+                exchangeOf(step.on, at).reader.unread,
+                `${at}: the octets past the responses`
+              ).toBe(0);
+            }
           }
 
           if (step.until !== undefined && 'timer' in step.until) {

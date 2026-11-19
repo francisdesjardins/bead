@@ -1902,7 +1902,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         return false;
       }
 
-      // ! over HTTP/1, in its socket's turn, and none behind an answer that closes its connection
+      // ! over HTTP/1, in its socket's turn, none behind an answer that closes its connection, and
+      // its socket read no further than its bound
       inTurn({ request, response }, () => {
         try {
           judge({ request, response }, { isDocument, matching, methods, path, target });
