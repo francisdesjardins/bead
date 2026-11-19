@@ -4289,6 +4289,34 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal([101, 431, 414, 101, 431], answers);
     }
 
+    // spec 15.2, 15.12; RFC 9110 §8.6
+    [Fact]
+    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        var answers = new List<(int Status, string? Refusal)>();
+
+        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade, each read to its socket's close
+        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        {
+            var (status, fields, _) = await AnswerOf(Latin1HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"));
+
+            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+        }
+
+        // and 2⁶³ and 2⁶⁴ under a host it does not take
+        foreach (var length in new[] { "9223372036854775808", "18446744073709551616" })
+        {
+            var (status, fields, _) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", $"Content-Length: {length}"));
+
+            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+        }
+
+        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before anything is judged
+        Assert.Equal([(400, null), (400, null), (400, null), (400, null), (400, null), (400, null)], answers);
+    }
+
     [Fact]
     public async Task Refuses_400_a_head_HTTP_does_not_read_a_control_character_in_its_target_or_a_value_among_it_and_a_version_but_1_x_505()
     {

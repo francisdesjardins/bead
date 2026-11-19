@@ -47,7 +47,6 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
-  isTransferEncodingFramed,
   type IRequestTarget,
   isVisibleTarget,
   ownAuthorityOf,
@@ -66,6 +65,7 @@ import {
   headerOf,
   type IExchangeIn,
   inTurn,
+  isTransferEncodingTaken,
   isUnencoded,
   joinedOf,
   keptAliveOf,
@@ -1758,13 +1758,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     };
     writerOf(response);
 
-    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a #
-    // anywhere in its target, or a Transfer-Encoding section 15.12 refuses, one over HTTP/1.0 among
-    // it, which Node hands on and the refusal's connection: close closes behind (RFC 9112 §6.1)
+    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a # in its
+    // target, or a Transfer-Encoding 15.12 refuses, which Node hands on over HTTP/1.0 or under
+    // `insecureHTTPParser`, its refusal closing its connection (RFC 9112 §6.1)
     const named =
       hasVisibleFields(request.rawHeaders) &&
       isVisibleTarget(request.url) &&
-      isTransferEncodingFramed(request.httpVersion, linesOf(request, 'transfer-encoding'))
+      isTransferEncodingTaken(request)
         ? authorityNamedBy(request)
         : undefined;
 

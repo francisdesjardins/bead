@@ -73,6 +73,7 @@ import {
   PAGE,
   batchOf,
   bytesOf,
+  closingAnswerOf,
   connect,
   envelopeOf,
   fieldsOf,
@@ -2316,6 +2317,50 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(started.server.clients).toHaveLength(1);
   });
 
+  // spec 15.12; RFC 9112 §6.1
+  test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a server whose parser is insecureHTTPParser’s, in either order, and closes its connection before a request smuggled behind it is read', async () => {
+    await using started = await startTransport({
+      createServer: (listener) => {
+        return createServer({ insecureHTTPParser: true }, listener);
+      },
+    });
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect behind the chunked body, which the Content-Length covers and the
+    // Transfer-Encoding leaves to be read as the next request (RFC 9112 §11.2)
+    const smuggled = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+    const body = `${cancel.length.toString(16)}\r\n${cancel}\r\n0\r\n\r\n${smuggled}`;
+    const length = `Content-Length: ${String(body.length)}`;
+
+    for (const framing of [
+      `Transfer-Encoding: chunked\r\n${length}`,
+      `${length}\r\nTransfer-Encoding: chunked`,
+    ]) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n${framing}\r\n\r\n${body}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked, which closes its connection
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the smuggled connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
   // spec 15.12
   test('refuses 400 unmarked an HTTP/1.0 request carrying a Transfer-Encoding under keep-alive, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
     await using started = await startTransport();
@@ -2471,6 +2516,62 @@ test.describe('createHTTPTransportServer, its edges', () => {
     // the refusal, then the connect it drew
     expect(read.text).toMatch(/^HTTP\/1\.1 404 [^]*HTTP\/1\.1 201 /u);
     expect(started.server.clients).toHaveLength(1);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+    await using started = await startTransport();
+    const answers: unknown[] = [];
+
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
+    for (const length of [
+      '9223372036854775808',
+      '18446744073709551614',
+      '18446744073709551615',
+      '18446744073709551616',
+    ]) {
+      answers.push(
+        await closingAnswerOf(
+          portOf(started.url),
+          `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+            `Content-Length: ${length}\r\n\r\n`
+        )
+      );
+    }
+
+    // Node's parser counts to 2⁶⁴ − 1: a connect that declares a body is malformed, and past it Node
+    // answers its own 400
+    expect(answers).toEqual([
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, 'malformed'],
+      [400, null],
+    ]);
+  });
+
+  // RFC 9112 §9.3
+  test('bounds what it reads of requests pipelined behind a held listen', async () => {
+    await using started = await startTransport();
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    // * a listen held 30 s, then a thousand requests pipelined behind it, in one write
+    socket.write(
+      `GET /bead HTTP/1.1\r\nHost: ${host}\r\n${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n` +
+        `${AFTER_HEADER}: 0\r\n${WAIT_HEADER}: 30000\r\n\r\n` +
+        `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000),
+      'latin1'
+    );
+    await expect
+      .poll(() => {
+        return read.isClosed;
+      })
+      .toBe(true);
+
+    // its socket closed, none of them answered, and the transport still serves
+    expect(read.text).not.toContain(' 404 ');
+    expect((await post(started.url)).status).toBe(201);
   });
 
   // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3

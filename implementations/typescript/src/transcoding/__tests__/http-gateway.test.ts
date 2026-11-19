@@ -31,6 +31,7 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
+import { closingAnswerOf } from '../../transport/server/__tests__/http-transport-server-fixtures';
 import {
   GOOD_CREDENTIAL,
   type ITranscodingFixture,
@@ -2059,6 +2060,47 @@ test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding, in eithe
   }
 });
 
+// spec 15.12; transcoding 10.1; RFC 9112 §6.1
+test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a server whose parser is insecureHTTPParser’s, in either order, and closes its connection before a request smuggled behind it is read', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer({ insecureHTTPParser: true }, listener);
+    },
+  });
+  const { port } = fixture;
+  // * a GET behind the chunked body, which the Content-Length covers and the Transfer-Encoding
+  // leaves to be read as the next request (RFC 9112 §11.2)
+  const body = `2\r\n{}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`;
+  const length = `content-length: ${String(body.length)}`;
+
+  for (const framing of [
+    `transfer-encoding: chunked\r\n${length}`,
+    `${length}\r\ntransfer-encoding: chunked`,
+  ]) {
+    const socket = opened(
+      port,
+      `POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n` +
+        `content-type: application/json\r\n${framing}\r\n\r\n${body}`
+    );
+    const chunks: Buffer[] = [];
+
+    socket.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    await new Promise((resolve) => {
+      socket.on('close', resolve);
+    });
+
+    // one answer, unmarked, its connection closed behind it
+    const came = Buffer.concat(chunks).toString('latin1');
+
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+});
+
 // what a gateway answers each request, written on a socket of its own with a GET pipelined behind
 // its chunked body: everything that came, to the socket's close, and the Bead connections drawn
 const pipelinedOn = async (
@@ -2209,6 +2251,72 @@ test('serves a request pipelined behind an answer that keeps its connection, in 
   // the book, twice, each kept alive
   expect(received()).toMatch(/^HTTP\/1\.1 200 [^]*HTTP\/1\.1 200 /u);
   expect(received().toLowerCase()).not.toContain('connection: close');
+});
+
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const answers: unknown[] = [];
+
+  // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route
+  for (const length of [
+    '9223372036854775808',
+    '18446744073709551614',
+    '18446744073709551615',
+    '18446744073709551616',
+  ]) {
+    answers.push(
+      await closingAnswerOf(
+        fixture.port,
+        `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+          `content-length: ${length}\r\n\r\n`
+      )
+    );
+  }
+
+  // Node's parser counts to 2⁶⁴ − 1: a body past maximumBodyBytes, and past it Node answers its own 400
+  expect(answers).toEqual([
+    [413, 'too-large'],
+    [413, 'too-large'],
+    [413, 'too-large'],
+    [400, null],
+  ]);
+});
+
+// RFC 9112 §9.3
+test('bounds what it reads of requests pipelined behind a stream', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // * a stream that never ends, then a thousand requests pipelined behind it, in one write
+  const socket = opened(
+    fixture.port,
+    `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n` +
+      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
+  );
+  const chunks: Buffer[] = [];
+  let isClosed = false;
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  socket.on('close', () => {
+    isClosed = true;
+  });
+  await until(() => {
+    return isClosed;
+  }, 5_000);
+
+  // its socket closed, none of them answered, and the gateway still serves
+  expect(Buffer.concat(chunks).toString('latin1')).not.toContain('A tale');
+  expect(
+    (
+      await exchanged(
+        fixture.port,
+        `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\nconnection: close\r\n\r\n`
+      )
+    ).status
+  ).toBe(200);
 });
 
 // spec 15.12; transcoding 10.2; RFC 9112 §9.5

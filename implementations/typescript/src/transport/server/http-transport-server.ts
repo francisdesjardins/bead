@@ -32,7 +32,6 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
-  isTransferEncodingFramed,
   isVisibleTarget,
   originOf,
   ownAuthorityOf,
@@ -76,6 +75,7 @@ import {
   type IExchangeIn,
   inTurn,
   isBeadBody,
+  isTransferEncodingTaken,
   joinedOf,
   linesOf,
   listeningOf,
@@ -1030,8 +1030,9 @@ export const createHTTPTransportServer = (
         if (
           !hasVisibleFields(request.rawHeaders) ||
           !isVisibleTarget(request.url) ||
-          // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0
-          !isTransferEncodingFramed(request.httpVersion, linesOf(request, 'transfer-encoding'))
+          // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0, or one
+          // beside a Content-Length, which it hands on under `insecureHTTPParser`
+          !isTransferEncodingTaken(request)
         ) {
           return (refuseMalformed(exchange), undefined);
         }

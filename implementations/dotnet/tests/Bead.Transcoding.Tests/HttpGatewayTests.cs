@@ -200,6 +200,10 @@ public sealed class HttpGatewayTests
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // what a server that stops reading takes at most of what one socket pipelines: its platform's
+    // buffers and the loopback's are far below it
+    private const long MostTaken = 64L * 1024 * 1024;
+
     private static CancellationToken Cancelled
     {
         get
@@ -2053,6 +2057,62 @@ public sealed class HttpGatewayTests
                 return answer[..3];
             }));
             Assert.DoesNotContain("connection: close", came.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1; RFC 9110 §8.6
+    [Fact]
+    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    {
+        var started = await Started();
+
+        try
+        {
+            var answers = new List<(int Status, string? Refusal)>();
+
+            // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
+            foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+            {
+                var (status, fields, _) = await Exchanged(started.Port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: {length}\r\n\r\n"));
+
+                answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+            }
+
+            // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
+            Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // RFC 9112 §9.3
+    [Fact]
+    public async Task Bounds_what_it_reads_of_requests_pipelined_behind_a_stream()
+    {
+        // ! a stream's heartbeat finds its client gone: Kestrel, which stopped reading, never reads
+        // its close, and the gateway's stop would wait on the stream
+        var started = await Started((options) =>
+        {
+            return options with { Heartbeat = TimeSpan.FromMilliseconds(100) };
+        });
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            // * a stream that never ends, then requests pipelined behind it, a thousand a send
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes($"GET /v1/watch HTTP/1.1\r\nhost: {own}\r\naccept: text/event-stream\r\n\r\n"));
+            var taken = await Taken(socket, Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n", 1_000))));
+
+            // what it took bounded, and the gateway still serves
+            Assert.True(taken < MostTaken, $"{taken} octets taken");
+            Assert.Equal(200, (await Exchanged(started.Port, Encoding.ASCII.GetBytes($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\nconnection: close\r\n\r\n"))).Status);
         }
         finally
         {
@@ -4123,6 +4183,29 @@ public sealed class HttpGatewayTests
         }
 
         return Encoding.UTF8.GetString([.. came]);
+    }
+
+    // the octets `socket` takes of `batch`, sent again and again until a send waits a second or
+    // fails, or MostTaken went
+    private static async Task<long> Taken(Socket socket, byte[] batch)
+    {
+        var taken = 0L;
+
+        while (taken < MostTaken)
+        {
+            try
+            {
+                await socket.SendAsync(batch, Cancelled).AsTask().WaitAsync(TimeSpan.FromSeconds(1), Cancelled);
+            }
+            catch (Exception error) when (error is TimeoutException or SocketException)
+            {
+                break;
+            }
+
+            taken += batch.Length;
+        }
+
+        return taken;
     }
 
     // a request's head and a part of its body written on a socket of its own, that part sent again

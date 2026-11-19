@@ -124,6 +124,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP's own 400 among them. Node's parser hands such a request on, and the transport drew its
   connection or the gateway served its route, its answer never written. Over HTTP/1, each now serves
   a request once Node gives its answer the socket, the answers before it ended.
+- The TypeScript HTTP transport and gateway destroy a socket that holds more than 32 requests
+  unserved, pipelined behind an answer under way or behind one that closes its connection. Node's
+  parser reads on while those answers write nothing, so one socket, unauthenticated, behind a held
+  listen or a stream, queued requests until the process ran out of heap; the C# and Rust sides stop
+  reading such a connection, and a twin on every side holds the bound.
+- The TypeScript HTTP transport and gateway refuse 400 unmarked, and close, a request that carries a
+  `Content-Length` beside a `Transfer-Encoding` on a server built with `insecureHTTPParser` or a
+  process run with `--insecure-http-parser`. Node's parser hands such a request on, and they served
+  it by its `Transfer-Encoding` and kept its connection, so a request smuggled behind its chunked
+  body was served too (RFC 9112 §6.1); they refuse it themselves, as their WebSocket judgement does.
 - The C# gateway closes, in stages, the connection of a refusal of its own of a request that
   declares a body: it kept it, and Kestrel read the refused body on with no bound, a declared 413's
   among it, then reset the connection 6 to 7 seconds later, no `connection: close` telling its
