@@ -125,7 +125,9 @@ internal static class HappyEyeballs
             return last;
         }
 
-        return new SocketException(platform.ErrorCode, $"{platform.Message}; {host} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked");
+        // ! the constructor takes a SocketError: ErrorCode is the platform's own errno off Windows (111
+        // for a refusal on Linux), which it would read as another
+        return new SocketException((int)platform.SocketErrorCode, $"{platform.Message}; {host} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked");
     }
 
     // definition
