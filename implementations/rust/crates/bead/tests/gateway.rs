@@ -5081,9 +5081,10 @@ async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_cl
     let port = fixture.port;
     let mut answers = Vec::new();
 
-    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
     for length in [
         "9223372036854775808",
+        "18446744073709551614",
         "18446744073709551615",
         "18446744073709551616",
     ] {
@@ -5116,6 +5117,7 @@ async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_cl
         answers,
         [
             ("413".to_owned(), true),
+            ("431".to_owned(), false),
             ("431".to_owned(), false),
             ("400".to_owned(), false),
         ]

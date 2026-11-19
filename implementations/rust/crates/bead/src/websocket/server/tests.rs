@@ -4690,33 +4690,54 @@ async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_cl
  {
     let (server, _, port) = started(&judging(&["bead.test"], &[])).await;
     let mut answers = Vec::new();
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade; then 2⁶³ and 2⁶⁴ under a host it does not take
+    let requests = [
+        ("bead.test", "9223372036854775808"),
+        ("bead.test", "18446744073709551614"),
+        ("bead.test", "18446744073709551615"),
+        ("bead.test", "18446744073709551616"),
+        ("elsewhere.test", "9223372036854775808"),
+        ("elsewhere.test", "18446744073709551616"),
+    ];
 
-    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
-    for length in [
-        "9223372036854775808",
-        "18446744073709551615",
-        "18446744073709551616",
-    ] {
+    for (host, length) in requests {
         let (answer, closed) = answer_of(
             port,
-            &request_of("GET / HTTP/1.1", &[&format!("Content-Length: {length}")]),
+            &request_of(
+                "GET / HTTP/1.1",
+                &[
+                    &format!("Host: {host}"),
+                    &format!("Content-Length: {length}"),
+                ],
+            ),
         )
         .await;
+        let refusal = answer
+            .split("\r\n")
+            .find_map(|line| line.strip_prefix("bead-refusal: "))
+            .map(str::to_owned);
 
         answers.push((
             answer.get(9..12).unwrap_or_default().to_owned(),
-            answer.contains("bead-refusal: malformed\r\n"),
+            refusal,
             closed,
         ));
     }
 
-    // the judgement reads the head itself and counts no length: content declared, malformed
+    // the judgement reads the head itself and counts no length: content declared, malformed, after
+    // its host
+    let malformed = ("400".to_owned(), Some("malformed".to_owned()), true);
+    let host_refused = ("403".to_owned(), Some("host-refused".to_owned()), true);
+
     assert_eq!(
         answers,
         [
-            ("400".to_owned(), true, true),
-            ("400".to_owned(), true, true),
-            ("400".to_owned(), true, true),
+            malformed.clone(),
+            malformed.clone(),
+            malformed.clone(),
+            malformed,
+            host_refused.clone(),
+            host_refused,
         ]
     );
     stopped(&server).await;

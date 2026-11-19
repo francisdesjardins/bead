@@ -2523,8 +2523,13 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await using started = await startTransport();
     const answers: unknown[] = [];
 
-    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-    for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
+    for (const length of [
+      '9223372036854775808',
+      '18446744073709551614',
+      '18446744073709551615',
+      '18446744073709551616',
+    ]) {
       answers.push(
         await closingAnswerOf(
           portOf(started.url),
@@ -2537,6 +2542,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     // Node's parser counts to 2⁶⁴ − 1: a connect that declares a body is malformed, and past it Node
     // answers its own 400
     expect(answers).toEqual([
+      [400, 'malformed'],
       [400, 'malformed'],
       [400, 'malformed'],
       [400, null],

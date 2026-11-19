@@ -2259,8 +2259,13 @@ test('answers a Content-Length too large to count as its platform does, and clos
   const own = `127.0.0.1:${String(fixture.port)}`;
   const answers: unknown[] = [];
 
-  // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a route
-  for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+  // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route
+  for (const length of [
+    '9223372036854775808',
+    '18446744073709551614',
+    '18446744073709551615',
+    '18446744073709551616',
+  ]) {
     answers.push(
       await closingAnswerOf(
         fixture.port,
@@ -2272,6 +2277,7 @@ test('answers a Content-Length too large to count as its platform does, and clos
 
   // Node's parser counts to 2⁶⁴ − 1: a body past maximumBodyBytes, and past it Node answers its own 400
   expect(answers).toEqual([
+    [413, 'too-large'],
     [413, 'too-large'],
     [413, 'too-large'],
     [400, null],

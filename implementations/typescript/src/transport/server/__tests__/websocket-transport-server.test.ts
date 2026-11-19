@@ -4200,8 +4200,13 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const answers: unknown[] = [];
 
-    // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
-    for (const length of ['9223372036854775808', '18446744073709551615', '18446744073709551616']) {
+    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
+    for (const length of [
+      '9223372036854775808',
+      '18446744073709551614',
+      '18446744073709551615',
+      '18446744073709551616',
+    ]) {
       answers.push(
         await closingAnswerOf(
           started.port,
@@ -4210,11 +4215,24 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
       );
     }
 
-    // Node's parser counts to 2⁶⁴ − 1: an upgrade that declares content is malformed, and past it Node
-    // answers its own 400
+    // and 2⁶³ and 2⁶⁴ under a host it does not take
+    for (const length of ['9223372036854775808', '18446744073709551616']) {
+      answers.push(
+        await closingAnswerOf(
+          started.port,
+          requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', `Content-Length: ${length}`])
+        )
+      );
+    }
+
+    // Node's parser counts to 2⁶⁴ − 1: an upgrade that declares content is malformed, after its
+    // host, and past it Node answers its own 400 before anything is judged
     expect(answers).toEqual([
       [400, 'malformed'],
       [400, 'malformed'],
+      [400, 'malformed'],
+      [400, null],
+      [403, 'host-refused'],
       [400, null],
     ]);
   });

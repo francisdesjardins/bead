@@ -2074,8 +2074,8 @@ public sealed class HttpGatewayTests
         {
             var answers = new List<(int Status, string? Refusal)>();
 
-            // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
-            foreach (var length in new[] { "9223372036854775808", "18446744073709551615", "18446744073709551616" })
+            // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
+            foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
             {
                 var (status, fields, _) = await Exchanged(started.Port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: {length}\r\n\r\n"));
 
@@ -2083,7 +2083,7 @@ public sealed class HttpGatewayTests
             }
 
             // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
-            Assert.Equal([(400, null), (400, null), (400, null)], answers);
+            Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
         }
         finally
         {

@@ -1939,8 +1939,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         var answers = new List<(int Status, string? Refusal)>();
 
-        // 2⁶³, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551615", "18446744073709551616" })
+        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
+        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
         {
             using var wire = await Wire.Open(_port);
 
@@ -1953,7 +1953,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         }
 
         // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
-        Assert.Equal([(400, null), (400, null), (400, null)], answers);
+        Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
     }
 
     // RFC 9112 §9.3
