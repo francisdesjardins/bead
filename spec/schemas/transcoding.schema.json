@@ -284,7 +284,7 @@
             "challenge": { "type": "string", "minLength": 1 },
             "pointer": { "$ref": "#/$defs/pointer" },
             "parameter": { "$ref": "#/$defs/parameter" },
-            "own": { "enum": ["timeout", "closed", "unwritable", "jwt", "scheme", "failed"] }
+            "own": { "enum": ["timeout", "closed", "unwritable", "jwt", "failed"] }
           },
           "not": { "required": ["pointer", "parameter"] }
         },

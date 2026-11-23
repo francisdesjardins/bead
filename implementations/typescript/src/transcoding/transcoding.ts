@@ -39,7 +39,6 @@ export type {
   Arose,
   Encoding,
   ICallFailure,
-  IOwnProblemOptions,
   IProblem,
   IProblemOptions,
   IProblemRoute,

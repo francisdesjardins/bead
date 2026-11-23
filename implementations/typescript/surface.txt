@@ -898,7 +898,6 @@
   IJsonForm	src/transcoding/json-form.ts
   IJsonPlace	src/transcoding/json-form.ts
   IJsonToken	src/transcoding/json-form.ts
-  IOwnProblemOptions	src/transcoding/problems.ts
   IProblem	src/transcoding/problems.ts
   IProblemOptions	src/transcoding/problems.ts
   IProblemRoute	src/transcoding/problems.ts
@@ -2899,9 +2898,6 @@ src/transcoding/problems.ts ICallFailure
     readonly encoding?: Encoding | undefined
     readonly place?: RequestPlace | undefined
     readonly scope: 'application' | 'protocol'
-src/transcoding/problems.ts IOwnProblemOptions
-  interface IOwnProblemOptions
-    readonly challenge?: string | undefined
 src/transcoding/problems.ts IProblem
   interface IProblem
     readonly body: string
@@ -2919,7 +2915,7 @@ src/transcoding/problems.ts IProblemRoute
     readonly request: DescMessage
     readonly variables: readonly string[]
 src/transcoding/problems.ts OwnFailure
-  type OwnFailure = 'closed' | 'failed' | 'jwt' | 'scheme' | 'timeout' | 'unwritable'
+  type OwnFailure = 'closed' | 'failed' | 'jwt' | 'timeout' | 'unwritable'
 src/transcoding/problems.ts PROBLEM_MEDIA_TYPE
   const PROBLEM_MEDIA_TYPE: "application/problem+json"
 src/transcoding/problems.ts PROTOCOL_TYPES
@@ -2929,7 +2925,7 @@ src/transcoding/problems.ts STATUS_PHRASES
 src/transcoding/problems.ts problemOfFailure
   const problemOfFailure(failure: ICallFailure, options: IProblemOptions = {}): IProblem
 src/transcoding/problems.ts problemOfOwn
-  const problemOfOwn(own: OwnFailure, detail: string, {challenge = DEFAULT_CHALLENGE}: IOwnProblemOptions = {}): IProblem
+  const problemOfOwn(own: OwnFailure, detail: string): IProblem
 src/transcoding/problems.ts problemOfRefusal
   const problemOfRefusal(status: number, detail: string): IProblem
 src/transcoding/routes.ts GENERATED_CODE_SUPPORTS_VERSION_5

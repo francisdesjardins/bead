@@ -67,9 +67,9 @@ use crate::transcoding::events::{
 };
 use crate::transcoding::form::{JsonFormError, MessageFormError, RequestPlace};
 use crate::transcoding::problems::{
-    Arose, CallFailure, Encoding, OwnFailure, OwnProblemOptions, PROBLEM_MEDIA_TYPE, Problem,
-    ProblemField, ProblemOptions, ProblemRoute, problem_of_failure, problem_of_own,
-    problem_of_refusal,
+    Arose, CallFailure, DEFAULT_CHALLENGE, Encoding, OwnFailure, PROBLEM_MEDIA_TYPE, Problem,
+    ProblemField, ProblemOptions, ProblemRoute, auth_scheme_of, challenge_of, problem_of_failure,
+    problem_of_own, problem_of_refusal,
 };
 use crate::transcoding::routes::{HttpMethod, HttpPayload, HttpRoute, HttpRouteTemplate};
 use crate::transcoding::templates::{
@@ -101,6 +101,9 @@ pub const MAXIMUM_EXCHANGES_PER_ADDRESS: u64 = 256;
 // a `JWT` the request's header holds at most, past its fixed part and its block's head (spec 4.4)
 const JWT_BYTES: usize = 1_004;
 
+// the words of a `Bearer` followed by neither a space nor its end, refused at step 9 (7.7)
+const BEARER_MALFORMED: &str = "Bearer followed by neither a space nor the field's end";
+
 // the methods in the order an `allow` names them (transcoding 3.10)
 const METHOD_ORDER: [&str; 6] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 
@@ -118,7 +121,8 @@ pub enum GatewayAuthorization {
     /// The field whole, `ELSEWHERE`.
     #[default]
     Elsewhere,
-    /// A `Bearer` token, as a `JWT` in the request's `CREDENTIAL` block.
+    /// A `Bearer` token, as a `JWT` in the request's `CREDENTIAL` block; another auth-scheme or
+    /// `Bearer` alone presenting none.
     BearerJwt,
 }
 
@@ -789,20 +793,52 @@ fn matches_tag(fields: &Fields<'_>, etag: &str) -> bool {
         })
 }
 
-// a `Bearer` token of an `authorization`'s value, as RFC 6750 §2.1 writes it: `"Bearer" 1*SP
-// b64token`, spaces alone between the two, so a tab after them is no separator; the token as it
-// stands after them
-fn bearer_of(value: &str) -> Option<&str> {
-    let scheme = value.get(..6)?;
-    let rest = value.get(6..)?;
+// what an `authorization`'s value presents under `bearer-jwt` (2.4)
+enum Bearer<'a> {
+    // `Bearer`, one or more spaces, then its token as it stands
+    Token(&'a str),
+    // `Bearer` alone, another auth-scheme or none: no credential, as an empty field
+    Absent,
+    // `Bearer` followed by neither a space nor its end: refused 400 at 10.1's step 9
+    Malformed,
+}
 
-    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with(' ') {
-        return None;
+// what an `authorization`'s value presents under `bearer-jwt`: its auth-scheme its first token, as
+// RFC 9110 §11.1 reads one, compared without regard to case; `Bearer` then `1*SP` and its token,
+// spaces alone between the two, as RFC 9110 §11.4 writes a credential; the token as it stands, a
+// `token68` or not, its server's to judge (13.8)
+fn bearer_of(value: &str) -> Bearer<'_> {
+    let scheme = auth_scheme_of(value);
+
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return Bearer::Absent;
+    }
+
+    let rest = value.get(scheme.len()..).unwrap_or("");
+
+    if rest.is_empty() {
+        return Bearer::Absent;
+    }
+
+    if !rest.starts_with(' ') {
+        return Bearer::Malformed;
     }
 
     let token = rest.trim_start_matches(' ');
 
-    (!token.is_empty() && !token.starts_with('\t')).then_some(token)
+    if token.is_empty() {
+        Bearer::Absent
+    } else {
+        Bearer::Token(token)
+    }
+}
+
+// whether a credential that came is of its challenge's auth-scheme, each read as 2.4 reads one, so
+// its 401 tells `invalid_token` (7.6.8)
+fn is_of_challenge(value: &str, challenge: &str) -> bool {
+    let scheme = auth_scheme_of(value);
+
+    !scheme.is_empty() && scheme.eq_ignore_ascii_case(auth_scheme_of(challenge))
 }
 
 // ── An exchange ───────────────────────────────────────────────────────────────────────────────
@@ -877,6 +913,14 @@ impl Refusal {
         self.fields.push(ProblemField {
             name: "retry-after",
             value: "1".to_owned(),
+        });
+        self
+    }
+
+    fn challenged(mut self, value: String) -> Self {
+        self.fields.push(ProblemField {
+            name: "www-authenticate",
+            value,
         });
         self
     }
@@ -1224,14 +1268,12 @@ impl Inner {
         self.answer_problem((exchange, problem), Some(refusal.reason));
     }
 
-    fn own_problem(&self, own: OwnFailure, detail: &str) -> Problem {
-        problem_of_own(
-            own,
-            detail,
-            &OwnProblemOptions {
-                challenge: self.settings.challenge.clone(),
-            },
-        )
+    // the challenge a 401 carries, `Bearer` where it is given none (7.6.8)
+    fn challenge(&self) -> &str {
+        self.settings
+            .challenge
+            .as_deref()
+            .unwrap_or(DEFAULT_CHALLENGE)
     }
 
     // ── The gates ─────────────────────────────────────────────────────────────────────────────
@@ -1636,25 +1678,28 @@ impl Inner {
             return Ok(Some(RequestCredential::Elsewhere(value.to_owned())));
         }
 
-        let Some(token) = bearer_of(value) else {
-            return Err(self.own_problem(OwnFailure::Scheme, "an auth-scheme but Bearer"));
+        // ! a `Bearer` followed by neither a space nor its end was refused at step 9, before its
+        // body
+        let Bearer::Token(token) = bearer_of(value) else {
+            return Ok(None);
         };
 
         if token.len() > JWT_BYTES {
-            return Err(
-                self.own_problem(OwnFailure::Jwt, &format!("a token past {JWT_BYTES} bytes"))
-            );
+            return Err(problem_of_own(
+                OwnFailure::Jwt,
+                &format!("a token past {JWT_BYTES} bytes"),
+            ));
         }
 
         Ok(Some(RequestCredential::Jwt(token.to_owned())))
     }
 
-    // the taken body's answer (7.6.27): a failure of its own, its words reported, never in its
+    // the taken body's answer (7.6.26): a failure of its own, its words reported, never in its
     // problem; over HTTP/1 its connection closed, since what is left of the body is never read
     fn refuse_taken(&self, exchange: &Exchange) {
         self.report_words("a body read before the gateway took its request");
         exchange.is_body_read.store(false, Ordering::SeqCst);
-        self.answer_problem((exchange, self.own_problem(OwnFailure::Failed, "")), None);
+        self.answer_problem((exchange, problem_of_own(OwnFailure::Failed, "")), None);
     }
 
     // serves an exchange its routes take, past the gates of 10.1's steps 8 to 11
@@ -1722,11 +1767,31 @@ impl Inner {
             );
         }
 
-        // 9: its fields and its bounds
-        if fields.lines_of("authorization").len() > 1 {
+        // 9: its fields and its bounds; under `bearer-jwt`, two fields or a malformed `Bearer`
+        // told `invalid_request` (RFC 6750 §3.1)
+        let authorizations = fields.lines_of("authorization");
+        let is_bearer_jwt = self.settings.authorization == GatewayAuthorization::BearerJwt;
+        let refused = if authorizations.len() > 1 {
+            Some("two authorization fields")
+        } else if is_bearer_jwt
+            && credential_of(&authorizations)
+                .is_some_and(|value| matches!(bearer_of(value), Bearer::Malformed))
+        {
+            Some(BEARER_MALFORMED)
+        } else {
+            None
+        };
+
+        if let Some(words) = refused {
+            let refusal = Refusal::of(400, (HTTP_REFUSALS.malformed, words));
+
             return self.refuse(
                 &exchange,
-                Refusal::of(400, (HTTP_REFUSALS.malformed, "two authorization fields")),
+                if is_bearer_jwt {
+                    refusal.challenged(challenge_of(self.challenge(), "invalid_request"))
+                } else {
+                    refusal
+                },
             );
         }
 
@@ -1805,12 +1870,12 @@ impl Inner {
 
         exchange.is_body_read.store(true, Ordering::SeqCst);
 
+        // 11: its credential, then its binding and its reading
         let credential = match self.credential_from(&fields) {
             Ok(credential) => credential,
             Err(problem) => return self.answer_problem((&exchange, problem), None),
         };
 
-        // 11: its binding and its reading
         let payload = match bound_of(served, (&path, (query.as_deref(), read.as_ref()))) {
             Ok(payload) => payload,
             Err(MessageFormError::Form(refused)) => {
@@ -1842,7 +1907,7 @@ impl Inner {
                 // gateway's
                 self.report(&RouterError::Other(Arc::new(other)));
 
-                let problem = self.own_problem(OwnFailure::Failed, "");
+                let problem = problem_of_own(OwnFailure::Failed, "");
 
                 return self.answer_problem((&exchange, problem), None);
             }
@@ -1851,7 +1916,9 @@ impl Inner {
         let context = Arc::new(CallContext {
             gateway: Weak::clone(&self.me),
             index,
-            credential: credential.is_some(),
+            credential: credential.is_some()
+                && credential_of(&fields.lines_of("authorization"))
+                    .is_some_and(|value| is_of_challenge(value, self.challenge())),
             encoding,
             is_handed: AtomicBool::new(false),
         });
@@ -1928,7 +1995,7 @@ impl Inner {
         let failed = |error: &dyn fmt::Display| {
             self.report_words(&error.to_string());
 
-            Some(self.own_problem(OwnFailure::Failed, ""))
+            Some(problem_of_own(OwnFailure::Failed, ""))
         };
         let transport =
             MemoryTransportClient::new(&transport_options).map_err(|error| failed(&error))?;
@@ -1994,7 +2061,7 @@ impl Inner {
                             },
                         )
                     } else {
-                        self.own_problem(OwnFailure::Failed, "")
+                        problem_of_own(OwnFailure::Failed, "")
                     },
                 ))
             }
@@ -2060,7 +2127,7 @@ impl Inner {
 
             if let Err(error) = connection.client.router().register_notification(registered) {
                 self.report(&RouterError::Other(Arc::new(error)));
-                self.answer_problem((exchange, self.own_problem(OwnFailure::Failed, "")), None);
+                self.answer_problem((exchange, problem_of_own(OwnFailure::Failed, "")), None);
                 connection.close();
 
                 return;
@@ -2458,7 +2525,7 @@ impl CallContext {
             Ended::Call(CallError::TimedOut(timeout)) => {
                 inner.report(&RouterError::Other(Arc::new(CallError::TimedOut(*timeout))));
 
-                Some(inner.own_problem(
+                Some(problem_of_own(
                     OwnFailure::Timeout,
                     &format!("no answer within {} ms", inner.settings.timeout.as_millis()),
                 ))
@@ -2467,20 +2534,20 @@ impl CallContext {
             Ended::Call(CallError::Disconnected(reason)) => {
                 inner.report(&RouterError::Disconnected(reason.clone()));
 
-                Some(inner.own_problem(OwnFailure::Closed, "the connection closed"))
+                Some(problem_of_own(OwnFailure::Closed, "the connection closed"))
             }
             Ended::Call(other) => {
                 // ! what no gate foresaw: its words are reported, never the gateway's
                 inner.report(&RouterError::Other(Arc::new(other.clone())));
 
-                Some(inner.own_problem(OwnFailure::Failed, ""))
+                Some(problem_of_own(OwnFailure::Failed, ""))
             }
             // * the mapping's own words of the result it holds no form of
             Ended::Form(MessageFormError::Form(error)) => {
                 inner.report(&RouterError::Other(Arc::new(error.clone())));
 
                 // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
-                Some(inner.own_problem(OwnFailure::Unwritable, error.reason()))
+                Some(problem_of_own(OwnFailure::Unwritable, error.reason()))
             }
             // the stock library's refusal of a result, or a notification, the server answered:
             // its words are never the gateway's, reported, and its code alone answers (9.0)
@@ -2506,7 +2573,7 @@ impl CallContext {
             Ended::Form(other) => {
                 inner.report(&RouterError::Other(Arc::new(other.clone())));
 
-                Some(inner.own_problem(OwnFailure::Failed, ""))
+                Some(problem_of_own(OwnFailure::Failed, ""))
             }
         }
     }
@@ -2700,7 +2767,7 @@ impl NotificationLike for Subscribed {
             return;
         };
         let problem = match failure {
-            None => inner.own_problem(OwnFailure::Closed, "the connection closed"),
+            None => problem_of_own(OwnFailure::Closed, "the connection closed"),
             Some(failure) => {
                 let Some(served) = self.context.served(&inner) else {
                     return;
@@ -2760,7 +2827,7 @@ impl NotificationLike for Subscribed {
                     self.context
                         .gateway
                         .upgrade()
-                        .map(|inner| inner.own_problem(OwnFailure::Closed, "the connection closed"))
+                        .map(|_| problem_of_own(OwnFailure::Closed, "the connection closed"))
                 });
 
                 if let Some(problem) = problem {
@@ -2905,7 +2972,7 @@ impl HttpGateway {
     /// every gate of 10.1, a field or a target past visible ASCII answered 400 unmarked, its
     /// problems, its pace and its bounds; it leaves its host its head's bounds and timeouts and its
     /// socket's write deadline. A body its host read before it is judged by hyper's hints before
-    /// its first byte and by its count at its end, refused 500, its call never made (7.6.27).
+    /// its first byte and by its count at its end, refused 500, its call never made (7.6.26).
     pub fn answer<B>(
         &self,
         request: ::http::Request<B>,

@@ -8,7 +8,7 @@
     "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its side's runtime reader, as a gateway reads a result (spec 17.9); then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
     "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
     "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
-    "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
+    "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one of its challenge's auth-scheme; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
     "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
     "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
@@ -6046,31 +6046,6 @@
       "problem": "{\"detail\":\"a token past 1004 bytes\",\"status\":431,\"title\":\"Request Header Fields Too Large\",\"type\":\"about:blank\"}"
     },
     {
-      "name": "an authorization of another scheme under bearer-jwt",
-      "clauses": [
-        "2.4",
-        "2.4.2",
-        "7.1",
-        "7.1.1",
-        "7.1.2",
-        "7.1.3",
-        "7.1.4",
-        "7.2",
-        "7.3",
-        "7.6",
-        "7.6.26"
-      ],
-      "failure": {
-        "own": "scheme",
-        "detail": "an auth-scheme but Bearer"
-      },
-      "status": 401,
-      "fields": {
-        "www-authenticate": "Bearer error=\"invalid_request\""
-      },
-      "problem": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
-    },
-    {
       "name": "what no gate foresaw, with no detail",
       "clauses": [
         "7.1",
@@ -6080,7 +6055,7 @@
         "7.2",
         "7.3",
         "7.6",
-        "7.6.28"
+        "7.6.27"
       ],
       "failure": {
         "own": "failed",
@@ -7639,10 +7614,12 @@
       ]
     },
     {
-      "name": "under bearer-jwt, another auth-scheme: 401, invalid_request",
+      "name": "under bearer-jwt, another auth-scheme presents no credential: a procedure that needs a session answers 401, its challenge alone, and one that needs none runs",
       "clauses": [
+        "2.4",
         "2.4.2",
-        "7.6.26"
+        "2.5",
+        "7.6.8"
       ],
       "options": {
         "authorization": "bearer-jwt"
@@ -7664,19 +7641,169 @@
               "vary": "Origin",
               "content-type": "application/problem+json",
               "bead-refusal": null,
-              "www-authenticate": "Bearer error=\"invalid_request\""
+              "www-authenticate": "Bearer"
             },
-            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+            "body": "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
           },
           "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Basic YTpi\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Basic\tYTpi\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer"
+            },
+            "body": "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearerabc\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer"
+            },
+            "body": "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
+          },
+          "on": "d"
         }
       ]
     },
     {
-      "name": "under bearer-jwt, a tab after Bearer: 401, invalid_request",
+      "name": "under bearer-jwt, Bearer alone presents no credential",
       "clauses": [
+        "2.4",
         "2.4.2",
-        "7.6.26"
+        "2.5",
+        "7.6.8"
+      ],
+      "options": {
+        "authorization": "bearer-jwt"
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer"
+            },
+            "body": "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer   \r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer"
+            },
+            "body": "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "c"
+        }
+      ]
+    },
+    {
+      "name": "under bearer-jwt, Bearer followed by neither a space nor its end: 400 malformed, invalid_request",
+      "clauses": [
+        "2.4",
+        "2.4.2",
+        "7.7",
+        "7.7.1",
+        "10.1",
+        "10.1.9"
       ],
       "options": {
         "authorization": "bearer-jwt"
@@ -7691,26 +7818,72 @@
         },
         {
           "expect": {
-            "status": 401,
+            "status": 400,
             "fields": {
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
               "vary": "Origin",
               "content-type": "application/problem+json",
-              "bead-refusal": null,
+              "bead-refusal": "malformed",
               "www-authenticate": "Bearer error=\"invalid_request\""
             },
-            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"Bearer followed by neither a space nor the field's end\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
           },
           "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer/abc\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "malformed",
+              "www-authenticate": "Bearer error=\"invalid_request\""
+            },
+            "body": "{\"detail\":\"Bearer followed by neither a space nor the field's end\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer,abc\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "malformed",
+              "www-authenticate": "Bearer error=\"invalid_request\""
+            },
+            "body": "{\"detail\":\"Bearer followed by neither a space nor the field's end\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+          },
+          "on": "c"
         }
       ]
     },
     {
-      "name": "under bearer-jwt, a tab after Bearer's space: 401, invalid_request",
+      "name": "under bearer-jwt, what follows Bearer's spaces is its token as it stands, a tab first among it",
       "clauses": [
+        "2.4",
         "2.4.2",
-        "7.6.26"
+        "7.5.3",
+        "7.6.11"
       ],
       "options": {
         "authorization": "bearer-jwt"
@@ -7725,16 +7898,15 @@
         },
         {
           "expect": {
-            "status": 401,
+            "status": 500,
             "fields": {
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
               "vary": "Origin",
               "content-type": "application/problem+json",
-              "bead-refusal": null,
-              "www-authenticate": "Bearer error=\"invalid_request\""
+              "bead-refusal": null
             },
-            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+            "body": "{\"code\":36,\"detail\":\"OPAQUE, ELSEWHERE\",\"scope\":\"protocol\",\"status\":500,\"title\":\"CREDENTIAL_UNSUPPORTED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/CREDENTIAL_UNSUPPORTED\"}"
           },
           "on": "a"
         }
@@ -7802,6 +7974,74 @@
               "bead-refusal": "malformed"
             },
             "body": "{\"detail\":\"two authorization fields\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "under bearer-jwt, two authorization fields, 400 malformed, invalid_request",
+      "clauses": [
+        "2.4",
+        "7.7",
+        "7.7.1",
+        "10.1.9"
+      ],
+      "options": {
+        "authorization": "bearer-jwt"
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Bearer good\r\nauthorization: Bearer good\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "malformed",
+              "www-authenticate": "Bearer error=\"invalid_request\""
+            },
+            "body": "{\"detail\":\"two authorization fields\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "ELSEWHERE, a credential of another auth-scheme that does not hold: 401, its challenge alone",
+      "clauses": [
+        "2.4",
+        "2.4.1",
+        "7.6.8"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/whoAmI HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\nauthorization: Basic YTpi\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 401,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null,
+              "www-authenticate": "Bearer"
+            },
+            "body": "{\"code\":32,\"detail\":\"the credential does not hold\",\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}"
           },
           "on": "a"
         }

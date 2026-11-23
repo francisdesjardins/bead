@@ -207,7 +207,6 @@ Notifier	INotifier [function type]	Notifier [function type]	Notifier [record]	re
 NotifyOptions	INotifyOptions [record]	NotifyOptions [record]	NotifyOptions [record]	same
 NotifyRequest	INotifyRequest [record]	NotifyRequest [record]	NotifyRequest [record]	same
 OwnFailure	OwnFailure [choice]	OwnFailure [choice]	OwnFailure [choice]	same
-OwnProblemOptions	IOwnProblemOptions [record]	OwnProblemOptions [record]	OwnProblemOptions [record]	same
 PACING_DEFAULTS	PACING_DEFAULTS [constant]	-	PACING_DEFAULTS [constant]	same
 PacingLimits	IPacingLimits [record]	PacingLimits [record]	PacingLimits [record]	same
 PacingLimitsOptions	PacingLimitsOptions [record]	-	PacingLimitsOptions [record]	same

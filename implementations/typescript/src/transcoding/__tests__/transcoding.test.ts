@@ -766,9 +766,7 @@ test.describe('plays transcoding.json', () => {
                 route,
               }
             )
-          : problemOfOwn(failure.own, failure.detail ?? '', {
-              challenge: failure.challenge ?? FILE.defaults.challenge,
-            });
+          : problemOfOwn(failure.own, failure.detail ?? '');
 
       expect(problem.status).toBe(entry.status);
       expect(problem.fields).toEqual(entry.fields);

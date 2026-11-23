@@ -22,7 +22,7 @@ import { fieldNamed, fragmentOf, pointerTokenOf, type RequestPlace } from './jso
 export type Arose = 'answer' | 'client' | 'gateway' | 'server';
 
 /** A failure of the gateway's own (7.6), each its status: `failed`, what no gate foresaw. */
-export type OwnFailure = 'closed' | 'failed' | 'jwt' | 'scheme' | 'timeout' | 'unwritable';
+export type OwnFailure = 'closed' | 'failed' | 'jwt' | 'timeout' | 'unwritable';
 
 /** A payload's encoding, as a binding names it. */
 export type Encoding = 'json' | 'proto' | 'raw' | 'text';
@@ -33,7 +33,10 @@ export type Encoding = 'json' | 'proto' | 'raw' | 'text';
 export interface ICallFailure {
   readonly arose: Arose;
   readonly code: number;
-  /** Whether its call presented a credential, which a 401 tells as `invalid_token`. */
+  /**
+   * Whether its call presented a credential of its challenge's auth-scheme, which a 401 tells as
+   * `invalid_token`.
+   */
   readonly credential?: boolean | undefined;
   readonly detail?: string | undefined;
   /** The encoding of the request its server could not read; `proto` where none is given. */
@@ -63,12 +66,6 @@ export interface IProblemOptions {
   readonly problemTypes?: string | undefined;
   /** Where its request's fields came from, for `PAYLOAD_INVALID`'s violations. */
   readonly route?: IProblemRoute | undefined;
-}
-
-/** What a problem of the gateway's own is written with besides its failure and its detail. */
-export interface IOwnProblemOptions {
-  /** The gateway's challenge, which an auth-scheme but `Bearer` answers; `Bearer` by default. */
-  readonly challenge?: string | undefined;
 }
 
 /** A problem as a gateway answers it: its status, the fields beside it, and its body's text. */
@@ -121,7 +118,6 @@ const OWN_STATUSES: Readonly<Record<OwnFailure, number>> = Object.freeze({
   closed: 502,
   failed: 500,
   jwt: 431,
-  scheme: 401,
   timeout: 504,
   unwritable: 500,
 });
@@ -132,10 +128,21 @@ const RETRY = Object.freeze({ 'retry-after': '1' });
 const ELEMENT =
   /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(-?[0-9]+|true|false|"(?:[^"\\]|\\.)*"(?:\.\.\.)?)\])?/u;
 
+// an auth-scheme, RFC 9110 §11.1: a run of RFC 9110 §5.6.2's `tchar`
+const AUTH_SCHEME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]*/u;
+
 // helpers
 
+/**
+ * The auth-scheme a field or a challenge starts with, as RFC 9110 §11.1 reads one: its longest run
+ * of `tchar`, empty where it starts with none (2.4).
+ */
+export const authSchemeOf = (value: string): string => {
+  return AUTH_SCHEME.exec(value)?.[0] ?? '';
+};
+
 /** A challenge with `error=` after it: after a space, or after `, ` where it holds parameters. */
-const challengeOf = (challenge: string, error: string): string => {
+export const challengeOf = (challenge: string, error: string): string => {
   return `${challenge}${challenge.trim().includes(' ') ? ', ' : ' '}error="${error}"`;
 };
 
@@ -418,22 +425,11 @@ export const problemOfFailure = (
 
 /**
  * The problem of a failure of the gateway's own (7.6) — its call's timeout, 504; its connection
- * closed, 502; a result it cannot write, 500; a `JWT` its block cannot hold, 431; an auth-scheme
- * but `Bearer` under `bearer-jwt`, 401; what no gate foresaw, 500 — `about:blank`, its detail its
- * words, none for what no gate foresaw.
+ * closed, 502; a result it cannot write, 500; a `JWT` its block cannot hold, 431; what no gate
+ * foresaw, 500 — `about:blank`, its detail its words, none for what no gate foresaw.
  */
-export const problemOfOwn = (
-  own: OwnFailure,
-  detail: string,
-  { challenge = DEFAULT_CHALLENGE }: IOwnProblemOptions = {}
-): IProblem => {
-  const status = OWN_STATUSES[own];
-
-  return {
-    ...problemOfRefusal(status, detail),
-    fields:
-      own === 'scheme' ? { 'www-authenticate': challengeOf(challenge, 'invalid_request') } : {},
-  };
+export const problemOfOwn = (own: OwnFailure, detail: string): IProblem => {
+  return problemOfRefusal(OWN_STATUSES[own], detail);
 };
 
 /**

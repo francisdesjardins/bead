@@ -4,9 +4,9 @@ use bytes::Bytes;
 use serde_json::{Value, json};
 
 use super::{
-    Arose, CallFailure, Encoding, OwnFailure, OwnProblemOptions, PROTOCOL_TYPES, Problem,
-    ProblemField, ProblemOptions, ProblemRoute, RoutedFieldPath, place_by, problem_of_failure,
-    problem_of_own, problem_of_refusal,
+    Arose, CallFailure, Encoding, OwnFailure, PROTOCOL_TYPES, Problem, ProblemField,
+    ProblemOptions, ProblemRoute, RoutedFieldPath, place_by, problem_of_failure, problem_of_own,
+    problem_of_refusal,
 };
 use crate::constants::{FailureScope, ProtocolCode};
 use crate::errors::ProgrammerError;
@@ -288,11 +288,7 @@ fn answers_each_protocol_code_with_its_status_by_where_it_arose_and_its_problem(
 
     // the gateway's own
     assert_eq!(
-        problem_of_own(
-            OwnFailure::Timeout,
-            "no answer",
-            &OwnProblemOptions::default()
-        ),
+        problem_of_own(OwnFailure::Timeout, "no answer"),
         Problem {
             status: 504,
             fields: vec![],
@@ -300,31 +296,7 @@ fn answers_each_protocol_code_with_its_status_by_where_it_arose_and_its_problem(
                 .to_owned(),
         }
     );
-    assert_eq!(
-        fields_of(&problem_of_own(
-            OwnFailure::Scheme,
-            "x",
-            &OwnProblemOptions::default()
-        )),
-        [("www-authenticate", "Bearer error=\"invalid_request\"")]
-    );
-    assert_eq!(
-        fields_of(&problem_of_own(
-            OwnFailure::Scheme,
-            "x",
-            &OwnProblemOptions {
-                challenge: Some("Bearer realm=\"bead\"".to_owned()),
-            }
-        )),
-        [(
-            "www-authenticate",
-            "Bearer realm=\"bead\", error=\"invalid_request\""
-        )]
-    );
-    assert_eq!(
-        problem_of_own(OwnFailure::Jwt, "x", &OwnProblemOptions::default()).status,
-        431
-    );
+    assert_eq!(problem_of_own(OwnFailure::Jwt, "x").status, 431);
     assert_eq!(
         problem_of_refusal(404, "no route").body,
         "{\"detail\":\"no route\",\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"

@@ -36,18 +36,8 @@ public enum OwnFailure
     /// <summary>A <c>JWT</c> its request's block cannot hold, under <c>bearer-jwt</c>, 431.</summary>
     Jwt,
 
-    /// <summary>An <c>authorization</c> of an auth-scheme but <c>Bearer</c>, under <c>bearer-jwt</c>, 401.</summary>
-    Scheme,
-
     /// <summary>What no gate foresaw, 500, with no detail.</summary>
     Failed,
-}
-
-/// <summary>What a failure of the gateway's own is written with besides its failure and its detail.</summary>
-public sealed record OwnProblemOptions
-{
-    /// <summary>The gateway's challenge, which an auth-scheme but <c>Bearer</c> answers; <c>Bearer</c> unless told.</summary>
-    public string? Challenge { get; init; }
 }
 
 /// <summary>Where a failure is answered from, and what a gateway is given to answer it.</summary>
@@ -59,7 +49,7 @@ public sealed record ProblemContext
     /// <summary>The encoding of the request its server could not read, which keys its PAYLOAD_UNDECODABLE.</summary>
     public HttpEncoding Encoding { get; init; } = HttpEncoding.Proto;
 
-    /// <summary>Whether its call presented a credential, which a <c>SESSION_REQUIRED</c>'s challenge tells.</summary>
+    /// <summary>Whether its call presented a credential of its challenge's auth-scheme, which a 401 tells as <c>invalid_token</c>.</summary>
     public bool Credential { get; init; }
 
     /// <summary>The gateway's challenge, a <c>SESSION_REQUIRED</c>'s <c>www-authenticate</c>.</summary>
@@ -283,7 +273,7 @@ public static partial class HttpProblems
     /// A failure of the gateway's own (transcoding 7.6): <c>about:blank</c>, its status's phrase, its
     /// detail its words, none for what no gate foresaw.
     /// </summary>
-    public static HttpProblem Own(OwnFailure failure, string detail, OwnProblemOptions? options = null)
+    public static HttpProblem Own(OwnFailure failure, string detail)
     {
         ArgumentNullException.ThrowIfNull(detail);
 
@@ -293,16 +283,10 @@ public static partial class HttpProblems
             OwnFailure.Closed => 502,
             OwnFailure.Unwritable or OwnFailure.Failed => 500,
             OwnFailure.Jwt => 431,
-            _ => 401,
+            _ => throw new ArgumentException("a failure of the gateway's own names one of its failures", nameof(failure)),
         };
-        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        if (failure == OwnFailure.Scheme)
-        {
-            fields["www-authenticate"] = ChallengeOf(options?.Challenge ?? DefaultChallenge, "invalid_request");
-        }
-
-        return new HttpProblem { Status = status, Fields = fields, Body = Refusal(status, detail) };
+        return new HttpProblem { Status = status, Fields = new Dictionary<string, string>(StringComparer.Ordinal), Body = Refusal(status, detail) };
     }
 
     /// <summary>
@@ -329,7 +313,8 @@ public static partial class HttpProblems
     }
 
     // a challenge with an error after it: after a space, or after `, ` where it holds parameters
-    private static string ChallengeOf(string challenge, string? error)
+    // (RFC 6750 §3.1)
+    internal static string ChallengeOf(string challenge, string? error)
     {
         if (error is null)
         {
@@ -337,6 +322,26 @@ public static partial class HttpProblems
         }
 
         return challenge + (challenge.Contains(' ', StringComparison.Ordinal) ? ", " : " ") + $"error=\"{error}\"";
+    }
+
+    // a field's auth-scheme, its first token as RFC 9110 §11.1 reads one: the longest run of tchar
+    // at its start (RFC 9110 §5.6.2), empty for none
+    internal static string AuthSchemeOf(string value)
+    {
+        var end = 0;
+
+        while (end < value.Length && IsTokenCharacter(value[end]))
+        {
+            end++;
+        }
+
+        return value[..end];
+    }
+
+    // RFC 9110 §5.6.2's tchar: "!#$%&'*+-.^_`|~", digits and letters, ASCII alone
+    private static bool IsTokenCharacter(char character)
+    {
+        return char.IsAsciiLetterOrDigit(character) || "!#$%&'*+-.^_`|~".Contains(character, StringComparison.Ordinal);
     }
 
     // PAYLOAD_INVALID's errors, more and stopped, from its detail's lines (7.4)
