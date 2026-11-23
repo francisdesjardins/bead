@@ -46,6 +46,42 @@ class Thing {
 
 // definition
 
+test('gives spec 17’s codecs by their encoding’s name', () => {
+  const raw = PAYLOAD_CODECS.raw.decode(new Uint8Array([1, 2]));
+
+  expect(PAYLOAD_CODECS.raw.encode(raw)).toEqual(new Uint8Array([1, 2]));
+  expect(PAYLOAD_CODECS.text.decode(utf8('Josée'))).toBe('Josée');
+  expect(() => {
+    return PAYLOAD_CODECS.text.decode(new Uint8Array([0xff]));
+  }).toThrow();
+  expect(PAYLOAD_CODECS.json.encode(PAYLOAD_CODECS.json.decode(utf8('{"b":2,"a":1}')))).toEqual(
+    utf8('{"a":1,"b":2}')
+  );
+  expect(() => {
+    return PAYLOAD_CODECS.json.decode(utf8('{"a":1,"a":2}'));
+  }).toThrow('a name twice');
+});
+
+test('hands on the document it read when canonical, and the canonical form’s otherwise', () => {
+  for (const [text, canonical] of [
+    ['{"a":1,"b":[-1.5,"x"]}', '{"a":1,"b":[-1.5,"x"]}'],
+    ['1.0', '1'],
+    ['-0', '0'],
+    ['[-0,{"a":-0}]', '[0,{"a":0}]'],
+    ['12345678901234567890', '12345678901234567000'],
+    [
+      '{"__prot\\u006f__":{"a":[1,-0,1E2,"\\n",true,null]},"2":false,"1":0}',
+      '{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\\n",true,null]}}',
+    ],
+  ]) {
+    const read = PAYLOAD_CODECS.json.decode(utf8(text!));
+
+    expect(written(read)).toBe(canonical);
+  }
+
+  expect(PAYLOAD_CODECS.json.decode(utf8('1.0'))).toBe(1);
+});
+
 test.describe('the json codec', () => {
   // spec 17.2
   test('refuses what it does not read, each in its own words, with a SyntaxError', () => {
