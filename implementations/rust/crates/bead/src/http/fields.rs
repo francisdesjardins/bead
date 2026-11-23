@@ -289,7 +289,7 @@ impl Request<'_> {
     }
 
     /// Whether its `Transfer-Encoding`, across its lines, frames its body as spec 15.12 takes it:
-    /// none, or one that ends in one `chunked`, over HTTP/1.1.
+    /// none, or one whose one coding is `chunked`, over HTTP/1.1.
     pub(crate) fn is_transfer_encoding_framed(&self) -> bool {
         let version = match (self.is_http1, self.is_http11) {
             (true, true) => "1.1",
@@ -298,7 +298,8 @@ impl Request<'_> {
         };
 
         // ! hyper refuses one over HTTP/1.0 itself, and `chunked,` with it, before the transport
-        // reads the request; it hands on another `chunked` after the first, its body read by the last
+        // reads the request; it hands on another `chunked` after the first, its body read by the
+        // last, and a coding before `chunked`, its body still coded
         is_transfer_encoding_framed(version, &self.lines_of("transfer-encoding"))
     }
 

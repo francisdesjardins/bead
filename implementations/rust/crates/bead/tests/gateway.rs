@@ -5042,6 +5042,49 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     fixture.dispose().await.expect("disposed");
 }
 
+// spec 15.12; transcoding 10.1: hyper hands each on, the body read by its final chunked, a
+// Content-Length after it dropped (`proto/h1/role.rs`, 285-287, 297-299), which the gateway refuses
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let own = format!("{HOST}:{port}");
+
+    for (authority, codings) in [
+        (own.as_str(), "transfer-encoding: gzip, chunked"),
+        (own.as_str(), "transfer-encoding: x-unknown, chunked"),
+        (
+            own.as_str(),
+            "transfer-encoding: gzip\r\ntransfer-encoding: chunked",
+        ),
+        (
+            own.as_str(),
+            "transfer-encoding: gzip, chunked\r\ncontent-length: 5",
+        ),
+        ("elsewhere.test", "transfer-encoding: gzip, chunked"),
+    ] {
+        let came = pipelined_on(
+            port,
+            ("HTTP/1.1", &format!("host: {authority}\r\n{codings}")),
+        )
+        .await;
+        let lowered = came.to_ascii_lowercase();
+
+        // one answer, unmarked, with none of the fields every response on the path carries, its
+        // socket closed behind it
+        assert!(came.starts_with("HTTP/1.1 400 "), "{codings}: {came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(!lowered.contains("bead-refusal"), "{came}");
+        assert!(!lowered.contains("cache-control"), "{came}");
+        assert!(!lowered.contains("vary"), "{came}");
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
 // spec 15.12; transcoding 10.1, 10.2; RFC 9112 §9.6
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
