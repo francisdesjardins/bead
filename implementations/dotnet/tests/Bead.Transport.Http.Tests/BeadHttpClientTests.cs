@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -356,20 +357,45 @@ public sealed class BeadHttpClientTests
     [Fact]
     public async Task A_dispose_cancels_a_reconnection_under_way_and_a_token_given_still_cancels_it_too()
     {
-        using var fetch = new Fetch();
-        await using var client = ClientOn(fetch);
-        await using var other = ClientOn(fetch);
+        using var refused = new ClosedPort();
+        await using var server = new HttpTransportServer();
+        var bound = await server.Start(new TransportServerStartOptions { Address = "127.0.0.1", Port = 0, CancellationToken = Cancelled });
+        var options = new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } };
+        await using var client = new BeadHttpClient(options);
+        await using var other = new BeadHttpClient(options);
         using var source = new CancellationTokenSource();
 
-        await Connect(client, fetch);
-        await Connect(other, fetch);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled });
+        await other.Connect(new HttpTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled });
+        await client.Disconnect().WaitAsync(Patience, Cancelled);
+        await other.Disconnect().WaitAsync(Patience, Cancelled);
+        await server.Stop().WaitAsync(Patience, Cancelled);
 
-        var byDispose = client.Reconnect();
-        var byToken = other.Reconnect(new TransportClientReconnectOptions { CancellationToken = source.Token });
+        foreach (var subject in new[] { client, other })
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() =>
+            {
+                return subject.Connect(new HttpTransportClientConnectOptions { Host = "127.0.0.1", Port = refused.Port, CancellationToken = Cancelled });
+            });
+        }
 
-        // each attempt under way, which the server never answers
-        await fetch.Next();
-        await fetch.Next();
+        var waiting = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
+        var reconnecting = new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
+            Tap = (delay, attempt) =>
+            {
+                waiting.Writer.TryWrite((delay, attempt));
+            },
+        };
+        var byDispose = client.Reconnect(reconnecting);
+        var byToken = other.Reconnect(reconnecting with { CancellationToken = source.Token });
+
+        for (var index = 0; index < 2; index++)
+        {
+            Assert.Equal((TimeSpan.FromMinutes(1), 1), await waiting.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        }
+
         await client.DisposeAsync();
         await source.CancelAsync();
 

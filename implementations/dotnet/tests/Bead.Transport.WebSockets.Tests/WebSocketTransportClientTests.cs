@@ -4219,22 +4219,25 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_socket_threw_when_the_server_is_gone()
     {
-        var reconnecting = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var refused = new ClosedPort();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // from its close, as the TypeScript side's test reconnects; one attempt, for a port nothing
-        // listens on takes this system two seconds to refuse
         _client.Close += (_, _) =>
         {
-            reconnecting.TrySetResult(_client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            closed.TrySetResult();
         };
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await _server.Stop().WaitAsync(Patience, Cancelled);
+        await closed.Task.WaitAsync(Patience, Cancelled);
+        await Assert.ThrowsAsync<WebSocketException>(() =>
+        {
+            return _client.Connect(Target with { Port = refused.Port, CancellationToken = Cancelled });
+        });
 
-        var reconnect = await reconnecting.Task.WaitAsync(Patience, Cancelled);
         var thrown = await Assert.ThrowsAsync<ReconnectException>(() =>
         {
-            return reconnect.WaitAsync(Patience, Cancelled);
+            return _client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 2, Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(10)) }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.IsType<WebSocketException>(thrown.InnerException);
