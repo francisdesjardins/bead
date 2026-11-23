@@ -257,9 +257,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Start(BrokerStart? start = null)
     {
         Link? guarded = null;
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var made = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
         {
             MaximumPacketSize = _options.MaximumPacketSize,
+            Connected = returned.Task,
             PastMaximum = (size) =>
             {
                 // ! its link set before its CONNECT goes, so before any packet is read
@@ -337,7 +339,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             try
             {
-                connected = await client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
+                var connecting = client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
+
+                // * its receive loop reads past its CONNACK once its connect returned, whatever
+                // context this continuation resumes on
+                _ = connecting.ContinueWith((_) =>
+                {
+                    returned.TrySetResult();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                connected = await connecting;
             }
             // * a packet its client cannot read, read before its CONNACK or as it: past its own Maximum
             // Packet Size, its CONNACK among them, or an acknowledgement its table does not name
