@@ -35,6 +35,48 @@ const failureOf = (read: () => unknown): FailureError => {
 test.describe.configure({ retries: 0 });
 
 test.describe('writeHeader and readHeader', () => {
+  test('writes a session announced as the token it was given', () => {
+    const bytes = new Uint8Array(28);
+
+    expect(writeHeader({ callId: 3, credential: OPAQUE, kind: 0x12 }, bytes)).toBe(28);
+    expect(bytes).toEqual(
+      fromHexadecimal(
+        'A1 12 08 07 00 00 00 03 00 01 00 10 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
+      )
+    );
+  });
+
+  test('a wire opaque credential reads with its token and never as a redacted value', () => {
+    const token = 'CQkJCQkJCQkJCQkJCQkJCQ' as SessionToken;
+    const credential = { scheme: CredentialScheme.OPAQUE, token } as const;
+
+    for (const header of [
+      { callId: 1, credential, kind: 0x10, procedureId: 1, serviceId: 1 },
+      { callId: 2, credential, kind: 0x11 },
+      { callId: 3, credential, kind: 0x12 },
+    ] as const) {
+      const bytes = new Uint8Array(headerBytesOf(header));
+
+      writeHeader(header, bytes);
+
+      const read = readHeader(bytes, SERVER_FAILURES)?.header;
+
+      expect(read).toEqual(header);
+      expect(read).toHaveProperty('credential', credential);
+    }
+
+    const bytes = fromHexadecimal('A1 11 08 03 00 00 00 02 00 01 00 00');
+
+    expect(
+      failureOf(() => {
+        return readHeader(bytes, CLIENT_FAILURES);
+      })
+    ).toMatchObject({
+      code: CLIENT_FAILURES.envelopeMalformed.code,
+      detail: 'an OPAQUE token is 16 bytes, not 0',
+    });
+  });
+
   for (const { bytes, header, name } of VECTORS.headers) {
     test(`reads ${name}, and writes it back`, () => {
       const expected = fromHexadecimal(bytes);
