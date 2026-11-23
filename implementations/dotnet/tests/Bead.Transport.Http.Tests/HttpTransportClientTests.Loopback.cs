@@ -84,10 +84,11 @@ public sealed partial class HttpTransportClientTests
         public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
         {
             using var resolver = new StandInResolver();
+            using var closed = new ClosedPort();
             await using var client = new HttpTransportClient(NotListening);
             var refused = await Assert.ThrowsAnyAsync<Exception>(() =>
             {
-                return client.Connect(new HttpTransportClientConnectOptions { Host = "bead-probe.localhost", Port = LoopbackFailures.Unheard(), CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                return client.Connect(new HttpTransportClientConnectOptions { Host = "bead-probe.localhost", Port = closed.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             });
 
             // * the platform's failure kept as its cause, the sentence in its message

@@ -506,15 +506,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     [Fact]
     public async Task Fails_its_start_where_its_broker_cannot_be_reached_over_TCP_TLS_or_a_WebSocket_naming_why()
     {
-        int port;
-
-        // a port no one listens on any more
-        using (var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0))
-        {
-            listener.Start();
-            port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-        }
+        // a port no one listens on
+        using var closed = new ClosedPort();
+        var port = closed.Port;
 
         // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
         foreach (var uri in new[] { $"mqtt://127.0.0.1:{port}", $"mqtts://127.0.0.1:{port}", $"ws://127.0.0.1:{port}/mqtt", $"wss://127.0.0.1:{port}/mqtt", "mqtt://broker.invalid", "mqtts://broker.invalid" })
