@@ -98,7 +98,10 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
   router, sections 15.2 and 15.12;
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
-  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
+  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39;
+- [0056](../docs/decisions/0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md):
+  a WebSocket message held partway to a budget and a rate, its frames read at their heads, sections
+  15.3 and 15.12.
 
 **Version: 0.17.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -1477,10 +1480,21 @@ connection; a 426 names `upgrade` in its `Connection`.
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it fails the connection with 1009
 ([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
-[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
-still comes until the peer's close or its close timeout, then ends the connection, its close
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, ends its
+writing where its platform lets it, and reads on, dropping what comes unparsed, the peer's close
+among it, until the peer ends the connection or its close timeout passes, then ends it, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A text message that is not UTF-8 fails the connection with 1007
+(section 15.1). A side judges each frame at its head, where its platform lets it read heads: a
+head that announces a length taking its message past `maximumMessageBytes`, a continuation's among
+them, fails the connection with 1009 at its head, without waiting for its payload; the head of a
+frame that takes its message past `maximumMessageFrames` — 16,384 by default, and never without
+end — frames each counting, an empty one among them, fails it with 1008
+([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)); a head that breaks
+[RFC 6455 §5.2](https://www.rfc-editor.org/rfc/rfc6455#section-5.2), §5.4 or §5.5 fails it
+with 1002. Each closes the connection and is reported as a 1009 is. What a read brings before the
+frame so judged is read as it would be; nothing from that frame on is. A page's `WebSocket` fails
+a message as its browser does. A text message that is not UTF-8 fails the connection with 1007
 ([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
 (section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
@@ -1503,7 +1517,8 @@ for it is held as section 15.12 says on a server, and is its application's on a 
 heartbeat counts what it reads, so a connection it pauses past about twice `heartbeat` is dropped by
 its own heartbeat (section 15.12). A page's `WebSocket` sends none: its browser answers the server's
 pings with their data, and the server's heartbeat drops a page gone without a word. What waits for a
-server's socket is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+server's socket is held besides as section 15.12 says. What comes of a message is held on a server
+as section 15.12 holds a message partway. A side that closes says 1000; a server that stops, 1001, to
 each connection it holds, one whose opening handshake completes as its stop begins among them. A
 close with 1000 is the clean one.
 
@@ -1730,10 +1745,11 @@ reads by `maximumUntakenEnvelopes` and `maximumUntakenBytes`:
 | `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                                                                                 | HTTP, WebSocket                    |
 | `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket, or for a broker at both ends                                                                               | WebSocket, broker                  |
 | `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                                                                                | HTTP, WebSocket                    |
-| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, or an envelope's parts over a broker, once its grace passed                                                        | HTTP, broker                       |
-| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, or an envelope's parts over a broker, before its rate is held                                                            | HTTP, broker                       |
+| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, an envelope's parts over a broker, or a WebSocket's message, once its grace passed                                 | HTTP, WebSocket, broker            |
+| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, an envelope's parts over a broker, or a WebSocket's message, before its rate is held                                     | HTTP, WebSocket, broker            |
 | `maximumUntakenEnvelopes`      | 64                                                                                                             | the envelopes one connection's transport handed its router that no turn of it took yet                                                          | HTTP, WebSocket, broker, in memory |
 | `maximumUntakenBytes`          | 1,048,576                                                                                                      | their bytes                                                                                                                                     | HTTP, WebSocket, broker, in memory |
+| `messageBytesBudget`           | 268,435,456                                                                                                    | the bytes a WebSocket server holds of messages partway, across its connections                                                                  | WebSocket                          |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait`, `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod` are never without end.
@@ -1806,6 +1822,23 @@ received behind an answer that closes it: none is judged, handed on or told
 ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close
 its socket after its request was read whole — a drop past a bound, a failure unforeseen — a server
 serves a request once the answers before it on that socket ended.
+
+A WebSocket server holds each message partway, from the first byte of its first frame's head to
+the last byte of its last frame. Each byte it reads of it is charged to `messageBytesBudget` as it
+comes, its frames' heads and the control frames between them among it, and each head 128 more once
+whole; never what a head announces. A message's charge is released once it is whole, or once its
+connection fails, which charges nothing after. A charge that would pass the budget casts off
+connections, as few as fit it, its own charge counted in its own: those whose message is past
+`bodyGracePeriod` before those within it, then the one whose message holds the most, then the one
+whose message began first; each fails with 1013
+([IANA's WebSocket Close Code Number Registry](https://www.iana.org/assignments/websocket/websocket.xhtml#close-code-number)),
+its own connection only when it comes first. A message that brought _R_ bytes of payload, and
+none more, by its first byte plus max(`bodyGracePeriod`, ⌈_R_ × 1,000 /
+`minimumBodyBytesPerSecond`⌉) milliseconds fails its connection with 1008
+([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), on the server's
+clock, the time its router holds the connection paused while nothing of it is read not counted.
+Each fails as section 15.3 says, reported naming the bound and its value. What a side holds of a
+message may pass its charge, up to twice it where a side's buffer grows by doubling.
 
 Over HTTP/1, a server holds no more of a socket than a bound of its own of what it read behind the
 answer under way and has not served, its platform's

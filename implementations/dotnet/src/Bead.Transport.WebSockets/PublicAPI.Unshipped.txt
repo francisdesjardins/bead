@@ -1,1 +1,11 @@
 #nullable enable
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageFrames.get -> int
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageFrames.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.BodyGracePeriod.get -> System.TimeSpan
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.BodyGracePeriod.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageFrames.get -> int
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageFrames.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MessageBytesBudget.get -> long
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MessageBytesBudget.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumBodyBytesPerSecond.get -> int
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumBodyBytesPerSecond.init -> void

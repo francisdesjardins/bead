@@ -51,6 +51,8 @@ mod tests;
 pub mod tls;
 pub mod validations;
 pub mod vectors;
+#[cfg(feature = "websocket")]
+pub mod websocket_frames;
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub mod wire;
 

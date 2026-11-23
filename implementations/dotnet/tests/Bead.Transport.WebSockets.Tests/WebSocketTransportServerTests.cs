@@ -21,7 +21,7 @@ namespace Bead.Transport.WebSockets.Tests;
 /// <see cref="WebSocketTransportServer"/>, on Kestrel, against a <see cref="ClientWebSocket"/>:
 /// what it delivers, what it sends, how it starts and stops, and how its connections close.
 /// </summary>
-public sealed class WebSocketTransportServerTests : IAsyncLifetime
+public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 {
     // constants
 
@@ -2531,11 +2531,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.Empty(gauges.Anomalies);
             Assert.Equal(
-                new Dictionary<string, long> { ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestUnsentBytes"] = 184_551_424 },
+                new Dictionary<string, long> { ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestUnsentBytes"] = 184_551_424, ["messageBytes"] = 268_435_456 },
                 gauges.Ceilings);
             Assert.Equal(new HashSet<string> { firstHandle, secondHandle }, new HashSet<string>(gauges.ConnectionHandles));
             Assert.Equal(
-                new Dictionary<string, long> { ["connections"] = 2, ["largestAddressConnections"] = 2, ["largestUnsentBytes"] = 0, ["unsentBytes"] = 0 },
+                new Dictionary<string, long> { ["connections"] = 2, ["largestAddressConnections"] = 2, ["largestUnsentBytes"] = 0, ["messageBytes"] = 0, ["unsentBytes"] = 0 },
                 gauges.Counts);
         }
     }
@@ -3112,7 +3112,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
                 Assert.Equal((wasClean, olderHandle), await Next(_closes));
                 Assert.Equal(
-                    (wasClean, "connections=1; largestAddressConnections=1; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, "connections=1; largestAddressConnections=1; largestUnsentBytes=0; messageBytes=0; unsentBytes=0"),
                     (wasClean, await CountsOnceHeldBy(1)));
 
                 // the newer stands, and is sent to
@@ -3126,7 +3126,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 Assert.Equal((wasClean, newerHandle), await Next(_closes));
                 Assert.Empty(_server.ConnectionHandles);
                 Assert.Equal(
-                    (wasClean, "connections=0; largestAddressConnections=0; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, "connections=0; largestAddressConnections=0; largestUnsentBytes=0; messageBytes=0; unsentBytes=0"),
                     (wasClean, await CountsOnceHeldBy(0)));
                 Assert.True(_closes.Reader.Count == 0);
             }

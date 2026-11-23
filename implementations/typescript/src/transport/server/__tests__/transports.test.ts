@@ -78,9 +78,11 @@ import type {
 } from '../types';
 import { ACCEPT_TIMEOUT } from '../broker-transport-server';
 import {
+  BODY_GRACE_PERIOD as WEBSOCKET_BODY_GRACE_PERIOD,
   createWebSocketTransportServer,
   HEARTBEAT,
   MAXIMUM_UNSENT_BYTES,
+  MINIMUM_BODY_BYTES_PER_SECOND as WEBSOCKET_MINIMUM_BODY_BYTES_PER_SECOND,
 } from '../websocket-transport-server';
 import {
   createBrokerPeers,
@@ -161,7 +163,7 @@ interface IRequest {
 interface IMessage {
   binary?: string;
   close?: number;
-  frames?: { fin: boolean; opcode: number; payload: string }[];
+  frames?: { fin: boolean; length?: number; opcode: number; payload: string }[];
   text?: string;
 }
 
@@ -206,8 +208,10 @@ interface ICase {
     heldBytesBudget?: number;
     maximumEnvelopePartsBytes?: number;
     maximumMessageBytes?: number;
+    maximumMessageFrames?: number;
     maximumQueuedMessages?: number;
     maximumUnsentBytes?: number;
+    messageBytesBudget?: number;
     names?: string[];
     timeout?: number;
     twin?: string;
@@ -492,6 +496,10 @@ const OPTION_KEYS: Readonly<
     'sendGracePeriod',
     'maximumUnsentBytes',
     'headersTimeout',
+    'messageBytesBudget',
+    'maximumMessageFrames',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
   ]),
 });
 const LIMIT_KEYS: ReadonlySet<string> = new Set([
@@ -596,8 +604,8 @@ const framesOf = ({ binary, close, frames = [], text }: IMessage): IFrame[] => {
     return [closeFrameOf(close)];
   }
 
-  return frames.map(({ fin, opcode, payload }) => {
-    return { fin, opcode, payload: fromHexadecimal(payload) };
+  return frames.map(({ fin, length, opcode, payload }) => {
+    return { fin, length, opcode, payload: fromHexadecimal(payload) };
   });
 };
 
@@ -755,7 +763,7 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
  * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
  * connection timeout. Over WebSocket, its transport takes the `hosts`, `origins`, `trustedProxies`
- * and `unnamedProxies` alike.
+ * and `unnamedProxies` alike, and a message partway's budget and rate.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -777,7 +785,9 @@ const serverOf = (
     connectionInactivityTimeout,
     heartbeat,
     maximumMessageBytes,
+    maximumMessageFrames,
     maximumUnsentBytes,
+    messageBytesBudget,
     ...bounds
   } = options;
 
@@ -786,6 +796,7 @@ const serverOf = (
       credentials: interopCredentialsOf(clock, limits),
       limits,
       transport: {
+        bodyGracePeriod: bounds.bodyGracePeriod,
         clock,
         headersTimeout: bounds.headersTimeout,
         heartbeat,
@@ -793,7 +804,10 @@ const serverOf = (
         maxPayload: maximumMessageBytes,
         maximumConnections: bounds.maximumConnections,
         maximumConnectionsPerAddress: bounds.maximumConnectionsPerAddress,
+        maximumMessageFrames,
         maximumUnsentBytes,
+        messageBytesBudget,
+        minimumBodyBytesPerSecond: bounds.minimumBodyBytesPerSecond,
         minimumSendBytesPerSecond: bounds.minimumSendBytesPerSecond,
         origins: bounds.origins,
         sendGracePeriod: bounds.sendGracePeriod,
@@ -1895,7 +1909,9 @@ test.describe('the transports', () => {
     fake.instances[0]?.emit('listening');
     await starting;
 
-    const built = fake.instances[0]?.options as { maxPayload?: number } | undefined;
+    const built = fake.instances[0]?.options as
+      | { maxFragments?: number; maxPayload?: number }
+      | undefined;
     // and the unsent bytes it holds a socket to, read from its ceiling
     const { ceilings } = wsTransport.gauges();
 
@@ -1913,6 +1929,7 @@ test.describe('the transports', () => {
       maximumConnections: MAXIMUM_CONNECTIONS,
       maximumConnectionsPerAddress: MAXIMUM_CONNECTIONS_PER_ADDRESS,
       maximumMessageBytes: built?.maxPayload,
+      maximumMessageFrames: built?.maxFragments,
       maximumOutboxBytes: MAXIMUM_OUTBOX_BYTES,
       maximumUnsentBytes: ceilings['largestUnsentBytes'],
       maximumWait: MAXIMUM_WAIT,
@@ -1923,8 +1940,14 @@ test.describe('the transports', () => {
       acceptTimeout: ACCEPT_TIMEOUT,
       maximumEnvelopePartsBytes: MAXIMUM_ENVELOPE_PARTS_BYTES,
       heldBytesBudget: HELD_BYTES_BUDGET,
+      messageBytesBudget: ceilings['messageBytes'],
     }).toEqual(TRANSPORTS.defaults);
     expect(MAXIMUM_UNSENT_BYTES).toBe(TRANSPORTS.defaults['maximumUnsentBytes']);
+    // a WebSocket message's rate, as an HTTP body's (spec 15.12)
+    expect([WEBSOCKET_BODY_GRACE_PERIOD, WEBSOCKET_MINIMUM_BODY_BYTES_PER_SECOND]).toEqual([
+      TRANSPORTS.defaults['bodyGracePeriod'],
+      TRANSPORTS.defaults['minimumBodyBytesPerSecond'],
+    ]);
   });
 
   for (const entry of TRANSPORTS.responses) {

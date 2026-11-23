@@ -426,7 +426,8 @@ impl ResponsesReader {
 
 // ── WebSocket's frames ─────────────────────────────────────────────────────────────────────────
 
-/// A WebSocket frame, RFC 6455 §5.2: its opcode, whether it ends its message, and its payload.
+/// A WebSocket frame, RFC 6455 §5.2: its opcode, whether it ends its message, its payload, and the
+/// length its head announces where that is more than its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// Whether it ends its message.
@@ -435,6 +436,10 @@ pub struct Frame {
     pub opcode: u8,
     /// Its payload.
     pub payload: Vec<u8>,
+    /// The length its head announces past its payload, which is written alone after that head, as
+    /// a peer that sends a frame's head and leaves its payload to come does: its payload's when
+    /// none.
+    pub length: Option<u64>,
 }
 
 impl Frame {
@@ -445,6 +450,7 @@ impl Frame {
             fin: true,
             opcode,
             payload,
+            length: None,
         }
     }
 
@@ -455,10 +461,12 @@ impl Frame {
     }
 
     /// Its bytes as a client writes them, RFC 6455 §5.2: masked, its length in 7, 16 or 64 bits as
-    /// it needs.
+    /// it needs, the length its head announces, then its payload.
     #[must_use]
     pub fn masked(&self) -> Vec<u8> {
-        let length = self.payload.len();
+        let length = self.length.map_or(self.payload.len(), |length| {
+            usize::try_from(length).unwrap_or(usize::MAX)
+        });
         let mut frame = vec![if self.fin { 0x80 } else { 0 } | (self.opcode & 0x0F)];
 
         if let Ok(short) = u8::try_from(length)
@@ -582,6 +590,7 @@ impl FrameReader {
             fin: first & 0x80 != 0,
             opcode: first & 0x0F,
             payload,
+            length: None,
         })
     }
 

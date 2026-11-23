@@ -57,6 +57,8 @@ interface ISlot {
 /** A WebSocket frame, RFC 6455 5.2: its opcode, whether it ends its message, and its payload. */
 export interface IFrame {
   fin: boolean;
+  /** The length its head announces, where it announces more than its payload, the rest never sent. */
+  length?: number | undefined;
   opcode: number;
   payload: Uint8Array;
 }
@@ -209,20 +211,20 @@ const framingOf = ({ fields, status }: IResponseHead): 'chunked' | 'end' | numbe
 };
 
 /** A frame as a client writes it, RFC 6455 5.2: masked, its length in 7, 16 or 64 bits as it needs. */
-export const frameOf = ({ fin, opcode, payload }: IFrame): Uint8Array => {
-  const { length } = payload;
-  const extended = length < 126 ? 0 : length < 65_536 ? 2 : 8;
+export const frameOf = ({ fin, length = 0, opcode, payload }: IFrame): Uint8Array => {
+  const announced = Math.max(length, payload.length);
+  const extended = announced < 126 ? 0 : announced < 65_536 ? 2 : 8;
   const at = 2 + extended + MASK.length;
-  const frame = new Uint8Array(at + length);
+  const frame = new Uint8Array(at + payload.length);
   const view = new DataView(frame.buffer);
 
   view.setUint8(0, (fin ? 0x80 : 0) | opcode);
-  view.setUint8(1, 0x80 | (extended === 0 ? length : extended === 2 ? 126 : 127));
+  view.setUint8(1, 0x80 | (extended === 0 ? announced : extended === 2 ? 126 : 127));
 
   if (extended === 2) {
-    view.setUint16(2, length);
+    view.setUint16(2, announced);
   } else if (extended === 8) {
-    view.setBigUint64(2, BigInt(length));
+    view.setBigUint64(2, BigInt(announced));
   }
 
   frame.set(MASK, 2 + extended);

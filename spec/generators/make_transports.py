@@ -73,6 +73,22 @@ def notification(call_id, value):
     return {'kind': NOTIFICATION, 'callId': call_id, 'payload': text(value)}
 
 
+def octets(data):
+    """The bytes a hexadecimal string holds, its bars aside."""
+    return bytes.fromhex(data.replace('|', ' '))
+
+
+def parts_of(envelope, sizes):
+    """An envelope's bytes cut in parts of these sizes, the last what is left."""
+    data_, cut = octets(envelope), []
+
+    for size in sizes:
+        cut.append(data_[:size])
+        data_ = data_[size:]
+
+    return [hexadecimal(each) for each in [*cut, data_] if each]
+
+
 # ── Exchanges ───────────────────────────────────────────────────────────────────────────────────
 
 
@@ -1219,6 +1235,7 @@ KEY, ACCEPT = 'dGhlIHNhbXBsZSBub25jZQ==', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
 SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
 CONTINUATION, TEXT, BINARY, PONG = 0x0, 0x1, 0x2, 0xA
 NORMAL, GOING_AWAY, INVALID_PAYLOAD, TOO_BIG = 1000, 1001, 1007, 1009
+PROTOCOL_ERROR, POLICY_VIOLATION, TRY_AGAIN = 1002, 1008, 1013
 
 
 def asked(on='socket', fields=None, *, method='GET', target='/', http='HTTP/1.1', host='{host}',
@@ -1294,6 +1311,168 @@ def pinged(on, within):
     return {'expect': {'ping': True}, 'on': on, 'after': 150, 'within': within}
 
 
+# ── A message partway ───────────────────────────────────────────────────────────────────────────
+
+# what a WebSocket server charges messageBytesBudget for each frame of a message partway beyond its
+# bytes, once its head is whole (spec 15.12)
+PER_FRAME = 128
+
+
+def frame(opcode, payload='', *, fin=False, length=None):
+    """A frame the peer sends: its payload given, and the length its head announces where a case has
+    it announce more, the rest never sent."""
+    assert length is None or length > len(octets(payload)), 'a length announced is past the payload given'
+    return {'opcode': opcode, 'fin': fin, 'payload': payload, **({'length': length} if length is not None else {})}
+
+
+def head_bytes(each):
+    """The octets of a masked frame's head (RFC 6455 §5.2), by the length it announces: 2, its mask's
+    4, and 2 more past 125 or 8 more past 65,535."""
+    announced = each.get('length', len(octets(each['payload'])))
+    return 6 + (0 if announced <= 125 else 2 if announced <= 65_535 else 8)
+
+
+def charged(frames):
+    """What frames charge messageBytesBudget once they came (spec 15.12): each one's head, the payload
+    given, and 128."""
+    return sum(head_bytes(each) + len(octets(each['payload'])) + PER_FRAME for each in frames)
+
+
+def filler(count):
+    """count octets of a message no case ends."""
+    return text('x' * count)
+
+
+def due_of(payload):
+    """When a message that brought that many octets of payload, and none more, fails, in milliseconds
+    from its first byte (spec 15.12)."""
+    return max(DEFAULTS['bodyGracePeriod'], -(-payload * 1_000 // DEFAULTS['minimumBodyBytesPerSecond']))
+
+
+def cast_off(held, asking, charge, budget):
+    """Whom a charge casts off (spec 15.12): none where it fits; else as few as fit it, those past their
+    grace first, then the one that holds the most, then the one whose message began first, the asking
+    one's charge counted in its own sum and that one cast off only when it comes first. held maps each
+    holder, the asking one among them, to its sum, whether it is past its grace, and when its message
+    began."""
+    sums = {name: amount + charge if name == asking else amount for name, (amount, _, _) in held.items()}
+    total = sum(sums.values())
+
+    if total <= budget:
+        return []
+
+    order = sorted(sums, key=lambda name: (not held[name][1], -sums[name], held[name][2]))
+
+    if order[0] == asking:
+        return [asking]
+
+    gone = []
+
+    for name in (name for name in order if name != asking):
+        gone.append(name)
+        total -= sums[name]
+
+        if total <= budget:
+            return gone
+
+    raise AssertionError('a charge that no cast-off fits')
+
+
+def arriving(held, asking, each, budget):
+    """Whom a frame's bytes cast off, and what is held once they came, the same however reads cut it:
+    whole, in two reads at every cut, and a byte a read, each read charged its bytes and 128 more where
+    the head ends in it."""
+    head = head_bytes(each)
+    whole = head + len(octets(each['payload']))
+    outcomes = set()
+
+    for ends in [[whole], *([cut, whole] for cut in range(1, whole)), list(range(1, whole + 1))]:
+        state, gone, at = dict(held), [], 0
+
+        for end in ends:
+            charge = end - at + (PER_FRAME if at < head <= end else 0)
+            at = end
+            out = cast_off(state, asking, charge, budget)
+            gone += out
+
+            for name in out:
+                del state[name]
+
+            if asking in out:
+                break
+
+            amount, past, began = state[asking]
+            state[asking] = (amount + charge, past, began)
+
+        outcomes.add((tuple(gone), sum(amount for amount, _, _ in state.values())))
+
+    assert len(outcomes) == 1, f'reads that cut a frame apart give {outcomes}'
+    return outcomes.pop()
+
+
+# a message's first frame of an echo's header alone, and a pong between its frames
+HEADER_FRAME, BEAT_FRAME = frame(BINARY, ECHO_HEADER), {'opcode': PONG, 'fin': True, 'payload': BEAT}
+
+
+def most_first():
+    """A budget of 500 and four messages partway, none past its grace, the clock never moving: ada's
+    194 and bob's 146, his head's 1,000 announced charging nothing; carol's 174 passes it, casting off
+    ada, who holds the most; dave passes it once he holds 181, more than any other, casting himself
+    off; and carol's tail fits, her message whole releasing her charge."""
+    budget = 500
+    value = '"' + 'x' * 66 + '"'
+    head, tail = parts_of(request(1, 'echo', value), [40])
+    ada, bob = frame(BINARY, filler(60)), frame(BINARY, filler(10), length=1_000)
+    carol, carol_tail, dave = frame(BINARY, head), frame(CONTINUATION, tail, fin=True), frame(BINARY, filler(100))
+    assert [charged([each]) for each in (ada, bob, carol, dave)] == [194, 146, 174, 234]
+    with_carol = arriving({'ada': (194, False, 0), 'bob': (146, False, 1), 'carol': (0, False, 2)}, 'carol', carol,
+                          budget)
+    assert with_carol == (('ada',), 320)
+    with_dave = arriving({'bob': (146, False, 1), 'carol': (174, False, 2), 'dave': (0, False, 3)}, 'dave', dave,
+                         budget)
+    assert with_dave == (('dave',), 320)
+    assert arriving({'bob': (146, False, 1), 'carol': (174, False, 2)}, 'carol', carol_tail, budget)[0] == ()
+
+    return ('a charge that would pass messageBytesBudget casts off with 1013 the connection whose message holds the most, the newcomer only when it holds the most, and a head’s announced length charges nothing',
+            ['15.3', '15.12', '15.12.19'], {'options': {'messageBytesBudget': budget}}, [
+                *upgrade('ada'), *upgrade('bob'), *upgrade('carol'), *upgrade('dave'),
+                message('ada', frames=[ada]), until('messageBytes', charged([ada])),
+                message('bob', frames=[bob]), until('messageBytes', charged([ada, bob])),
+                message('carol', frames=[carol]), heard('ada', close=TRY_AGAIN), until('messageBytes', with_carol[1]),
+                message('dave', frames=[dave]), heard('dave', close=TRY_AGAIN), until('messageBytes', with_dave[1]),
+                message('carol', frames=[carol_tail]), heard('carol', envelope=result(1, value)),
+                until('messageBytes', charged([bob]))])
+
+
+def past_grace_first():
+    """A budget of 3,200: ada's 1,576, due at 6,000 ms, past her grace at 5,500 and not yet due; bob's
+    1,636 passes it once he holds 1,625, more than ada, and ada goes, past her grace, where the most
+    first alone would cast off bob."""
+    budget, grace = 3_200, DEFAULTS['bodyGracePeriod']
+    ada, bob = frame(BINARY, filler(1_440)), frame(BINARY, filler(1_500))
+    due = due_of(1_440)
+    later = (grace + due) // 2
+    assert [charged([ada]), charged([bob])] == [1_576, 1_636] and grace < later < due
+    assert arriving({'ada': (1_576, False, 0), 'bob': (0, False, 1)}, 'bob', bob, budget)[0] == ('bob',)
+    with_bob = arriving({'ada': (1_576, True, 0), 'bob': (0, False, 1)}, 'bob', bob, budget)
+    assert with_bob == (('ada',), 1_636)
+
+    return ('a charge that would pass messageBytesBudget casts off a message past its grace before a larger one within it',
+            ['15.12', '15.12.16', '15.12.19'], {'options': {'messageBytesBudget': budget}}, [
+                *upgrade('ada'), message('ada', frames=[ada]), armed(due), advance(later),
+                *upgrade('bob'), message('bob', frames=[bob]), heard('ada', close=TRY_AGAIN),
+                until('messageBytes', with_bob[1])])
+
+
+# 250 empty continuations, 1,500 octets of heads that would hold a message 6,250 ms were they its
+# payload, where its 12 octets of header hold it its grace alone
+EMPTY_CONTINUATIONS = [frame(CONTINUATION)] * 250
+assert due_of(len(octets(ECHO_HEADER))) == DEFAULTS['bodyGracePeriod'] < due_of(
+    sum(head_bytes(each) for each in EMPTY_CONTINUATIONS))
+# an echo's header, then a continuation whose head takes the message past SMALL's limit
+assert len(octets(ECHO_HEADER)) <= SMALL['maximumEnvelopeBytes'] < len(octets(ECHO_HEADER)) + 60
+
+
 websocket = [
     ('a binary message is one envelope, and its answer one binary message', ['15.2'], {}, [
         *upgrade(), message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
@@ -1307,6 +1486,46 @@ websocket = [
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
     ('a message past the side\'s own limit fails its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
+    # 15.3: a frame judged at its head, its payload never awaited: a first frame's, a continuation's
+    # that takes its message past the limit, and one behind a message whole in the same write, which
+    # its router has first, a text it reports
+    ('a frame whose head would take its message past the side’s own limit fails its connection with 1009 at its head, without waiting for its payload, a continuation’s among them, and a message whole ahead of it in the same read is handed on',
+     ['15.3', '12.2.1'], {'limits': SMALL}, [
+         *upgrade('first'), message('first', frames=[frame(BINARY, fin=True, length=100)]),
+         heard('first', close=TOO_BIG),
+         *upgrade('second'), message('second', frames=[HEADER_FRAME, frame(CONTINUATION, length=60)]),
+         heard('second', close=TOO_BIG),
+         *upgrade('third'), message('third', frames=[frame(TEXT, text('x'), fin=True), frame(BINARY, fin=True, length=100)]),
+         {'report': 1}, heard('third', close=TOO_BIG)]),
+    ('a message of maximumMessageFrames frames is one envelope, and the frame past them fails its connection with 1008 at its head, an empty frame counting',
+     ['15.3'], {'options': {'maximumMessageFrames': 4}}, [
+         *upgrade('whole'), message('whole', frames=[HEADER_FRAME, frame(CONTINUATION), frame(CONTINUATION),
+                                                     frame(CONTINUATION, ECHO_PAYLOAD, fin=True)]),
+         heard('whole', envelope=result(1, '"x"')),
+         *upgrade('past'), message('past', frames=[frame(BINARY, text('x')), *[frame(CONTINUATION)] * 3,
+                                                   frame(CONTINUATION, length=10)]),
+         heard('past', close=POLICY_VIOLATION)]),
+    # 15.12: a message's rate counts its payload alone, from its first byte, on the clock given
+    ('a message that comes slower than minimumBodyBytesPerSecond once bodyGracePeriod passed since its first byte fails its connection with 1008, its heads and control frames counting for nothing',
+     ['15.3', '15.12', '15.12.15', '15.12.16'], {}, [
+         *upgrade(), message('socket', frames=[HEADER_FRAME]), beat('socket'),
+         message('socket', frames=EMPTY_CONTINUATIONS), armed(DEFAULTS['bodyGracePeriod']),
+         advance(DEFAULTS['bodyGracePeriod']), heard('socket', close=POLICY_VIOLATION)]),
+    ('a message’s grace grows with its payload: 1,440 bytes hold it 6 seconds', ['15.12', '15.12.15', '15.12.16'], {}, [
+        *upgrade(), message('socket', frames=[frame(BINARY, filler(1_440))]), armed(due_of(1_440)),
+        advance(due_of(1_440)), heard('socket', close=POLICY_VIOLATION)]),
+    most_first(),
+    past_grace_first(),
+    ('pongs between a message’s frames are charged to messageBytesBudget, and its charge is released once it is whole',
+     ['15.12', '15.12.19'], {}, [
+         *upgrade(), message('socket', frames=[HEADER_FRAME]), until('messageBytes', charged([HEADER_FRAME])),
+         beat('socket'), until('messageBytes', charged([HEADER_FRAME, BEAT_FRAME])),
+         message('socket', frames=[frame(CONTINUATION, ECHO_PAYLOAD, fin=True)]),
+         heard('socket', envelope=result(1, '"x"')), until('messageBytes', 0)]),
+    ('a frame that breaks RFC 6455 fails its connection with 1002, a continuation with no message under way among them',
+     ['15.3'], {}, [
+         *upgrade(), message('socket', frames=[frame(CONTINUATION, text('x'), fin=True)]),
+         heard('socket', close=PROTOCOL_ERROR)]),
     # 15.3: FF and FE are never UTF-8 (RFC 3629 §1), written as a frame since a text is a JSON string,
     # which holds no octet past UTF-8
     ('a text message that is not UTF-8 fails its connection with 1007', ['15.3'], {}, [
@@ -1796,9 +2015,10 @@ class Flag:
 
 # the layout of every parcel this file writes, and the one a case sends as a layout to come
 PARCEL_LAYOUT, LAYOUT_TO_COME = 0xB1, 0xB2
-# a half no parcel names, and the codes a CLOSE carries besides 1000, 1001 and 1009 (spec 15.17)
+# a half no parcel names, and the codes a CLOSE carries besides a WebSocket's 1000, 1001, 1002 and
+# 1009 (spec 15.17)
 NO_HALF = '00 00 00 00 00 00 00 00'
-PROTOCOL_ERROR, LOST, UNANSWERED = 1002, 4000, 4001
+LOST, UNANSWERED = 4000, 4001
 # the participant under test, by its role, the name its server serves, and a peer's id unless a case
 # names others
 SERVER, CLIENT, NAME, PEER = 'server', 'client', 'interop', 'peer'
@@ -1836,11 +2056,6 @@ CHUNK = 20
 def half(n):
     """A half a peer draws: 8 bytes, never all zero, told apart by n."""
     return hexadecimal(bytes([0xA0 + n, 0, 0, 0, 0, 0, 0, n]))
-
-
-def octets(data):
-    """The bytes a hexadecimal string holds, its bars aside."""
-    return bytes.fromhex(data.replace('|', ' '))
 
 
 def credit_of(call_id, end, paced=False):
@@ -2034,17 +2249,6 @@ def gone_of(peer, incarnation):
     """The GONE a peer's broker publishes to its departure as its will (spec 15.21)."""
     return {'kind': Kind.GONE, 'opener': NO_HALF, 'acceptor': NO_HALF, 'sequence': 0, 'flags': 0,
             'incarnation': incarnation, 'id': peer}
-
-
-def parts_of(envelope, sizes):
-    """An envelope's bytes cut in parts of these sizes, the last what is left."""
-    data_, cut = octets(envelope), []
-
-    for size in sizes:
-        cut.append(data_[:size])
-        data_ = data_[size:]
-
-    return [hexadecimal(each) for each in [*cut, data_] if each]
 
 
 # the requests the server cases send, and what answers them
@@ -3124,8 +3328,8 @@ document = {
         "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
         'A step is what the test does — send, behind, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the HTTP exchange it names, which a send opened: it never opens a socket. A behind is never awaited: the next step starts as it is written, the player writing it from a task of its own, without waiting for its socket to take it. Each of its heads is whole, of no HEAD and no CONNECT, and carries no upgrade or expect, so that each response is framed by its status and its fields alone (RFC 9112, section 6.3); one behind writes 65,536 octets at most, each value put in counted as 128, within what a host\'s socket takes, since a case holds a server\'s outcome, never what it reads ahead. On a socket its server ended, a behind writes what the platform takes, and a write refused fails no step.',
         'expect reads the next response on the exchange it names, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). On an exchange a behind wrote on, each told is the next refusal told on it, in order. A response is read by its content-length, or de-chunked, as responses checks every reader, several on one socket among them, each read whole after the one before. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). No expect of an exchange a behind wrote on is orLost or told null: a refusal told names its socket, not its request, so neither could be matched to one response. An expect of end, once its responses were read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12), and that nothing came past those responses. The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
-        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.',
-        'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
+        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload, and, where given, its length, the one its head announces, past the payload, which alone follows the head; or close and its code; every frame masked, as a client\'s is, and the frames of one send written in one write. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.',
+        'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value: over WebSocket, messageBytes is what its server holds of messages partway against messageBytesBudget, every byte their frames bring from a message\'s first head to the end of its last frame, control frames between them among it, and 128 more for each frame\'s head once whole (spec 15.12). report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send, behind and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, behind, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',

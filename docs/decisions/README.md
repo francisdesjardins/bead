@@ -147,13 +147,17 @@ that meets the Tenth Man:
   bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
+- what
+  [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md)
+  keeps ahead: the HTTP transport's `bodyBytesBudget` and a broker's `heldBytesBudget`, which refuse
+  the newcomer, brought to its cast-off, those past their grace first, then the most;
 - what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a share of the
   budget per connection or per address, with
   [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the nine every side shares
+  the parsers the sides fuzz, the ten every side shares
   ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
   beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
   judges alone; and the `envelope` target's writer held to the refusals it documents, as
@@ -274,14 +278,15 @@ table.
 
 ### A server's edge
 
-| #                                                                                         | Decision                                                                                                                                                                               | Status   |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority                                                | accepted |
-| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII                                                            | accepted |
-| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                                                                   | accepted |
-| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)    | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                                                                    | accepted |
-| [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)                                     | A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles | accepted |
-| [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)                | A server tells each access it refuses, never the credential                                                                                                                            | accepted |
+| #                                                                                                                                | Decision                                                                                                                                                                               | Status   |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)                                          | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority                                                | accepted |
+| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)                                        | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII                                                            | accepted |
+| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)                                              | An HTTP server answers CORS to the origins it names, and to no other                                                                                                                   | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)                                           | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                                                                    | accepted |
+| [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)                                                                            | A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles | accepted |
+| [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)                                                       | A server tells each access it refuses, never the credential                                                                                                                            | accepted |
+| [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md) | A WebSocket server holds a message partway to a budget and a rate, and every side reads its frames at their heads                                                                      | accepted |
 
 ### Time
 
@@ -319,7 +324,7 @@ table.
 
 ## Writing one
 
-The next decision is 0056. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0057. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

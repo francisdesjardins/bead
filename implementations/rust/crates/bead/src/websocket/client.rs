@@ -45,7 +45,8 @@ use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
     GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of, ended_of,
 };
-use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, Stamped, hold_heartbeat};
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, hold_heartbeat};
+use crate::websocket::meter::{FrameMeterOptions, Meter, Metering};
 
 #[cfg(test)]
 mod tests;
@@ -92,9 +93,13 @@ pub struct WebSocketTransportClientOptions {
     /// which the connection is dropped (spec 15.3): [`HEARTBEAT`] when none; [`crate::NEVER`] beats
     /// none.
     pub heartbeat: Option<Duration>,
-    /// The largest message it reads, past which it fails its connection with 1009 (spec 15.3):
-    /// [`MAXIMUM_MESSAGE_BYTES`] when none.
+    /// The largest message it reads, past which it fails its connection with 1009 at the head that
+    /// takes it past (spec 15.3): [`MAXIMUM_MESSAGE_BYTES`] when none.
     pub maximum_message_bytes: Option<u64>,
+    /// The frames one message may have, an empty one counting, past which it fails its connection
+    /// with 1008 at the head of the frame past them (spec 15.3): [`crate::MAXIMUM_MESSAGE_FRAMES`]
+    /// when none; never without end.
+    pub maximum_message_frames: Option<u64>,
     /// The TLS a secured connect speaks, the application's own, which a copy of offers HTTP/1.1
     /// alone by ALPN: of `tls` when none. Refused beside `tls`.
     pub client_config: Option<Arc<ClientConfig>>,
@@ -204,6 +209,7 @@ struct Settings {
     close_timeout: Duration,
     heartbeat: Duration,
     maximum_message_bytes: u64,
+    maximum_message_frames: u64,
     tls: ClientTls,
 }
 
@@ -273,7 +279,7 @@ pub(crate) struct ClientInner {
 
 // a connection opened, its credential with it, and what is read of it
 struct Opened {
-    socket: WebSocketStream<Stamped<ClientSocket>>,
+    socket: WebSocketStream<Meter<ClientSocket>>,
     reads: Arc<Reads>,
     credential: Option<String>,
 }
@@ -392,6 +398,15 @@ fn failure_of(failed: &Failed) -> RouterError {
         Failed::Protocol(why) => format!("the connection is closed with 1002: {why}"),
         Failed::InvalidPayload(why) => format!("the connection is closed with 1007: {why}"),
         Failed::Dropped(why) => format!("the connection is dropped: {why}"),
+        Failed::TooManyFrames(maximum) => format!(
+            "the connection is closed with 1008: a message past its maximumMessageFrames, {maximum} frames"
+        ),
+        // a server's alone, which holds its messages partway to a rate and a budget
+        Failed::Slow(why) => format!("the connection is closed with 1008: {why}"),
+        Failed::CastOff(budget) => format!(
+            "the connection is closed with 1013: the messages partway would pass messageBytesBudget, {}",
+            byte_count_of(*budget)
+        ),
     };
 
     RouterError::Other(Arc::new(io::Error::other(message)))
@@ -602,10 +617,27 @@ impl ClientInner {
             .map_err(connect_error)?;
         // each read of its socket stamped, what its heartbeat counts its silence from (spec 15.3)
         let reads = Reads::new(Arc::clone(&self.platform));
+        let mut frames = FrameMeterOptions::new(false);
+
+        frames.maximum_message_bytes = Some(self.settings.maximum_message_bytes);
+        frames.maximum_message_frames = Some(self.settings.maximum_message_frames);
+
+        // * its frames metered from the end of its 101's head on, what came past it with it among
+        // them, which tungstenite never reads first
+        let meter = Meter::new(
+            socket,
+            Metering {
+                read: Vec::new(),
+                reads: Arc::clone(&reads),
+                frames,
+                holding: None,
+                is_upgrading: true,
+            },
+        );
         // ! no redirect followed: tungstenite fails an upgrade answered with anything but 101
         let (socket, response) = tokio_tungstenite::client_async_with_config(
             request,
-            Stamped::new(socket, Arc::clone(&reads)),
+            meter,
             Some(config_of(self.settings.maximum_message_bytes, None)),
         )
         .await
@@ -954,6 +986,12 @@ impl WebSocketTransportClient {
                 .maximum_message_bytes
                 .unwrap_or(MAXIMUM_MESSAGE_BYTES),
         )?;
+        let maximum_message_frames = hold_count(
+            "maximumMessageFrames",
+            options
+                .maximum_message_frames
+                .unwrap_or(crate::MAXIMUM_MESSAGE_FRAMES),
+        )?;
         let clock = options
             .clock
             .clone()
@@ -974,6 +1012,7 @@ impl WebSocketTransportClient {
                     close_timeout,
                     heartbeat,
                     maximum_message_bytes,
+                    maximum_message_frames,
                     tls,
                 },
                 racing,

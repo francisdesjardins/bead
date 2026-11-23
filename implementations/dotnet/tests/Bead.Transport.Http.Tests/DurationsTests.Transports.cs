@@ -559,6 +559,48 @@ public sealed partial class DurationsTests
         return WebSocketServerBuilt(new WebSocketTransportServerOptions { HeadersTimeout = Assert.NotNull(given) });
     }
 
+    // webSocketTransportServer.bodyGracePeriod
+
+    // the transport server's options, as it is built: the due of the timer it arms on its clock for
+    // a message whose first frame came, empty and not final, the one timer it arms; refused, no
+    // server built
+    private static async Task<Observed> BodyGracePeriodByWebSocketOptions(TimeSpan? given)
+    {
+        var clock = new SteppingClock(Epoch);
+        WebSocketTransportServer server;
+
+        try
+        {
+            server = new WebSocketTransportServer(given is { } grace ? new WebSocketTransportServerOptions { BodyGracePeriod = grace, Clock = clock } : new WebSocketTransportServerOptions { Clock = clock });
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        await using (server)
+        {
+            var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
+            using var client = new ClientWebSocket();
+
+            await client.ConnectAsync(new Uri($"ws://{Host}:{port}/"), Cancelled);
+            await client.SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Binary, false, Cancelled);
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var dues = clock.Dues();
+
+            while (dues.Count == 0 && watch.Elapsed < Patience)
+            {
+                await Task.Delay(5, Cancelled);
+                dues = clock.Dues();
+            }
+
+            client.Abort();
+
+            return HeldAt(DueOf(dues));
+        }
+    }
+
     // a WebSocket transport server built, taken or refused
     private static async Task<Observed> WebSocketServerBuilt(WebSocketTransportServerOptions options)
     {

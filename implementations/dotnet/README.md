@@ -503,9 +503,21 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
   to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
   dropped, its close unclean, and reported through `Error` as its connection ends, naming the bound
-  and its value. A message past `MaximumMessageBytes` fails its connection with 1009, drained until
-  the peer's close or `CloseTimeout`, its close unclean whatever the peer answers, and reported
-  through `Error` the same way (spec 15.3).
+  and its value. Each read of a connection's upgraded stream goes through its frame meter before
+  .NET's reader sees it (spec 15.3, decision 0056). The meter judges each frame at its head: a
+  length that takes its message past `MaximumMessageBytes` fails the connection with 1009, the
+  frame past `MaximumMessageFrames`, 16,384, with 1008, and a head RFC 6455 forbids with 1002.
+  What a read brought before that frame is handed on; nothing from it on is. The bytes of messages
+  partway are charged to `MessageBytesBudget`, 256 MiB across the connections, as they come, each
+  head 128 more, gauged `messageBytes`. A charge past it casts off connections with 1013: those
+  whose message is past `BodyGracePeriod` first, then the one that holds the most. A message slower
+  than `MinimumBodyBytesPerSecond`, 240, once `BodyGracePeriod`, 5 s, passed fails with 1008, on the
+  server's clock. Its clock runs while a paused connection reads its message on. Each verdict
+  sends its close, then drops what comes, unparsed, until the peer ends or `CloseTimeout` passes.
+  The close is unclean whatever the peer answers, and is reported through `Error` the same way.
+  Kestrel's upgraded stream has no half-close, so the server's writing ends with its socket. The
+  client meters its frames alike, held to `MaximumMessageBytes` and `MaximumMessageFrames`, with no
+  budget and no rate.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.

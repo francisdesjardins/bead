@@ -61,12 +61,31 @@ session's timers count what the peer says, not that it answers. Bead has no ping
 a connection is alive is its transport's to know.
 
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
-its `maxPayload` says otherwise, and fails a connection that sends a larger one with 1009; over the
-global `WebSocket`, its platform's bound applies. Each end drains it until the peer's close or its
-`closeTimeout`, its close unclean whatever the peer answers, and reports it on `error`, naming
-`maximumMessageBytes` and its value, as it reports a protocol error, before its close; a client over
-the global `WebSocket`, whose `error` cannot be told from a drop, tells its close alone (spec 15.1,
-15.3). The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
+its `maxPayload` says otherwise, in 16,384 frames at most, `MAXIMUM_MESSAGE_FRAMES`, unless its
+`maximumMessageFrames` says otherwise. It fails at its head a frame whose announced length takes its
+message past `maxPayload`, with 1009, and a head RFC 6455 forbids, with 1002, but a 64-bit length
+with its top bit set, which the client fails with 1009, as `ws` reads any length past 2⁵³ − 1; a
+frame past `maximumMessageFrames`, with 1008, at its head on the server, once its payload came on
+the client, as `ws` counts it; over the global `WebSocket`, its platform's bounds apply. Each end then sends its
+close, and drains the connection, unread, until the peer's end or its `closeTimeout`, its close
+unclean whatever the peer answers, and reports it on `error`, naming the bound and its value, as it
+reports a protocol error, before its close; a client over the global `WebSocket`, whose `error`
+cannot be told from a drop, tells its close alone (spec 15.1, 15.3). The server judges each frame
+by a frame meter of its own, which reads each read of the upgrade's raw socket before `ws` does, and
+ends its writing once its close is written; the client leaves its frames to `ws`.
+
+A server holds each message partway, from the first byte of its first frame's head to the last byte
+of its last frame, to a budget and a rate (spec 15.12). Every byte it reads of one is charged to
+`messageBytesBudget`, 268,435,456 bytes across its connections, as it comes, its frames' heads and
+the control frames between them among it, and 128 more for each head; never what a head announces.
+A charge that would pass the budget casts off with 1013 as few connections as fit it: those whose
+message is past `bodyGracePeriod` first, then the one whose message holds the most, the newcomer
+only when it comes first. A message that brings its payload slower than
+`minimumBodyBytesPerSecond`, 240 bytes a second, once `bodyGracePeriod`, 5 seconds, passed since its
+first byte fails with 1008, on the server's clock, the time its router holds the connection paused
+not counted. Each is reported on `error`, naming its bound, and its gauge is `messageBytes`. The
+budget and the rate hold where the `WebSocketServer` given hands the transport the raw socket of
+each upgrade, as `ws` on Node's own upgrade does. The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
 `ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A
 WebSocket server judges a request at its address in the order of spec 15.2: 400 as HTTP answers it
 to a field holding a control character but a tab or an octet past ASCII, to a target holding an

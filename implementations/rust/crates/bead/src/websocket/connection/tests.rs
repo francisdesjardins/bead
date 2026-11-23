@@ -47,9 +47,27 @@ async fn opened(
 ) -> (Connection<DuplexStream>, Commands, DuplexStream) {
     let (server, peer) = tokio::io::duplex(capacity);
     let (connection, commands) =
-        Connection::open((server, Vec::new()), (Role::Server, bounds)).await;
+        Connection::open(metered(server, &bounds), (Role::Server, bounds)).await;
 
     (connection, commands, peer)
+}
+
+// `socket` metered as a server's, within `bounds`, holding no budget
+fn metered(socket: DuplexStream, bounds: &ConnectionBounds) -> Meter<DuplexStream> {
+    let mut frames = crate::websocket::meter::FrameMeterOptions::new(true);
+
+    frames.maximum_message_bytes = Some(bounds.maximum_message_bytes);
+
+    Meter::new(
+        socket,
+        crate::websocket::meter::Metering {
+            read: Vec::new(),
+            reads: crate::websocket::heartbeat::Reads::new(Arc::clone(&bounds.platform)),
+            frames,
+            holding: None,
+            is_upgrading: false,
+        },
+    )
 }
 
 // a frame a client sends, masked, its payload under 126 bytes
@@ -319,6 +337,7 @@ fn shared() -> Shared {
         paused: AtomicBool::new(false),
         is_ended: AtomicBool::new(false),
         dropped: Mutex::new(None),
+        partway: None,
     }
 }
 

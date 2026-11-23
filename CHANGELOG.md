@@ -123,6 +123,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refusal at a WebSocket's address, to the socket's end. Both conformance files play a signed
   `Content-Length`, which Kestrel reads as its number, the C# side excused by the row "A signed
   `Content-Length`".
+- Spec 15.3 and 15.12: a WebSocket server holds each message partway to `messageBytesBudget` and
+  to `minimumBodyBytesPerSecond` past `bodyGracePeriod`. Every byte its frames bring is charged,
+  and 128 a frame. A charge that would pass the budget casts off with 1013 as few connections as
+  it needs, those past their grace first and the largest first. A message too slow fails
+  with 1008. Every side reads frame heads itself: 1009 at the head that takes a message past
+  `maximumMessageBytes`, 1008 past `maximumMessageFrames` (16,384), and 1002 at a head RFC 6455
+  forbids. From a failure on, nothing more is read: the side sends its close, ends its writing where
+  its platform lets it and drops what comes until its peer ends or its close timeout passes. A peer could hold a message's
+  memory without end through one-byte fragments, or on the TypeScript side pin a read's whole bytes
+  for each fragment. The Rust side reserved a frame's announced length at its head, and the Rust
+  and C# sides kept their largest message's buffer. Eight cases of `spec/transports.json`, which
+  take a frame's `length` and the gauge `messageBytes`, and the place
+  `webSocketTransportServer.bodyGracePeriod` of `spec/durations.json` play it; the support matrix
+  gains its feature, three platform rows and the open row `The frame a WebSocket client fails at
+  its head`, and its open row on a frame's head becomes the platform row `What a WebSocket
+  message's frame costs a side beyond its bytes`. Every side fuzzes a tenth
+  target, `websocket-frames`, its meter against its platform's reader (decision 0056).
 
 ## [0.16.0] - 2026-11-18
 

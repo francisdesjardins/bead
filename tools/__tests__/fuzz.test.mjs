@@ -86,6 +86,7 @@ describe('the targets', () => {
       'broker-parcel',
       'proto-codecs',
       'json-form',
+      'websocket-frames',
     ]);
     assert.deepEqual(TARGETS.csharp, TWINS);
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
@@ -308,6 +309,25 @@ describe('the seeds', () => {
     for (const seed of SEEDS['mqtt-websocket-frames']) {
       assert.equal(seed[1] & 0x80, 0, seed.toString('hex'));
     }
+  });
+
+  test("seed the frame meter's target with the WebSocket cases' sends, each a server's to read, masked as a client writes it", () => {
+    const seeds = SEEDS['websocket-frames'];
+
+    assert.ok(seeds.length > 0);
+
+    // * the byte that has a server read them, then a first head masked (RFC 6455 §5.3)
+    for (const seed of seeds) {
+      assert.equal(seed[0], 0, seed.toString('hex'));
+      assert.equal(seed[2] & 0x80, 0x80, seed.toString('hex'));
+    }
+
+    // a head announcing more than its payload brings, as a case gives it
+    assert.ok(
+      seeds.some((seed) => {
+        return seed.toString('hex') === '0082e437fa213d';
+      })
+    );
   });
 
   test("seed the envelope target with every side's envelope mutation seeds, in their order and digest", () => {

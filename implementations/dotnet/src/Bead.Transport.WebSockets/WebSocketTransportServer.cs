@@ -20,9 +20,12 @@ namespace Bead.Transport.WebSockets;
 public sealed record WebSocketTransportServerOptions
 {
     /// <summary>
-    /// The largest message it reads, in bytes, the spec's <c>maximumMessageBytes</c>: one larger
-    /// fails its connection with 1009, reported through <see cref="WebSocketTransportServer.Error"/>
-    /// naming the bound, its close unclean whatever the peer answers (spec 15.3). A router's envelope
+    /// The largest message it reads, in bytes, the spec's <c>maximumMessageBytes</c>: the head of a
+    /// frame that announces a length taking its message past it fails its connection with 1009, at
+    /// its head, reported through <see cref="WebSocketTransportServer.Error"/> naming the bound; it
+    /// sends its close, then drops what comes unparsed until the peer ends or
+    /// <see cref="CloseTimeout"/> passes, its close unclean whatever the peer answers (spec 15.3). A
+    /// router's envelope
     /// limit at least, as the TypeScript side's <c>maxPayload</c> is; an envelope's limit by default.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
@@ -183,6 +186,46 @@ public sealed record WebSocketTransportServerOptions
     public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
 
     /// <summary>
+    /// The bytes its connections hold of messages partway, together, the spec's
+    /// <c>messageBytesBudget</c>: 268,435,456 by default (spec 15.12). Each byte read from a message's
+    /// first head to the end of its last frame is charged as it comes, the control frames between
+    /// them among it, and each head 128 more once whole; never what a head announces. A charge that
+    /// would pass it casts off connections, as few as fit it: those whose message is past
+    /// <see cref="BodyGracePeriod"/> first, then the one that holds the most, then the one whose
+    /// message began first, the asking one only when it comes first. Each fails with 1013, reported
+    /// through <see cref="WebSocketTransportServer.Error"/> naming the bound. A whole number above 0;
+    /// any other is an <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public long MessageBytesBudget { get; init; } = ServerBounds.MessageBytesBudget;
+
+    /// <summary>
+    /// The frames a message takes at most, the spec's <c>maximumMessageFrames</c>: 16,384 by
+    /// default, and never without end (spec 15.3). The head of the frame past them, an empty one
+    /// counting, fails its connection with 1008, reported through
+    /// <see cref="WebSocketTransportServer.Error"/> naming the bound. A whole number above 0; any
+    /// other is an <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MaximumMessageFrames { get; init; } = FrameMeter.MaximumMessageFrames;
+
+    /// <summary>
+    /// The slowest a message may come, in bytes of payload a second, once <see cref="BodyGracePeriod"/>
+    /// passed since its first byte: 240 by default (spec 15.12). One that brought <i>R</i> bytes, and
+    /// none more, by its first byte plus the longer of the grace and <i>R</i> at this rate fails its
+    /// connection with 1008, reported through <see cref="WebSocketTransportServer.Error"/> naming the
+    /// bound; heads, masks and control frames count for nothing. Its clock runs while its router
+    /// paused it and it reads a message on (docs/support.md). A whole number above 0; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
+
+    /// <summary>
+    /// How long a message comes before its rate is held: 5 seconds by default; from 1 to 2³¹ − 1
+    /// milliseconds, rounded to the nearest whole one; zero and infinite are refused (spec 15.12). On
+    /// the server's clock, <see cref="Clock"/>.
+    /// </summary>
+    public TimeSpan BodyGracePeriod { get; init; } = ServerBounds.BodyGracePeriod;
+
+    /// <summary>
     /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
     /// any other, which names no destination, is answered as one to no resolver,
     /// <c>SERVICE_UNKNOWN</c> or <c>PROCEDURE_UNKNOWN</c>, before its credential, its admission and
@@ -218,6 +261,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
     private readonly WebSocketTransportServerOptions _options;
     private readonly TimeProvider _clock;
+    // what its connections hold of messages partway, together (spec 15.12)
+    private readonly MessageBudget _budget;
     // the networks of the proxies it believes X-Forwarded-For from
     private readonly ProxyTrust _proxyTrust;
     // the procedures each of its connections takes; none, every one
@@ -256,6 +301,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumConnectionsPerAddress), given.MaximumConnectionsPerAddress));
         ServerBounds.AssertCountOrNone((nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), given.MinimumSendBytesPerSecond));
         ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), given.MaximumUnsentBytes ?? 1));
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MessageBytesBudget), given.MessageBytesBudget));
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumMessageFrames), given.MaximumMessageFrames));
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
         _procedures = ProceduresTaken.Of(given.Procedures, ("a WebSocket transport server", nameof(options)));
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
@@ -275,8 +323,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             HeadersTimeout = Clocks.AssertHeldFinite(
                 (nameof(WebSocketTransportServerOptions.HeadersTimeout), nameof(WebSocketTransportServerOptions.HeadersTimeout)),
                 given.HeadersTimeout),
+            BodyGracePeriod = Clocks.AssertHeldFinite(
+                (nameof(WebSocketTransportServerOptions.BodyGracePeriod), nameof(WebSocketTransportServerOptions.BodyGracePeriod)),
+                given.BodyGracePeriod),
         };
         _clock = _options.Clock ?? TimeProvider.System;
+        _budget = new MessageBudget(_options.MessageBytesBudget);
         _isSecure = _options.Secure ?? false;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
@@ -302,10 +354,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<TransportServerRefusal>? Refusal;
 
     /// <summary>
-    /// What went wrong on a connection, with its handle (spec 15.1): a protocol error on it; a bound
-    /// it is dropped behind, an <see cref="IOException"/>, or a message past its
-    /// <see cref="WebSocketTransportServerOptions.MaximumMessageBytes"/> it is failed with 1009 for,
-    /// an <see cref="InvalidDataException"/>, each naming the bound in the spec's spelling and its
+    /// What went wrong on a connection, with its handle (spec 15.1): a protocol error on it, a frame
+    /// head RFC 6455 forbids among them, failed with 1002, a <see cref="WebSocketException"/>; a
+    /// bound it is dropped behind, or a message it is failed for, too slow, 1008, or cast off by
+    /// <see cref="WebSocketTransportServerOptions.MessageBytesBudget"/>, 1013, an
+    /// <see cref="IOException"/>; or a message past its
+    /// <see cref="WebSocketTransportServerOptions.MaximumMessageBytes"/>, 1009, or its
+    /// <see cref="WebSocketTransportServerOptions.MaximumMessageFrames"/>, 1008, an
+    /// <see cref="InvalidDataException"/>; each naming the bound in the spec's spelling and its
     /// value; each told once, as its connection ends, its close begun, before its unclean
     /// <see cref="Close"/>, so a listener that throws keeps nothing open. Or what a listener of its
     /// events threw, as it threw, the transport going on as if it returned. Never a peer that drops
@@ -420,8 +476,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// <summary>
     /// What it holds, at the ceilings it has: the connections, counted, and the connections the
     /// busiest address holds, which its health warns on before a proxy it was not told of is refused
-    /// <c>busy</c>; and their handles — never to leave the process — which a server sets its own
-    /// layers against.
+    /// <c>busy</c>; what waits for their sockets; what they hold of messages partway,
+    /// <c>messageBytes</c>, under <see cref="WebSocketTransportServerOptions.MessageBytesBudget"/>;
+    /// and their handles — never to leave the process — which a server sets its own layers against.
     /// </summary>
     public Gauges Gauges()
     {
@@ -444,6 +501,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 ["connections"] = connectionHandles.Count,
                 ["largestAddressConnections"] = largest,
                 ["largestUnsentBytes"] = unsent.DefaultIfEmpty().Max(),
+                ["messageBytes"] = _budget.Charged,
                 ["unsentBytes"] = unsent.Sum(),
             },
             connectionHandles) with
@@ -453,6 +511,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 ["connections"] = _options.MaximumConnections,
                 ["largestAddressConnections"] = _options.MaximumConnectionsPerAddress,
                 ["largestUnsentBytes"] = MaximumUnsentBytes,
+                ["messageBytes"] = _options.MessageBytesBudget,
             },
         };
     }
@@ -545,7 +604,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             Built?.Invoke(application);
 
             // * ahead of the WebSocket middleware, so each upgrade's stream is read through its gate
-            application.Use(ReadGate.Gating);
+            // and its meter
+            application.Use((context, next) =>
+            {
+                return ReadGate.Gating(context, (next, MeterOf));
+            });
             application.UseWebSockets(new WebSocketOptions
             {
                 KeepAliveInterval = _options.Heartbeat,
@@ -724,6 +787,25 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return ServerBounds.UnsentBytesOf(limits);
     }
 
+
+    // * an upgrade's meter (decision 0056): its frames judged at their heads, its messages partway
+    // charged to the budget its connections share and held to the rate, on the server's clock
+    private FrameMeter MeterOf()
+    {
+        return new FrameMeter(new FrameMeter.MeterOptions
+        {
+            MaximumMessageBytes = MaximumMessageBytes,
+            MaximumMessageFrames = _options.MaximumMessageFrames,
+            IsServer = true,
+            Budget = _budget,
+            Rate = new FrameMeter.RateOptions
+            {
+                MinimumBodyBytesPerSecond = _options.MinimumBodyBytesPerSecond,
+                BodyGracePeriod = _options.BodyGracePeriod,
+                Clock = _clock,
+            },
+        });
+    }
 
     // * a place taken as an upgrade is judged, before its handshake completes, under the lock, so
     // upgrades that cross take no more places than are left; none past either bound, nor once a stop
@@ -1040,9 +1122,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     // what this side ended a connection of its own for, named by its bound in the spec's spelling
-    // and its value (spec 15.3, 15.12): a drop, the socket aborted, its I/O cut short; a message
-    // past its bound, data it does not take, as SignalR reports a message past its own; then what
-    // its socket threw as it was aborted; none otherwise
+    // and its value (spec 15.3, 15.12): a drop, the socket aborted, its I/O cut short; a verdict, a
+    // message past a bound, too slow or cast off, or a head RFC 6455 forbids; then what its socket
+    // threw as it was aborted; none otherwise
     private static Exception? FailureOf(WebSocketConnection connection, string connectionHandle)
     {
         if (connection.Dropped is { } why)
@@ -1050,7 +1132,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             return ServerBounds.DroppedOf(connectionHandle, why);
         }
 
-        return connection.IsTooBig ? connection.TooBigOf(connectionHandle) : connection.AbortFailure;
+        return connection.FailureOf(connectionHandle) ?? connection.AbortFailure;
     }
 
     // * a connection's end, told once its read ended, its close or its abort begun: its one error,

@@ -225,6 +225,10 @@ public sealed class TransportsTests
                 "sendGracePeriod" => options with { SendGracePeriod = TimeOf(option.Value) },
                 "maximumUnsentBytes" => options with { MaximumUnsentBytes = option.Value.GetInt64() },
                 "headersTimeout" => options with { HeadersTimeout = TimeOf(option.Value) },
+                "messageBytesBudget" => options with { MessageBytesBudget = option.Value.GetInt64() },
+                "maximumMessageFrames" => options with { MaximumMessageFrames = option.Value.GetInt32() },
+                "minimumBodyBytesPerSecond" => options with { MinimumBodyBytesPerSecond = option.Value.GetInt32() },
+                "bodyGracePeriod" => options with { BodyGracePeriod = TimeOf(option.Value) },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }
@@ -374,22 +378,24 @@ public sealed class TransportsTests
         };
     }
 
-    // a frame of the peer's, masked as a client's must be, its payload's length in 7, 16 or 64 bits
-    // as its size needs (RFC 6455, section 5.2)
-    private static byte[] FrameOf((int Opcode, bool IsFinal, byte[] Payload) frame)
+    // a frame of the peer's, masked as a client's must be, its length in 7, 16 or 64 bits as it needs
+    // (RFC 6455, section 5.2): the length its head announces, where a case gives one past its
+    // payload, the rest never sent, or its payload's
+    private static byte[] FrameOf(PeerFrame frame)
     {
-        var (opcode, isFinal, payload) = frame;
+        var (opcode, isFinal, payload, announced) = frame;
         var bytes = new List<byte> { (byte)((isFinal ? 0x80 : 0) | opcode) };
+        var told = announced ?? payload.Length;
 
-        if (payload.Length < 126)
+        if (told < 126)
         {
-            bytes.Add((byte)(0x80 | payload.Length));
+            bytes.Add((byte)(0x80 | told));
         }
-        else if (payload.Length <= ushort.MaxValue)
+        else if (told <= ushort.MaxValue)
         {
             var length = new byte[2];
 
-            BinaryPrimitives.WriteUInt16BigEndian(length, (ushort)payload.Length);
+            BinaryPrimitives.WriteUInt16BigEndian(length, (ushort)told);
             bytes.Add(0x80 | 126);
             bytes.AddRange(length);
         }
@@ -397,7 +403,7 @@ public sealed class TransportsTests
         {
             var length = new byte[8];
 
-            BinaryPrimitives.WriteUInt64BigEndian(length, (ulong)payload.Length);
+            BinaryPrimitives.WriteUInt64BigEndian(length, (ulong)told);
             bytes.Add(0x80 | 127);
             bytes.AddRange(length);
         }
@@ -482,8 +488,13 @@ public sealed class TransportsTests
             "minimumSendBytesPerSecond" => Alike((http.MinimumSendBytesPerSecond, webSocket.MinimumSendBytesPerSecond)),
             "sendGracePeriod" => Alike(((long)http.SendGracePeriod.TotalMilliseconds, (long)webSocket.SendGracePeriod.TotalMilliseconds)),
             "headersTimeout" => Alike(((long)http.HeadersTimeout.TotalMilliseconds, (long)webSocket.HeadersTimeout.TotalMilliseconds)),
-            "minimumBodyBytesPerSecond" => http.MinimumBodyBytesPerSecond,
-            "bodyGracePeriod" => (long)http.BodyGracePeriod.TotalMilliseconds,
+            "minimumBodyBytesPerSecond" => Alike((http.MinimumBodyBytesPerSecond, webSocket.MinimumBodyBytesPerSecond)),
+            "bodyGracePeriod" => Alike(((long)http.BodyGracePeriod.TotalMilliseconds, (long)webSocket.BodyGracePeriod.TotalMilliseconds)),
+
+            // what a WebSocket server holds of its messages partway, and the frames a message takes,
+            // alike on a server and a client
+            "messageBytesBudget" => webSocket.MessageBytesBudget,
+            "maximumMessageFrames" => Alike((webSocket.MaximumMessageFrames, new WebSocketTransportClientOptions().MaximumMessageFrames)),
 
             // what the WebSocket server holds for a socket when built alone, told none
             "maximumUnsentBytes" => new WebSocketTransportServer(webSocket).MaximumUnsentBytes,
@@ -1076,7 +1087,8 @@ public sealed class TransportsTests
         }
 
         // a message on an exchange that is a WebSocket: binary or text, in one final frame; frames
-        // as given; or a close and its code
+        // as given, each the length its head announces where the case gives one, all of a step in
+        // one write, as one send of the case's is; or a close and its code
         private async Task Write((JsonElement Message, string On) step)
         {
             var (message, on) = step;
@@ -1084,25 +1096,29 @@ public sealed class TransportsTests
 
             if (message.TryGetProperty("binary", out var binary))
             {
-                await exchange.Write((Binary, true, BytesOf(binary.GetString()!)));
+                await exchange.Write([new PeerFrame(Binary, true, BytesOf(binary.GetString()!), null)]);
             }
             else if (message.TryGetProperty("text", out var text))
             {
-                await exchange.Write((Text, true, Encoding.UTF8.GetBytes(text.GetString()!)));
+                await exchange.Write([new PeerFrame(Text, true, Encoding.UTF8.GetBytes(text.GetString()!), null)]);
             }
             else if (message.TryGetProperty("frames", out var frames))
             {
-                foreach (var frame in frames.EnumerateArray())
+                await exchange.Write([.. frames.EnumerateArray().Select((frame) =>
                 {
-                    await exchange.Write((frame.GetProperty("opcode").GetInt32(), frame.GetProperty("fin").GetBoolean(), BytesOf(frame.GetProperty("payload").GetString()!)));
-                }
+                    return new PeerFrame(
+                        frame.GetProperty("opcode").GetInt32(),
+                        frame.GetProperty("fin").GetBoolean(),
+                        BytesOf(frame.GetProperty("payload").GetString()!),
+                        frame.TryGetProperty("length", out var length) ? length.GetInt64() : null);
+                })]);
             }
             else
             {
                 var code = new byte[2];
 
                 BinaryPrimitives.WriteUInt16BigEndian(code, (ushort)message.GetProperty("close").GetInt32());
-                await exchange.Write((Closing, true, code));
+                await exchange.Write([new PeerFrame(Closing, true, code, null)]);
             }
         }
 
@@ -1430,6 +1446,9 @@ public sealed class TransportsTests
     /// <summary>What the server sent on a WebSocket: a message whole, a close, a ping or a pong, by its opcode; or its socket's end, with what came past its responses.</summary>
     private sealed record Heard(int Kind, byte[] Bytes);
 
+    /// <summary>A frame the peer sends: its opcode, whether it ends its message, its payload, and the length its head announces where it is past that payload.</summary>
+    private sealed record PeerFrame(int Opcode, bool IsFinal, byte[] Payload, long? Announced);
+
     /// <summary>A response on an exchange's socket: its head, then its body, each read as it comes.</summary>
     private sealed record Response(Task<Head> Head, Task<byte[]> Body)
     {
@@ -1631,10 +1650,13 @@ public sealed class TransportsTests
             _ending.TrySetResult();
         }
 
-        // a frame of the peer's, whole, after any other it writes
-        public async Task Write((int Opcode, bool IsFinal, byte[] Payload) frame)
+        // frames of the peer's, in one write, after any other it writes
+        public async Task Write(IReadOnlyList<PeerFrame> frames)
         {
-            if (frame.Opcode == Closing)
+            if (frames.Any((frame) =>
+            {
+                return frame.Opcode == Closing;
+            }))
             {
                 _isClosing = true;
             }
@@ -1643,7 +1665,7 @@ public sealed class TransportsTests
 
             try
             {
-                await _stream.WriteAsync(FrameOf(frame), Cancelled);
+                await _stream.WriteAsync(frames.SelectMany(FrameOf).ToArray(), Cancelled);
             }
             finally
             {
@@ -1736,11 +1758,11 @@ public sealed class TransportsTests
 
                     if (opcode == Ping && _isAnsweringPings)
                     {
-                        await Write((Pong, true, payload));
+                        await Write([new PeerFrame(Pong, true, payload, null)]);
                     }
                     else if (opcode == Closing && !_isClosing)
                     {
-                        await Write((Closing, true, payload.Length >= 2 ? payload[..2] : []));
+                        await Write([new PeerFrame(Closing, true, payload.Length >= 2 ? payload[..2] : [], null)]);
                     }
                     else if (opcode is Continuation or Text or Binary)
                     {

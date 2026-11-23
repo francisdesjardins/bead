@@ -4976,3 +4976,210 @@ async fn raises_no_message_for_what_comes_after_it_sent_its_close() {
     assert_eq!(recorder.errors(), Vec::<String>::new(), "no error");
     assert_eq!(client.ready_state(), ReadyState::Closed);
 }
+
+// ── Its frame meter (decision 0056) ──────────────────────────────────────────────────────────
+
+// a head of a server's frame, unmasked: `fin`, `opcode`, and the length it announces
+fn head_announcing(opcode: u8, (fin, length): (bool, u64)) -> Vec<u8> {
+    let mut head = vec![if fin { 0x80 } else { 0 } | opcode];
+
+    if length < 126 {
+        head.push(u8::try_from(length).unwrap());
+    } else if let Ok(medium) = u16::try_from(length) {
+        head.push(126);
+        head.extend_from_slice(&medium.to_be_bytes());
+    } else {
+        head.push(127);
+        head.extend_from_slice(&length.to_be_bytes());
+    }
+
+    head
+}
+
+// a frame of a server's, not final: its opcode and its payload, under 126 bytes
+fn fragment_of(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mut frame = head_announcing(opcode, (false, u64::try_from(payload.len()).unwrap()));
+
+    frame.extend_from_slice(payload);
+    frame
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1009_at_its_head_without_waiting_for_its_payload_a_frame_that_would_take_its_message_past_maximum_message_bytes_a_continuation_among_them()
+ {
+    // its head alone, written with its 101 in one write, its payload never sent
+    let mut server = raw_writing(head_announcing(0x2, (true, 100_000))).await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_bytes: Some(1_024),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1009),
+        "1009 at its head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(
+        told_of(&recorder),
+        [
+            "error: the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes",
+            "close: false false"
+        ],
+        "one error, then its close"
+    );
+
+    // a continuation whose head takes its message past
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_bytes: Some(1_024),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut written = fragment_of(0x2, &[0; 100]);
+
+    written.extend(head_announcing(0x0, (true, 1_000)));
+    socket.write_all(&written).await.unwrap();
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1009),
+        "1009 at its head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(recorder.messages(), Vec::<Bytes>::new(), "nothing handed");
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1008_the_frame_past_maximum_message_frames_at_its_head_an_empty_frame_counting()
+{
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_frames: Some(3),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut whole = fragment_of(0x2, &[1]);
+
+    // three frames, a ping between them counting for none, are one message
+    whole.extend(fragment_of(0x0, &[]));
+    whole.extend(frame_of(0x9, b"beat"));
+    whole.extend(frame_of(0x0, &[2]));
+    socket.write_all(&whole).await.unwrap();
+
+    assert_eq!(
+        messages_within(&recorder, 1).await,
+        [Bytes::from_static(&[1, 2])],
+        "one message of three frames"
+    );
+
+    let mut past = fragment_of(0x2, &[1]);
+
+    past.extend(fragment_of(0x0, &[]));
+    past.extend(fragment_of(0x0, &[]));
+    past.extend(head_announcing(0x0, (true, 10)));
+    socket.write_all(&past).await.unwrap();
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1008),
+        "1008 at the fourth frame's head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(
+        told_of(&recorder),
+        [
+            "error: the connection is closed with 1008: a message past its maximumMessageFrames, 3 frames",
+            "close: false false"
+        ],
+        "one error, then its close"
+    );
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1002_a_frame_head_rfc_6455_forbids_before_its_platform_reads_it() {
+    let heads: [(&[u8], &str); 4] = [
+        (&[0xC2, 0x00], "a reserved bit set"),
+        (&[0x80, 0x00], "a continuation with no message under way"),
+        (&[0x82, 0x81, 1, 2, 3, 4, 5], "a masked frame"),
+        (
+            &[0x82, 0x7F, 0x80, 0, 0, 0, 0, 0, 0, 0],
+            "a 64-bit length with its top bit set",
+        ),
+    ];
+
+    for (head, why) in heads {
+        let mut server = raw().await;
+        let client = client();
+        let recorder = recorded(&client);
+
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+
+        socket.write_all(head).await.unwrap();
+
+        assert_eq!(
+            close_code_from(&mut socket).await,
+            Some(1002),
+            "{why}: 1002"
+        );
+        socket.shutdown().await.unwrap();
+        closes_within(&recorder, 1).await;
+        assert_eq!(
+            told_of(&recorder),
+            [
+                format!(
+                    "error: the connection is closed with 1002: a frame head RFC 6455 forbids, {why}"
+                ),
+                "close: false false".to_owned()
+            ],
+            "{why}: one error, then its close"
+        );
+    }
+}
+
+// spec 15.3
+#[tokio::test]
+async fn reads_a_message_of_frames_past_64_kib_whose_first_came_with_its_101() {
+    let payload = vec![0x2a_u8; 200_000];
+    let mut written = head_announcing(0x2, (true, 200_000));
+
+    written.extend_from_slice(&payload[..1_000]);
+
+    let mut server = raw_writing(written).await;
+    let client = client();
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    socket.write_all(&payload[1_000..]).await.unwrap();
+
+    assert_eq!(
+        messages_within(&recorder, 1).await,
+        [Bytes::from(payload)],
+        "one message, as it was sent"
+    );
+    assert_eq!(recorder.errors(), Vec::<String>::new(), "no error");
+}

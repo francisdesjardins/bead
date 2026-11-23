@@ -887,12 +887,22 @@
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>The pace of a body over HTTP, or of an envelope’s parts over a broker</td>
+            <td>The pace of a body over HTTP, of a WebSocket message, or of an envelope’s parts over a broker</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
             <td class="code-num">16,778,240</td>
             <td>A WebSocket message; past it, 1009</td>
+          </tr>
+          <tr>
+            <td><code>maximumMessageFrames</code></td>
+            <td class="code-num">16,384</td>
+            <td>A WebSocket message’s frames; past them, 1008</td>
+          </tr>
+          <tr>
+            <td><code>messageBytesBudget</code></td>
+            <td class="code-num">268,435,456</td>
+            <td>The WebSocket messages a server holds partway; past it, a connection is cast off with 1013</td>
           </tr>
         </tbody>
       </table>
@@ -1701,7 +1711,7 @@
     Where its platform lets it, each end of a WebSocket sends a PING on a connection silent for
     30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
     The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
-    server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
+    server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455), one past <code>maximumMessageFrames</code> with 1008, and a frame RFC 6455 forbids with 1002. A side reads each frame’s head where its platform lets it, and judges it there.
   </p>
   <p>
     A <code>POST</code> with no body connects. The server answers 201 with a 16-byte token in the

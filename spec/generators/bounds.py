@@ -35,7 +35,11 @@ DEFAULTS = {
     'headersTimeout': 30_000,
     'minimumBodyBytesPerSecond': 240,
     'bodyGracePeriod': 5_000,
+    # a WebSocket server's (spec 15.12): what it holds of messages partway, across its connections
+    'messageBytesBudget': 268_435_456,
     'maximumMessageBytes': MAXIMUM_ENVELOPE_BYTES,
+    # the frames one WebSocket message may have, on every side (spec 15.3)
+    'maximumMessageFrames': 16_384,
     'heartbeat': 30_000,
     # a broker's (spec 15.23): a half-open connection's wait for its third leg, one envelope's parts,
     # bounded by default as an envelope is, and what a participant holds in parts, as bodyBytesBudget
