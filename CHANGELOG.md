@@ -88,6 +88,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   read as its CONNACK. MQTTnet 5.2 could read that packet before it held the task of its own
   receive loop, and then never said the link disconnected, so the adapter kept a dead link up and
   told no down. A read past the CONNACK now waits until the connect returned.
+- The C# and TypeScript sides' WebSocket servers close their own refusal of an upgrade whose body
+  is still coming in stages, its socket closed once 2 seconds pass, as their HTTP transports and
+  gateways do. The C# side left that socket to Kestrel, which reset it about 6 seconds later; the
+  TypeScript side left it to Node, which reset a client still sending as soon as the refusal was
+  written, before the client could read it.
 
 ### Security
 
@@ -108,6 +113,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   address refused it 400 `malformed`, marked, at step 6. RFC 9112 §6.1's 501 is a row of the
   support matrix's "Leveled down". Two cases of `spec/transports.json` and an exchange of
   `spec/transcoding.json` play it.
+- Spec 15.12: over HTTP/2, a request carrying any field RFC 9113 §8.2.2 makes malformed
+  (`connection`, `proxy-connection`, `keep-alive`, `transfer-encoding`, `upgrade`, or a `te` but
+  `trailers`) has its stream reset `PROTOCOL_ERROR`, where the spec named only `transfer-encoding`.
+  A `te` is taken as `trailers` in lower case alone. The TypeScript side took `Trailers`, and now
+  resets it as h2 and Kestrel refuse it, a row of the support matrix's "Leveled down". Kestrel ends
+  the session of a `connection` or such a `te`, a row of its "Differences". `spec/transports.json`
+  plays a final coding other than `chunked` with no `Content-Length` beside it, and every framing
+  refusal at a WebSocket's address, to the socket's end. Both conformance files play a signed
+  `Content-Length`, which Kestrel reads as its number, the C# side excused by the row "A signed
+  `Content-Length`".
 
 ## [0.16.0] - 2026-11-18
 

@@ -374,7 +374,7 @@ players are in `crates/bead/tests/`, one file a conformance file, a trial per en
 entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.json` are played in
 `crates/bead-protobuf/tests/codecs.rs`, the same way, through both codecs, and
 `spec/transcoding.json` in `crates/bead-protobuf/tests/transcoding.rs`, its exchanges through a
-gateway on its own listener over a real socket, but the one its `differs` excuses the side from.
+gateway on its own listener over a real socket, but those their `differs` excuse the side from.
 The gateway's and the caller's twins are `crates/bead/tests/gateway.rs` and `tests/caller.rs`.
 `crates/bead/tests/allocations.rs`, a binary of its own whose global allocator is `stats_alloc`'s
 counting one, holds a counted call to allocating not a byte more than an uncounted one (debugging
