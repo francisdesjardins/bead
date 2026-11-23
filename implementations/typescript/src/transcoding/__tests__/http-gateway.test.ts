@@ -81,6 +81,10 @@ interface IOwnCase {
 /** The origin of another site the gateways here name. */
 const ORIGIN = 'https://app.example';
 
+/** The problem of a call that presented no credential to a procedure that needs a session. */
+const NO_CREDENTIAL =
+  '{"code":32,"scope":"protocol","status":401,"title":"SESSION_REQUIRED","type":"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED"}';
+
 // the requests pipelined behind a call in one write: past one read of Node's, so that its socket's
 // read stops and resumes
 const PIPELINED = 6_000;
@@ -540,10 +544,12 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   expect(JSON.parse(presented.body)).toMatchObject({ code: 36, title: 'CREDENTIAL_UNSUPPORTED' });
   expect(reported).toHaveLength(1);
   expect(reported[0]).toMatch(/^the server takes none of the scheme this gateway presents: /u);
+  // another auth-scheme presents none, as an empty field does
   expect(
     await send(jwt.port, { ...whoAmI, headers: { authorization: 'Basic YTpi' } })
   ).toMatchObject({
-    headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+    body: NO_CREDENTIAL,
+    headers: { 'www-authenticate': 'Bearer' },
     status: 401,
   });
   // a token its request's block holds, 1,004 bytes, and one past it
@@ -557,25 +563,136 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   ).toBe(431);
 });
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
-test('answers 401 to a tab after Bearer, its separator one or more spaces', async () => {
+// transcoding 2.4.2; transcoding 10.1.9; RFC 9110 §11.4: `Bearer`, `1*SP`, then its credentials,
+// `token68` or not its server's to judge; RFC 6750 §3.1
+test('refuses 400 Bearer followed by neither a space nor its end under bearer-jwt, before its body, with invalid_request', async () => {
   await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  await using elsewhere = await startTranscoding();
+  await using realm = await startTranscoding({
+    authorization: 'bearer-jwt',
+    challenge: 'Bearer realm="bead"',
+  });
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+  const words = "Bearer followed by neither a space nor the field's end";
 
-  // right after Bearer, or after its spaces
-  for (const authorization of ['Bearer\ta.b.c', 'Bearer \ta.b.c']) {
+  for (const authorization of ['Bearer\ta.b.c', 'Bearer/abc', 'Bearer,abc']) {
+    const answered = await send(jwt.port, { ...whoAmI, headers: { authorization } });
+
+    expect(answered, authorization).toMatchObject({
+      headers: {
+        'bead-refusal': 'malformed',
+        'www-authenticate': 'Bearer error="invalid_request"',
+      },
+      status: 400,
+    });
+    expect(JSON.parse(answered.body), authorization).toMatchObject({ detail: words });
+  }
+
+  // * before its body: one byte of the 100,000 it declares, answered at once
+  const own = `127.0.0.1:${String(jwt.port)}`;
+  const early = await exchanged(
+    jwt.port,
+    `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+      'authorization: Bearer\ta.b.c\r\ncontent-length: 100000\r\n\r\n{',
+    { within: 1_000 }
+  );
+
+  expect(early).toMatchObject({
+    headers: { 'bead-refusal': 'malformed', 'www-authenticate': 'Bearer error="invalid_request"' },
+    status: 400,
+  });
+
+  // two authorization fields, with its challenge under bearer-jwt alone
+  const twice = { ...whoAmI, headers: { authorization: ['Bearer good', 'Bearer good'] } };
+  const twiceJwt = await send(jwt.port, twice);
+  const twiceElsewhere = await send(elsewhere.port, twice);
+
+  expect(twiceJwt).toMatchObject({
+    headers: {
+      'bead-refusal': 'malformed',
+      'www-authenticate': 'Bearer error="invalid_request"',
+    },
+    status: 400,
+  });
+  expect(twiceElsewhere).toMatchObject({ headers: { 'bead-refusal': 'malformed' }, status: 400 });
+  expect(twiceElsewhere.headers['www-authenticate']).toBeUndefined();
+
+  // its challenge's parameters, then its error
+  expect(
+    await send(realm.port, { ...whoAmI, headers: { authorization: 'Bearer\ta.b.c' } })
+  ).toMatchObject({
+    headers: { 'www-authenticate': 'Bearer realm="bead", error="invalid_request"' },
+    status: 400,
+  });
+
+  // a tab after its spaces, and two spaces, present the token, which a server with no JWT verifier
+  // refuses
+  for (const authorization of ['Bearer \ta.b.c', 'Bearer  a.b.c']) {
+    const presented = await send(jwt.port, { ...whoAmI, headers: { authorization } });
+
+    expect(presented.status, authorization).toBe(500);
+    expect(JSON.parse(presented.body), authorization).toMatchObject({
+      code: 36,
+      title: 'CREDENTIAL_UNSUPPORTED',
+    });
+  }
+});
+
+// transcoding 2.4.2; RFC 9110 §11.1: an auth-scheme is its field's first token; RFC 6750 §3.1
+test('presents no credential under bearer-jwt for another auth-scheme or Bearer alone, so a procedure that needs none runs', async () => {
+  await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+
+  for (const authorization of [
+    'Basic YTpi',
+    'Basic\tYTpi',
+    'Bearerabc',
+    'Bearer.abc',
+    '=abc',
+    'Bearer',
+    'Bearer   ',
+  ]) {
     expect(
-      await send(jwt.port, { ...whoAmI, headers: { authorization } }),
+      await send(jwt.port, {
+        body: '{"anInt32":1}',
+        headers: { authorization },
+        path: '/api/Transcoding/echo',
+      }),
+      authorization
+    ).toMatchObject({ body: '{"anInt32":1}', status: 200 });
+    expect(
+      await send(jwt.port, {
+        body: '{}',
+        headers: { authorization },
+        path: '/api/Transcoding/whoAmI',
+      }),
       authorization
     ).toMatchObject({
-      headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+      body: NO_CREDENTIAL,
+      headers: { 'www-authenticate': 'Bearer' },
       status: 401,
     });
   }
-  // two spaces present the token, which a server with no JWT verifier refuses
-  expect(
-    (await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer  a.b.c' } })).status
-  ).toBe(500);
+});
+
+// transcoding 7.6.8; RFC 6750 §3.1
+test('tells invalid_token only to a credential of the auth-scheme its challenge names', async () => {
+  await using elsewhere = await startTranscoding();
+  await using realm = await startTranscoding({ challenge: 'Bearer realm="bead"' });
+  const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+
+  for (const [fixture, authorization, challenge] of [
+    [elsewhere, 'Bearer bad', 'Bearer error="invalid_token"'],
+    [elsewhere, 'bearer bad', 'Bearer error="invalid_token"'],
+    [elsewhere, 'Basic YTpi', 'Bearer'],
+    [elsewhere, 'Bearerabc', 'Bearer'],
+    [realm, 'Basic YTpi', 'Bearer realm="bead"'],
+    [realm, 'Bearer bad', 'Bearer realm="bead", error="invalid_token"'],
+  ] as const) {
+    expect(
+      await send(fixture.port, { ...whoAmI, headers: { authorization } }),
+      authorization
+    ).toMatchObject({ headers: { 'www-authenticate': challenge }, status: 401 });
+  }
 });
 
 test('refuses a request with no Origin from a page of another site, and a navigation to an unmarked get rule', async () => {
@@ -1543,10 +1660,11 @@ test('words each refusal of its gates exactly, none of them what its request car
   const cases: Record<'jwt' | 'plain' | 'small', IOwnCase[]> = {
     jwt: [
       {
-        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Basic YTpi'],
+        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Bearer\ta.b.c'],
         body: '{}',
-        status: 401,
-        words: 'an auth-scheme but Bearer',
+        reason: 'malformed',
+        status: 400,
+        words: "Bearer followed by neither a space nor the field's end",
       },
       {
         lines: [
@@ -1557,12 +1675,6 @@ test('words each refusal of its gates exactly, none of them what its request car
         body: '{}',
         status: 431,
         words: 'a token past 1004 bytes',
-      },
-      {
-        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Bearer'],
-        body: '{}',
-        status: 401,
-        words: 'an auth-scheme but Bearer',
       },
     ],
     plain: [

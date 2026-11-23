@@ -104,6 +104,9 @@ import { createEventStream, EVENT_STREAM_MEDIA_TYPE, type IEventStream } from '.
 import { createJsonForm, JsonFormError, responseFieldOf } from './json-form';
 import {
   type Arose,
+  authSchemeOf,
+  challengeOf,
+  DEFAULT_CHALLENGE,
   type Encoding,
   type IProblem,
   problemOfFailure,
@@ -132,7 +135,8 @@ import {
 export interface IHTTPGatewayOptions extends IHTTPPolicyOptions, IHTTPPolicyOption {
   /**
    * What a call presents of a request's `authorization` (2.4): `elsewhere`, the field whole, by
-   * default; `bearer-jwt`, a `Bearer` token as a `JWT`.
+   * default; `bearer-jwt`, a `Bearer` token as a `JWT`, another auth-scheme or `Bearer` alone
+   * presenting none.
    */
   readonly authorization?: 'bearer-jwt' | 'elsewhere' | undefined;
   /** The challenge a 401 carries, `Bearer` by default (7.6). */
@@ -303,10 +307,6 @@ const RESULT_MEDIA_TYPES: Readonly<Record<Encoding, string>> = Object.freeze({
   text: 'text/plain;charset=utf-8',
 });
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`, spaces alone between the two, so a tab after them is no
-// separator; the token as it stands after them
-const BEARER = /^bearer[ ]+([^\t ].*)$/iu;
-
 // a weight as RFC 9110 §12.4.2's qvalue writes it
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
 
@@ -424,6 +424,34 @@ const isBodyTaken = (request: IHTTPRequestLike): boolean => {
   return (
     request.readableDidRead === true || (request.readableEnded === true && carriesContent(request))
   );
+};
+
+/**
+ * What an `authorization` presents under `bearer-jwt` (2.4), its spaces and tabs removed: `Bearer`,
+ * one or more spaces, then its token as it stands; none for `Bearer` alone or another auth-scheme;
+ * `malformed` for `Bearer` followed by anything else.
+ */
+const bearerOf = (value: string): { readonly token?: string } | 'malformed' => {
+  // * its auth-scheme, RFC 9110 §11.1: a run of `tchar`, so `Bearerabc` and `Bearer.abc` are others
+  const scheme = authSchemeOf(value);
+
+  if (scheme.toLowerCase() !== 'bearer') {
+    return {};
+  }
+
+  const rest = value.slice(scheme.length);
+
+  if (rest === '') {
+    return {};
+  }
+
+  // ! spaces alone separate it from its token, RFC 9110 §11.4's `1*SP`: a tab is no separator
+  if (!rest.startsWith(' ')) {
+    return 'malformed';
+  }
+
+  // the token, `token68` or not, is its server's to judge (13.8), a tab first among it included
+  return { token: rest.replace(/^ +/u, '') };
 };
 
 /** Whether an `if-none-match` holds `etag`, weakly compared, or `*`, alone or among others (RFC 9110 §13.1.2). */
@@ -563,6 +591,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   assertOrigins(origins);
 
   const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
+
+  // the auth-scheme a credential is of where a 401 tells it `invalid_token`, read as a field's (2.4)
+  const challengeScheme = authSchemeOf(challenge ?? DEFAULT_CHALLENGE).toLowerCase();
+  // what a refusal of its `authorization` carries under `bearer-jwt` (10.1, step 9; RFC 6750 §3.1)
+  const invalidRequest: Record<string, string> =
+    authorization === 'bearer-jwt'
+      ? { 'www-authenticate': challengeOf(challenge ?? DEFAULT_CHALLENGE, 'invalid_request') }
+      : {};
 
   // ── The table ──────────────────────────────────────────────────────────────
 
@@ -1010,12 +1046,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   // ── The call ───────────────────────────────────────────────────────────────
 
-  /** The credential a call presents of a request's `authorization` (2.4), or the refusal it is. */
+  /**
+   * The credential a call presents of a request's `authorization` (2.4), its `Bearer` read at step
+   * 9 under `bearer-jwt`, or the refusal it is.
+   */
   const credentialFrom = (
-    request: IHTTPRequestLike
+    value: string | undefined,
+    { token }: { readonly token?: string }
   ): { credential?: RequestCredential | undefined; problem?: IProblem | undefined } => {
-    const value = credentialOf(linesOf(request, 'authorization'));
-
     if (value === undefined) {
       return {};
     }
@@ -1024,12 +1062,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return { credential: { carried: value, scheme: CredentialScheme.ELSEWHERE } };
     }
 
-    const token = BEARER.exec(value)?.[1];
-
+    // `Bearer` alone, or another auth-scheme: no credential, as an empty field (RFC 6750 §3.1)
     if (token === undefined) {
-      return {
-        problem: problemOfOwn('scheme', 'an auth-scheme but Bearer', { challenge }),
-      };
+      return {};
     }
 
     if (ENCODER.encode(token).length > JWT_BYTES) {
@@ -1224,6 +1259,22 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (
         refuse(exchange, {
           detail: 'two authorization fields',
+          fields: invalidRequest,
+          reason: HTTP_REFUSALS.MALFORMED,
+          status: 400,
+        }),
+        undefined
+      );
+    }
+
+    const field = credentialOf(linesOf(request, 'authorization'));
+    const bearer = authorization === 'bearer-jwt' && field !== undefined ? bearerOf(field) : {};
+
+    if (bearer === 'malformed') {
+      return (
+        refuse(exchange, {
+          detail: "Bearer followed by neither a space nor the field's end",
+          fields: invalidRequest,
           reason: HTTP_REFUSALS.MALFORMED,
           status: 400,
         }),
@@ -1307,13 +1358,20 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     exchange.isBodyRead ||= !takesBody;
 
-    const { credential, problem: refused } = credentialFrom(request);
+    // 11: its credential, then its binding and its reading
+    const { credential, problem: refused } = credentialFrom(field, bearer);
 
     if (refused !== undefined) {
       return (answerProblem(exchange, { problem: refused }), undefined);
     }
 
-    // 11: its binding and its reading
+    // * a 401 tells `invalid_token` only to a credential of its challenge's auth-scheme (7.6.8)
+    const isChallenged =
+      credential !== undefined &&
+      field !== undefined &&
+      authSchemeOf(field) !== '' &&
+      authSchemeOf(field).toLowerCase() === challengeScheme;
+
     const decoded = variablesOf(template, path);
     const variables = template.variables.map(({ fieldPath }) => {
       return fieldPath;
@@ -1548,7 +1606,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             end(
               problemOfCall(error, {
                 chosen,
-                credential: credential !== undefined,
+                credential: isChallenged,
                 encoding,
                 isHanded: true,
                 variables,
@@ -1585,7 +1643,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     } catch (error) {
       const problem = problemOfCall(error, {
         chosen,
-        credential: credential !== undefined,
+        credential: isChallenged,
         encoding,
         isHanded,
         variables,
@@ -1617,7 +1675,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       const problem =
         problemOfCall(error, {
           chosen,
-          credential: credential !== undefined,
+          credential: isChallenged,
           encoding,
           isHanded: true,
           variables,
