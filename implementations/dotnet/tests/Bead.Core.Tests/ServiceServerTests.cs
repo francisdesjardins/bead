@@ -656,7 +656,7 @@ public sealed class ServiceServerTests
 
     // spec 18.2
     [Fact]
-    public async Task Fails_a_command_whose_rule_throws_as_it_judges_with_that_throw_before_anything_goes()
+    public async Task Fails_a_command_whose_rule_panics_as_it_judges_with_that_panic_before_anything_goes()
     {
         await using var link = await ServiceLink.Open();
         var broken = new InvalidOperationException("this rule fails to judge, on purpose first");
