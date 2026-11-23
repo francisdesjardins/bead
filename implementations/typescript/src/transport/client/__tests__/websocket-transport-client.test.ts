@@ -33,7 +33,6 @@ import {
 } from '../../shared/__tests__/durations';
 import {
   allClosed,
-  closedPort,
   createTestClock,
   delaysOn,
   host,
@@ -66,6 +65,7 @@ import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
 import {
+  closedPort,
   PROBE,
   replaceResolver,
   settledOf,
@@ -515,14 +515,17 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('rejects with a ConnectError when nothing listens', async () => {
-        await expect(client.connect({ host, port: await closedPort() })).rejects.toBeInstanceOf(
+        await using closed = await closedPort();
+
+        await expect(client.connect({ host, port: closed.port })).rejects.toBeInstanceOf(
           ConnectError
         );
         expect(client.isClosed()).toBe(true);
       });
 
       test('keeps the error the implementation reported as the ConnectError cause', async () => {
-        const connecting = client.connect({ host, port: await closedPort() });
+        await using closed = await closedPort();
+        const connecting = client.connect({ host, port: closed.port });
 
         await expect(connecting).rejects.toBeInstanceOf(ConnectError);
         // ws reports the system's error; the global WebSocket a TypeError that says nothing more
@@ -738,8 +741,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       }
 
       test('asks for wss when secured', async () => {
+        await using closed = await closedPort();
+
         await expect(
-          client.connect({ host, port: await closedPort(), secured: true })
+          client.connect({ host, port: closed.port, secured: true })
         ).rejects.toBeInstanceOf(ConnectError);
 
         expect([...sockets.keys()].at(-1)?.url).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/$/);
@@ -4242,7 +4247,7 @@ test.describe('WebSocketTransportClient, on the loopback', () => {
   });
 
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
-    const port = await closedPort();
+    await using closed = await closedPort();
     using resolver = replaceResolver();
 
     for (const client of [
@@ -4250,7 +4255,7 @@ test.describe('WebSocketTransportClient, on the loopback', () => {
       createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
     ]) {
       const refused = await settledOf(() => {
-        return client.connect({ host: PROBE, port });
+        return client.connect({ host: PROBE, port: closed.port });
       });
 
       expect(refused).toBeInstanceOf(ConnectError);

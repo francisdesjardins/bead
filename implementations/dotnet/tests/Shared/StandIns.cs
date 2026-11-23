@@ -5,20 +5,84 @@ using System.Text;
 
 namespace Bead.Tests;
 
-/// <summary>What a connect to the loopback that failed says, and where nothing listens.</summary>
+/// <summary>What a connect to the loopback that failed says.</summary>
 internal static class LoopbackFailures
 {
     /// <summary>The sentence a localhost name's failed connect carries (spec 13.4).</summary>
     public const string Sentence = "bead-probe.localhost names the loopback: connected to 127.0.0.1 and ::1, no resolver asked";
+}
 
-    /// <summary>A port nothing listens on, on either loopback, as far as a test can tell.</summary>
-    public static int Unheard()
+// ! a port let go before its connect is one another test's listener may take in the meantime, and
+// a connect then reaches it: keep this undisposed across the connect, never only its number
+/// <summary>
+/// A port nothing listens on, held until disposed, as the TypeScript side's <c>closedPort</c> and the
+/// Rust side's <c>closed_port</c> are: a socket bound on 127.0.0.1 and one on ::1, where this machine
+/// has it, both on the same port and neither listening, so that a connect to either is refused and no
+/// other test's listener is given that port meanwhile.
+/// </summary>
+internal sealed class ClosedPort : IDisposable
+{
+    private readonly List<Socket> _held = [];
+
+    public ClosedPort()
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        while (true)
+        {
+            var ipv4 = Bound(new IPEndPoint(IPAddress.Loopback, 0));
+            var port = ((IPEndPoint)ipv4.LocalEndPoint!).Port;
 
-        listener.Start();
+            _held.Add(ipv4);
 
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
+            try
+            {
+                _held.Add(Bound(new IPEndPoint(IPAddress.IPv6Loopback, port)));
+                Port = port;
+
+                return;
+            }
+            catch (SocketException error) when (error.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                // * taken on ::1 already: another port
+                ipv4.Dispose();
+                _held.Clear();
+            }
+            catch (SocketException)
+            {
+                // * a machine without the IPv6 loopback refuses its connect there all the same
+                Port = port;
+
+                return;
+            }
+        }
+    }
+
+    /// <summary>The port.</summary>
+    public int Port { get; }
+
+    public void Dispose()
+    {
+        foreach (var socket in _held)
+        {
+            socket.Dispose();
+        }
+    }
+
+    private static Socket Bound(IPEndPoint endpoint)
+    {
+        var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+
+        try
+        {
+            socket.Bind(endpoint);
+
+            return socket;
+        }
+        catch (SocketException)
+        {
+            socket.Dispose();
+
+            throw;
+        }
     }
 }
 

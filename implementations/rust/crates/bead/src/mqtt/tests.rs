@@ -454,11 +454,9 @@ async fn fails_its_start_on_a_connack_whose_maximum_qos_is_0_naming_it() {
 #[tokio::test]
 async fn fails_its_start_where_its_broker_cannot_be_reached_over_tcp_tls_or_a_websocket_naming_why()
 {
-    // a port no one listens on any more
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    drop(listener);
+    // a port no one listens on
+    let closed = crate::testing::closed_port::closed_port().unwrap();
+    let port = closed.port();
 
     // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
     for url in [

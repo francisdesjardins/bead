@@ -7,6 +7,7 @@ import { createHTTPCaller, type HTTPEvent } from '../http-caller';
 import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, TranscodingHttpClient } from './generated/bead_http';
 import {
+  closedPort,
   PROBE,
   replaceResolver,
   settledOf,
@@ -1394,13 +1395,9 @@ test.describe('createHTTPCaller, on the loopback', () => {
   });
 
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
-    const port = await (async () => {
-      await using fixture = await startTranscoding();
-
-      return fixture.port;
-    })();
+    await using closed = await closedPort();
     using resolver = replaceResolver();
-    const client = new TranscodingHttpClient(`http://${PROBE}:${String(port)}`);
+    const client = new TranscodingHttpClient(`http://${PROBE}:${String(closed.port)}`);
     const refused = await settledOf(() => {
       return client.json(null);
     });

@@ -48,14 +48,6 @@ export const stopServer = async (server: WebSocketServer) => {
   });
 };
 
-/** A port nothing listens on: one a server held and let go. */
-export const closedPort = async () => {
-  const server = await startServer();
-  const port = portOf(server);
-  await stopServer(server);
-  return port;
-};
-
 // Every socket a test opens, with its close, so teardown waits for each and none outlives its test.
 // The close is listened for from construction rather than read from `readyState`: the global
 // WebSocket reports CLOSING for good once `close()` has aborted its handshake, after its `close`.

@@ -8,7 +8,7 @@
 
 import { once } from 'node:events';
 import { createServer as createHttpServer, type IncomingMessage } from 'node:http';
-import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
+import { connect, createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { getGlobalDispatcher, ProxyAgent, setGlobalDispatcher } from 'undici';
 import type { loopbackLookup } from '../loopback';
 
@@ -35,6 +35,58 @@ export const PROBE = 'bead-probe.localhost';
 export const ELSEWHERE = '192.0.2.7';
 
 // helpers
+
+// a connection from `localPort` on `address`, any when none, to a listener of its own there, both
+// held until disposed
+const heldFrom = async (address: string, localPort?: number) => {
+  const accepted = new Set<Socket>();
+  const listener = createTcpServer((socket) => {
+    accepted.add(socket);
+    socket.on('error', () => {
+      // let go as it is disposed
+    });
+  });
+  const disposed = async (): Promise<void> => {
+    for (const socket of accepted) {
+      socket.destroy();
+    }
+
+    await new Promise<void>((resolve) => {
+      listener.close(() => {
+        resolve();
+      });
+    });
+  };
+
+  listener.listen(0, address);
+  await once(listener, 'listening');
+
+  const socket = connect({
+    host: address,
+    port: (listener.address() as AddressInfo).port,
+    ...(localPort === undefined ? {} : { localAddress: address, localPort }),
+  });
+
+  socket.on('error', () => {
+    // its connect's own failure, which `once` rejects with
+  });
+
+  try {
+    await once(socket, 'connect');
+  } catch (error) {
+    socket.destroy();
+    await disposed();
+    throw error;
+  }
+
+  return {
+    port: socket.localPort ?? 0,
+    [Symbol.asyncDispose]: async () => {
+      socket.destroy();
+      await disposed();
+    },
+  };
+};
 
 // whether `hostname` is a localhost name, a trailing dot or not, as the replaced resolver answers it
 const isLocalhost = (hostname: string): boolean => {
@@ -114,6 +166,40 @@ export const withoutUndici = (): Disposable => {
       }
     },
   };
+};
+
+/**
+ * A port nothing listens on, held until disposed, as the C# side's `ClosedPort` and the Rust side's
+ * `closed_port` are: the local port of a connection held open on 127.0.0.1, and of one on ::1 where
+ * this machine has it, so that a connect to either is refused and no other test's listener is given
+ * that port meanwhile.
+ */
+// ! Node binds no TCP socket without listening on it, so a connection's own end holds the port; a
+// port let go before its connect is one another test's listener may take in the meantime
+export const closedPort = async (): Promise<AsyncDisposable & { port: number }> => {
+  for (;;) {
+    const ipv4 = await heldFrom('127.0.0.1');
+
+    try {
+      const ipv6 = await heldFrom('::1', ipv4.port);
+
+      return {
+        port: ipv4.port,
+        [Symbol.asyncDispose]: async () => {
+          await ipv6[Symbol.asyncDispose]();
+          await ipv4[Symbol.asyncDispose]();
+        },
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+        // * a machine without the IPv6 loopback refuses its connect there all the same
+        return ipv4;
+      }
+
+      // * taken on ::1 already: another port
+      await ipv4[Symbol.asyncDispose]();
+    }
+  }
 };
 
 /**

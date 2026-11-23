@@ -9,7 +9,7 @@ import {
   loopbackFailureOf,
   loopbackLookup,
 } from '../loopback';
-import { PROBE, replaceResolver } from './loopback-fixtures';
+import { closedPort, PROBE, replaceResolver } from './loopback-fixtures';
 
 // helpers
 
@@ -132,13 +132,9 @@ test.describe('loopbackLookup', () => {
 
   // spec 13.4
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
-    const port = await (async () => {
-      await using listener = await listenOn('127.0.0.1');
-
-      return listener.port;
-    })();
+    await using closed = await closedPort();
     using resolver = replaceResolver();
-    const failure = await connectOf(PROBE, port);
+    const failure = await connectOf(PROBE, closed.port);
     // * as a fetch fails on it: a TypeError, the socket's error its cause
     const fetchFailure = new TypeError('fetch failed', { cause: failure });
     const said = loopbackFailureOf(fetchFailure, { host: PROBE }) as TypeError;

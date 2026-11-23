@@ -137,16 +137,12 @@ async fn keeps_a_localhost_name_in_its_host_and_its_tls_server_name_while_it_con
 // spec 13.4
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
-    let closed = TcpListener::bind((HOST, 0)).await.unwrap();
-    let port = closed.local_addr().unwrap().port();
-
-    drop(closed);
-
+    let closed = crate::testing::closed_port::closed_port().unwrap();
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
     let client = resolving_client(&asked, &not_listening());
     let failed = settled(client.connect(&HttpTransportClientConnectOptions::new(
         "bead-probe.localhost",
-        port,
+        closed.port(),
     )))
     .await;
 

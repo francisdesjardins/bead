@@ -37,7 +37,7 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
-import { PROBE, replaceResolver, startDropping } from './loopback-fixtures';
+import { closedPort, PROBE, replaceResolver, startDropping } from './loopback-fixtures';
 import { PKI } from './tls-front';
 
 // constants
@@ -3310,16 +3310,12 @@ test.describe('createAmqpBrokerAdapter, on the loopback', () => {
   test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
     // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
     // and closed unanswered
-    const closed = await (async () => {
-      await using listener = await startDropping();
-
-      return listener.port;
-    })();
+    await using closed = await closedPort();
     await using dropping = await startDropping();
     using resolver = replaceResolver();
     const messages: string[] = [];
 
-    for (const port of [closed, dropping.port]) {
+    for (const port of [closed.port, dropping.port]) {
       const adapter = createAmqpBrokerAdapter({
         connectTimeout: 2_000,
         id: ID,

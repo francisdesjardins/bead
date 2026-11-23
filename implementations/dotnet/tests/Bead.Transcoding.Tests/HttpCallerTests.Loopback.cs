@@ -64,7 +64,8 @@ public sealed partial class HttpCallerTests
         public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
         {
             using var resolver = new StandInResolver();
-            using var client = new TranscodingHttpClient(new Uri($"http://bead-probe.localhost:{LoopbackFailures.Unheard()}"));
+            using var closed = new ClosedPort();
+            using var client = new TranscodingHttpClient(new Uri($"http://bead-probe.localhost:{closed.Port}"));
             var refused = await Assert.ThrowsAnyAsync<Exception>(() =>
             {
                 return client.Json(Json("null"));

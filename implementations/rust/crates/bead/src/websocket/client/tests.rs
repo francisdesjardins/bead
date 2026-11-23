@@ -13,6 +13,7 @@ use tungstenite::handshake::server::{
 use tungstenite::protocol::Message;
 
 use super::*;
+use crate::testing::closed_port::closed_port;
 use crate::testing::{Instant, SteppingClock, patience, spawn, yield_now};
 use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
@@ -137,13 +138,6 @@ async fn settled(connecting: Connect) -> Result<(), TransportError> {
 
 fn is_state(client: &WebSocketTransportClient, ready: ReadyState) -> bool {
     client.ready_state() == ready
-}
-
-// a port nothing listens on
-async fn closed_port() -> u16 {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-
-    listener.local_addr().unwrap().port()
 }
 
 // whether this machine has the IPv6 loopback
@@ -759,7 +753,8 @@ async fn fails_a_101_whose_connection_lists_upgrade_among_other_tokens() {
 
 async fn compares_a_refused_connect_and_its_retry() {
     let client = client();
-    let refused = settled(client.connect(&to(closed_port().await))).await;
+    let closed = closed_port().unwrap();
+    let refused = settled(client.connect(&to(closed.port()))).await;
 
     assert!(
         matches!(refused, Err(TransportError::Connect(_))),
@@ -779,7 +774,8 @@ async fn compares_a_refused_connect_and_its_retry() {
 #[tokio::test]
 async fn keeps_the_error_the_implementation_reported_as_the_connect_error_cause() {
     let client = client();
-    let refused = settled(client.connect(&to(closed_port().await))).await;
+    let closed = closed_port().unwrap();
+    let refused = settled(client.connect(&to(closed.port()))).await;
     let Err(TransportError::Connect(error)) = &refused else {
         panic!("a connect error: {refused:?}");
     };
@@ -1023,9 +1019,10 @@ async fn requests_the_path_its_pathname_names() {
 #[tokio::test]
 async fn asks_for_wss_when_secured() {
     let client = client();
+    let closed = closed_port().unwrap();
     let refused = settled(client.connect(&WebSocketTransportClientConnectOptions {
         secured: Some(true),
-        ..to(closed_port().await)
+        ..to(closed.port())
     }))
     .await;
 
@@ -2123,9 +2120,10 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
     let client = resolving_client(&asked);
+    let closed = closed_port().unwrap();
     let failed = settled(client.connect(&WebSocketTransportClientConnectOptions::new(
         "bead-probe.localhost",
-        closed_port().await,
+        closed.port(),
     )))
     .await;
 

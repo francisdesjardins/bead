@@ -389,10 +389,13 @@ async fn a_connect_refused_after_a_close_keeps_the_target_before_it_which_a_reco
 
     settled(client.connect(&to(server.port))).await.unwrap();
     disconnected(&client).await.unwrap();
+
+    let closed = closed_port().unwrap();
+
     assert!(matches!(
         settled(client.connect(&WebSocketTransportClientConnectOptions {
             timeout: Some(Duration::from_micros(500)),
-            ..to(closed_port().await)
+            ..to(closed.port())
         }))
         .await,
         Err(TransportError::Refused(_))

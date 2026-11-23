@@ -55,6 +55,7 @@ import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, type IFakeCall, responseOf } from './fake-fetch';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
 import {
+  closedPort,
   PROBE,
   replaceResolver,
   settledOf,
@@ -3606,15 +3607,11 @@ test.describe('createHTTPTransportClient, on the loopback', () => {
   });
 
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
-    const port = await (async () => {
-      await using server = await startDrawing();
-
-      return server.port;
-    })();
+    await using closed = await closedPort();
     using resolver = replaceResolver();
     await using client = createHTTPTransportClient({ isListening: false });
     const refused = await settledOf(() => {
-      return client.connect({ host: PROBE, port });
+      return client.connect({ host: PROBE, port: closed.port });
     });
 
     expect(refused).toBeInstanceOf(ConnectError);
