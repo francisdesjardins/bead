@@ -83,7 +83,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # ! a version's image is pushed once: a team pins its digest, which a second build would not
-      # give again
+      # give again. A run that failed after its index was pushed is run again by its failed job
       - name: No image at this version yet
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -160,7 +160,8 @@ jobs:
           name: digest-${{ matrix.name }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
-          retention-days: 1
+          # a week for `gh run rerun --failed`, which runs the index's job again from these
+          retention-days: 7
 
   # The index of both platforms under beadc's version, then its provenance and its signature, each
   # on the index's digest, which a team pins.
