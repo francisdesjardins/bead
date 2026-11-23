@@ -102,7 +102,7 @@ export const UNTESTED = Object.freeze([
  * of UNTESTED or places no citation, the Rust cell of a row spec/check.py's AHEAD holds ahead left
  * out. A count over it fails; lowered as tests land.
  */
-export const UNTESTED_OPEN = 45;
+export const UNTESTED_OPEN = 42;
 
 // the group of the floors and of the count each kind is counted in
 const GROUP = Object.freeze({
