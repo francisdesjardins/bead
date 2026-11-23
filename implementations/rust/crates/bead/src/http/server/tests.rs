@@ -1364,49 +1364,102 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
 
 // spec 15.12; RFC 9110 §8.6
 #[tokio::test]
-async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    // a connect from a host it does not take
+    let asked = |length: &str, close: bool| {
+        let close = if close { "Connection: close\r\n" } else { "" };
+
+        format!(
+            "POST /bead HTTP/1.1\r\nHost: elsewhere.test\r\nContent-Type: {BEAD_MEDIA_TYPE}\r\n{close}Content-Length: {length}\r\n\r\n"
+        )
+    };
+
+    // 2⁶³ − 1 is a length: its host is judged
+    let mut socket = RawSocket::on(port).await;
+
+    socket
+        .write(asked("9223372036854775807", true).as_bytes())
+        .await
+        .unwrap();
+
+    let head = socket.head(PATIENCE).await.expect("its answer");
+
+    assert_eq!(
+        refusal_of(&head),
+        (403, Some(HTTP_REFUSALS.host.to_owned())),
+        "2⁶³ − 1"
+    );
+
+    // 2⁶³ in 19 digits and in 23 and 19 nines, which hyper hands on, then 2⁶⁴ and 23 nines, which
+    // it answers 400 itself, each on a socket of its own; hyper answers 2⁶⁴ − 2 and 2⁶⁴ − 1 431
+    // itself, the next test's
+    for length in [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551616",
+        twenty_three.as_str(),
+    ] {
+        let mut socket = RawSocket::on(port).await;
+
+        socket.write(asked(length, false).as_bytes()).await.unwrap();
+
+        let head = socket.head(PATIENCE).await.expect("its answer");
+
+        assert_eq!(
+            (refusal_of(&head), socket.ended(PATIENCE).await),
+            ((400, None), true),
+            "{length}"
+        );
+    }
+
+    started.stop().await;
+}
+
+// RFC 9112 §11.2; docs/support.md
+#[tokio::test]
+async fn answers_431_unmarked_a_content_length_of_2_64_2_or_2_64_1_by_its_number_as_hyper_does_and_closes_its_connection()
  {
     let started = started(&HttpTransportServerOptions::default()).await;
     let port = started.port;
     let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
-    let mut answers = Vec::new();
 
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-    for length in [
-        "9223372036854775808",
-        "18446744073709551614",
-        "18446744073709551615",
-        "18446744073709551616",
+    // * hyper counts to 2⁶⁴ − 3 and answers the two values past it 431, by their number, before
+    // the transport reads the request: 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ − 2 led by a zero, and 2⁶⁴ − 2 before
+    // a Transfer-Encoding
+    for fields in [
+        &["Content-Length: 18446744073709551614"][..],
+        &["Content-Length: 18446744073709551615"],
+        &["Content-Length: 018446744073709551614"],
+        &[
+            "Content-Length: 18446744073709551614",
+            "Transfer-Encoding: chunked",
+        ],
     ] {
         let mut socket = RawSocket::on(port).await;
+        let mut lines = vec![bead.as_str()];
 
+        lines.extend_from_slice(fields);
         socket
-            .write(
-                head_of(
-                    ("POST", "/bead"),
-                    (port, &[&bead, &format!("Content-Length: {length}")]),
-                )
-                .as_bytes(),
-            )
+            .write(head_of(("POST", "/bead"), (port, &lines)).as_bytes())
             .await
             .unwrap();
 
         let head = socket.head(PATIENCE).await.expect("its answer");
 
-        answers.push((refusal_of(&head), socket.ended(PATIENCE).await));
+        assert_eq!(
+            (refusal_of(&head), socket.ended(PATIENCE).await),
+            ((431, None), true),
+            "{fields:?}"
+        );
     }
 
-    // hyper counts to 2⁶⁴ − 3: a connect that declares a body is malformed; 2⁶⁴ − 2 and 2⁶⁴ − 1
-    // hyper refuses 431, and past them 400
-    assert_eq!(
-        answers,
-        [
-            ((400, Some(HTTP_REFUSALS.malformed.to_owned())), true),
-            ((431, None), true),
-            ((431, None), true),
-            ((400, None), true),
-        ]
-    );
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
     started.stop().await;
 }
 

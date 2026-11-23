@@ -614,6 +614,85 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_o
     started.stop().await;
 }
 
+// what a `POST` of Bead's type whose `Content-Length` is `length` is answered over `session` of
+// h2's, its stream left open behind its head, so that h2 resets no length it counts for content
+// not yet come: its status, or the code its stream was reset with
+async fn opened_answer_of(
+    session: &h2::client::SendRequest<Bytes>,
+    (port, length): (u16, &str),
+) -> Result<u16, Option<h2::Reason>> {
+    let fields = [
+        ("content-type", BEAD_MEDIA_TYPE),
+        ("content-length", length),
+    ];
+    let (response, _sending) = sent(session, (request_of(("POST", port), &fields), false)).await;
+
+    match patience(PATIENCE, response)
+        .await
+        .expect("answered within patience")
+    {
+        Ok(response) => Ok(response.status().as_u16()),
+        Err(error) => Err(error.reason()),
+    }
+}
+
+// spec 15.12; RFC 9110 §8.6
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_passes_2_63_1() {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let session = session_of(port).await;
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+
+    // * 2⁶³ and 19 nines h2 hands on, and the transport resets their stream (spec 15.12); 2⁶³ in
+    // 23 digits h2 resets itself; PROTOCOL_ERROR, from a host it takes, nothing drawn
+    for length in [
+        "9223372036854775808",
+        nineteen.as_str(),
+        "00009223372036854775808",
+    ] {
+        assert_eq!(
+            opened_answer_of(&session, (port, length)).await,
+            Err(Some(h2::Reason::PROTOCOL_ERROR)),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
+// docs/support.md; RFC 9110 §8.6
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_is_more_than_nineteen_digits_whatever_its_number_as_h2_does()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let session = session_of(port).await;
+    let one = format!("{}1", core::iter::repeat_n('0', 19).collect::<String>());
+
+    // * h2 parses 19 digits at most, and resets the stream of more before the transport reads the
+    // request, whatever their number: 1 in 20 digits, and 2⁶³ − 1 in 23
+    for length in [one.as_str(), "00009223372036854775807"] {
+        assert_eq!(
+            opened_answer_of(&session, (port, length)).await,
+            Err(Some(h2::Reason::PROTOCOL_ERROR)),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
 // spec 15.12
 #[tokio::test]
 async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specific_field_a_transfer_encoding_with_a_content_length_beside_it_or_none_a_keep_alive_a_proxy_connection_or_an_upgrade()

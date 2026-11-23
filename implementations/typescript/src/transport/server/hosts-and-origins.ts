@@ -50,6 +50,13 @@ const IPV4_ADDRESS = new RegExp(`^${DEC_OCTET}(?:\\.${DEC_OCTET}){3}$`, 'u');
 // a port of one digit at least
 const PORT = /^\d+$/u;
 
+// a `Content-Length` of one or more ASCII digits and nothing else (RFC 9110 §8.6)
+const LENGTH = /^\d+$/u;
+
+// the largest number a `Content-Length` may name: 2⁶³ − 1, the largest signed 64-bit count
+// ! a bigint: a double reads 2⁶³ − 1 and 2⁶³ as one number
+const MAXIMUM_LENGTH = 2n ** 63n - 1n;
+
 // a field value of visible ASCII, spaces and tabs alone, none at either end (RFC 9110 §5.5, RFC 9113
 // §8.2.1)
 const VISIBLE_FIELD = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
@@ -297,6 +304,18 @@ export const isTransferEncodingFramed = (
   });
 
   return httpVersion !== '1.0' && first === elements.length - 1;
+};
+
+/**
+ * Whether `value`, one `Content-Length` field line's value as the parser handed it on, is a count
+ * spec 15.12 takes: one or more ASCII digits and nothing else, whose number is 2⁶³ − 1 at most,
+ * read by value, so its leading zeros count for nothing (RFC 9110 §8.6). A request whose
+ * `Content-Length` is not counted is answered 400 unmarked, or over HTTP/2 its stream reset, before
+ * anything else of it is judged. Node's parser answers one past 2⁶⁴ − 1 itself, and hands on one
+ * between 2⁶³ and 2⁶⁴ − 1; nghttp2 resets the stream of one past 2⁶³ − 1.
+ */
+export const isCountedLength = (value: string): boolean => {
+  return LENGTH.test(value) && BigInt(value) <= MAXIMUM_LENGTH;
 };
 
 /**

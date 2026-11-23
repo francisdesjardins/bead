@@ -3605,12 +3605,12 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
-def framed_by(fields, *, on='a', http='HTTP/1.1'):
-    """A POST of {} to the echo route, of HTTP/1.1 unless told otherwise, framed by the field lines
-    given, each a name and a value written as it is, a Content-Length's value alone standing for its
-    line; its body in one chunk beside a Transfer-Encoding."""
+def framed_by(fields, *, on='a', http='HTTP/1.1', host='{host}'):
+    """A POST of {} to the echo route, of HTTP/1.1 unless told otherwise, naming the host given, framed
+    by the field lines given, each a name and a value written as it is, a Content-Length's value alone
+    standing for its line; its body in one chunk beside a Transfer-Encoding."""
     lines = [field if isinstance(field, tuple) else ('content-length', field) for field in fields]
-    head = f'POST /api/Transcoding/echo {http}\r\nhost: {{host}}\r\ncontent-type: application/json\r\n'
+    head = f'POST /api/Transcoding/echo {http}\r\nhost: {host}\r\ncontent-type: application/json\r\n'
     head += ''.join(f'{name}: {value}\r\n' for name, value in lines)
     coded = any(name == 'transfer-encoding' for name, _ in lines)
     body = hexadecimal(b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}')
@@ -4038,6 +4038,19 @@ EXCHANGES = [
                'on': 'a'}],
              differs=[{'row': 'A `Content-Length` naming one number in several lines, over HTTP/1.1',
                        'language': 'Rust'}]),
+    # * a Content-Length past 2⁶³ − 1, read by value whatever zeros lead it, refused as HTTP refuses it
+    # before the host is judged; one at the count, in 19 digits and in 23, goes on to the host's 403;
+    # 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out, since hyper answers them 431 (spec 15.12)
+    exchange("a body whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, refused as HTTP "
+             "refuses it, unmarked, its body empty, before its host is judged",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, length in (('a', str(2 ** 63 - 1)), ('b', f'0000{2 ** 63 - 1}'), ('c', str(2 ** 63)),
+                                      ('d', f'0000{2 ** 63}'), ('e', '9' * 19), ('f', str(2 ** 64)), ('g', '9' * 23))
+              for step in (framed_by([length], on=on, host='evil.example'),
+                           refused_own(403, 'host-refused', 'a host it does not take', on=on)
+                           if int(length) <= 2 ** 63 - 1 else
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})]),
     # ! an exchange of its own, so that the side whose HTTP reads a Content-Length beside a
     # Transfer-Encoding by the Transfer-Encoding alone (hyper drops the Content-Length, the row A
     # `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1) is excused by its differs from it

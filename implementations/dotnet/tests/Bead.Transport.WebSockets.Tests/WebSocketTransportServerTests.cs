@@ -4291,30 +4291,39 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.2, 15.12; RFC 9110 §8.6
     [Fact]
-    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    public async Task Answers_400_unmarked_a_Content_Length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
     {
         await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
 
-        var answers = new List<(int Status, string? Refusal)>();
+        var answers = new List<(string Length, int Status, string? Refusal, string Path, string Body)>();
 
-        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade, each read to its socket's close
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        // 2⁶³ − 1, its close asked; then 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1,
+        // 2⁶⁴ and 23 nines; each on an upgrade from a host it does not take, read to its socket's close
+        string[] lengths =
+        [
+            "9223372036854775807",
+            "9223372036854775808",
+            "00009223372036854775808",
+            "9999999999999999999",
+            "18446744073709551614",
+            "18446744073709551615",
+            "18446744073709551616",
+            "99999999999999999999999",
+        ];
+
+        foreach (var length in lengths)
         {
-            var (status, fields, _) = await AnswerOf(Latin1HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"));
+            var close = length == lengths[0] ? "Connection: close" : "Connection: Upgrade";
+            var (status, fields, body) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", close, $"Content-Length: {length}"));
 
-            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
-        }
-
-        // and 2⁶³ and 2⁶⁴ under a host it does not take
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551616" })
-        {
-            var (status, fields, _) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", $"Content-Length: {length}"));
-
-            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+            answers.Add((length, status, fields.GetValueOrDefault("bead-refusal"), string.Join(" ", PathFields.Where(fields.ContainsKey)), body));
         }
 
         // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before anything is judged
-        Assert.Equal([(400, null), (400, null), (400, null), (400, null), (400, null), (400, null)], answers);
+        Assert.Equal(lengths.Select((length) =>
+        {
+            return length == lengths[0] ? (length, 403, WebSocketRefusals.Host, "cache-control x-content-type-options", "") : (length, 400, (string?)null, "", "");
+        }), answers);
     }
 
     [Fact]

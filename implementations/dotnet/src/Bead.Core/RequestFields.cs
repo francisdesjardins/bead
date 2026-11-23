@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead;
 
 /// <summary>
@@ -66,5 +68,20 @@ internal static class RequestFields
         });
 
         return !string.Equals(protocol, "HTTP/1.0", StringComparison.OrdinalIgnoreCase) && first == elements.Count - 1;
+    }
+
+    /// <summary>
+    /// Whether a <c>Content-Length</c>'s value, one field line as it came, is a length spec 15.12
+    /// counts: digits alone, at least one, with no sign and no space, whose number is 2⁶³ − 1 at
+    /// most, read by value, its leading zeros counting for nothing (RFC 9110 §8.6).
+    /// </summary>
+    public static bool IsCountedLength(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || !value.All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _);
     }
 }

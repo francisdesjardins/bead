@@ -3211,6 +3211,198 @@
       ]
     },
     {
+      "name": "a request whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 9223372036854775807\r\nconnection: close\r\n\r\n"
+          },
+          "on": "counted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "counted"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 00009223372036854775807\r\nconnection: close\r\n\r\n"
+          },
+          "on": "padded"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "padded"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 9223372036854775808\r\n\r\n"
+          },
+          "on": "past"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "past"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "past"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 00009223372036854775808\r\n\r\n"
+          },
+          "on": "beyond"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "beyond"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "beyond"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 9999999999999999999\r\n\r\n"
+          },
+          "on": "nineteen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "nineteen"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "nineteen"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 18446744073709551616\r\n\r\n"
+          },
+          "on": "wide"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "wide"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "wide"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 99999999999999999999999\r\n\r\n"
+          },
+          "on": "long"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "long"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "long"
+        }
+      ]
+    },
+    {
       "name": "a request carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged, and its connection closed",
       "clauses": [
         "15.12"
@@ -14871,6 +15063,174 @@
             "body": ""
           },
           "on": "padded"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 9223372036854775807\r\n\r\n"
+          },
+          "on": "counted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "counted"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 00009223372036854775807\r\n\r\n"
+          },
+          "on": "padded"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "padded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 9223372036854775808\r\n\r\n"
+          },
+          "on": "past"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "past"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 00009223372036854775808\r\n\r\n"
+          },
+          "on": "beyond"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "beyond"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 9999999999999999999\r\n\r\n"
+          },
+          "on": "nineteen"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "nineteen"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 18446744073709551616\r\n\r\n"
+          },
+          "on": "wide"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "wide"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 99999999999999999999999\r\n\r\n"
+          },
+          "on": "long"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "long"
         }
       ]
     },

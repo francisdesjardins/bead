@@ -342,6 +342,38 @@ public sealed class WebSocketHandshakeTests
         Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 7"]), Options));
     }
 
+    // spec 15.2, 15.12; RFC 9110 §8.6
+    [Fact]
+    public void Refuses_first_unmarked_a_Content_Length_whose_number_passes_2_63_1_leading_zeros_read_by_value_whatever_else_the_request_holds()
+    {
+        // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 1, 2⁶⁴, 23 nines; each alone, from a host it
+        // does not take, and under another method with no upgrade
+        string[] lengths =
+        [
+            "9223372036854775808",
+            "00009223372036854775808",
+            new string('9', 19),
+            "18446744073709551615",
+            "18446744073709551616",
+            new string('9', 23),
+        ];
+
+        Assert.All(lengths, (length) =>
+        {
+            Assert.Equal((length, (400, (string?)null)), (length, AnswerOf(("GET / HTTP/1.1", [$"Content-Length: {length}"]), Options)));
+            Assert.Equal((length, (400, (string?)null)), (length, AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", $"Content-Length: {length}"]), Options)));
+            Assert.Equal((length, (400, (string?)null)), (length, AnswerOf(("POST / HTTP/1.1", [$"Content-Length: {length}", "Upgrade"]), Options)));
+        });
+
+        // 2⁶³ − 1, in 19 digits and in 23, is a length, the content it declares refused after the host
+        Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 9223372036854775807"]), Options));
+        Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Content-Length: 00009223372036854775807"]), Options));
+        Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Content-Length: 9223372036854775807"]), Options));
+
+        // and 0 written forty times is no content
+        Assert.Equal((101, (string?)null), AnswerOf(("GET / HTTP/1.1", [$"Content-Length: {new string('0', 40)}"]), Options));
+    }
+
     [Fact]
     public void Refuses_first_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_whatever_either_holds_or_a_Transfer_Encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_HTTP_1_0_request_carries_whatever_else_the_request_holds()
     {

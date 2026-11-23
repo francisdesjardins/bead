@@ -14,6 +14,7 @@ import {
   HOST_REFUSAL,
   ORIGIN_REFUSAL,
   isAuthority,
+  isCountedLength,
   isTransferEncodingFramed,
   requestTargetOf,
   type IAuthority,
@@ -186,6 +187,13 @@ export const isTransferEncodingTaken = (request: IHTTPRequestLike): boolean => {
     (linesOf(request, 'content-length').length === 0 &&
       isTransferEncodingFramed(request.httpVersion, codings))
   );
+};
+
+// whether every line of a request's `Content-Length` is one spec 15.12 counts: digits alone whose
+// number is 2⁶³ − 1 at most, read by value (RFC 9110 §8.6)
+// ! Node's parser counts to 2⁶⁴ − 1 and hands on what lies between 2⁶³ and that
+export const isContentLengthCounted = (request: IHTTPRequestLike): boolean => {
+  return linesOf(request, 'content-length').every(isCountedLength);
 };
 
 // a field's lines joined in their order by `, ` (RFC 9110 §5.3, spec 15.12); none without a line

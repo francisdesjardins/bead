@@ -113,6 +113,71 @@ internal sealed class TlsWire : IAsyncDisposable
         return (head[3], head[4], BinaryPrimitives.ReadInt32BigEndian(head.AsSpan(5)) & 0x7FFF_FFFF, await ReadExactly(length));
     }
 
+    // the connection's preface and an empty SETTINGS, the server's own acknowledged
+    private async Task Begin()
+    {
+        await _tls.WriteAsync(Preface, Cancelled);
+        await _tls.WriteAsync(FrameOf((Settings, 0, 0), []), Cancelled);
+
+        // ! the server's SETTINGS acknowledged before the request goes, so nothing is written once a
+        // session may end: a write that meets a session Kestrel ended draws a reset, which takes its
+        // GOAWAY, unread, with it
+        while (true)
+        {
+            var (type, flags, _, _) = await ReadFrame();
+
+            if (type == Settings && (flags & Acknowledged) == 0)
+            {
+                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
+
+                break;
+            }
+        }
+    }
+
+    // a POST on the next client stream, its HEADERS of the flags given, and what came of it
+    private async Task<TlsAnswer> Asked(IReadOnlyList<(string Name, string Value)> fields, byte flagged)
+    {
+        // ! a pseudo-header the fields given name takes the place of its default, every one before
+        // any regular field (RFC 9113 §8.3)
+        (string Name, string Value)[] defaults = [(":method", "POST"), (":scheme", "https"), (":path", "/bead")];
+        (string, string)[] request = [.. defaults.Where((field) =>
+        {
+            return !fields.Any((given) =>
+            {
+                return given.Name == field.Name;
+            });
+        }), .. fields];
+        var streamId = _nextStream;
+
+        _nextStream += 2;
+        await _tls.WriteAsync(FrameOf((Headers, flagged, streamId), BlockOf(request)), Cancelled);
+
+        while (true)
+        {
+            var (type, flags, stream, payload) = await ReadFrame();
+
+            if (type == Settings && (flags & Acknowledged) == 0)
+            {
+                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
+            }
+            else if (stream == streamId && type == ResetStream)
+            {
+                return new TlsAnswer(null, null, BinaryPrimitives.ReadUInt32BigEndian(payload));
+            }
+            else if (type == GoAway)
+            {
+                // the session ended before any answer, the stream with it: its code after the last
+                // stream id
+                return new TlsAnswer(null, null, null, BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4)));
+            }
+            else if (stream == streamId && type == Headers)
+            {
+                return new HeaderBlock(payload).Answer();
+            }
+        }
+    }
+
     // definition
 
     /// <summary>A socket connected to the port given and its TLS shaken hands, offering the protocol given.</summary>
@@ -155,68 +220,26 @@ internal sealed class TlsWire : IAsyncDisposable
     /// </summary>
     public async Task<TlsAnswer> Ask(IReadOnlyList<(string Name, string Value)> fields)
     {
-        await _tls.WriteAsync(Preface, Cancelled);
-        await _tls.WriteAsync(FrameOf((Settings, 0, 0), []), Cancelled);
-
-        // ! the server's SETTINGS acknowledged before the request goes, so nothing is written once a
-        // session may end: a write that meets a session Kestrel ended draws a reset, which takes its
-        // GOAWAY, unread, with it
-        while (true)
-        {
-            var (type, flags, _, _) = await ReadFrame();
-
-            if (type == Settings && (flags & Acknowledged) == 0)
-            {
-                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
-
-                break;
-            }
-        }
+        await Begin();
 
         return await AskNext(fields);
+    }
+
+    /// <summary>
+    /// One request over HTTP/2 as <see cref="Ask"/> sends it, its stream left open after its head, a
+    /// body it declares never coming: what its stream was answered, or reset or ended with.
+    /// </summary>
+    public async Task<TlsAnswer> AskOpen(IReadOnlyList<(string Name, string Value)> fields)
+    {
+        await Begin();
+
+        return await Asked(fields, EndHeaders);
     }
 
     /// <summary>A POST on the next client stream of the same HTTP/2 session.</summary>
     public async Task<TlsAnswer> AskNext(IReadOnlyList<(string Name, string Value)> fields)
     {
-        // ! a pseudo-header the fields given name takes the place of its default, every one before
-        // any regular field (RFC 9113 §8.3)
-        (string Name, string Value)[] defaults = [(":method", "POST"), (":scheme", "https"), (":path", "/bead")];
-        (string, string)[] request = [.. defaults.Where((field) =>
-        {
-            return !fields.Any((given) =>
-            {
-                return given.Name == field.Name;
-            });
-        }), .. fields];
-        var streamId = _nextStream;
-
-        _nextStream += 2;
-        await _tls.WriteAsync(FrameOf((Headers, EndStream | EndHeaders, streamId), BlockOf(request)), Cancelled);
-
-        while (true)
-        {
-            var (type, flags, stream, payload) = await ReadFrame();
-
-            if (type == Settings && (flags & Acknowledged) == 0)
-            {
-                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
-            }
-            else if (stream == streamId && type == ResetStream)
-            {
-                return new TlsAnswer(null, null, BinaryPrimitives.ReadUInt32BigEndian(payload));
-            }
-            else if (type == GoAway)
-            {
-                // the session ended before any answer, the stream with it: its code after the last
-                // stream id
-                return new TlsAnswer(null, null, null, BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4)));
-            }
-            else if (stream == streamId && type == Headers)
-            {
-                return new HeaderBlock(payload).Answer();
-            }
-        }
+        return await Asked(fields, EndStream | EndHeaders);
     }
 
     /// <summary>One request over HTTP/1.1, its head as given: the status it was answered.</summary>

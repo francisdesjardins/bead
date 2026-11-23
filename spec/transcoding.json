@@ -12849,6 +12849,150 @@
       ]
     },
     {
+      "name": "a body whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, refused as HTTP refuses it, unmarked, its body empty, before its host is judged",
+      "clauses": [
+        "7.7",
+        "7.7.2",
+        "10.1",
+        "10.1.1",
+        "spec:15.12"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 9223372036854775807\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "host-refused"
+            },
+            "body": "{\"detail\":\"a host it does not take\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 00009223372036854775807\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "host-refused"
+            },
+            "body": "{\"detail\":\"a host it does not take\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 9223372036854775808\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 00009223372036854775808\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "d"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 9999999999999999999\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "e"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "e"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 18446744073709551616\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "f"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "f"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: 99999999999999999999999\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "g"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "g"
+        }
+      ]
+    },
+    {
       "name": "a body whose Content-Length comes beside a Transfer-Encoding, in either order, refused as HTTP refuses it, unmarked, its body empty",
       "clauses": [
         "10.1",

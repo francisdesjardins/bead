@@ -4686,60 +4686,62 @@ async fn waits_for_a_head_not_whole() {
 
 // spec 15.2, 15.12; RFC 9110 §8.6
 #[tokio::test]
-async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
  {
     let (server, _, port) = started(&judging(&["bead.test"], &[])).await;
-    let mut answers = Vec::new();
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade; then 2⁶³ and 2⁶⁴ under a host it does not take
-    let requests = [
-        ("bead.test", "9223372036854775808"),
-        ("bead.test", "18446744073709551614"),
-        ("bead.test", "18446744073709551615"),
-        ("bead.test", "18446744073709551616"),
-        ("elsewhere.test", "9223372036854775808"),
-        ("elsewhere.test", "18446744073709551616"),
-    ];
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    // an upgrade from a host it does not take
+    let answered = |length: String, close: bool| async move {
+        let mut fields = vec!["Host: elsewhere.test".to_owned()];
 
-    for (host, length) in requests {
-        let (answer, closed) = answer_of(
-            port,
-            &request_of(
-                "GET / HTTP/1.1",
-                &[
-                    &format!("Host: {host}"),
-                    &format!("Content-Length: {length}"),
-                ],
-            ),
-        )
-        .await;
+        if close {
+            fields.push("Connection: close".to_owned());
+        }
+
+        fields.push(format!("Content-Length: {length}"));
+
+        let lines = fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let (answer, closed) = answer_of(port, &request_of("GET / HTTP/1.1", &lines)).await;
         let refusal = answer
             .split("\r\n")
             .find_map(|line| line.strip_prefix("bead-refusal: "))
             .map(str::to_owned);
 
-        answers.push((
+        (
             answer.get(9..12).unwrap_or_default().to_owned(),
             refusal,
             closed,
-        ));
-    }
+        )
+    };
 
-    // the judgement reads the head itself and counts no length: content declared, malformed, after
-    // its host
-    let malformed = ("400".to_owned(), Some("malformed".to_owned()), true);
-    let host_refused = ("403".to_owned(), Some("host-refused".to_owned()), true);
+    // 2⁶³ − 1 is a length: its host is judged
+    let (status, refusal, _) = answered("9223372036854775807".to_owned(), true).await;
 
     assert_eq!(
-        answers,
-        [
-            malformed.clone(),
-            malformed.clone(),
-            malformed.clone(),
-            malformed,
-            host_refused.clone(),
-            host_refused,
-        ]
+        (status, refusal),
+        ("403".to_owned(), Some("host-refused".to_owned())),
+        "2⁶³ − 1"
     );
+
+    // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ and 23 nines: the judgement reads
+    // its own head, and counts each
+    for length in [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551614",
+        "18446744073709551615",
+        "18446744073709551616",
+        twenty_three.as_str(),
+    ] {
+        assert_eq!(
+            answered(length.to_owned(), false).await,
+            ("400".to_owned(), None, true),
+            "{length}"
+        );
+    }
+
     stopped(&server).await;
 }
 
