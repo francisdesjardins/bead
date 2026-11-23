@@ -1407,10 +1407,24 @@ test.describe('createHTTPTransportClient', () => {
   test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
     await using started = await startServer();
     const { port, server } = started;
-    const client = createHTTPTransportClient({ isListening: false });
+    const client = createHTTPTransportClient();
+    const closed = new Promise<void>((resolve) => {
+      client.once('close', () => {
+        resolve();
+      });
+    });
+
+    await using refused = await closedPort();
 
     await client.connect({ host, port });
+    await expect
+      .poll(() => {
+        return server.gauges().counts['listens'];
+      })
+      .toBe(1);
     await server.stop();
+    await closed;
+    await expect(client.connect({ host, port: refused.port })).rejects.toBeInstanceOf(ConnectError);
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
     const reason = await client.reconnect({ maximumAttempts: 1 }).catch((error: unknown) => {
