@@ -158,7 +158,7 @@ internal static class WebSocketHandshake
 
     // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
     // Transfer-Encoding alone that ends in one chunked, over HTTP/1.1, or a Content-Length of one line
-    // of digits alone (RFC 9110 §8.6), or neither
+    // of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
     private static bool IsFramed(HttpRequest request)
     {
         var headers = request.Headers;
@@ -176,8 +176,9 @@ internal static class WebSocketHandshake
                 && RequestFields.IsTransferEncodingFramed(request.Protocol, headers.TransferEncoding);
         }
 
-        return lengths.Count == 0
-            || (lengths.Count == 1 && ValueOf(lengths[0]) is { Length: > 0 } length && length.All(char.IsAsciiDigit));
+        // ! Kestrel answers a Content-Length past 2⁶³ − 1 itself before the judgement runs, so the
+        // bound holds a request no socket brings: the unit test's
+        return lengths.Count == 0 || (lengths.Count == 1 && RequestFields.IsCountedLength(ValueOf(lengths[0])));
     }
 
     // whether a request has content: a Content-Length past 0, as written, never a length the
@@ -271,8 +272,8 @@ internal static class WebSocketHandshake
     /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
     /// character past ASCII, a target that holds an octet other than visible ASCII or a path whose
     /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
-    /// a <c>Content-Length</c> other than one line of digits alone, one beside a
-    /// <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
+    /// a <c>Content-Length</c> other than one line of digits alone, one whose number passes 2⁶³ − 1,
+    /// one beside a <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
     /// <c>chunked</c> or that lists anything after its first <c>chunked</c>, or one an HTTP/1.0
     /// request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two

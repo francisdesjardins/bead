@@ -52,6 +52,23 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         "access-control-max-age",
     ];
 
+    // 2⁶³ − 1, the largest Content-Length spec 15.12 counts
+    private const string CountedLength = "9223372036854775807";
+
+    // 2⁶³ − 1, then what passes it: 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴
+    // and 23 nines
+    private static readonly string[] PastCountedLengths =
+    [
+        CountedLength,
+        "9223372036854775808",
+        "00009223372036854775808",
+        "9999999999999999999",
+        "18446744073709551614",
+        "18446744073709551615",
+        "18446744073709551616",
+        "99999999999999999999999",
+    ];
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     // what a server that stops reading takes at most of what one socket pipelines: its platform's
@@ -2006,27 +2023,40 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12; RFC 9110 §8.6
     [Fact]
-    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    public async Task Answers_400_unmarked_a_Content_Length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
     {
         await Start();
 
-        var answers = new List<(int Status, string? Refusal)>();
+        var answers = new List<(string Length, int Status, string? Refusal)>();
 
-        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        // 2⁶³ − 1, its close asked; then 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1,
+        // 2⁶⁴ and 23 nines; each on a connect from a host the transport does not take
+        foreach (var length in PastCountedLengths)
         {
             using var wire = await Wire.Open(_port);
+            var isCounted = length == CountedLength;
 
-            await wire.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n\r\n");
+            await wire.Write($"POST /bead HTTP/1.1\r\nHost: elsewhere.test\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n{(isCounted ? "Connection: close\r\n" : "")}\r\n");
 
-            var (head, _) = await wire.Read();
+            var (head, body) = await wire.Read();
 
-            Assert.True(await wire.IsClosed());
-            answers.Add((head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+            answers.Add((length, head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+
+            // ! Kestrel keeps the connection of a length it counts to read the body it declares,
+            // whatever close the request asks: no close is asserted there
+            if (!isCounted)
+            {
+                Assert.Equal((length, 0, ""), (length, body.Length, StampedOf(head.Headers)));
+                Assert.True(await wire.IsClosed(), length);
+            }
         }
 
-        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
-        Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
+        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before the transport reads the request
+        Assert.Equal(PastCountedLengths.Select((length) =>
+        {
+            return length == CountedLength ? (length, 403, HttpRefusals.Host) : (length, 400, (string?)null);
+        }), answers);
+        Assert.Single(_refusals);
     }
 
     // spec 15.12; RFC 9112 §9.3
@@ -3273,6 +3303,48 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // one line is a length
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("content-length", "0")));
+    }
+
+    // spec 15.12: the row "A `Content-Length` HTTP refuses, over HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_passes_2_63_1_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // ! Kestrel counts to 2⁶³ − 1 and refuses past it of its own, ending the session where the
+        // spec resets the stream (RFC 9113 §5.4.1 lets it): 2⁶³, in 19 digits and in 23, 19 nines
+        // and 2⁶⁴ − 1, each on a connect whose body never comes
+        foreach (var length in (string[])["9223372036854775808", "00009223372036854775808", "9999999999999999999", "18446744073709551615"])
+        {
+            Assert.Equal((length, new TlsAnswer(null, null, null, 0x1)), (length, await OpenHttp2Of(length)));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+    }
+
+    // spec 15.12; RFC 9110 §8.6: the row "A `Content-Length` of more than nineteen digits, over
+    // HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Judges_over_HTTP_2_a_Content_Length_of_more_than_nineteen_digits_by_its_number()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // 2⁶³ − 1, in 19 digits and in 23, on a connect whose body never comes: a length, so the
+        // transport answers the connect that declares a body as its own
+        foreach (var length in (string[])[CountedLength, $"0000{CountedLength}"])
+        {
+            Assert.Equal((length, new TlsAnswer(400, HttpRefusals.Malformed, null)), (length, await OpenHttp2Of(length)));
+        }
+    }
+
+    // a connect over HTTP/2 of the Content-Length given, on a socket of its own, its stream left
+    // open after its head: its answer, or its reset, or its session's end
+    private async Task<TlsAnswer> OpenHttp2Of(string length)
+    {
+        await using var wire = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+        return await wire.AskOpen([(":authority", $"{Host}:{_port}"), ("content-type", HttpTransport.MediaType), ("content-length", length)]);
     }
 
     // spec 15.12
