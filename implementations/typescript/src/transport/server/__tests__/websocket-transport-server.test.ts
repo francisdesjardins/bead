@@ -1816,6 +1816,65 @@ test.describe('WebSocketTransportServer, its handshake', () => {
       expect(await statusLineOf(port, request), request).toBe('HTTP/1.1 101 Switching Protocols');
     }
   });
+
+  // spec 15.2, 15.12
+  test('closes in stages a refusal of an upgrade whose body is still coming, its client reading the refusal as it goes on sending', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    // * a client that sends on past the server's end of its write side, as one still sending does
+    const socket = connectTcp({ allowHalfOpen: true, host, port });
+    const answer = { answered: 0, closed: 0, isReset: false, text: '' };
+
+    await once(socket, 'connect');
+    socket.on('data', (chunk: Buffer) => {
+      answer.text += chunk.toString('latin1');
+
+      if (answer.answered === 0 && answer.text.includes('\r\n\r\n')) {
+        answer.answered = performance.now();
+      }
+    });
+    socket.on('error', () => {
+      answer.isReset ||= answer.answered === 0;
+    });
+    socket.on('close', () => {
+      answer.closed = performance.now();
+    });
+
+    // its head alone, at its own host, a body in chunks declared, and a chunk of it every 200 ms
+    socket.write(requestOf('GET / HTTP/1.1', ['Transfer-Encoding: gzip, chunked']));
+
+    const sending = setInterval(() => {
+      if (!socket.destroyed) {
+        socket.write('1\r\na\r\n');
+      }
+    }, 200);
+
+    try {
+      await expect
+        .poll(
+          () => {
+            return answer.closed;
+          },
+          { timeout: 5_000 }
+        )
+        .toBeGreaterThan(0);
+    } finally {
+      clearInterval(sending);
+      socket.destroy();
+    }
+
+    // the refusal whole, unmarked, read before any reset, which closes its connection; then what
+    // still came read on and dropped, its socket closed once the linger's 2 s passed
+    const head = (answer.text.split('\r\n\r\n')[0] ?? '').toLowerCase();
+
+    expect(answer.text).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(head).toContain('connection: close');
+    expect(head).not.toContain('bead-refusal');
+    expect(answer.isReset).toBe(false);
+    expect(answer.closed - answer.answered).toBeGreaterThan(1_000);
+    expect(answer.closed - answer.answered).toBeLessThan(3_000);
+    expect(server.clients).toHaveLength(0);
+  });
 });
 
 test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () => {

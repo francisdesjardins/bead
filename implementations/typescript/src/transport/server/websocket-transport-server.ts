@@ -42,6 +42,7 @@ import {
   HEADERS_TIMEOUT,
   type ISendPace,
   lateOf,
+  lingerOn,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
   MINIMUM_SEND_BYTES_PER_SECOND,
@@ -70,6 +71,7 @@ import type {
 } from './types';
 import {
   BUSY_HANDSHAKE,
+  hasContent,
   type IHandshakeRefusal,
   MALFORMED_HANDSHAKE,
   refusalOfHandshake,
@@ -522,6 +524,12 @@ export const createWebSocketTransportServer = (
           refuse(request, {
             refusal,
             write: () => {
+              // * a refusal of an upgrade that declares a body closes its socket in stages, so a
+              // client still sending reads it before the close (RFC 9112 §9.6; spec 15.12)
+              if (hasContent(request)) {
+                lingerOn(request.socket, response);
+              }
+
               response.sendDate = false;
               response.writeHead(refusal.status, { date: dateOf(), ...refusal.fields }).end();
             },
