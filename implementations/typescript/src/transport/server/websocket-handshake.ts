@@ -188,7 +188,7 @@ const isFramed = (request: IHandshakeRequestLike): boolean => {
 };
 
 // whether a request has content: a `Content-Length` past 0, or a `Transfer-Encoding`
-const hasContent = (request: IHandshakeRequestLike): boolean => {
+export const hasContent = (request: IHandshakeRequestLike): boolean => {
   return (
     linesOf(request, 'transfer-encoding').length > 0 ||
     linesOf(request, 'content-length').some((length) => {

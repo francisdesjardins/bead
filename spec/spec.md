@@ -1911,10 +1911,11 @@ path carries, and its stream reset `PROTOCOL_ERROR` over HTTP/2, a stream error
 ([RFC 9113 §5.4.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.2)), before anything else of
 the request is judged. That is a `Content-Length` that is not digits alone
 ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), an empty one among them,
-or one that names two numbers, in one line or across its lines. So is one that names one number
-more than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or
-read as that number: every side refuses it, since not every platform's HTTP can read it
-(`docs/support.md`, "Leveled down").
+or one that names two numbers, in one line or across its lines. A sign before its digits, `+0` or
+`-0`, is no digit: one platform's HTTP reads it as the number it writes, and serves the request
+(`docs/support.md`, "Differences"). So is one that names one number more than once, `0, 0` or `0`
+in two lines, which RFC 9110 §8.6 lets a recipient either refuse or read as that number: every side
+refuses it, since not every platform's HTTP can read it (`docs/support.md`, "Leveled down").
 
 A request's `Content-Length` whose number passes 2⁶³ − 1, the largest signed 64-bit count, is
 answered alike: 400 unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields
@@ -1958,10 +1959,20 @@ HTTP's own carries no `cache-control`, and not every platform's HTTP lets a serv
 as faulty and close its connection, since its sender may have passed on a chunked body it never
 decoded. A server may refuse it all the same, and the refusal reads none of that body. One
 platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
-`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences"). Over
-HTTP/2 a `Transfer-Encoding` is malformed
-([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)), a `Content-Length`
-beside it or none: its stream is reset `PROTOCOL_ERROR`.
+`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences").
+
+Over HTTP/2, a request that carries a connection-specific field is malformed
+([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)): a `connection`, a
+`proxy-connection`, a `keep-alive`, a `transfer-encoding`, a `content-length` beside it or none,
+or an `upgrade`, and a `te` whose value is not `trailers`. Its stream is reset `PROTOCOL_ERROR`, a
+stream error ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), before
+anything else of the request is judged. One platform's HTTP/2 ends the session of a `connection`
+or of such a `te` instead, `GOAWAY` `PROTOCOL_ERROR`, as
+[§5.4.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.1) lets an endpoint treat a stream
+error (`docs/support.md`, "Differences"). A `te` is compared as it comes: `trailers` in lower
+case is the one value taken.
+[RFC 9110 §10.1.4](https://www.rfc-editor.org/rfc/rfc9110#section-10.1.4) reads it in any case,
+and not every platform's HTTP/2 does (`docs/support.md`, "Leveled down").
 
 A request's field in more than one field line is read with its lines joined in their order by
 `, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient

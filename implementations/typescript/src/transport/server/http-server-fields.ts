@@ -189,6 +189,18 @@ export const isTransferEncodingTaken = (request: IHTTPRequestLike): boolean => {
   );
 };
 
+// whether a request's `te` is one spec 15.12 takes: any over HTTP/1; over HTTP/2, `trailers` in
+// lower case in each line (RFC 9113 §8.2.2), compared byte for byte as h2 and Kestrel compare it
+// ! nghttp2 resets every other value itself, but hands `trailers` on in any case
+export const isTeTaken = (request: IHTTPRequestLike): boolean => {
+  return (
+    request.httpVersionMajor === 1 ||
+    linesOf(request, 'te').every((value) => {
+      return value === 'trailers';
+    })
+  );
+};
+
 // whether every line of a request's `Content-Length` is one spec 15.12 counts: digits alone whose
 // number is 2⁶³ − 1 at most, read by value (RFC 9110 §8.6)
 // ! Node's parser counts to 2⁶⁴ − 1 and hands on what lies between 2⁶³ and that

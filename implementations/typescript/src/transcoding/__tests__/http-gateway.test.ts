@@ -9,6 +9,7 @@ import {
 import {
   connect as connectHTTP2,
   constants as http2Constants,
+  createSecureServer,
   createServer as createHTTP2Server,
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
@@ -41,6 +42,8 @@ import {
   statusesOf,
   takenUntilStalled,
 } from '../../transport/server/__tests__/http-transport-server-fixtures';
+import { rawResetOverHTTP2 } from '../../transport/server/__tests__/raw-http2';
+import { TLS_FIXTURE } from '../../transport/server/__tests__/tls-fixture';
 import {
   GOOD_CREDENTIAL,
   type ITranscodingFixture,
@@ -89,6 +92,12 @@ const NO_CREDENTIAL =
 // the requests pipelined behind a call in one write: past one read of Node's, so that its socket's
 // read stops and resumes
 const PIPELINED = 6_000;
+
+// where a raw request over HTTP/2 goes: a route of the gateway's, and the body it reads
+const ECHO_OVER_HTTP2 = Object.freeze({
+  contentType: 'application/json',
+  path: '/api/Transcoding/echo',
+});
 
 // helpers
 
@@ -290,6 +299,46 @@ const until = async (condition: () => boolean, within = 2_000): Promise<void> =>
     }
 
     await sleep(5);
+  }
+};
+
+/** A gateway under TLS, HTTP/2 and HTTP/1.1 on one port, over the transcoding service. */
+const startSecureTranscoding = (): Promise<ITranscodingFixture> => {
+  return startTranscoding({
+    createServer: (listener) => {
+      return createSecureServer({ ...TLS_FIXTURE, allowHTTP1: true }, (request, response) => {
+        listener(request, response);
+      });
+    },
+  });
+};
+
+/** The status a gateway under TLS on `port` answers a book's `GET` over HTTP/2 of `headers` with. */
+const bookOverHTTP2 = async (
+  port: number,
+  headers: Record<string, string> = {}
+): Promise<number | undefined> => {
+  const session = connectHTTP2(`https://127.0.0.1:${String(port)}`, { ca: TLS_FIXTURE.cert });
+
+  session.on('error', () => {});
+
+  try {
+    return await new Promise((resolve) => {
+      const stream = session.request({ ':method': 'GET', ':path': '/v1/books/2', ...headers });
+      let status: number | undefined;
+
+      stream.once('response', (response) => {
+        status = response[':status'];
+      });
+      stream.on('data', () => {});
+      stream.on('error', () => {});
+      stream.once('close', () => {
+        resolve(status);
+      });
+      stream.end();
+    });
+  } finally {
+    session.close();
   }
 };
 
@@ -2350,6 +2399,56 @@ test('refuses 400 unmarked a request whose Transfer-Encoding lists a coding befo
   expect(drawn).toBe(0);
 });
 
+// spec 15.12; transcoding 10.1; RFC 9112 §6.3
+test('refuses 400 unmarked a Transfer-Encoding whose final coding is not chunked, gzip or identity, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // ! Node's parser refuses each before the gateway reads the request; this pins it, so that a
+  // Node that hands one on shows here
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip'],
+    ['HTTP/1.1', own, 'transfer-encoding: identity'],
+  ]);
+
+  // one answer each, unmarked, its connection closed behind it, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(answers).toHaveLength(2);
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9112 §6.3
+test('refuses 400 unmarked a Transfer-Encoding whose final coding is not chunked on a server whose parser is insecureHTTPParser’s, gzip or identity, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer({ insecureHTTPParser: true }, listener);
+    },
+  });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // * Node's parser hands each on under `insecureHTTPParser`, its body unframed: the gateway
+  // refuses it itself
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip'],
+    ['HTTP/1.1', own, 'transfer-encoding: identity'],
+  ]);
+
+  // one answer each, unmarked, which closes its connection, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(answers).toHaveLength(2);
+  expect(drawn).toBe(0);
+});
+
 // spec 15.12; transcoding 10.1, 10.2; RFC 9112 §9.6
 test('serves no request pipelined behind an answer that closes its connection, whatever closes it, and closes that connection', async () => {
   await using fixture = await startTranscoding({ maximumBodyBytes: 16 });
@@ -2891,6 +2990,81 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
   } finally {
     session.close();
   }
+});
+
+// spec 15.12
+test('resets over HTTP/2 the stream of a request carrying a connection-specific field, a transfer-encoding with a content-length beside it or none, a keep-alive, a proxy-connection or an upgrade', async () => {
+  await using fixture = await startSecureTranscoding();
+  const { port } = fixture;
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+
+  // ! nghttp2 resets each before the gateway reads the request (RFC 9113 §8.2.2)
+  expect(
+    await Promise.all(
+      [
+        [['transfer-encoding', 'chunked']],
+        [
+          ['transfer-encoding', 'chunked'],
+          ['content-length', '0'],
+        ],
+        [
+          ['content-length', '0'],
+          ['transfer-encoding', 'chunked'],
+        ],
+        [['transfer-encoding', 'identity']],
+        [['keep-alive', 'timeout=5']],
+        [['proxy-connection', 'keep-alive']],
+        [['upgrade', 'websocket']],
+      ].map((fields) => {
+        return rawResetOverHTTP2(port, fields as [string, string][], ECHO_OVER_HTTP2);
+      })
+    )
+  ).toEqual(
+    Array.from({ length: 7 }, () => {
+      return http2Constants.NGHTTP2_PROTOCOL_ERROR;
+    })
+  );
+  expect(drawn).toEqual([]);
+  // none of them, a route answered
+  expect(await bookOverHTTP2(port)).toBe(200);
+});
+
+// spec 15.12
+test('resets over HTTP/2 the stream of a request carrying a connection, or a te other than trailers in lower case, and serves one whose te is trailers', async () => {
+  await using fixture = await startSecureTranscoding();
+  const { port } = fixture;
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+
+  // ! nghttp2 resets a connection and a te other than trailers before the gateway reads the
+  // request, but hands trailers on in any case: the gateway resets Trailers (RFC 9113 §8.2.2)
+  expect(
+    await Promise.all(
+      [
+        ['connection', 'keep-alive'],
+        ['connection', 'close'],
+        ['te', 'gzip'],
+        ['te', 'trailers, gzip'],
+        ['te', 'Trailers'],
+      ].map((field) => {
+        return rawResetOverHTTP2(port, [field as [string, string]], ECHO_OVER_HTTP2);
+      })
+    )
+  ).toEqual(
+    Array.from({ length: 5 }, () => {
+      return http2Constants.NGHTTP2_PROTOCOL_ERROR;
+    })
+  );
+  expect(drawn).toEqual([]);
+  // trailers in lower case, a route answered
+  expect(await bookOverHTTP2(port, { te: 'trailers' })).toBe(200);
 });
 
 test('refuses a route off its template’s grammar, and listens once', async () => {

@@ -4745,6 +4745,82 @@ async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_ju
     stopped(&server).await;
 }
 
+// spec 15.2, 15.12
+#[tokio::test]
+async fn closes_in_stages_a_refusal_of_an_upgrade_whose_body_is_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+ {
+    let (server, _, port) = started(&judging(&["bead.test"], &[])).await;
+    // an upgrade at its own host whose body comes in chunks, its head sent first
+    let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (mut reading, mut writing) = socket.into_split();
+
+    writing
+        .write_all(request_of("GET / HTTP/1.1", &["Transfer-Encoding: gzip, chunked"]).as_bytes())
+        .await
+        .unwrap();
+
+    // * its client sends a chunk each 200 ms as it reads, past the end of the server's write side,
+    // until a write fails once the server closed its socket: when it failed
+    let sending = crate::testing::spawn(async move {
+        while writing.write_all(b"1\r\na\r\n").await.is_ok() {
+            rest(Duration::from_millis(200)).await;
+        }
+
+        Instant::now()
+    });
+
+    // its refusal read whole, before any reset
+    let mut head = Vec::new();
+    let mut byte = [0_u8; 1];
+
+    patience(PATIENCE, async {
+        while !head.ends_with(b"\r\n\r\n") {
+            assert_eq!(
+                reading.read(&mut byte).await.expect("no reset before it"),
+                1,
+                "its socket ended before its refusal"
+            );
+            head.push(byte[0]);
+        }
+    })
+    .await
+    .unwrap();
+
+    let answered = Instant::now();
+    let head = latin1(&head).to_ascii_lowercase();
+
+    assert!(head.starts_with("http/1.1 400 "), "{head}");
+    assert!(head.contains("\r\nconnection: close\r\n"), "{head}");
+    assert!(!head.contains("bead-refusal"), "{head}");
+
+    // nothing after it, its write side ended
+    let mut after = [0_u8; 64];
+
+    assert_eq!(
+        patience(PATIENCE, reading.read(&mut after))
+            .await
+            .unwrap()
+            .unwrap_or_default(),
+        0,
+        "nothing after its refusal"
+    );
+
+    // what still came read on and dropped, its socket closed once the linger's 2 s passed
+    let closed = patience(PATIENCE, sending).await.unwrap().unwrap();
+    let lingered = closed.duration_since(answered);
+
+    assert!(
+        lingered > Duration::from_secs(1),
+        "closed at once: {lingered:?}"
+    );
+    assert!(
+        lingered < Duration::from_secs(3),
+        "closed past 3 s: {lingered:?}"
+    );
+    assert!(server.clients().is_empty(), "no connection");
+    stopped(&server).await;
+}
+
 #[tokio::test]
 async fn reads_a_head_whole_its_method_its_target_and_its_fields_as_they_came_an_octet_past_ascii_refused_400_unmarked()
  {

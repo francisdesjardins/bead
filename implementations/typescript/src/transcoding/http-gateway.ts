@@ -66,6 +66,7 @@ import {
   type IExchangeIn,
   inTurn,
   isContentLengthCounted,
+  isTeTaken,
   isTransferEncodingTaken,
   isUnencoded,
   joinedOf,
@@ -1825,7 +1826,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       hasVisibleFields(request.rawHeaders) &&
       isVisibleTarget(request.url) &&
       isTransferEncodingTaken(request) &&
-      isContentLengthCounted(request)
+      isContentLengthCounted(request) &&
+      // over HTTP/2, a te other than trailers in lower case, its stream reset (RFC 9113 §8.2.2)
+      isTeTaken(request)
         ? authorityNamedBy(request)
         : undefined;
 

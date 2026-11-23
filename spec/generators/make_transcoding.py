@@ -4030,7 +4030,8 @@ EXCHANGES = [
              [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown', 'a path no route matches')]),
     # * a chunk's size that is no number, then a Content-Length spec 15.12 refuses: a word, two numbers
     # in one line or in two; then a Transfer-Encoding it refuses: one that lists anything after its
-    # first chunked, in one line or in two, and one an HTTP/1.0 request carries
+    # first chunked, in one line or in two, one an HTTP/1.0 request carries, and one whose final
+    # coding is not chunked, gzip or identity, whose connection's close is each side's own test
     exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
              ['10.1', '10.1.1', 'spec:15.12'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
@@ -4049,7 +4050,11 @@ EXCHANGES = [
                                          'body': ''}, 'on': on})],
               framed_by([('transfer-encoding', 'chunked')], on='i', http='HTTP/1.0'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'i'}]),
+               'on': 'i'},
+              *[step for on, coding in (('j', 'gzip'), ('k', 'identity'))
+                for step in (framed_by([('transfer-encoding', coding)], on=on),
+                             {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                         'body': ''}, 'on': on})]]),
     # a Transfer-Encoding that lists a coding before its chunked, in one line or in two, refused as
     # HTTP refuses it before the route reads a body still coded; an empty element before chunked
     # ignored, the body echoed
@@ -4102,6 +4107,16 @@ EXCHANGES = [
                                        'body': ''}, 'on': on})],
              differs=[{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1',
                        'language': 'Rust'}]),
+    # ! an exchange of its own, so that the side whose HTTP reads a sign before a Content-Length's
+    # digits as the number they write (Kestrel serves +2 as 2 and reads -0 as 0, the row A signed
+    # `Content-Length`) is excused by its differs from it alone (spec 15.12)
+    exchange("a body whose Content-Length is signed, +2 or -0, refused as HTTP refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, length in (('a', '+2'), ('b', '-0'))
+              for step in (framed_by([length], on=on),
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})],
+             differs=[{'row': 'A signed `Content-Length`', 'language': 'C#'}]),
     exchange("what HTTP refuses of its own, unmarked, its body empty", ['7.7', '10.1', '10.1.1'],
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},

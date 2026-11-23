@@ -33,6 +33,9 @@
          reaches the loopback (spec 13.4), with the collection of the tests that set them -->
     <Compile Include="../Shared/StandIns.cs" Link="StandIns.cs" />
     <Compile Include="../Shared/PlatformSeams.cs" Link="PlatformSeams.cs" />
+    <!-- the HTTP transport's socket over TLS, which writes HTTP/2 by hand: what Kestrel answers a
+         gateway's request before the gateway reads it -->
+    <Compile Include="../Bead.Transport.Http.Tests/TlsWire.cs" Link="TlsWire.cs" />
   </ItemGroup>
 
   <ItemGroup>

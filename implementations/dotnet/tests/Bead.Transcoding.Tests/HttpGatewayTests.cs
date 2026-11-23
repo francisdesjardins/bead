@@ -2,13 +2,16 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
+using Bead.Transport.Http.Tests;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
@@ -16,6 +19,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using static Bead.Transcoding.Tests.TranscodingFile;
@@ -1974,6 +1978,48 @@ public sealed class HttpGatewayTests
         Assert.Equal((StatusCodes.Status200OK, (int?)null, "{\"name\":\"2\",\"title\":\"A tale\"}"), await Http2Of(gateway, ("/v1/books/2", [])));
     }
 
+    // spec 15.12: the row "A `connection` or a `te` other than `trailers`, over HTTP/2" of
+    // docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does_and_serves_one_whose_te_is_trailers()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        var (application, port) = await MountedOverTls(gateway);
+
+        await using (application)
+        {
+            (string, string)[] book = [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}")];
+
+            // ! Kestrel refuses each of its own before the gateway reads the request, a te compared
+            // with trailers byte for byte, ending the session where the spec resets the stream (RFC
+            // 9113 §5.4.1 lets it)
+            (string, string)[] carried =
+            [
+                ("connection", "keep-alive"),
+                ("connection", "close"),
+                ("te", "gzip"),
+                ("te", "trailers, gzip"),
+                ("te", "Trailers"),
+            ];
+
+            foreach (var field in carried)
+            {
+                Assert.Equal((field, new TlsAnswer(null, null, null, 0x1)), (field, await Http2Over(port, [.. book, field])));
+            }
+
+            Assert.Equal(0, Volatile.Read(ref drawn));
+
+            // a te of trailers, a route served
+            Assert.Equal(new TlsAnswer(StatusCodes.Status200OK, null, null), await Http2Over(port, [.. book, ("te", "trailers")]));
+            await application.StopAsync(Cancelled);
+        }
+    }
+
     // spec 15.12; transcoding 10.1
     [Fact]
     public async Task Refuses_400_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_over_HTTP_1_0_too_and_closes_its_connection_before_a_request_smuggled_behind_it_is_read()
@@ -2124,6 +2170,61 @@ public sealed class HttpGatewayTests
 
             // no route served
             Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1; RFC 9112 §6.3
+    [Fact]
+    public async Task Refuses_400_unmarked_a_Transfer_Encoding_whose_final_coding_is_not_chunked_gzip_or_identity_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        var started = await Started();
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+
+            // ! Kestrel refuses each of its own before the gateway reads it, a chunked body behind it
+            foreach (var codings in (string[])["transfer-encoding: gzip", "transfer-encoding: identity"])
+            {
+                var came = await PipelinedOn(started.Port, ("HTTP/1.1", own, codings));
+
+                // one answer, unmarked, its connection closed behind it
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // no route served
+            Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Serves_a_body_under_a_signed_Content_Length_plus_2_as_Kestrel_does()
+    {
+        var started = await Started();
+
+        try
+        {
+            // ! Kestrel reads a sign before the digits as the number, where RFC 9110 §8.6 holds a
+            // length to digits alone, and the gateway reads the 2 octets it frames
+            var answered = await Exchanged(started.Port, Encoding.ASCII.GetBytes(
+                $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: +2\r\nconnection: close\r\n\r\n{{}}"));
+
+            Assert.Equal((200, "{}"), (answered.Status, answered.Body));
         }
         finally
         {
@@ -2659,6 +2760,56 @@ public sealed class HttpGatewayTests
         {
             Code = errorCode;
         }
+    }
+
+    // a self-signed certificate for 127.0.0.1, which a client trusts alone
+    private static readonly Lazy<X509Certificate2> Certificate = new(() =>
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256);
+        var names = new SubjectAlternativeNameBuilder();
+
+        names.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(names.Build());
+
+        using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+
+        // imported again, so SslStream can use its key on Windows
+        return X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+    });
+
+    // a gateway mapped as the fallback of an application of Kestrel's over TLS, HTTP/2 offered by
+    // ALPN beside HTTP/1.1, as Kestrel reads a request before the gateway does; and the port it
+    // listens on
+    private static async Task<(WebApplication Application, int Port)> MountedOverTls(HttpGateway gateway)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrel((kestrel) =>
+        {
+            kestrel.Listen(IPAddress.Loopback, 0, (listen) =>
+            {
+                listen.Protocols = HttpProtocols.Http1AndHttp2;
+                listen.UseHttps(Certificate.Value);
+            });
+        });
+
+        var application = builder.Build();
+
+        application.MapBeadGateway(gateway);
+        await application.StartAsync(Cancelled);
+
+        return (application, new Uri(application.Urls.First()).Port);
+    }
+
+    // one request over HTTP/2 of the fields given, written by hand on a socket of its own over TLS:
+    // its answer, its reset, or the end of its session
+    private static async Task<TlsAnswer> Http2Over(int port, (string Name, string Value)[] fields)
+    {
+        await using var wire = await TlsWire.Open(port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+        return await wire.Ask(fields);
     }
 
     [Fact]

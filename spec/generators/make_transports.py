@@ -259,6 +259,12 @@ LENGTHS = [{'row': 'A `Content-Length` naming one number in several lines, over 
 CL_TE_CASE = ("a request carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, "
               "before its host is judged, and its connection closed")
 CL_TE = [{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1', 'language': 'Rust'}]
+BARE_CODING_CASE = ("a request whose Transfer-Encoding's final coding is not chunked, gzip or identity, with no "
+                    "Content-Length beside it, is answered 400 unmarked, before its host is judged, and its connection "
+                    "closed")
+SIGNED_CASE = ("a request whose Content-Length is signed, +0, -0 or +5, is answered 400 unmarked, before its host is "
+               "judged, and its connection closed")
+SIGNED = [{'row': 'A signed `Content-Length`', 'language': 'C#'}]
 # the largest count of a Content-Length (spec 15.12), 2⁶³ − 1, and the values each case sends about it,
 # read by value whatever zeros lead them: two at the count, five past it; 2⁶⁴ − 2 and 2⁶⁴ − 1 stay
 # out, since hyper answers them 431, a row of docs/support.md
@@ -504,14 +510,16 @@ cases = [
          connect('future', host='[v1.bead]'), unmarked('future'),
          connect('portless', host='localhost:'), unmarked('portless')]),
     # 15.12: a body framed as HTTP frames it (RFC 9112 §6.3), a Content-Length digits alone (RFC 9110
-    # §8.6) in one line, answered as HTTP answers it, before hosts is read
-    ('a request whose Content-Length frames no body — a word, nothing, two numbers in one line or in two, one number twice in one line — is answered 400 unmarked, before its host is judged',
+    # §8.6) in one line, answered as HTTP answers it, before hosts is read, and its connection closed
+    # once answered, on a socket that asks no close
+    ('a request whose Content-Length frames no body — a word, nothing, two numbers in one line or in two, one number twice in one line — is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.12'], {'hosts': ['bead.test']}, [
          step
          for on, length in (('word', 'abc'), ('empty', ''), ('listed', '0, 1'), ('numbers', ['0', '1']),
                             ('twice', '0, 0'))
-         for step in (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length),
-                      unmarked(on))]),
+         for step in (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length,
+                           close=False),
+                      unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.12: one number in two lines, which RFC 9110 §8.6 lets a recipient read as that number, refused
     # on every side as Node's and Kestrel's parsers refuse it; a case of its own, since its differs
     # excuses a whole case
@@ -535,6 +543,40 @@ cases = [
          for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD), *framing], length=[],
                            body=LAST_CHUNK),
                       unmarked(on))]),
+    # 15.12: a Transfer-Encoding whose final coding is not chunked, with no Content-Length beside it
+    # (RFC 9112 §6.3 item 4), answered as HTTP answers it before hosts is read, and its connection
+    # closed once answered, on a socket that asks no close; the body after the head is what a server
+    # that kept the socket would answer as a second request. Kestrel and hyper refuse each step before
+    # Bead reads it. On Node's default parser, the TypeScript transport's isTransferEncodingFramed
+    # refuses connect, identity and elsewhere, and Node's parser refuses both exchanges first; the
+    # transport's own test holds the exchanges, on a server built with insecureHTTPParser
+    (BARE_CODING_CASE, ['15.12'], {'hosts': ['bead.test']}, [
+        *drawn('drawn'),
+        *[step
+          for on, host, fields, body in (
+              ('connect', '{host}', [('content-type', BEAD), ('transfer-encoding', 'gzip')], LAST_CHUNK),
+              ('identity', '{host}', [('content-type', BEAD), ('transfer-encoding', 'identity')], LAST_CHUNK),
+              ('exchange', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD),
+                                      ('transfer-encoding', 'gzip')], CHUNKED_CANCEL),
+              ('identified', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD),
+                                        ('transfer-encoding', 'identity')], CHUNKED_CANCEL),
+              ('elsewhere', 'elsewhere.test', [('content-type', BEAD), ('transfer-encoding', 'gzip')], LAST_CHUNK))
+          for step in (send(on, 'POST', host=host, fields=fields, length=[], body=body, close=False),
+                       unmarked(on), {'expect': {'end': True}, 'on': on})]]),
+    # 15.12: a sign before a Content-Length's digits is no digit (RFC 9110 §8.6), answered as HTTP
+    # answers it before hosts is read, and its connection closed once answered, on a socket that asks
+    # no close. Kestrel reads a sign as the number: under +0 and -0 its transport goes on to the host,
+    # and under +5 it reads the five octets as the exchange's body. Node's parser and hyper refuse all
+    # three first. A case of its own, since its differs excuses a whole case
+    (SIGNED_CASE, ['15.12'], {'hosts': ['bead.test']}, [
+        *drawn('drawn'),
+        *[step
+          for on, host, fields, length, body in (
+              ('plus', 'elsewhere.test', [('content-type', BEAD)], '+0', None),
+              ('minus', 'elsewhere.test', [('content-type', BEAD)], '-0', None),
+              ('five', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD)], '+5', LAST_CHUNK))
+          for step in (send(on, 'POST', host=host, fields=fields, length=length, body=body, close=False),
+                       unmarked(on), {'expect': {'end': True}, 'on': on})]]),
     # 15.12: a Content-Length past 2⁶³ − 1, read by value, answered as HTTP answers it before hosts is
     # read, and its connection closed once answered, on a socket that asks no close; one at the count
     # goes on to its host
@@ -1195,10 +1237,11 @@ def asked(on='socket', fields=None, *, method='GET', target='/', http='HTTP/1.1'
 PLAIN = {'upgrade': None, 'connection': None, 'key': None, 'version': None}
 
 
-def handshake(on='socket', fields=None, host='{host}', version=13, target='/'):
+def handshake(on='socket', fields=None, host='{host}', version=13, target='/', body=None):
     """An opening handshake, on a socket of its own, at the target given, naming the host given, of
-    the version given, or of none when None, with the fields given besides."""
-    return asked(on, fields, target=target, host=host, version=version)
+    the version given, or of none when None, with the fields given besides, and the body's octets
+    after its head."""
+    return asked(on, fields, target=target, host=host, version=version, body=body)
 
 
 def taken(on='socket'):
@@ -1324,68 +1367,92 @@ websocket = [
          asked('parameter', host='a;b=c'), unmarked('parameter'),
          asked('future', host='[v1.bead]'), unmarked('future'),
          asked('portless', host='localhost:'), unmarked('portless')]),
-    # 15.2, step 1, and 15.12: a Content-Length that frames no body, one number twice among it, which
-    # every side refuses as Node's and Kestrel's parsers refuse it, judged before hosts is read
-    ('an upgrade whose Content-Length frames no body — a word, nothing, two numbers — or names one number twice, in one line or in two, is answered 400 unmarked, before its host is judged',
+    # * 15.2, step 1, and 15.12: what HTTP refuses of a request's framing at a WebSocket's address, each
+    # refusal followed by its socket's end, its connection closed once answered. A step that carries a
+    # Transfer-Encoding sends its last chunk, so that Kestrel ends the socket at the refusal's close,
+    # where with the head alone it would read on. The C# WebSocket server's own close in stages within
+    # 2 seconds is held by each side's twin, not by these steps, which carry no within
+    #
+    # a Content-Length that frames no body, one number twice among it, which every side refuses as
+    # Node's and Kestrel's parsers refuse it, judged before hosts is read
+    ('an upgrade whose Content-Length frames no body — a word, nothing, two numbers — or names one number twice, in one line or in two, is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
          for on, lengths in (('word', ['abc']), ('empty', ['']), ('numbers', ['0', '1']), ('listed', ['0, 0']),
                              ('twice', ['0', '0']), ('padded', ['0', '00']))
          for step in (handshake(on, [('content-length', length) for length in lengths], host='elsewhere.test'),
-                      unmarked(on))]),
+                      unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.2, step 1, and 15.12: a Content-Length past 2⁶³ − 1, read by value, judged before hosts is
     # read; one at the count goes on to its host
-    ('an upgrade whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged',
+    ('an upgrade whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
          for on, length in PAST_COUNT
+         for step in ((handshake(on, [('content-length', length)], host='elsewhere.test'),
+                       refused(on, 403, 'host-refused', UPGRADE_REFUSED))
+                      if int(length) <= COUNT else
+                      (handshake(on, [('content-length', length)], host='elsewhere.test'),
+                       unmarked(on), {'expect': {'end': True}, 'on': on}))]),
+    # 15.2, step 1, and 15.12: a sign before a Content-Length's digits is no digit (RFC 9110 §8.6),
+    # judged before hosts is read. Kestrel writes 0 for each, and the judgement takes the upgrade at its
+    # own host and refuses it 403 at another; Node's parser and the Rust side's judgement refuse first.
+    # A case of its own, since its differs excuses a whole case
+    ('an upgrade whose Content-Length is signed, +0 or -0, is answered 400 unmarked, before its host is judged, and its connection closed',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}, 'differs': SIGNED}, [
+         step
+         for on, length in (('plus', '+0'), ('minus', '-0'))
          for step in (handshake(on, [('content-length', length)], host='elsewhere.test'),
-                      refused(on, 403, 'host-refused', UPGRADE_REFUSED) if int(length) <= COUNT else unmarked(on))]),
+                      unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.2, step 1, and 15.12: a Content-Length beside a Transfer-Encoding, whatever it holds, and a
     # Transfer-Encoding whose final coding is not chunked (RFC 9112 §6.3 items 3 and 4), judged before
     # hosts is read
-    ('an upgrade carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged',
+    ('an upgrade carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
          for on, fields in (('coded', [('transfer-encoding', 'chunked'), ('content-length', '0')]),
                             ('counted', [('content-length', '0'), ('transfer-encoding', 'chunked')]),
                             ('word', [('transfer-encoding', 'chunked'), ('content-length', 'abc')]))
-         for step in (handshake(on, fields, host='elsewhere.test'), unmarked(on))]),
-    ('an upgrade whose Transfer-Encoding\'s final coding is not chunked is answered 400 unmarked, before its host is judged',
+         for step in (handshake(on, fields, host='elsewhere.test', body=LAST_CHUNK), unmarked(on),
+                      {'expect': {'end': True}, 'on': on})]),
+    ('an upgrade whose Transfer-Encoding\'s final coding is not chunked is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
          for on, coding in (('gzip', 'gzip'), ('identity', 'identity'), ('last', 'chunked, gzip'))
-         for step in (handshake(on, [('transfer-encoding', coding)], host='elsewhere.test'), unmarked(on))]),
+         for step in (handshake(on, [('transfer-encoding', coding)], host='elsewhere.test', body=LAST_CHUNK),
+                      unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.2, step 1, and 15.12: a Transfer-Encoding that lists anything after its first chunked, in one
     # line or across its lines, judged before hosts is read
-    ('an upgrade whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged',
+    ('an upgrade whose Transfer-Encoding lists anything after its first chunked, in one line or two, is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
          for on, codings in (('twice', ['chunked, chunked']), ('lines', ['chunked', 'chunked']), ('empty', ['chunked,']))
-         for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test'),
-                      unmarked(on))]),
+         for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test',
+                                body=LAST_CHUNK),
+                      unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.2, step 1, and 15.12: a Transfer-Encoding that lists a coding before its chunked, in one line
     # or across its lines, judged before hosts is read; an empty element before chunked ignored, so
     # step 2 judges its host, and a field step 1 takes still has content at step 6
-    ('an upgrade whose Transfer-Encoding lists a coding before its chunked, in one line or two, is answered 400 unmarked, before its host is judged; an empty element before it is ignored',
+    ('an upgrade whose Transfer-Encoding lists a coding before its chunked, in one line or two, is answered 400 unmarked, before its host is judged, and its connection closed; an empty element before it is ignored',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          *[step
            for on, codings in (('gzip', ['gzip, chunked']), ('unknown', ['x-unknown, chunked']),
                                ('lines', ['gzip', 'chunked']))
-           for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test'),
-                        unmarked(on))],
+           for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test',
+                                  body=LAST_CHUNK),
+                        unmarked(on), {'expect': {'end': True}, 'on': on})],
          handshake('empty', [('transfer-encoding', ', chunked')], host='elsewhere.test'),
          refused('empty', 403, 'host-refused', UPGRADE_REFUSED)]),
     # 15.2, step 1, and 15.12: a Transfer-Encoding an HTTP/1.0 request carries, judged before hosts is
     # read and before step 4 would answer it 426, an upgrade asked or none
-    ('an HTTP/1.0 request at a WebSocket\'s address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged',
+    ('an HTTP/1.0 request at a WebSocket\'s address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          asked('old', [('transfer-encoding', 'chunked')], http='HTTP/1.0', body=LAST_CHUNK), unmarked('old'),
+         {'expect': {'end': True}, 'on': 'old'},
          asked('elsewhere', [('transfer-encoding', 'chunked')], http='HTTP/1.0', host='elsewhere.test',
                body=LAST_CHUNK),
-         unmarked('elsewhere'),
+         unmarked('elsewhere'), {'expect': {'end': True}, 'on': 'elsewhere'},
          asked('plain', [('transfer-encoding', 'chunked')], http='HTTP/1.0', body=LAST_CHUNK, **PLAIN),
-         unmarked('plain')]),
+         unmarked('plain'), {'expect': {'end': True}, 'on': 'plain'}]),
     ('a request at a WebSocket\'s address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
      ['15.1', '15.2', '15.2.1', '15.12'], {}, [
          handshake('escape', {'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),
@@ -3042,7 +3109,7 @@ HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeou
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
 HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS,
-                CL_TE_CASE: CL_TE}
+                CL_TE_CASE: CL_TE, SIGNED_CASE: SIGNED}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:
