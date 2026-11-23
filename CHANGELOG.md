@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The guides for teams take beadc's published image: getting started verifies 0.16.0's with `gh
+  attestation verify` and `cosign verify`, pins it by its digest and builds its scenario with it,
+  and shows the two timeouts of a call whose resolver waits on a person.
 - The C# side's MQTT 5 and AMQP 1.0 adapters race a name's address families, as its WebSocket and
   HTTP clients do, through Bead's own connect: a connect by `localhost` to a server on `127.0.0.1`
   alone no longer waits out Windows' two-second refusal of `::1`.
