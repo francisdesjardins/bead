@@ -410,6 +410,13 @@ file, a key or a property was added
 10. **The push, on the maintainer's word.** The one line `tag` prints:
     `git push --atomic origin main develop vX.Y.Z <document tags> :release/X.Y.Z`. Then follow the
     runs of `main` and `develop`.
+11. **The image.** The tag starts `image.yml`, which publishes beadc's image under the release's
+    version, attested and signed, and prints its digest
+    ([0055](decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)):
+    `gh run list --workflow image.yml --limit 1`. GitHub starts no run when more than three tags are
+    pushed at once; then `gh workflow run image.yml --ref develop -f tag=vX.Y.Z`. A run that failed
+    once its index was pushed, at the attestation or the signature, takes
+    `gh run rerun <run> --failed`: a new dispatch refuses the version the registry holds.
 
 A hotfix starts from `main` with `git flow hotfix start X.Y.Z` and follows the same steps;
 `prepare` also takes every `beadc breaking` waiver out of `ci.yml`, each moot since the release
