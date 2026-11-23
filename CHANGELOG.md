@@ -39,6 +39,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   matrix's open row on requests pipelined becomes a platform row: what each platform reads ahead,
   and when each side sees its client leave.
 
+### Fixed
+
+- The C# side's MQTT 5 adapter tells its link lost when the packet that ends it comes in the same
+  read as its CONNACK. MQTTnet 5.2 could read that packet before it held the task of its own
+  receive loop, and then never said the link disconnected, so the adapter kept a dead link up and
+  told no down. A read past the CONNACK now waits until the connect returned.
+
 ### Security
 
 - A client connects `localhost` and a name under `.localhost` to the loopback itself, `127.0.0.1`
