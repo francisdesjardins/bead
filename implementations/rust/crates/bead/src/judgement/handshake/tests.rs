@@ -640,21 +640,68 @@ fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_
         each(HOST, 22),
         "each refused unmarked"
     );
-    // a final coding chunked and nothing after it, in any case, the empty elements before it
-    // ignored, is content, at step 6
+    // chunked as its one coding, in any case, an empty element before it ignored, is content, at
+    // step 6
     assert_eq!(
         answers_of(&[
             plain(&[("Transfer-Encoding", "Chunked")]),
             plain(&[("Transfer-Encoding", ", chunked")]),
-            plain(&[("Transfer-Encoding", "gzip, , chunked")]),
-            plain(&[("Transfer-Encoding", "gzip, chunked")]),
-            plain(&[
-                ("Transfer-Encoding", "gzip"),
-                ("Transfer-Encoding", "chunked")
-            ]),
         ]),
-        each(MALFORMED, 5),
+        each(MALFORMED, 2),
         "content"
+    );
+}
+
+#[test]
+fn refuses_first_unmarked_a_transfer_encoding_that_lists_a_coding_before_its_chunked_in_one_line_or_two_whatever_else_the_request_holds_and_takes_an_empty_element_before_it()
+ {
+    let codings: [&[(&str, &str)]; 4] = [
+        &[("Transfer-Encoding", "gzip, chunked")],
+        &[("Transfer-Encoding", "x-unknown, chunked")],
+        &[("Transfer-Encoding", "gzip, , chunked")],
+        &[
+            ("Transfer-Encoding", "gzip"),
+            ("Transfer-Encoding", "chunked"),
+        ],
+    ];
+    let elsewhere = |fields: &[(&str, &str)]| {
+        let mut asked = vec![("Host", "elsewhere.test")];
+
+        asked.extend_from_slice(fields);
+        without(&asked, &["host"])
+    };
+    let posted = |fields: &[(&str, &str)]| {
+        request_of(
+            fields,
+            Shape {
+                method: Some("POST"),
+                without: &["upgrade"],
+                ..Shape::default()
+            },
+        )
+    };
+
+    // a coding before its chunked, in one line or two, an empty element among them; from a host
+    // it does not take, under another method
+    let refused = codings
+        .iter()
+        .flat_map(|fields| [plain(fields), elsewhere(fields), posted(fields)])
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        answers_of(&refused),
+        each(HOST, 12),
+        "each refused unmarked"
+    );
+    // an empty element before chunked is no coding: content, at step 6, or a host it does not
+    // take, at step 2
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Transfer-Encoding", ", chunked")]),
+            elsewhere(&[("Transfer-Encoding", ", chunked")]),
+        ]),
+        [MALFORMED, HOST_REFUSED],
+        "taken at step 1"
     );
 }
 

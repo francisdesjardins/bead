@@ -157,8 +157,8 @@ internal static class WebSocketHandshake
     }
 
     // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-    // Transfer-Encoding alone that ends in one chunked, over HTTP/1.1, or a Content-Length of one line
-    // of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
+    // Transfer-Encoding alone whose one coding is chunked, over HTTP/1.1, or a Content-Length of one
+    // line of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
     private static bool IsFramed(HttpRequest request)
     {
         var headers = request.Headers;
@@ -274,8 +274,8 @@ internal static class WebSocketHandshake
     /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, an authority that is no host,
     /// a <c>Content-Length</c> other than one line of digits alone, one whose number passes 2⁶³ − 1,
     /// one beside a <c>Transfer-Encoding</c>, or a <c>Transfer-Encoding</c> whose final coding is not
-    /// <c>chunked</c> or that lists anything after its first <c>chunked</c>, or one an HTTP/1.0
-    /// request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// <c>chunked</c>, that lists a coding before its <c>chunked</c> or anything after its first, or
+    /// one an HTTP/1.0 request carries, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
     /// <c>Authorization</c> lines and content, a <c>Content-Length</c> past 0 or a
     /// <c>Transfer-Encoding</c>, among it, 400; an origin not taken, 403.
@@ -302,8 +302,8 @@ internal static class WebSocketHandshake
         // and a body HTTP cannot frame, judged alike: a Content-Length that frames no body, and a
         // Transfer-Encoding whose final coding is not chunked, which Kestrel refuses before the
         // application runs, a Content-Length beside a Transfer-Encoding, and a Transfer-Encoding that
-        // lists anything after its first chunked or that an HTTP/1.0 request carries, which it hands
-        // on
+        // lists a coding before its chunked or anything after its first, or that an HTTP/1.0 request
+        // carries, which it hands on
         if (!isVisible || !IsFramed(request))
         {
             return BadRequest;

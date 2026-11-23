@@ -608,6 +608,32 @@ cases = [
                ('empty', 'elsewhere.test', [('content-type', BEAD), ('transfer-encoding', 'chunked,')], LAST_CHUNK))
            for step in (send(on, 'POST', host=host, fields=fields, length=[], body=body, close=False),
                         unmarked(on), {'expect': {'end': True}, 'on': on})]]),
+    # 15.12: a Transfer-Encoding that lists a coding before its chunked, which no side decodes, refused
+    # before hosts is read and its connection closed once answered; a Content-Length beside it, in
+    # either order, answered alike on every side; an empty element before chunked ignored
+    ('a request whose Transfer-Encoding lists a coding before its chunked, in one line or two, a Content-Length beside it or none, is answered 400 unmarked, before its host is judged, and its connection closed; an empty element before it is ignored',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         *drawn('drawn'),
+         *[step
+           for on, host, fields, body in (
+               ('connect', '{host}', [('content-type', BEAD), ('transfer-encoding', 'gzip, chunked')], LAST_CHUNK),
+               ('exchange', '{host}', [('bead-connection-token', '{token}'), ('content-type', BEAD),
+                                       ('transfer-encoding', 'x-unknown, chunked')], CHUNKED_CANCEL),
+               ('lines', '{host}', [('content-type', BEAD), ('transfer-encoding', 'gzip'),
+                                    ('transfer-encoding', 'chunked')], LAST_CHUNK),
+               # the length is the last chunk's own five octets, so that a side that frames by it and
+               # a side that frames by the coding read the same body
+               ('beside', '{host}', [('content-type', BEAD), ('transfer-encoding', 'x-unknown, chunked'),
+                                     ('content-length', '5')], LAST_CHUNK),
+               ('counted', '{host}', [('content-type', BEAD), ('content-length', '5'),
+                                      ('transfer-encoding', 'x-unknown, chunked')], LAST_CHUNK),
+               ('elsewhere', 'elsewhere.test', [('content-type', BEAD), ('transfer-encoding', 'x-unknown, chunked')],
+                LAST_CHUNK))
+           for step in (send(on, 'POST', host=host, fields=fields, length=[], body=body, close=False),
+                        unmarked(on), {'expect': {'end': True}, 'on': on})],
+         send('empty', 'POST', host='elsewhere.test', fields=[('content-type', BEAD), ('transfer-encoding', ', chunked')],
+              length=[], body=LAST_CHUNK),
+         refused('empty', 403, 'host-refused')]),
     # 15.12: a field value of visible ASCII, spaces and tabs, as both HTTP servers take it; the
     # escape, the bell and the delete are the octets themselves, and so is the one past ASCII
     ('a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
@@ -1338,6 +1364,18 @@ websocket = [
          for on, codings in (('twice', ['chunked, chunked']), ('lines', ['chunked', 'chunked']), ('empty', ['chunked,']))
          for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test'),
                       unmarked(on))]),
+    # 15.2, step 1, and 15.12: a Transfer-Encoding that lists a coding before its chunked, in one line
+    # or across its lines, judged before hosts is read; an empty element before chunked ignored, so
+    # step 2 judges its host, and a field step 1 takes still has content at step 6
+    ('an upgrade whose Transfer-Encoding lists a coding before its chunked, in one line or two, is answered 400 unmarked, before its host is judged; an empty element before it is ignored',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         *[step
+           for on, codings in (('gzip', ['gzip, chunked']), ('unknown', ['x-unknown, chunked']),
+                               ('lines', ['gzip', 'chunked']))
+           for step in (handshake(on, [('transfer-encoding', coding) for coding in codings], host='elsewhere.test'),
+                        unmarked(on))],
+         handshake('empty', [('transfer-encoding', ', chunked')], host='elsewhere.test'),
+         refused('empty', 403, 'host-refused', UPGRADE_REFUSED)]),
     # 15.2, step 1, and 15.12: a Transfer-Encoding an HTTP/1.0 request carries, judged before hosts is
     # read and before step 4 would answer it 426, an upgrade asked or none
     ('an HTTP/1.0 request at a WebSocket\'s address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged',

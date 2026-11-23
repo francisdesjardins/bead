@@ -81,6 +81,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A `.localhost` name that a hosts file or a container's `extra_hosts` maps elsewhere reaches the
   loopback, and a connect whose every attempt failed there says that it went to the loopback and
   asked no resolver; no option points such a name elsewhere.
+- Spec 15.12 and 15.2's step 1: a request whose `Transfer-Encoding` lists a coding before its
+  `chunked`, `gzip, chunked` among them, is refused as HTTP's own: 400 unmarked over HTTP/1.1 and
+  at a WebSocket's address, before its host is judged, its connection closed. Every side's HTTP
+  transport and gateway took such a request and handed on its body still coded; a WebSocket's
+  address refused it 400 `malformed`, marked, at step 6. RFC 9112 §6.1's 501 is a row of the
+  support matrix's "Leveled down". Two cases of `spec/transports.json` and an exchange of
+  `spec/transcoding.json` play it.
 
 ## [0.16.0] - 2026-11-18
 

@@ -1369,9 +1369,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
         // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own; and so a
         // target past visible ASCII, which Kestrel takes as it takes a control character in a field,
-        // a Content-Length beside a Transfer-Encoding, or a Transfer-Encoding that lists anything
-        // after its first chunked or that an HTTP/1.0 request carries, its connection closed behind
-        // it over HTTP/1.x, and a connection-specific field over HTTP/2, which Kestrel hands on
+        // a Content-Length beside a Transfer-Encoding, or a Transfer-Encoding that lists a coding
+        // before its chunked or anything after its first, or that an HTTP/1.0 request carries, its
+        // connection closed behind it over HTTP/1.x, and a connection-specific field over HTTP/2,
+        // which Kestrel hands on
         if (!HttpServerFields.HasVisibleFields(request)
             || !HttpServerFields.IsVisibleTarget(context)
             || HttpServerFields.IsLengthBesideTransferEncoding(request)
