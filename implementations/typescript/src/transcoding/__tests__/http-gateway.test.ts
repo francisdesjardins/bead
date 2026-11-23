@@ -13,6 +13,7 @@ import {
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { gzipSync } from 'node:zlib';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
@@ -150,8 +151,11 @@ const octetsOf = (port: number, { body = '', lines }: Pick<IOwnCase, 'body' | 'l
   ].join('\r\n');
 };
 
-/** Opens a socket of the test's own to the gateway on `port` and writes `octets` on it. */
-const opened = (port: number, octets: string): Socket => {
+/**
+ * Opens a socket of the test's own to the gateway on `port` and writes `octets` on it, a string as
+ * its UTF-8.
+ */
+const opened = (port: number, octets: string | Uint8Array): Socket => {
   const socket = connect(port, '127.0.0.1');
 
   socket.on('error', () => {});
@@ -2226,10 +2230,16 @@ test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a serv
 });
 
 // what a gateway answers each request, written on a socket of its own with a GET pipelined behind
-// its chunked body: everything that came, to the socket's close, and the Bead connections drawn
+// its chunked body, `{}` in one chunk unless it gives its own, each character an octet: everything
+// that came, to the socket's close, and the Bead connections drawn
 const pipelinedOn = async (
   fixture: ITranscodingFixture,
-  requests: readonly (readonly [version: string, authority: string, codings: string])[]
+  requests: readonly (readonly [
+    version: string,
+    authority: string,
+    codings: string,
+    body?: string,
+  ])[]
 ): Promise<{ answers: string[]; drawn: number }> => {
   const { port } = fixture;
   const answers: string[] = [];
@@ -2239,12 +2249,15 @@ const pipelinedOn = async (
     drawn += 1;
   });
 
-  for (const [version, authority, codings] of requests) {
+  for (const [version, authority, codings, body = '2\r\n{}\r\n0\r\n\r\n'] of requests) {
     const socket = opened(
       port,
-      `POST /api/Transcoding/echo ${version}\r\nhost: ${authority}\r\ncontent-type: application/json\r\n` +
-        `connection: keep-alive\r\n${codings}\r\n\r\n2\r\n{}\r\n0\r\n\r\n` +
-        `GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`
+      Buffer.from(
+        `POST /api/Transcoding/echo ${version}\r\nhost: ${authority}\r\ncontent-type: application/json\r\n` +
+          `connection: keep-alive\r\n${codings}\r\n\r\n${body}` +
+          `GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`,
+        'latin1'
+      )
     );
     const chunks: Buffer[] = [];
 
@@ -2303,6 +2316,37 @@ test('refuses 400 unmarked a request whose Transfer-Encoding lists anything afte
     expect(came.toLowerCase()).not.toContain('bead-refusal');
   }
 
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9112 §6.1
+test('refuses 400 unmarked a request whose Transfer-Encoding lists a coding before its chunked, in one line or two, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const body = gzipSync('{}');
+  // * a body still gzip-coded once its chunks are read, which no side decodes
+  const gzipped = `${body.length.toString(16)}\r\n${body.toString('latin1')}\r\n0\r\n\r\n`;
+
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip, chunked', gzipped],
+    ['HTTP/1.1', own, 'transfer-encoding: x-unknown, chunked'],
+    ['HTTP/1.1', own, 'transfer-encoding: gzip\r\ntransfer-encoding: chunked', gzipped],
+    ['HTTP/1.1', 'elsewhere.test', 'transfer-encoding: gzip, chunked', gzipped],
+  ]);
+
+  // one answer each, unmarked, with none of the fields every response on the path carries, its
+  // connection closed behind it, and no route served
+  for (const came of answers) {
+    const head = (came.split('\r\n\r\n')[0] ?? '').toLowerCase();
+
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(head).toContain('connection: close');
+    expect(head).not.toContain('bead-refusal');
+    expect(head).not.toMatch(/\r\n(?:cache-control|vary):/u);
+  }
+
+  expect(answers).toHaveLength(4);
   expect(drawn).toBe(0);
 });
 

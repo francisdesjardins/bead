@@ -3,6 +3,7 @@ using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
@@ -475,6 +476,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     private static byte[] ChunkOf(byte[] bytes)
     {
         return [.. Encoding.ASCII.GetBytes($"{bytes.Length:x}\r\n"), .. bytes, .. "\r\n"u8];
+    }
+
+    // the bytes given, gzip-coded (RFC 1952)
+    private static byte[] GzipOf(byte[] bytes)
+    {
+        using var coded = new MemoryStream();
+
+        using (var gzip = new GZipStream(coded, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            gzip.Write(bytes);
+        }
+
+        return coded.ToArray();
     }
 
     private long Count(string name)
@@ -1929,6 +1943,52 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             var (head, answered) = await wire.Read();
 
             Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+            Assert.Empty(answered);
+            Assert.True(await wire.IsClosed());
+        }
+
+        // neither the cancel handed on, nor the pipelined connect drawn, nor anything told
+        Assert.Empty(_messages);
+        Assert.Single(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.12; RFC 9112 §6.1
+    [Fact]
+    public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, 5);
+        var pipelined = Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+        // * a body still gzip-coded once its chunks are read, which no side decodes
+        byte[] gzipped = [.. ChunkOf(GzipOf(cancel)), .. "0\r\n\r\n"u8];
+        byte[] plain = [.. ChunkOf(cancel), .. "0\r\n\r\n"u8];
+
+        // ! Kestrel hands each on, the body read by its final chunked and still coded, which the
+        // transport refuses
+        (string Authority, string Codings, byte[] Chunks)[] requests =
+        [
+            (Host, "Transfer-Encoding: gzip, chunked", gzipped),
+            (Host, "Transfer-Encoding: x-unknown, chunked", plain),
+            (Host, "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked", gzipped),
+            ("elsewhere.test", "Transfer-Encoding: gzip, chunked", gzipped),
+        ];
+
+        foreach (var (authority, codings, chunks) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {authority}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{codings}\r\n\r\n"), .. chunks, .. pipelined]);
+
+            var (head, answered) = await wire.Read();
+
+            // one answer, unmarked, with none of the fields every response on the path carries, which
+            // closes its connection
+            Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+            Assert.Equal((false, false), (head.Headers.ContainsKey("cache-control"), head.Headers.ContainsKey("vary")));
             Assert.Empty(answered);
             Assert.True(await wire.IsClosed());
         }

@@ -1235,6 +1235,66 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     started.stop().await;
 }
 
+// spec 15.12: hyper hands each on, the body read by its final chunked, a Content-Length after it
+// dropped (`proto/h1/role.rs`, 285-287, 297-299), which the transport refuses
+#[tokio::test]
+async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let cancel = envelope_of(CANCEL, (5, 0));
+    let own = format!("{HOST}:{port}");
+    let mut body = format!("{:x}\r\n", cancel.len()).into_bytes();
+
+    body.extend_from_slice(&cancel);
+    body.extend_from_slice(b"\r\n0\r\n\r\n");
+    body.extend_from_slice(
+        head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"])).as_bytes(),
+    );
+
+    for (authority, codings) in [
+        (own.as_str(), "Transfer-Encoding: gzip, chunked"),
+        (own.as_str(), "Transfer-Encoding: x-unknown, chunked"),
+        (
+            own.as_str(),
+            "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
+        ),
+        (
+            own.as_str(),
+            "Transfer-Encoding: gzip, chunked\r\nContent-Length: 5",
+        ),
+        ("elsewhere.test", "Transfer-Encoding: gzip, chunked"),
+    ] {
+        let mut request = format!(
+            "POST /bead HTTP/1.1\r\nHost: {authority}\r\n{bead}\r\n{CONNECTION_TOKEN_HEADER}: {token}\r\n{codings}\r\n\r\n"
+        )
+        .into_bytes();
+
+        request.extend_from_slice(&body);
+
+        let answer = read_to_end_of(port, &request).await;
+        let lowered = answer.to_ascii_lowercase();
+
+        // one answer, unmarked, with none of the fields every response on the path carries, its
+        // socket closed behind it
+        assert!(answer.starts_with("HTTP/1.1 400 "), "{codings}: {answer}");
+        assert_eq!(
+            answer.matches("HTTP/1.1 ").count(),
+            1,
+            "one answer: {answer}"
+        );
+        assert!(!lowered.contains(REFUSAL_HEADER), "{answer}");
+        assert!(!lowered.contains("cache-control"), "{answer}");
+        assert!(!lowered.contains("vary"), "{answer}");
+    }
+
+    assert_eq!(started.server.clients().len(), 1, "no connect pipelined");
+    assert!(started.recorder.told().refusals.is_empty(), "none told");
+    started.stop().await;
+}
+
 // spec 15.12; RFC 9112 §9.6: hyper reads no request behind an answer that closes
 #[tokio::test]
 async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()

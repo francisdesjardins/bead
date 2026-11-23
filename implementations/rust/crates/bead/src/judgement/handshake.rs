@@ -240,8 +240,8 @@ fn is_protocol_list(lines: &[&str]) -> bool {
 }
 
 // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-// `Transfer-Encoding` alone that ends in one `chunked`, over HTTP/1.1, or a `Content-Length` of one
-// line of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
+// `Transfer-Encoding` alone whose one coding is `chunked`, over HTTP/1.1, or a `Content-Length` of
+// one line of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
 fn is_framed(request: &HandshakeRequest<'_>) -> bool {
     let codings = lines_of(request, "transfer-encoding");
     let lengths = lines_of(request, "content-length");
@@ -312,8 +312,8 @@ pub fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold {
 ///    repeated or no host, a target in absolute-form that names none or another scheme (RFC 9112
 ///    §3.2, §3.2.2), a `Content-Length` other than one line of digits alone, one whose number passes
 ///    2⁶³ − 1, one beside a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not
-///    `chunked` or that lists anything after its first `chunked`, or one an HTTP/1.0 request carries
-///    (RFC 9112 §6.1, §6.3; spec 15.12), 400 unmarked;
+///    `chunked`, that lists a coding before its `chunked` or anything after its first, or one an
+///    HTTP/1.0 request carries (RFC 9112 §6.1, §6.3; spec 15.12), 400 unmarked;
 /// 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
 ///    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
 /// 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;

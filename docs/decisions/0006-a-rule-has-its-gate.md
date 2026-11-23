@@ -119,6 +119,11 @@ refused comparison or a failed measure fails its job. `tools/release.mjs prepare
 the release's branch among what a release owes by hand, and a regression is read once and judged
 from its report, never chased by a rerun ([the root README](../../README.md#measurement)).
 
+**A release's image is published, never as a gate.** `.github/workflows/image.yml` builds beadc's
+image at a release's tag, each platform natively, its test stage first, and pushes it under beadc's
+version, attested and signed ([0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). It refuses a tag that is no release's, a version off the tag
+and a version the registry holds; CI's image legs are the gate, on every push.
+
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
 with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=1` turns an interop

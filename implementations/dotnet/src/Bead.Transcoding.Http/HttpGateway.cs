@@ -294,9 +294,9 @@ public sealed class HttpGateway : IAsyncDisposable
 
         // 1. what HTTP refuses of its own, unmarked (spec 15.12): a field or a target past visible
         // ASCII, which Kestrel takes, a Content-Length beside a Transfer-Encoding, or a
-        // Transfer-Encoding that lists anything after its first chunked or that an HTTP/1.0 request
-        // carries, its connection closed behind it over HTTP/1.x, and a connection-specific field
-        // over HTTP/2, which Kestrel hands on; over HTTP/2 its stream reset
+        // Transfer-Encoding that lists a coding before its chunked or anything after its first, or
+        // that an HTTP/1.0 request carries, its connection closed behind it over HTTP/1.x, and a
+        // connection-specific field over HTTP/2, which Kestrel hands on; over HTTP/2 its stream reset
         if (!HasVisibleFields(request)
             || !IsVisibleTarget(context)
             || !IsTakenTarget(context)

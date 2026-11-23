@@ -4,10 +4,11 @@ This guide builds one Bead service from an empty folder to a running C# (.NET 10
 TypeScript client, in Node and in a browser page. Every file below is a file of a project built
 and run this way outside the repository; every output quoted is what that project printed.
 
-> **No package is published yet.** No Bead package is on npm, NuGet or crates.io, and beadc's
-> image is on no registry. A team clones Bead at a commit it pins, builds beadc's image from that
-> clone, and takes the runtimes from the same clone by path, so the generator and the runtimes are
-> one commit. Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may
+> **The packages are not published.** No Bead package is on npm, NuGet or crates.io. beadc's image
+> is on GitHub's container registry at each release, `ghcr.io/francisdesjardins/beadc:<version>`,
+> attested and signed. A team pins that image by its digest and takes the runtimes from a clone of
+> Bead at the same release's tag, by path, so the generator and the runtimes are one release. The
+> packages' publication is ahead. Bead has not run in production, and before 1.0.0 a minor may
 > break. [The support matrix](../support.md) says what each side plays today and what is ahead.
 
 ## What you build
@@ -27,7 +28,7 @@ The server is C#, over WebSocket. The client is TypeScript, run in Node and in a
 
 ## What you need
 
-- Git, and Docker (or Podman) to run beadc's image.
+- Git, and Docker (or Podman) to run beadc's image; GitHub's CLI and cosign 3 to verify it.
 - The .NET SDK 10.0.404 or later, for the server.
 - Node 24.9 or later and npm, for the client.
 - bash 3.2 or later, or PowerShell 7.6 or later (`pwsh`, not Windows PowerShell), for beadc's
@@ -37,7 +38,7 @@ The layout this guide builds, Bead's clone beside your project:
 
 ```text
 work/
-├── bead-pinned/        Bead, cloned at the commit you pin
+├── bead-pinned/        Bead, cloned at the release you pin
 └── station/            your project
     ├── beadc.sh, beadc.ps1, beadc.yaml, buf.yaml
     ├── proto/station/v1/station.proto
@@ -46,32 +47,46 @@ work/
     └── typescript/     the TypeScript client; typescript/gen/ is beadc's
 ```
 
-## 1. Pin Bead and build beadc's image
+## 1. Pin Bead and beadc's image
 
-Clone Bead and check out the commit you pin, then build beadc's image from that clone. The image
-holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your machine needs no
-protobuf toolchain of its own ([the image](../../builder/README.md#the-image-and-its-wrappers)).
+Clone Bead at the tag of the release you pin, then verify beadc's image of that release and pin it
+by its digest. The image holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your
+machine needs no protobuf toolchain of its own
+([the image](../../builder/README.md#the-image-and-its-wrappers)).
 
 ```sh
-git clone https://github.com/francisdesjardins/bead bead-pinned
-git -C bead-pinned checkout <commit>
+git clone --branch v<version> https://github.com/francisdesjardins/bead bead-pinned
 
-cd bead-pinned
-docker build -f builder/Dockerfile -t beadc:local .
-cd ..
+gh attestation verify oci://ghcr.io/francisdesjardins/beadc:<version> --owner francisdesjardins
+cosign verify ghcr.io/francisdesjardins/beadc:<version> \
+  --certificate-identity-regexp '^https://github\.com/francisdesjardins/bead/\.github/workflows/image\.yml@refs/(tags/v[0-9]+\.[0-9]+\.[0-9]+|heads/(develop|main))$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker buildx imagetools inspect ghcr.io/francisdesjardins/beadc:<version>   # its Digest
+export BEADC_IMAGE=ghcr.io/francisdesjardins/beadc@sha256:<digest>
+```
+
+```powershell
+# in PowerShell 7.6 (pwsh)
+$env:BEADC_IMAGE = 'ghcr.io/francisdesjardins/beadc@sha256:<digest>'
+```
+
+Or build the image from the clone, and name it instead:
+
+```sh
+docker build -f bead-pinned/builder/Dockerfile -t beadc:local bead-pinned
+export BEADC_IMAGE=beadc:local
 ```
 
 ## 2. Start the project
 
 beadc runs through two wrappers, `beadc.sh` and `beadc.ps1`, which the image prints. A project
-commits both. Each runs the image `BEADC_IMAGE` names, here the one you just built.
+commits both. Each runs the image `BEADC_IMAGE` names, here the one you pinned.
 
 ```sh
 mkdir station && cd station
-docker run --rm beadc:local wrapper beadc.sh > beadc.sh
-docker run --rm beadc:local wrapper beadc.ps1 > beadc.ps1
+docker run --rm "$BEADC_IMAGE" wrapper beadc.sh > beadc.sh
+docker run --rm "$BEADC_IMAGE" wrapper beadc.ps1 > beadc.ps1
 chmod +x beadc.sh
-export BEADC_IMAGE=beadc:local
 
 bash beadc.sh init station --language csharp --language typescript
 ```
@@ -79,8 +94,7 @@ bash beadc.sh init station --language csharp --language typescript
 ```powershell
 # in PowerShell 7.6 (pwsh); init writes beadc.sh beside it
 mkdir station; cd station
-docker run --rm beadc:local wrapper beadc.ps1 > beadc.ps1
-$env:BEADC_IMAGE = 'beadc:local'
+docker run --rm $env:BEADC_IMAGE wrapper beadc.ps1 > beadc.ps1
 
 ./beadc.ps1 init station --language csharp --language typescript
 ```
@@ -93,8 +107,8 @@ output for every language beadc targets, Rust's included; name the two you use. 
 the project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since git on Windows
 records no mode.
 
-To run the image with no `BEADC_IMAGE`, tag it with the name the wrappers carry, `docker tag
-beadc:local ghcr.io/francisdesjardins/beadc:<version>`; `./beadc.sh version` prints the version.
+Without `BEADC_IMAGE`, the wrappers pull the image by the version they name,
+`ghcr.io/francisdesjardins/beadc:<version>`; `./beadc.sh version` prints the version.
 Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass
 -File ./beadc.ps1 generate` runs it.
 
@@ -297,7 +311,7 @@ its floor.
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- ! no package is published yet: the runtime comes from a clone of Bead at a pinned commit,
+    <!-- ! no package is published: the runtime comes from a clone of Bead at a pinned release,
          beside this project, by path -->
     <ProjectReference Include="../../bead-pinned/implementations/dotnet/src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <!-- the check a generated proto codec runs, and the validators of the .proto's rules -->

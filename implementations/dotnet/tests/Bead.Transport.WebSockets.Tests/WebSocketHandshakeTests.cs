@@ -414,15 +414,12 @@ public sealed class WebSocketHandshakeTests
             Assert.Equal((400, (string?)null), AnswerOf(request, Options));
         });
 
-        // a final coding chunked and nothing after it, in any case, the empty elements before it
-        // ignored, is content, at step 6
+        // chunked as the one coding, in any case, an empty element before it ignored, is content, at
+        // step 6
         (string Start, string[] Fields)[] content =
         [
             ("GET / HTTP/1.1", ["Transfer-Encoding: Chunked"]),
             ("GET / HTTP/1.1", ["Transfer-Encoding: , chunked"]),
-            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, , chunked"]),
-            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip, chunked"]),
-            ("GET / HTTP/1.1", ["Transfer-Encoding: gzip", "Transfer-Encoding: chunked"]),
         ];
 
         Assert.All(content, (request) =>
@@ -432,6 +429,32 @@ public sealed class WebSocketHandshakeTests
 
         // an X-Content-Length with no Transfer-Encoding is a field like any other
         Assert.Equal((101, (string?)null), AnswerOf(("GET / HTTP/1.1", ["X-Content-Length: 5"]), Options));
+    }
+
+    // spec 15.2, 15.12; RFC 9112 §6.1
+    [Fact]
+    public void Refuses_first_unmarked_a_Transfer_Encoding_that_lists_a_coding_before_its_chunked_in_one_line_or_two_whatever_else_the_request_holds_and_takes_an_empty_element_before_it()
+    {
+        // a coding before chunked, an empty element among it, in one line or two
+        string[][] codings = [["gzip, chunked"], ["x-unknown, chunked"], ["gzip, , chunked"], ["gzip", "chunked"]];
+
+        // each as it is, from a host it does not take and under another method
+        Assert.All(codings, (lines) =>
+        {
+            var fields = lines.Select((line) =>
+            {
+                return $"Transfer-Encoding: {line}";
+            }).ToArray();
+
+            Assert.Equal((400, (string?)null), AnswerOf(("GET / HTTP/1.1", fields), Options));
+            Assert.Equal((400, (string?)null), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", .. fields]), Options));
+            Assert.Equal((400, (string?)null), AnswerOf(("POST / HTTP/1.1", [.. fields, "Upgrade"]), Options));
+        });
+
+        // an empty element before chunked is no coding: the content it frames is malformed, after its
+        // host
+        Assert.Equal((400, WebSocketRefusals.Malformed), AnswerOf(("GET / HTTP/1.1", ["Transfer-Encoding: , chunked"]), Options));
+        Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Transfer-Encoding: , chunked"]), Options));
     }
 
     [Fact]

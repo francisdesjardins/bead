@@ -1919,8 +1919,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   <p class="space">
     The architecture guide sets Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: it is
-    unpublished, and it speaks three languages.
+    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: its
+    packages are unpublished, and it speaks three languages.
   </p>
 </section>
 
@@ -1953,7 +1953,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     blueprint from it, a JSON file that describes the API without depending on any language.
     <code>beadc check</code> judges it by its rules, each refusal at its line and column. Each
     language’s target then writes its code from it, and <code>beadc breaking</code> holds it to
-    <a href="#versions">the last release</a>. <code>beadc</code> runs in a Docker image. One
+    <a href="#versions">the last release</a>. <code>beadc</code> runs in a Docker image, published
+    on GitHub’s container registry at each release, attested and signed. One
     contract gives several packages, each with its own selection of procedures.
     <a href="/playground/#packages">The demo’s Packages tab</a> cuts a blueprint into packages
     with <code>beadc</code>’s own code.
@@ -2259,7 +2260,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         Codes each MQTT 5 acknowledgement names.</li>
       <li><strong>The conversations</strong>: 210, each a script between
         clients and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 299, each at a
+      <li><strong>The transports’ cases</strong>: 301, each at a
         transport’s edge, over HTTP, over WebSocket and over a broker, written byte by byte.</li>
       <li><strong>The durations</strong>: 35 places that take a duration,
         and what each makes of 19 inputs.</li>
@@ -2271,7 +2272,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <li><strong>Transcoding</strong>: 26 templates, 192
         readings, 78 writings, 66 bindings,
         45 failures, 10 event streams and
-        101 exchanges.</li>
+        102 exchanges.</li>
       <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors.</li>
     </ul>
   </details>
@@ -3935,7 +3936,7 @@ offerHello(server);
     </li>
     <li>
       <strong>Publication</strong
-      ><span>The packages on npm, NuGet and crates.io, and <code>beadc</code>’s image.</span>
+      ><span>The packages on npm, NuGet and crates.io.</span>
     </li>
   </ul>
 </section>
@@ -4214,7 +4215,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     Le guide d’architecture place Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
     Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
-    d’eux : il n’est pas publié, et il parle trois langages.
+    d’eux : ses paquets ne sont pas publiés, et il parle trois langages.
   </p>
 </section>
 
@@ -4250,7 +4251,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>beadc check</code> le juge par ses règles, chaque refus à sa ligne et sa colonne. La
     cible de chaque langage en écrit ensuite le code, et <code>beadc breaking</code> le tient à
     <a href="#versions">la dernière version sortie</a>. <code>beadc</code> tourne dans une image
-    Docker. Un contrat donne plusieurs paquets, chacun avec sa sélection de procédures.
+    Docker, publiée sur le registre de conteneurs de GitHub à chaque version, attestée et signée. Un contrat donne plusieurs paquets, chacun avec sa sélection de procédures.
     <a href="/playground/#packages">L’onglet Packages de la démo</a> découpe un blueprint en
     paquets avec le code même de <code>beadc</code>.
   </p>
@@ -4562,7 +4563,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         à l’octet ; et les Reason Codes que nomme chaque accusé de MQTT 5.</li>
       <li><strong>Les conversations</strong> : 210, chacune un script entre
         des clients et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 299, chacun au bord
+      <li><strong>Les cas des transports</strong> : 301, chacun au bord
         d’un transport, sur HTTP, sur WebSocket et sur un courtier, écrit octet par octet.</li>
       <li><strong>Les durées</strong> : 35 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
@@ -4574,7 +4575,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <li><strong>Le transcodage</strong> : 26 gabarits,
         192 lectures, 78 écritures,
         66 liaisons, 45 échecs,
-        10 flux d’évènements et 101 échanges.</li>
+        10 flux d’évènements et 102 échanges.</li>
       <li><strong>Le fuzzing</strong> : chaque suite passe ses lecteurs au fuzzing sur des
         mutations des vecteurs.</li>
     </ul>
@@ -6297,7 +6298,7 @@ offerHello(server);
     </li>
     <li>
       <strong>La publication</strong
-      ><span>Les paquets sur npm, NuGet et crates.io, et l’image de <code>beadc</code>.</span>
+      ><span>Les paquets sur npm, NuGet et crates.io.</span>
     </li>
   </ul>
 </section>

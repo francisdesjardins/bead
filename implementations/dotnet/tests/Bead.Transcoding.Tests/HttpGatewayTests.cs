@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -2076,6 +2077,60 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; transcoding 10.1; RFC 9112 §6.1
+    [Fact]
+    public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        var started = await Started();
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            var own = $"127.0.0.1:{started.Port}";
+            var coded = GzipOf("{}"u8.ToArray());
+
+            // * a body still gzip-coded once its chunks are read, which no side decodes
+            byte[] gzipped = [.. Encoding.ASCII.GetBytes($"{coded.Length:x}\r\n"), .. coded, .. "\r\n0\r\n\r\n"u8];
+            byte[] plain = [.. "2\r\n{}\r\n0\r\n\r\n"u8];
+
+            // ! Kestrel hands each on, the body read by its final chunked and still coded, which the
+            // gateway refuses
+            (string Authority, string Codings, byte[] Chunks)[] requests =
+            [
+                (own, "transfer-encoding: gzip, chunked", gzipped),
+                (own, "transfer-encoding: x-unknown, chunked", plain),
+                (own, "transfer-encoding: gzip\r\ntransfer-encoding: chunked", gzipped),
+                ("elsewhere.test", "transfer-encoding: gzip, chunked", gzipped),
+            ];
+
+            foreach (var (authority, codings, chunks) in requests)
+            {
+                var head = Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: {authority}\r\ncontent-type: application/json\r\nconnection: keep-alive\r\n{codings}\r\n\r\n");
+                var pipelined = Encoding.ASCII.GetBytes($"GET /v1/books/2 HTTP/1.1\r\nhost: {own}\r\n\r\n");
+                var came = Encoding.ASCII.GetString(await Received(started.Port, [.. head, .. chunks, .. pipelined]));
+                var fields = came.Split("\r\n\r\n")[0];
+
+                // one answer, unmarked, with none of the fields every response on the path carries,
+                // its connection closed behind it
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+                Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("bead-refusal", fields, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("\r\ncache-control:", fields, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("\r\nvary:", fields, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // no route served
+            Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // spec 15.12; transcoding 10.1, 10.2; RFC 9112 §9.6
     [Fact]
     public async Task Serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
@@ -2555,6 +2610,19 @@ public sealed class HttpGatewayTests
         var octets = $"POST /api/Transcoding/echo {version}\r\nhost: {authority}\r\ncontent-type: application/json\r\nconnection: keep-alive\r\n{codings}\r\n\r\n2\r\n{{}}\r\n0\r\n\r\nGET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\n\r\n";
 
         return Encoding.ASCII.GetString(await Received(port, Encoding.ASCII.GetBytes(octets)));
+    }
+
+    // the bytes given, gzip-coded (RFC 1952)
+    private static byte[] GzipOf(byte[] bytes)
+    {
+        using var coded = new MemoryStream();
+
+        using (var gzip = new GZipStream(coded, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            gzip.Write(bytes);
+        }
+
+        return coded.ToArray();
     }
 
     // what the gateway answers an exchange over HTTP/2 of the target and the fields given: its status,

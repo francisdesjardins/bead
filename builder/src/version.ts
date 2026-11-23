@@ -20,8 +20,8 @@ import { buffaPin, findBuffa } from './targets/rust/messages.ts';
 export const FORMAT = 'bead-blueprint/1';
 
 // ! the number bead/options.proto's three extensions take, which version.test.ts holds them to:
-// 58500 while the options are unpublished; from their first publication, a number of protobuf's
-// global registry (decision 0008), here, in options.proto and in options_pb.ts, regenerated, and in
+// 58500, which the published image carries; a number of protobuf's global registry is ahead
+// (decisions 0008 and 0055), here, in options.proto and in options_pb.ts, regenerated, and in
 // the goldens that embed it, written again:
 // test/golden/typescript/bead/options_pb.ts and messages_pb.ts, and
 // test/golden/csharp/Bead/Protobuf/Options.cs, its three extensions, and

@@ -438,24 +438,59 @@ test.describe('refusalOfHandshake', () => {
         return HOST;
       })
     );
-    // a final coding chunked and nothing after it, in any case, the empty elements before it
-    // ignored, is content, at step 6
+    // chunked as the one coding, in any case, an empty element before it ignored, is content, at
+    // step 6
     expect(
       [
         requestOf([['Transfer-Encoding', 'Chunked']]),
         requestOf([['Transfer-Encoding', ', chunked']]),
-        requestOf([['Transfer-Encoding', 'gzip, , chunked']]),
-        requestOf([['Transfer-Encoding', 'gzip, chunked']]),
-        requestOf([
-          ['Transfer-Encoding', 'gzip'],
-          ['Transfer-Encoding', 'chunked'],
-        ]),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 5 }, () => {
+      Array.from({ length: 2 }, () => {
         return MALFORMED;
       })
     );
+  });
+
+  // spec 15.2, 15.12; RFC 9112 §6.1
+  test('refuses first, unmarked, a Transfer-Encoding that lists a coding before its chunked, in one line or two, whatever else the request holds, and takes an empty element before it', () => {
+    const codingsOf = (lines: readonly string[]) => {
+      const fields = lines.map((line) => {
+        return ['Transfer-Encoding', line] as const;
+      });
+
+      return [
+        requestOf(fields),
+        requestOf([['Host', 'elsewhere.test'], ...fields], { without: ['host'] }),
+        requestOf(fields, { method: 'POST', without: ['upgrade'] }),
+      ];
+    };
+
+    // a coding before chunked, an empty element among it, in one line or two; each as it is, from
+    // a host it does not take and under another method
+    expect(
+      [['gzip, chunked'], ['x-unknown, chunked'], ['gzip, , chunked'], ['gzip', 'chunked']]
+        .flatMap(codingsOf)
+        .map(answerOf)
+    ).toEqual(
+      Array.from({ length: 12 }, () => {
+        return HOST;
+      })
+    );
+    // an empty element before chunked is no coding: the content it frames is malformed, after its
+    // host
+    expect(answerOf(requestOf([['Transfer-Encoding', ', chunked']]))).toEqual(MALFORMED);
+    expect(
+      answerOf(
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Transfer-Encoding', ', chunked'],
+          ],
+          { without: ['host'] }
+        )
+      )
+    ).toEqual(HOST_REFUSED);
   });
 
   test('refuses a host it does not take before anything else of the request is read', () => {

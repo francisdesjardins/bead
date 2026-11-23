@@ -64,8 +64,7 @@ It plays the conformance files it reaches, each part it lacks a row of the suppo
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
 - **the rules a security pass brings to every side**: a bound on what a server reads of a
-  connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other than
-  `chunked` refused, as RFC 9112 §6.1 asks;
+  connection ahead of the request it serves, and on a `Content-Length`;
 - **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, under a record of its own
@@ -204,9 +203,9 @@ that meets the Tenth Man:
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
   problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`;
-- **publication**: the packages on npm, NuGet and crates.io, beadc's image on a registry, and the
-  options' number of protobuf's global registry
-  ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+- **publication**: the packages on npm, NuGet and crates.io, and the options' number of protobuf's
+  global registry ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md),
+  [0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -312,14 +311,15 @@ table.
 
 ### How the repository decides
 
-| #                                                               | Decision                                                                                                                     | Status   |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0006](0006-a-rule-has-its-gate.md)                             | A rule has its gate, or it is a preference                                                                                   | accepted |
-| [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md) | The repository follows Conventional Commits, git-flow and Keep a Changelog, and what the languages share meets the Tenth Man | accepted |
+| #                                                                                               | Decision                                                                                                                     | Status   |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0006](0006-a-rule-has-its-gate.md)                                                             | A rule has its gate, or it is a preference                                                                                   | accepted |
+| [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)                                 | The repository follows Conventional Commits, git-flow and Keep a Changelog, and what the languages share meets the Tenth Man | accepted |
+| [0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md) | beadc's image is published on GitHub's container registry at each release, under beadc's version, attested and signed        | accepted |
 
 ## Writing one
 
-The next decision is 0055. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0056. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

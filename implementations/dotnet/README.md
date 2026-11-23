@@ -716,13 +716,15 @@ hands on with the `Content-Length` removed and its value kept in an `X-Content-L
 transports and the gateway read that field back beside a `Transfer-Encoding`, a client's own among
 it, and refuse the request with `connection: close`, so its connection closes on every 10.0 patch
 (RFC 9112 §6.1). So is one whose `Transfer-Encoding` lists anything after its first `chunked`, in
-one line or across its lines: Kestrel hands it on and reads it by its final `chunked`. So is an
-HTTP/1.0 request that carries a `Transfer-Encoding`: Kestrel reads its body as chunked, and keeps
-its connection open under `Connection: keep-alive`. `RequestFields.IsTransferEncodingFramed` refuses
-both at the HTTP transport, at the gateway and in the WebSocket judgement, 400 unmarked with
-`connection: close`, so no request pipelined behind either is read (RFC 9112 §6.1). Over HTTP/2, a
-`transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC 9113 §8.2.2
-calls malformed and Kestrel hands on, has its stream reset by the transport and the gateway.
+one line or across its lines: Kestrel hands it on and reads it by its final `chunked`. So is one
+whose `Transfer-Encoding` lists a coding before its `chunked`, which Kestrel hands on with its body
+still coded. So is an HTTP/1.0 request that carries a `Transfer-Encoding`: Kestrel reads its body as
+chunked, and keeps its connection open under `Connection: keep-alive`.
+`RequestFields.IsTransferEncodingFramed` refuses each at the HTTP transport, at the gateway and in
+the WebSocket judgement, 400 unmarked with `connection: close`, so no request pipelined behind any
+of them is read (RFC 9112 §6.1). Over HTTP/2, a `transfer-encoding`, a `keep-alive`, a
+`proxy-connection` or an `upgrade`, which RFC 9113 §8.2.2 calls malformed and Kestrel hands on, has
+its stream reset by the transport and the gateway.
 
 A request names its authority by its target when the target is in absolute-form, its `Host` judged
 as one field line alone, which an HTTP/1.0 request may leave out (RFC 9112 §3.2.2), for which both
