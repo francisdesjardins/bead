@@ -1284,7 +1284,7 @@ async fn mounted_behind_reader(gateway: bead::HttpGateway) -> u16 {
     port
 }
 
-// transcoding 7.6.27
+// transcoding 7.6.26
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn refuses_500_a_body_read_before_it_by_the_server_it_is_mounted_on_reported_its_call_never_made()
  {
@@ -2710,7 +2710,7 @@ async fn answers_503_destination_unreachable_when_its_connection_cannot_be_drawn
     fixture.dispose().await.expect("disposed");
 }
 
-// transcoding 7.6.28
+// transcoding 7.6.27
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem() {
     // * a clock that breaks as a body is read, past every gate: the Rust form, a clock that arms

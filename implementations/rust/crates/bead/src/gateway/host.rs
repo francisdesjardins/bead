@@ -1649,7 +1649,7 @@ impl Inner {
         Ok(Some(RequestCredential::Jwt(token.to_owned())))
     }
 
-    // the taken body's answer (7.6.27): a failure of its own, its words reported, never in its
+    // the taken body's answer (7.6.26): a failure of its own, its words reported, never in its
     // problem; over HTTP/1 its connection closed, since what is left of the body is never read
     fn refuse_taken(&self, exchange: &Exchange) {
         self.report_words("a body read before the gateway took its request");
@@ -2905,7 +2905,7 @@ impl HttpGateway {
     /// every gate of 10.1, a field or a target past visible ASCII answered 400 unmarked, its
     /// problems, its pace and its bounds; it leaves its host its head's bounds and timeouts and its
     /// socket's write deadline. A body its host read before it is judged by hyper's hints before
-    /// its first byte and by its count at its end, refused 500, its call never made (7.6.27).
+    /// its first byte and by its count at its end, refused 500, its call never made (7.6.26).
     pub fn answer<B>(
         &self,
         request: ::http::Request<B>,

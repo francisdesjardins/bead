@@ -65,8 +65,7 @@ It plays the conformance files it reaches, each part it lacks a row of the suppo
 
 - **the rules a security pass brings to every side**: a bound on what a server reads of a
   connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other than
-  `chunked` refused, as RFC 9112 §6.1 asks; and a malformed `Bearer` answered as RFC 6750 §3.1 gives
-  it;
+  `chunked` refused, as RFC 9112 §6.1 asks;
 - **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, under a record of its own

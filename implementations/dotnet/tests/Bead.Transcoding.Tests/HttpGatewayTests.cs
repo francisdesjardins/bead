@@ -1042,7 +1042,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // transcoding 7.6.27
+    // transcoding 7.6.26
     [Fact]
     public async Task Refuses_500_a_body_read_before_it_by_the_server_it_is_mounted_on_reported_its_call_never_made()
     {
@@ -1214,7 +1214,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // transcoding 7.6.28
+    // transcoding 7.6.27
     [Fact]
     public async Task Answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem()
     {

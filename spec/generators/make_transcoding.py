@@ -2186,7 +2186,7 @@ ROWS = [
 # the rows past the protocol's codes: a code no name names, an application failure, then the gateway's own
 UNNAMED_ROW, APPLICATION_ROW = len(ROWS) + 1, len(ROWS) + 2
 OWN_ROWS = {'timeout': (len(ROWS) + 3, 504), 'closed': (len(ROWS) + 4, 502), 'unwritable': (len(ROWS) + 5, 500),
-            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 9, 500)}
+            'jwt': (len(ROWS) + 6, 431), 'failed': (len(ROWS) + 8, 500)}
 
 
 def row_of(code, arose, encoding):
@@ -3349,10 +3349,9 @@ def failure(name, clauses, given, *, procedure=None, rule=None, problem_types=PR
 def own(name, clauses, which, detail):
     """A failure of the gateway's own (7.6's last rows): about:blank, its status's phrase."""
     row, status = OWN_ROWS[which]
-    fields = {'www-authenticate': 'Bearer error="invalid_request"'} if which == 'scheme' else {}
     text = problem(status, detail=detail)
     return {'name': name, 'clauses': [*clauses, '7.1', *member_rows(text), '7.2', '7.3', '7.6', f'7.6.{row}'],
-            'failure': {'own': which, 'detail': detail}, 'status': status, 'fields': fields, 'problem': text}
+            'failure': {'own': which, 'detail': detail}, 'status': status, 'fields': {}, 'problem': text}
 
 
 def violations(*lines):
@@ -3455,7 +3454,6 @@ FAILURES = [
     own("the exchange's connection closed before its answer", [], 'closed', 'the connection closed'),
     own('a result Bead\'s proto JSON form holds none of', ['5.7'], 'unwritable', 'a Value whose number is not finite'),
     own('a JWT its block cannot hold', ['2.4', '2.4.2'], 'jwt', 'a token past 1004 bytes'),
-    own('an authorization of another scheme under bearer-jwt', ['2.4', '2.4.2'], 'scheme', 'an auth-scheme but Bearer'),
     own('what no gate foresaw, with no detail', [], 'failed', ''),
 ]
 
@@ -3577,6 +3575,12 @@ def own_failed(status, words, *, fields=None, on='a'):
     return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
                                                     'bead-refusal': None, **(fields or {})},
                        'body': problem(status, detail=words)}, 'on': on}
+
+
+# 7.7's words for a Bearer field followed by neither a space nor its end, and the field each 400 of an
+# authorization carries beside it under bearer-jwt (10.1's step 9)
+BEARER_WORDS = "Bearer followed by neither a space nor the field's end"
+INVALID_REQUEST = {'www-authenticate': 'Bearer error="invalid_request"'}
 
 
 def call_failed(given, *, on='a', procedure=None, rule=None):
@@ -3810,28 +3814,39 @@ EXCHANGES = [
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: bearer a.b.c']),
               call_failed({'code': 36, 'arose': 'server', 'detail': 'OPAQUE, ELSEWHERE'})],
              options={'authorization': 'bearer-jwt'}),
-    exchange("under bearer-jwt, another auth-scheme: 401, invalid_request", ['2.4.2', '7.6.26'],
-             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic YTpi']),
-              {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
-                                                    'bead-refusal': None,
-                                                    'www-authenticate': 'Bearer error="invalid_request"'},
-                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
+    exchange("under bearer-jwt, another auth-scheme presents no credential: a procedure that needs a session "
+             "answers 401, its challenge alone, and one that needs none runs", ['2.4', '2.4.2', '2.5', '7.6.8'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic YTpi'], on='a'),
+              call_failed({'code': 32, 'arose': 'server'}, on='a'),
+              json_post('/api/Transcoding/echo', '{}', ['authorization: Basic YTpi'], on='b'),
+              answered('{}', on='b'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic\tYTpi'], on='c'),
+              call_failed({'code': 32, 'arose': 'server'}, on='c'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearerabc'], on='d'),
+              call_failed({'code': 32, 'arose': 'server'}, on='d')],
              options={'authorization': 'bearer-jwt'}),
-    exchange("under bearer-jwt, a tab after Bearer: 401, invalid_request", ['2.4.2', '7.6.26'],
-             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer\ta.b.c']),
-              {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
-                                                    'bead-refusal': None,
-                                                    'www-authenticate': 'Bearer error="invalid_request"'},
-                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
+    exchange("under bearer-jwt, Bearer alone presents no credential", ['2.4', '2.4.2', '2.5', '7.6.8'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer'], on='a'),
+              call_failed({'code': 32, 'arose': 'server'}, on='a'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer   '], on='b'),
+              call_failed({'code': 32, 'arose': 'server'}, on='b'),
+              json_post('/api/Transcoding/echo', '{}', ['authorization: Bearer'], on='c'),
+              answered('{}', on='c')],
              options={'authorization': 'bearer-jwt'}),
-    # one or more spaces and nothing else separate Bearer from its token (RFC 6750 §2.1's 1*SP): a tab
-    # after them is no separator, and no b64token starts with one
-    exchange("under bearer-jwt, a tab after Bearer's space: 401, invalid_request", ['2.4.2', '7.6.26'],
+    # Bearer, then SP or the field's end (RFC 9110 §11.4's 1*SP): anything else after the auth-scheme is no separator
+    exchange("under bearer-jwt, Bearer followed by neither a space nor its end: 400 malformed, invalid_request",
+             ['2.4', '2.4.2', '10.1', '10.1.9'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer\ta.b.c'], on='a'),
+              refused_own(400, 'malformed', BEARER_WORDS, fields=INVALID_REQUEST, on='a'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer/abc'], on='b'),
+              refused_own(400, 'malformed', BEARER_WORDS, fields=INVALID_REQUEST, on='b'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer,abc'], on='c'),
+              refused_own(400, 'malformed', BEARER_WORDS, fields=INVALID_REQUEST, on='c')],
+             options={'authorization': 'bearer-jwt'}),
+    exchange("under bearer-jwt, what follows Bearer's spaces is its token as it stands, a tab first among it",
+             ['2.4', '2.4.2', '7.5.3', '7.6.11'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer \ta.b.c']),
-              {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
-                                                    'bead-refusal': None,
-                                                    'www-authenticate': 'Bearer error="invalid_request"'},
-                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
+              call_failed({'code': 36, 'arose': 'server', 'detail': 'OPAQUE, ELSEWHERE'})],
              options={'authorization': 'bearer-jwt'}),
     exchange("under bearer-jwt, two spaces after Bearer present the token", ['2.4', '2.4.2', '7.5.3', '7.6.11'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer  a.b.c']),
@@ -3840,6 +3855,14 @@ EXCHANGES = [
     exchange("two authorization fields, 400 malformed", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
               refused_own(400, 'malformed', 'two authorization fields')]),
+    exchange("under bearer-jwt, two authorization fields, 400 malformed, invalid_request", ['2.4', '10.1.9'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
+              refused_own(400, 'malformed', 'two authorization fields', fields=INVALID_REQUEST)],
+             options={'authorization': 'bearer-jwt'}),
+    exchange("ELSEWHERE, a credential of another auth-scheme that does not hold: 401, its challenge alone",
+             ['2.4', '2.4.1', '7.6.8'],
+             [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic YTpi']),
+              call_failed({'code': 32, 'arose': 'server', 'detail': 'the credential does not hold'})]),
     exchange("a command to an exchange's connection is answered SERVICE_UNKNOWN", ['2.6', 'spec:9.2.5'],
              [json_post('/api/Transcoding/ask', '{}'), answered(result('AskResponse', {'code': 18}))]),
     exchange("the gateway's call timeout, 504, its call cancelled", ['9.2', '7.6.22'],
@@ -4242,7 +4265,7 @@ DOCUMENT_JSON = {
         "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its side's runtime reader, as a gateway reads a result (spec 17.9); then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
         "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
-        "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
+        "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one of its challenge's auth-scheme; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
         "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",

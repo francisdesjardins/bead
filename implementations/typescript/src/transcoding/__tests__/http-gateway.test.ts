@@ -1058,7 +1058,7 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   expect(reported[0]).toMatch(/, not open$/u);
 });
 
-// transcoding 7.6.27
+// transcoding 7.6.26
 test('refuses 500 a body read before it by the server it is mounted on, reported, its call never made', async () => {
   await using fixture = await mountedBehindReader();
   const reported = reportedBy(fixture.gateway);
@@ -1165,7 +1165,7 @@ test('reads a body that came empty as empty, whatever read it before', async () 
   expect(reported).toEqual([]);
 });
 
-// transcoding 7.6.28
+// transcoding 7.6.27
 test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
   // * a clock that breaks as a body is read, past every gate
   const broken: IClock = {

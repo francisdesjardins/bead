@@ -48,6 +48,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   support matrix's "Leveled down". The platform rows keep hyper's 431 at 2⁶⁴ − 2 and 2⁶⁴ − 1,
   Kestrel's `GOAWAY` and h2's reset of more than 19 digits over HTTP/2. Two cases of
   `spec/transports.json` and an exchange of `spec/transcoding.json` play it.
+- Transcoding 2.4, 7.6, 7.7 and 10.1: under `bearer-jwt`, a gateway reads an `authorization`'s
+  auth-scheme as RFC 9110 §11.1 reads one, its longest run of `tchar`. Another auth-scheme, or
+  `Bearer` alone, presents no credential, as RFC 6750 §3.1 reads a request that attempted no
+  `Bearer` credential: a procedure that needs no session runs, and one that needs one answers 401
+  with the challenge alone. `Bearer` followed by neither a space nor the field's end, a tab among
+  it, is refused 400 `malformed` before its body is read, with `error="invalid_request"` beside
+  the challenge, as two `authorization` fields are under `bearer-jwt`. What follows `Bearer`'s
+  spaces is its token as it stands, which its server judges. Every gateway answered each of these
+  401 `invalid_request`, `an auth-scheme but Bearer`, once its body was read. A 401
+  `SESSION_REQUIRED` carries `error="invalid_token"` only where a credential of the challenge's
+  auth-scheme came, under `elsewhere` too. A generated client raises `PAYLOAD_UNDECODABLE` for
+  the 400, as for any `malformed`. Transcoding's rows 7.6.27 and 7.6.28 become 7.6.26 and 7.6.27.
+
+### Removed
+
+- The gateway's own failure `scheme` and the options of a problem of the gateway's own, on every
+  side: TypeScript's `OwnFailure` `'scheme'` and `IOwnProblemOptions`, C#'s `OwnFailure.Scheme`
+  and `OwnProblemOptions`, the Rust side's `OwnFailure::Scheme` and `OwnProblemOptions`. A
+  problem of the gateway's own takes its failure and its detail. `spec/transcoding.json`'s `own`
+  loses `scheme`.
 
 ### Fixed
 
