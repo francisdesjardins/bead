@@ -12,9 +12,10 @@ extension or the demo — how to reproduce it, and what it lets a peer do.
 
 Bead is a personal project, kept at its author's pace, with no warranty (see the
 [licence](LICENSE)) and no promise of an answer or a fix by any date. A report is read, and a fix,
-when one comes, lands on `develop` and in the next release; an earlier release takes none. Nothing
-is published to npm, NuGet or a registry yet; publication is ahead, so a fix reaches a user as a new
-commit to build on, pinned.
+when one comes, lands on `develop` and in the next release; an earlier release takes none. No package
+is published to npm, NuGet or crates.io; their publication is ahead, so a fix to a runtime reaches a
+user as a new commit to build on, pinned. beadc's image is published at each release, so a fix to
+beadc reaches a user as a new release's image.
 
 ## What Bead already holds
 

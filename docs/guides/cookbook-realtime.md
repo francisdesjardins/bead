@@ -4,8 +4,9 @@ Recipes for the questions a team meets once [the getting-started project](gettin
 runs: who may call, what happens when a connection drops, how to watch the server, and how to see
 a page's calls. Each builds on `StationService` and its C# server over WebSocket.
 
-> **No package is published yet.** The runtimes come from a clone of Bead at a pinned commit, and
-> beadc's image is built from it, as [the getting-started guide](getting-started.md) shows.
+> **The packages are not published.** The runtimes come from a clone of Bead at a release's tag,
+> and beadc's image of that release from ghcr.io, pinned by its digest, as
+> [the getting-started guide](getting-started.md) shows.
 
 ## Authenticate calls with a JWT and admission hooks
 

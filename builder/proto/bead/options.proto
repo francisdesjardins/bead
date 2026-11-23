@@ -11,8 +11,8 @@ import "google/protobuf/descriptor.proto";
 option csharp_namespace = "Bead.Protobuf";
 
 // ! One number on every extendee: 58500, of the range descriptor.proto leaves to one organization or
-// to experimental options, until the first publication takes a number of protobuf's global
-// registry (decisions 0008 and 0022)
+// to experimental options, which the published image carries; a number of protobuf's global
+// registry is ahead (decisions 0008, 0022 and 0055)
 extend google.protobuf.FileOptions {
   File file = 58500;
 }

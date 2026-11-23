@@ -5,8 +5,8 @@
 
 ## Context
 
-Bead is published to no registry, yet its name is public already: the demo beadproto.dev serves
-carries it. Three things change at different speeds: the bytes of an envelope, which every
+Bead's packages are on no registry, yet its name is public already: the demo beadproto.dev serves
+carries it, and beadc's image is on GitHub's container registry ([0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). Three things change at different speeds: the bytes of an envelope, which every
 peer must agree on; the spec that states them, whose text and conformance files grow faster than the
 bytes; and each implementation, which ships fixes the wire never sees.
 
@@ -91,8 +91,8 @@ the media types are `application/prs.bead` and `application/prs.bead-batch`, in 
 RFC 6838, and the headers are `bead-*`. The builder's command is `beadc`, as `protoc` and `flatc`
 are named, since a bare `bead` is not Bead's to take; the C# it generates qualifies every type as
 `global::Bead.`, so a platform's name, as ASP.NET's `HealthStatus`, never makes one of Bead's
-ambiguous (CS0104). The builder's options take one extension number of protobuf's global registry
-from their first publication, which lists the project beside it; their package, `bead`, is protected
+ambiguous (CS0104). The builder's options take one extension number of protobuf's global registry,
+which lists the project beside it: that number is ahead, and the published image carries 58500 ([0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)); their package, `bead`, is protected
 by no registry, as no protobuf package is, and goes by the project's name as `buf.validate` and
 `google.api` go by theirs
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)). A
@@ -103,7 +103,7 @@ spec's axis.
 here, and the Tenth Man before it ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manifest stays
 `private: true`, the C# projects carry no package id, and the Rust workspace holds
-`publish = false`, until a first publication sets them.
+`publish = false`, until the packages' first publication sets them.
 
 ## Consequences
 
@@ -135,18 +135,18 @@ with its answer:
 
 ### On the names
 
-| Objection                                                                                                                         | Answer                                                                                                                                                                                                |
-| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bead` is taken on npm, PyPI and crates.io, and a memory tool for coding agents goes by Beads                                     | Accepted in part: the protocol keeps its name, and the builder's command is `beadc`.                                                                                                                  |
-| npm's scope is the owner's, and NuGet has no scopes                                                                               | Accepted as a rule: the C# packages are `FrancisDesjardins.Bead.*`, and their assemblies and namespaces stay `Bead.*`.                                                                                |
-| A prefix against a platform's names holds once, in `BeadHttpClient`, and `HealthStatus` collides with ASP.NET's (CS0104)          | Accepted for the builder: the C# it generates qualifies every type as `global::Bead.`. Nothing else is renamed.                                                                                       |
-| The builder's protobuf package and extension numbers belong in protobuf's global registry                                         | Accepted: from their first publication, the image's, not at v1 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s second round).                         |
-| "Nothing is published" does not hold: the demo carries the name, and names are due at the first publication, not the first commit | Accepted: the repository is kept as if it were published.                                                                                                                                             |
-| Another name for the protocol, one free on every registry                                                                         | Refused: the name weighed sounds like a binary WebSocket library in the same languages; the names Bead publishes under are qualified by their owner, and free; and a rename is a decision of its own. |
-| another npm scope                                                                                                                 | Refused: an account can become an organization.                                                                                                                                                       |
-| another media type than `application/prs.bead`                                                                                    | Refused: RFC 6838's personal tree fits it.                                                                                                                                                            |
-| another namespace than `Bead` in `Bead.Core`                                                                                      | Refused: a library's namespace is its name, as Polly's is `Polly`.                                                                                                                                    |
-| one spelling of WebSocket across the sides                                                                                        | Refused: `ws` and `WS` are each language's idiom.                                                                                                                                                     |
+| Objection                                                                                                                         | Answer                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bead` is taken on npm, PyPI and crates.io, and a memory tool for coding agents goes by Beads                                     | Accepted in part: the protocol keeps its name, and the builder's command is `beadc`.                                                                                                                                 |
+| npm's scope is the owner's, and NuGet has no scopes                                                                               | Accepted as a rule: the C# packages are `FrancisDesjardins.Bead.*`, and their assemblies and namespaces stay `Bead.*`.                                                                                               |
+| A prefix against a platform's names holds once, in `BeadHttpClient`, and `HealthStatus` collides with ASP.NET's (CS0104)          | Accepted for the builder: the C# it generates qualifies every type as `global::Bead.`. Nothing else is renamed.                                                                                                      |
+| The builder's protobuf package and extension numbers belong in protobuf's global registry                                         | Accepted: the options take one number of the registry, ahead; the published image carries 58500, its cost stated in [0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md). |
+| "Nothing is published" does not hold: the demo carries the name, and names are due at the first publication, not the first commit | Accepted: the repository is kept as if it were published.                                                                                                                                                            |
+| Another name for the protocol, one free on every registry                                                                         | Refused: the name weighed sounds like a binary WebSocket library in the same languages; the names Bead publishes under are qualified by their owner, and free; and a rename is a decision of its own.                |
+| another npm scope                                                                                                                 | Refused: an account can become an organization.                                                                                                                                                                      |
+| another media type than `application/prs.bead`                                                                                    | Refused: RFC 6838's personal tree fits it.                                                                                                                                                                           |
+| another namespace than `Bead` in `Bead.Core`                                                                                      | Refused: a library's namespace is its name, as Polly's is `Polly`.                                                                                                                                                   |
+| one spelling of WebSocket across the sides                                                                                        | Refused: `ws` and `WS` are each language's idiom.                                                                                                                                                                    |
 
 ### On the release's versions and their gate
 

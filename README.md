@@ -48,8 +48,11 @@ This repository holds the protocol and its implementations, side by side:
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   each other side's generated HTTP client calls.
 
-**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry.
-Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may break.
+**beadc's image is published; the packages are not.** At each release, beadc's image goes to
+GitHub's container registry, `ghcr.io/francisdesjardins/beadc:<version>`, attested and signed, and
+a team pins it by its digest ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). No package goes to npm, NuGet or crates.io: the runtimes come
+from a clone at the release's tag, and their publication is ahead. Bead has not run in production,
+and before 1.0.0 a minor may break.
 
 ## At a glance
 
@@ -197,7 +200,7 @@ tools/                        repository checks, a feature's finish, the release
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
 .githooks/                    the repository checks before each commit, opt-in
 .github/
-  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release
+  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release; image.yml, beadc's image at each release
   dependabot.yml              the dependencies' updates, every week, grouped
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
 ```
@@ -1185,7 +1188,13 @@ git flow release finish --keepremote 0.2.0     # without -p: origin's branch goe
 node tools/release.mjs tag                     # spec-v…, debugging-v… and transcoding-v… at v0.2.0, then the gate on develop
 git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml   # only if tag took one out
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
+gh run list --workflow image.yml --limit 1     # beadc's image, published from v0.2.0
+gh workflow run image.yml --ref develop -f tag=v0.2.0   # only if no run started
 ```
+
+The tag `v*` starts [`image.yml`](.github/workflows/image.yml), which publishes beadc's image under
+the release's version, attested and signed ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)); GitHub starts no run when more than three tags
+are pushed at once, and the release then dispatches it.
 
 Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
 Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
