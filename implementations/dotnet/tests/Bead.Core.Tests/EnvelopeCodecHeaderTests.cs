@@ -61,6 +61,111 @@ public sealed class EnvelopeCodecHeaderTests
 
     // definition
 
+    [Fact]
+    public void An_opaque_header_keeps_its_scheme_without_a_token_and_redacts_idempotently()
+    {
+        var token = SessionToken.Parse("BwcHBwcHBwcHBwcHBwcHBw");
+        var credential = Credential.Opaque(token);
+        IEnvelopeHeader[] headers =
+        [
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = credential },
+            new ResultHeader { CallId = 2, Credential = credential },
+            new FailureHeader { CallId = 3, Credential = credential },
+        ];
+
+        foreach (var header in headers)
+        {
+            var redacted = RouterCore.Redact(header);
+            var kept = redacted switch
+            {
+                RequestHeader request => request.Credential,
+                ResultHeader result => result.Credential,
+                FailureHeader failure => failure.Credential,
+                _ => throw new InvalidOperationException("a header with a credential"),
+            };
+
+            Assert.Equal(CredentialScheme.Opaque, kept?.Scheme);
+            Assert.Null(kept?.SessionToken);
+            Assert.Equal(redacted, RouterCore.Redact(redacted));
+            Assert.Equal(header.CallId, redacted.CallId);
+            Assert.Equal(header.Kind, redacted.Kind);
+            Assert.Equal(credential, header switch
+            {
+                RequestHeader request => request.Credential,
+                ResultHeader result => result.Credential,
+                FailureHeader failure => failure.Credential,
+                _ => throw new InvalidOperationException("a header with a credential"),
+            });
+            Assert.DoesNotContain(token.ToString(), redacted.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_wire_opaque_credential_reads_with_its_token_and_never_as_a_redacted_value()
+    {
+        var credential = Credential.Opaque(SessionToken.Parse("CQkJCQkJCQkJCQkJCQkJCQ"));
+        IEnvelopeHeader[] headers =
+        [
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = credential },
+            new ResultHeader { CallId = 2, Credential = credential },
+            new FailureHeader { CallId = 3, Credential = credential },
+        ];
+
+        foreach (var header in headers)
+        {
+            var bytes = new byte[EnvelopeCodec.HeaderBytesOf(header)];
+
+            EnvelopeCodec.WriteHeader(header, bytes);
+
+            var read = EnvelopeCodec.ReadHeader(bytes, RouterSide.Server);
+
+            Assert.NotNull(read);
+            Assert.Equal(header, read.Value.Header);
+            Assert.Equal(credential, read.Value.Header switch
+            {
+                RequestHeader request => request.Credential,
+                ResultHeader result => result.Credential,
+                FailureHeader failure => failure.Credential,
+                _ => throw new InvalidOperationException("a header with a credential"),
+            });
+        }
+
+        var refused = Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadHeader(Vectors.FromHexadecimal("A1 11 08 03 00 00 00 02 00 01 00 00"), RouterSide.Client);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, refused.Code);
+        Assert.Equal("an OPAQUE token is 16 bytes, not 0", refused.Detail);
+    }
+
+    [Fact]
+    public void Read_an_envelope_where_a_pooled_buffer_holds_it_at_its_own_offset()
+    {
+        var request = Vectors.FromHexadecimal("A1 10 00 03 00 00 00 03 00 02 00 01 68 69");
+        var pool = new byte[request.Length + 5];
+
+        request.CopyTo(pool, 3);
+
+        var slice = pool.AsMemory(3, request.Length);
+        var read = EnvelopeCodec.ReadEnvelope(slice.Span, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = 64 });
+
+        Assert.NotNull(read);
+        Assert.Equal(new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1 }, read.Header);
+        Assert.Equal(new byte[] { 0x68, 0x69 }, read.Payload.ToArray());
+    }
+
+    [Fact]
+    public void Writes_no_destination_block_for_a_destination_left_undefined()
+    {
+        var header = new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1 };
+        var bytes = new byte[12];
+
+        Assert.Equal(12, EnvelopeCodec.HeaderBytesOf(header));
+        Assert.Equal(12, EnvelopeCodec.WriteHeader(header, bytes));
+        Assert.Equal(Vectors.FromHexadecimal("A1 10 00 03 00 00 00 01 00 02 00 01"), bytes);
+    }
+
     /// <summary>The names of every vector of the <c>headers</c> group.</summary>
     public static TheoryData<string> Headers { get; } = Vectors.NamesOf("headers");
 
