@@ -20,6 +20,8 @@ use crate::duration::LONGEST_TIMER;
 
 #[cfg(test)]
 pub(crate) mod clockless;
+#[cfg(all(test, any(feature = "websocket", feature = "http", feature = "mqtt")))]
+pub(crate) mod closed_port;
 #[cfg(test)]
 pub(crate) mod core_port;
 pub mod durations;

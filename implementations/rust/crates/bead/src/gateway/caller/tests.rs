@@ -1212,11 +1212,8 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let service = Service::new();
     let routes = service.routes();
-    let closed = TcpListener::bind((HOST, 0)).await.expect("bound");
-    let port = closed.local_addr().expect("its address").port();
-
-    drop(closed);
-
+    let closed = crate::testing::closed_port::closed_port().unwrap();
+    let port = closed.port();
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
     let caller = resolving_caller(&format!("http://bead-probe.localhost:{port}"), &asked);
     let echo = caller
