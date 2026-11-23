@@ -4202,27 +4202,36 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
   });
 
   // spec 15.2, 15.12; RFC 9110 §8.6
-  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+  test('answers 400 unmarked a Content-Length past 2⁶³ − 1, before its host is judged, and closes its connection', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
+
+    // 2⁶³ − 1 is a length: the host is judged
+    expect(
+      (
+        await answerFromOf(
+          started.port,
+          requestOf('GET / HTTP/1.1', [
+            'Host: elsewhere.test',
+            'Connection: close',
+            'Content-Length: 9223372036854775807',
+          ])
+        )
+      ).answer
+    ).toEqual([403, 'host-refused']);
+
+    // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴ − 2 and 2⁶⁴ − 1, which Node's parser hands on; and
+    // 2⁶⁴ and 23 nines, which it answers itself; each on an upgrade from a host it does not take
     const answers: unknown[] = [];
 
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade
     for (const length of [
       '9223372036854775808',
+      '00009223372036854775808',
+      '9'.repeat(19),
       '18446744073709551614',
       '18446744073709551615',
       '18446744073709551616',
+      '9'.repeat(23),
     ]) {
-      answers.push(
-        await closingAnswerOf(
-          started.port,
-          requestOf('GET / HTTP/1.1', [`Content-Length: ${length}`])
-        )
-      );
-    }
-
-    // and 2⁶³ and 2⁶⁴ under a host it does not take
-    for (const length of ['9223372036854775808', '18446744073709551616']) {
       answers.push(
         await closingAnswerOf(
           started.port,
@@ -4231,16 +4240,12 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
       );
     }
 
-    // Node's parser counts to 2⁶⁴ − 1: an upgrade that declares content is malformed, after its
-    // host, and past it Node answers its own 400 before anything is judged
-    expect(answers).toEqual([
-      [400, 'malformed'],
-      [400, 'malformed'],
-      [400, 'malformed'],
-      [400, null],
-      [403, 'host-refused'],
-      [400, null],
-    ]);
+    expect(answers).toEqual(
+      Array.from({ length: 7 }, () => {
+        return [400, null];
+      })
+    );
+    expect(started.server.clients).toEqual([]);
   });
 
   test('waits for a head not whole', async () => {

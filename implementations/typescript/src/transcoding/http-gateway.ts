@@ -65,6 +65,7 @@ import {
   headerOf,
   type IExchangeIn,
   inTurn,
+  isContentLengthCounted,
   isTransferEncodingTaken,
   isUnencoded,
   joinedOf,
@@ -1759,12 +1760,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     writerOf(response);
 
     // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, a # in its
-    // target, or a Transfer-Encoding 15.12 refuses, which Node hands on over HTTP/1.0 or under
-    // `insecureHTTPParser`, its refusal closing its connection (RFC 9112 §6.1)
+    // target, a Transfer-Encoding 15.12 refuses, which Node hands on over HTTP/1.0 or under
+    // `insecureHTTPParser`, or a Content-Length past 2⁶³ − 1, its refusal closing its connection
+    // (RFC 9112 §6.1)
     const named =
       hasVisibleFields(request.rawHeaders) &&
       isVisibleTarget(request.url) &&
-      isTransferEncodingTaken(request)
+      isTransferEncodingTaken(request) &&
+      isContentLengthCounted(request)
         ? authorityNamedBy(request)
         : undefined;
 
