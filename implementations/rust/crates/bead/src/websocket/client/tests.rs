@@ -3131,6 +3131,7 @@ async fn rejects_while_a_connect_is_pending_and_that_connect_still_opens() {
 
 #[tokio::test]
 async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone() {
+    let refused = closed_port().unwrap();
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -3142,6 +3143,12 @@ async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_serve
     drop(server);
     drop(upgraded);
     closes_within(&recorder, 1).await;
+
+    // * the failed connect keeps a held destination for every reconnection attempt
+    assert!(matches!(
+        settled(client.connect(&to(refused.port()))).await,
+        Err(TransportError::Connect(_))
+    ));
 
     let failed = reconnected(&client, &reconnecting_by((Duration::from_millis(10), 2))).await;
     let Err(TransportError::Reconnect(error)) = &failed else {

@@ -663,26 +663,23 @@ async fn is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_i
 
 #[tokio::test]
 async fn listens_on_the_port_it_was_asked_for() {
-    let port = std::net::TcpListener::bind((HOST, 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
     let server = HttpTransportServer::new(&HttpTransportServerOptions::default()).unwrap();
     let bound = server
         .start(&TransportServerStartOptions {
             address: Some(HOST.to_owned()),
-            port: Some(port),
+            port: Some(0),
             ..TransportServerStartOptions::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        (bound.address.as_str(), bound.port),
-        (HOST, port),
-        "where it listens"
-    );
+    assert_eq!(bound.address, HOST, "where it listens");
+    assert_ne!(bound.port, 0, "the port it draws");
+    let reached = tokio::net::TcpStream::connect((HOST, bound.port))
+        .await
+        .unwrap();
+
+    assert_eq!(reached.peer_addr().unwrap().port(), bound.port, "reachable");
     assert_eq!(server.ready_state(), ReadyState::Open, "open");
     server.stop().await.unwrap();
 }
