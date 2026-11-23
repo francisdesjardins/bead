@@ -30,7 +30,7 @@ import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
 import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
-import { PROBE, replaceResolver, startDropping, startHeard } from './loopback-fixtures';
+import { closedPort, PROBE, replaceResolver, startDropping, startHeard } from './loopback-fixtures';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 import { PKI } from './tls-front';
 
@@ -529,18 +529,9 @@ test.describe('createMqttBrokerAdapter', () => {
   });
 
   test('fails its start where its broker cannot be reached, over TCP, TLS or a WebSocket, naming why', async () => {
-    // a port no one listens on any more
-    const listener = createServer();
-
-    await new Promise<void>((resolve) => {
-      listener.listen(0, '127.0.0.1', resolve);
-    });
-
-    const { port } = listener.address() as AddressInfo;
-
-    await new Promise((resolve) => {
-      listener.close(resolve);
-    });
+    // a port no one listens on
+    await using closed = await closedPort();
+    const { port } = closed;
 
     // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
     for (const url of [
@@ -3636,16 +3627,12 @@ test.describe('createMqttBrokerAdapter, on the loopback', () => {
   test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
     // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
     // and closed unanswered
-    const closed = await (async () => {
-      await using listener = await startDropping();
-
-      return listener.port;
-    })();
+    await using closed = await closedPort();
     await using dropping = await startDropping();
     using resolver = replaceResolver();
     const messages: string[] = [];
 
-    for (const port of [closed, dropping.port]) {
+    for (const port of [closed.port, dropping.port]) {
       const adapter = createMqttBrokerAdapter({
         connectTimeout: 2_000,
         id: ID,
