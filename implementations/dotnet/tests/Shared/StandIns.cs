@@ -190,7 +190,7 @@ internal sealed class HeadListener : IAsyncDisposable
     }
 
     // an HTTP head read to its blank line; another protocol's bytes, a control byte among them, as
-    // they came
+    // they came; recorded before its answer goes
     private async Task Serve(Socket socket)
     {
         using var owned = socket;
@@ -224,22 +224,24 @@ internal sealed class HeadListener : IAsyncDisposable
                     break;
                 }
             }
-
-            if (_answer is not null)
-            {
-                await stream.WriteAsync(Encoding.Latin1.GetBytes(_answer), deadline.Token);
-            }
         }
         catch (Exception)
         {
             // what it read so far stands
         }
 
+        // ! recorded before it answers: its client reads what it holds as soon as its answer came
         _heads.Enqueue(read.ToString());
 
         try
         {
             _arrived.Release();
+
+            if (_answer is not null)
+            {
+                await stream.WriteAsync(Encoding.Latin1.GetBytes(_answer), deadline.Token);
+            }
+
             socket.Shutdown(SocketShutdown.Both);
         }
         catch (Exception)
