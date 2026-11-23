@@ -1429,10 +1429,10 @@ WebSocket's address in this order, and answers the first that applies:
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
    path whose percent-decoding holds NUL, a field that holds a control character or an octet past
-   US-ASCII, a `Content-Length` that frames no body or one beside a `Transfer-Encoding`, or a
-   `Transfer-Encoding` whose final coding is not `chunked` or that lists anything after its first
-   `chunked`, or one an HTTP/1.0 request carries (section 15.12), its HTTP server answers,
-   unmarked.
+   US-ASCII, a `Content-Length` that frames no body, one whose number passes 2⁶³ − 1 or one beside
+   a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked` or that lists
+   anything after its first `chunked`, or one an HTTP/1.0 request carries (section 15.12), its HTTP
+   server answers, unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1914,6 +1914,19 @@ the request is judged. That is a `Content-Length` that is not digits alone
 or one that names two numbers, in one line or across its lines. So is one that names one number
 more than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or
 read as that number: every side refuses it, since not every platform's HTTP can read it
+(`docs/support.md`, "Leveled down").
+
+A request's `Content-Length` whose number passes 2⁶³ − 1, the largest signed 64-bit count, is
+answered alike: 400 unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields
+every response on the path carries, its connection closed once answered, and its stream reset
+`PROTOCOL_ERROR` over HTTP/2. It is judged before anything else of the request, whether a
+`Transfer-Encoding` comes beside it or not. Its number is its digits' decimal value, and its leading
+zeros count for nothing ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)):
+2⁶³ − 1 written in 23 digits is a length, and 2⁶³ so written is not. RFC 9110 §8.6 holds any such
+number valid and has a recipient guard against its overflow. A server may refuse content too large
+to process ([§17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5)), 413
+([§15.5.14](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.14)). Every side answers it as
+HTTP's own all the same, since not every platform's HTTP lets a server read such a request
 (`docs/support.md`, "Leveled down").
 
 A request that carries a `Content-Length` beside a `Transfer-Encoding`, in either order and

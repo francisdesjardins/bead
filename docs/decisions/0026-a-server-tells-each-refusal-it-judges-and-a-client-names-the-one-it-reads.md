@@ -4,8 +4,10 @@
 - **Scope**: the protocol, and every implementation's server transports and clients, over HTTP and
   at a WebSocket's address: in [`spec/spec.md`](../../spec/spec.md), the refusal a server's
   transport tells (15.1, and 15.2's refusals told), what a client names of a refusal it reads
-  (15.6), the octets a request's field and its target may hold (15.12, and transcoding 3.6), and how
-  its method is compared (15.6, and 15.2's step 3). The marks and their order are 15.6's; which
+  (15.6), the octets a request's field and its target may hold (15.12, and transcoding 3.6), how a
+  request's body is framed, its `Content-Length` and its `Transfer-Encoding`, and the bound on a
+  `Content-Length` (15.12, 15.2's step 1, and transcoding 10.1), and how its method is compared
+  (15.6, and 15.2's step 3). The marks and their order are 15.6's; which
   visible characters a target holds, by the sets a page's browser percent-encodes under the URL
   Standard, and a `#` anywhere, is
   [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s;
@@ -173,6 +175,26 @@ The Rust side's HTTP address and its gateway serve a target that holds a `#` cut
 `docs/support.md`, `A # in a target`
 ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
+**A request's body is framed as HTTP frames it, and its `Content-Length` is counted to 2⁶³ − 1**
+(spec 15.12): what HTTP refuses of a body's framing, a `Content-Length` that frames no body, one
+beside a `Transfer-Encoding`, or a `Transfer-Encoding` it does not take, is answered as HTTP's own,
+unmarked, before anything else of the request is judged
+([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)). A `Content-Length` is
+counted by value, its leading zeros counting for nothing
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), to 2⁶³ − 1, the largest
+signed 64-bit count. One past it is answered 400 unmarked over HTTP/1.1 and at a WebSocket's
+address, its connection closed, and its stream reset `PROTOCOL_ERROR` over HTTP/2, before its host
+is judged. That levels RFC 9110 §17.5's 413
+([§15.5.14](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.14)) to what Kestrel, nghttp2 and
+Node's parser answer before an application reads the request, a row of `docs/support.md`'s "Leveled
+down". Each side reads the digits by value, through `isCountedLength`,
+`RequestFields.IsCountedLength` and `is_counted_length`: the TypeScript side compares a `BigInt`,
+since a double reads 2⁶³ − 1 and 2⁶³ as one number. hyper's 431 at 2⁶⁴ − 2 and 2⁶⁴ − 1 over
+HTTP/1.1, and h2's reset of a `Content-Length` of more than 19 digits over HTTP/2, stay platform
+rows of `docs/support.md`, since Bead puts no second parser of the head in front of hyper's
+([RFC 9112 §11.2](https://www.rfc-editor.org/rfc/rfc9112#section-11.2)). Kestrel's `GOAWAY` over
+HTTP/2 is the row of a `Content-Length` HTTP refuses over HTTP/2.
+
 **A request's method is compared as it came** (spec 15.6, and 15.2's step 3): a case-sensitive
 token ([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)), so `get` is no `GET`.
 Any method the path does not take, an extension method among them, is refused 405
@@ -225,6 +247,15 @@ none, one percent-encoded taken; an exchange of `spec/transcoding.json` pins it 
 no route matches answered 400, not 404. Over HTTP/2, Kestrel ends the session on NUL or on a lone
 octet that is no UTF-8 in `:path`, as on a field, and h2 on such a lone octet, where Node resets the
 stream: the platform row of `docs/support.md` names each.
+
+**A `Content-Length` past 2⁶³ − 1 is answered alike on every side**: two cases of
+`spec/transports.json`, over HTTP and at a WebSocket's address, and an exchange of
+`spec/transcoding.json` send it from a host not taken. 2⁶³ − 1, in 19 digits and in 23, goes on to
+the host's 403 `host-refused`; 2⁶³, in 19 digits and in 23, 19 nines, 2⁶⁴ and 23 nines are each
+answered 400 unmarked. 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out of the shared files, since hyper answers
+them 431. Each side's own tests send them: the Rust side's hold hyper's 431 at its HTTP transport
+and gateway, and every other surface answers them 400 unmarked. Over HTTP/2, each side's own test
+holds its answer.
 
 **Over HTTP/2, each platform answers part of it before its transport reads the request**: Node's
 HTTP/2 parser, nghttp2, drops a field whose value holds a control character, so the TypeScript
@@ -279,9 +310,10 @@ the address a server listens on; a field value's ends met it in
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round, which keeps its
 objections and answers; a request's target met it in a round of its own, at xhigh effort, beside
 [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
-rule on a target past US-ASCII at a gateway: ten objections, each accepted; and a method's case
-met it in a round of its own, at xhigh effort: eight objections, each accepted. Its objections, each
-with the answer that holds:
+rule on a target past US-ASCII at a gateway: ten objections, each accepted; a method's case met it
+in a round of its own, at xhigh effort: eight objections, each accepted; and a `Content-Length` too
+large to count met it in a round of its own, at xhigh effort: nine objections, eight accepted and
+one in part. Its objections, each with the answer that holds:
 
 ### On a refusal told and the default listening address
 
@@ -326,3 +358,22 @@ it came.
 | The excuse hides no refusal, but a `GET` control is the one step the TypeScript side could play; and that side's twin sends `BEAD` and `get` alone                                                                                                                                                      | **Accepted.** No control step: each step opens its own socket, and the next case proves the server standing. Two cases of their own rather than steps added to the 405 cases, since a `differs` excuses a whole case. The row says what holds of the rest: llhttp matches its method table byte for byte, in upper case alone.                                                                                                                                                                                                                               |
 | The row, the counts and the gate that holds them are unsaid: `check_crossing` asks the row to name both titles, and `spec/check.py` holds the totals and the Rust side's count, not the TypeScript and C# sides' "but"                                                                                  | **Accepted.** The row names both titles; 268 cases, 91 over HTTP and 46 over WebSocket, the Rust side's 182 of 268, the README's 268; the TypeScript and C# sides' "all 268 but two" each, counted from the file's `differs`. The page's count follows the file, read at its build.                                                                                                                                                                                                                                                                          |
 | The CHANGELOG's line is to be reworded and the cases told; the proposal's account of today misses the twins on every side; `BEAD` as the unknown method                                                                                                                                                 | **Accepted.** The line reworded, the cases told; this table answers the proposal as it stands, the three twins cited by the row; `BEAD` kept, a token no parser's table holds and no registered method.                                                                                                                                                                                                                                                                                                                                                      |
+
+### On a Content-Length too large to count
+
+The proposal: 15.12 bounding a `Content-Length` at 2⁶³ − 1, as one that frames no body, and
+answering one past it as HTTP's own refusal, 400 unmarked, its connection closed, before any other
+judgement. Nine objections, each checked against the platforms on the wire and RFC 9110: eight
+accepted and one in part, the proposal amended.
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The draft treats a `Content-Length` too large to count as one that frames no body, answered as HTTP answers it. RFC 9110 §8.6 holds any such value valid, and the standard's answer to content a server cannot process is 413 (§17.5, §15.5.14). The 400 is Bead leveling to the platforms, so it needs a "Leveled down" row, and the bound should be named for what it is. | Accepted. 15.12 gains a paragraph of its own, outside "frames no body". It says §8.6 holds the value valid and §17.5 would answer 413, and that every side answers 400 unmarked, its connection closed, or resets its stream over HTTP/2, since Kestrel and nghttp2 answer before an application reads the request. A "Leveled down" row covers both HTTP versions. The bound is named "the largest signed 64-bit count". The spec names no platform, as its other levelings do, and the row names Kestrel and nghttp2.                              |
+| The draft, the review and the row leave out HTTP/2, where the three sides answer 2⁶³ three ways: nghttp2 resets the stream, Kestrel ends the session, and h2 hands 2⁶³ to 10¹⁹ − 1 on to Bead as a length.                                                                                                                                                                  | Accepted. 15.12's paragraph covers HTTP/2 with a stream reset `PROTOCOL_ERROR`. The Rust transport and gateway apply the bound over HTTP/2 through `Malformed` and `reset_of`. The Rust behaviour today is inferred from h2's and hyper's source, so the Rust stage's HTTP/2 test proves it, with values h2 hands on. The TypeScript and Rust sides gain an HTTP/2 test, and the C# side a test of Kestrel's `GOAWAY`. The row of a `Content-Length` HTTP refuses over HTTP/2 extends to the bound.                                                  |
+| Leading zeros count by value, as RFC 9110 reads the field, and five of the six parsers read it so. h2 counts digits, which leaves a Rust-over-HTTP/2 difference the draft never names.                                                                                                                                                                                      | Accepted. 15.12 reads the number by value, its leading zeros counting for nothing. The cases send a zero-padded 2⁶³ − 1 (a length) and a zero-padded 2⁶³ (refused), so no side can count digits. A platform row says that h2 resets a `Content-Length` of more than 19 digits whatever its number, with no option, until h2 reads it by value.                                                                                                                                                                                                       |
+| TypeScript's predicate cannot use `Number`, and a case built only of 2⁶³ and 10²³ passes a predicate that also refuses 2⁶³ − 1.                                                                                                                                                                                                                                             | Accepted. TypeScript compares with `BigInt`, C# with `long.TryParse` and Rust with `i64` parsing, each after a check of digits alone. Every surface's case holds both edges: 2⁶³ − 1 goes on to the host's 403 `host-refused`, and 2⁶³ is answered 400 unmarked. 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out of the shared files.                                                                                                                                                                                                                                   |
+| The draft leaves C# out of the implementers, though the twin rule needs a C# twin of the new judgement tests, and C#'s `IsFramed` would fail it.                                                                                                                                                                                                                            | Accepted. `IsFramed` applies the bound through `RequestFields.IsCountedLength`, and `WebSocketHandshakeTests` and a new `RequestFieldsTests` carry the twins. The C# transport and gateway need no code, since Kestrel answers first. Their tests of the old row are renamed and send a host not taken.                                                                                                                                                                                                                                              |
+| hyper's 431 reaches further than two values: zero-padded forms, and a length placed before a `Transfer-Encoding`. "It cannot be changed from Bead's code" is inaccurate: it can be, at a cost Bead should decline by name.                                                                                                                                                  | Accepted. The row says hyper answers 431 at 2⁶⁴ − 2 and 2⁶⁴ − 1 by their number, whatever zeros lead them, and before a `Transfer-Encoding` that follows. It says hyper's builder offers no option and `on_error` no callback, and that Bead declines a second parser of the head in front of hyper's (RFC 9112 §11.2). Its lift is hyper answering 400, since 431 is for fields too large (RFC 6585 §5). A Rust-only test holds the row, and the shared files leave both values out.                                                                |
+| The draft's evidence on the order is wrong for TypeScript: with a host not taken, it answers 403 below 2⁶⁴ too. The order itself holds.                                                                                                                                                                                                                                     | Accepted. The record's evidence says that today TypeScript and Rust answer 403 where C# answers 400, at the HTTP transport, the gateway and the WebSocket address, which the round's own probe confirms. The new paragraph states its place, before anything else of the request. Every rule judged that early answers 400 unmarked, so nothing collides. Every case sends a host not taken.                                                                                                                                                         |
+| The change costs more than the draft counts, for a reach of nil. Shipping its HTTP/1.1 half alone would leave HTTP/2 answering 2⁶³ three ways with no row.                                                                                                                                                                                                                  | Accepted. The change is carried whole, HTTP/2 and every row included, as one series: the spec, then each side. No half ships alone.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| RFC 9110 §8.6's MUST binds every recipient, a client too, and the three clients read a response's `Content-Length` three ways, so the failure each reports may differ.                                                                                                                                                                                                      | In part. Each client guards against overflow, so the MUST holds: TypeScript compares a double, C# reads what `SocketsHttpHandler` parsed, and Rust parses a `u64` or meets hyper's bound. A difference in what each reports is inferred, not shown, so the spec states no client behaviour from it. The bound is written as a server's reading of a request. The paragraph opens "A request's `Content-Length`", so the scope is in its own words. A probe of the three clients is an open point: its outcome is a row or a sentence with its twins. |
