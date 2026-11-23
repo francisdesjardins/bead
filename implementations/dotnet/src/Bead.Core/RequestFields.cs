@@ -5,9 +5,9 @@ namespace Bead;
 /// <summary>
 /// What HTTP refuses of a request's fields that Kestrel hands on (spec 15.12): a
 /// <c>Content-Length</c> beside a <c>Transfer-Encoding</c> over HTTP/1.x, a
-/// <c>Transfer-Encoding</c> that lists anything after its first <c>chunked</c> or that an HTTP/1.0
-/// request carries, and the connection-specific fields over HTTP/2, which every server judges before
-/// anything else of the request.
+/// <c>Transfer-Encoding</c> that lists a coding before its <c>chunked</c>, anything after its first
+/// <c>chunked</c> or that an HTTP/1.0 request carries, and the connection-specific fields over
+/// HTTP/2, which every server judges before anything else of the request.
 /// </summary>
 internal static class RequestFields
 {
@@ -39,11 +39,13 @@ internal static class RequestFields
 
     /// <summary>
     /// Whether a request's <c>Transfer-Encoding</c>, its field lines as they came, frames its body
-    /// as spec 15.12 takes it: none at all; or, over HTTP/1.1, a list whose final coding is
-    /// <c>chunked</c>, in any ASCII case (RFC 9112 §6.3 item 4), and whose first <c>chunked</c> is
-    /// that last element. An empty element before it is ignored (RFC 9110 §5.6.1.2); anything after
-    /// it, another <c>chunked</c> or an empty element among it, is not. One an HTTP/1.0 request
-    /// carries is none either, its framing faulty (RFC 9112 §6.1).
+    /// as spec 15.12 takes it: none at all; or, over HTTP/1.1, a list whose one coding is
+    /// <c>chunked</c>, in any ASCII case, its last element (RFC 9112 §6.3 item 4). An empty element
+    /// before it is ignored (RFC 9110 §5.6.1.2). A coding before it is one no side decodes (RFC 9112
+    /// §6.1), and anything after it, another <c>chunked</c> or an empty element among it, is not
+    /// taken. One an HTTP/1.0 request carries is none either, its framing faulty (RFC 9112 §6.1). A
+    /// request whose <c>Transfer-Encoding</c> is not taken is answered 400 unmarked and its
+    /// connection closed, before anything else of it is judged.
     /// </summary>
     public static bool IsTransferEncodingFramed(string protocol, IReadOnlyList<string?> transferEncoding)
     {
@@ -62,12 +64,15 @@ internal static class RequestFields
         {
             return element.Trim(HostsAndOrigins.FieldWhitespace);
         }).ToList();
-        var first = elements.FindIndex((element) =>
-        {
-            return HostsAndOrigins.IsAsciiEqual(element, "chunked");
-        });
 
-        return !string.Equals(protocol, "HTTP/1.0", StringComparison.OrdinalIgnoreCase) && first == elements.Count - 1;
+        // every element but the last empty, and the last chunked; each line splits into one element
+        // at least, so there is a last
+        return !string.Equals(protocol, "HTTP/1.0", StringComparison.OrdinalIgnoreCase)
+            && HostsAndOrigins.IsAsciiEqual(elements[^1], "chunked")
+            && elements.Take(elements.Count - 1).All((element) =>
+            {
+                return element.Length == 0;
+            });
     }
 
     /// <summary>

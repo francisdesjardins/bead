@@ -13,6 +13,7 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  isTransferEncodingFramed,
   isVisibleField,
   isVisibleTarget,
   isWellFormedHost,
@@ -842,6 +843,40 @@ test.describe('hosts and origins', () => {
         return isCountedLength(value);
       })
     ).toEqual([]);
+  });
+
+  test('isTransferEncodingFramed takes chunked as its one coding, in any case, over HTTP/1.1, an empty element before it ignored, and refuses a coding before it, anything after it and one an HTTP/1.0 request carries', () => {
+    // none at all, over either version
+    expect(isTransferEncodingFramed('1.1', [])).toBe(true);
+    expect(isTransferEncodingFramed('1.0', [])).toBe(true);
+    // chunked as the one coding, in any case, an empty element before it in one line or two
+    expect(
+      [['chunked'], ['Chunked'], [', chunked'], [',  , chunked'], ['', 'chunked']].filter(
+        (lines) => {
+          return !isTransferEncodingFramed('1.1', lines);
+        }
+      )
+    ).toEqual([]);
+    // a coding before chunked, in one line or two; a final coding other than chunked; anything
+    // after the first chunked; and chunked with a parameter
+    expect(
+      [
+        ['gzip, chunked'],
+        ['x-unknown, chunked'],
+        ['identity, chunked'],
+        ['gzip, , chunked'],
+        ['gzip', 'chunked'],
+        ['gzip'],
+        ['chunked, gzip'],
+        ['chunked,'],
+        ['chunked, chunked'],
+        ['chunked;q=1'],
+      ].filter((lines) => {
+        return isTransferEncodingFramed('1.1', lines);
+      })
+    ).toEqual([]);
+    // chunked alone, over HTTP/1.0
+    expect(isTransferEncodingFramed('1.0', ['chunked'])).toBe(false);
   });
 
   test('folds ASCII alone: a host that differs past ASCII is another', () => {

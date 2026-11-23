@@ -11,6 +11,7 @@ import { request as requestHTTPS } from 'node:https';
 import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { connect as connectTLS } from 'node:tls';
+import { gzipSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createRouterServer } from '../../../router/server/router-server';
@@ -2576,6 +2577,54 @@ test.describe('createHTTPTransportServer, its edges', () => {
       expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
       expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
       expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the pipelined connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
+  // spec 15.12; RFC 9112 §6.1
+  test('refuses 400 unmarked a request whose Transfer-Encoding lists a coding before its chunked, in one line or two, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+    await using started = await startTransport();
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 }));
+    const chunkedOf = (body: Buffer): string => {
+      return `${body.length.toString(16)}\r\n${body.toString('latin1')}\r\n0\r\n\r\n`;
+    };
+    // * a body still gzip-coded once its chunks are read, which no side decodes
+    const gzipped = chunkedOf(gzipSync(cancel));
+    const plain = chunkedOf(cancel);
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+
+    for (const [authority, codings, chunks] of [
+      [host, 'Transfer-Encoding: gzip, chunked', gzipped],
+      [host, 'Transfer-Encoding: x-unknown, chunked', plain],
+      [host, 'Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked', gzipped],
+      ['elsewhere.test', 'Transfer-Encoding: gzip, chunked', gzipped],
+    ] as const) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.1\r\nHost: ${authority}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\n${codings}\r\n\r\n${chunks}${pipelined}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked, with none of the fields every response on the path carries, which
+      // closes its connection
+      const head = (read.text.split('\r\n\r\n')[0] ?? '').toLowerCase();
+
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(head).toContain('connection: close');
+      expect(head).not.toContain(REFUSAL_HEADER);
+      expect(head).not.toMatch(/\r\n(?:cache-control|vary):/u);
     }
 
     // neither the cancel handed on, nor the pipelined connect drawn
