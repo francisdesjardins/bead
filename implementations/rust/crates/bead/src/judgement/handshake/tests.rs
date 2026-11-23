@@ -486,6 +486,81 @@ fn refuses_first_unmarked_a_content_length_other_than_one_line_of_digits_alone_i
 }
 
 #[test]
+fn refuses_first_unmarked_a_content_length_whose_number_passes_2_63_1_leading_zeros_read_by_value_whatever_else_the_request_holds()
+ {
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    let zeros = core::iter::repeat_n('0', 40).collect::<String>();
+    // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ and 23 nines: the judgement
+    // reads its own head, and counts each
+    let past = [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551614",
+        "18446744073709551615",
+        "18446744073709551616",
+        twenty_three.as_str(),
+    ];
+    let alone = past.map(|length| plain(&[("Content-Length", length)]));
+    let elsewhere = past.map(|length| {
+        without(
+            &[("Host", "elsewhere.test"), ("Content-Length", length)],
+            &["host"],
+        )
+    });
+    let posted = past.map(|length| {
+        request_of(
+            &[("Content-Length", length)],
+            Shape {
+                method: Some("POST"),
+                ..Shape::default()
+            },
+        )
+    });
+
+    // as it is, from a host it does not take, and under another method
+    assert_eq!(
+        answers_of(&alone),
+        each(HOST, past.len()),
+        "each refused unmarked as it is"
+    );
+    assert_eq!(
+        answers_of(&elsewhere),
+        each(HOST, past.len()),
+        "each refused unmarked from elsewhere"
+    );
+    assert_eq!(
+        answers_of(&posted),
+        each(HOST, past.len()),
+        "each refused unmarked under POST"
+    );
+    // 2⁶³ − 1, in 19 digits and in 23, is a length: content declared, malformed after its host;
+    // 0 in 40 digits is none
+    assert_eq!(
+        answers_of(&[
+            plain(&[("Content-Length", "9223372036854775807")]),
+            plain(&[("Content-Length", "00009223372036854775807")]),
+            plain(&[("Content-Length", zeros.as_str())]),
+        ]),
+        [MALFORMED, MALFORMED, TAKEN],
+        "a length"
+    );
+    // and 2⁶³ − 1 from a host it does not take goes on to the host's refusal
+    assert_eq!(
+        answers_of(&[without(
+            &[
+                ("Host", "elsewhere.test"),
+                ("Content-Length", "9223372036854775807")
+            ],
+            &["host"],
+        )]),
+        [HOST_REFUSED],
+        "a length from elsewhere"
+    );
+}
+
+#[test]
 fn refuses_first_unmarked_a_content_length_beside_a_transfer_encoding_in_either_order_whatever_either_holds_or_a_transfer_encoding_whose_final_coding_is_not_chunked_that_lists_anything_after_its_first_chunked_or_that_an_http_1_0_request_carries_whatever_else_the_request_holds()
  {
     let old = |fields: &[(&str, &str)], without: &[&str]| {
