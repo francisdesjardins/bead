@@ -127,8 +127,8 @@
   <p class="space">
     The architecture guide sets Bead
     <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: it is
-    unpublished, and it speaks three languages.
+    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: its
+    packages are unpublished, and it speaks three languages.
   </p>
 </section>
 
@@ -161,7 +161,8 @@
     blueprint from it, a JSON file that describes the API without depending on any language.
     <code>beadc check</code> judges it by its rules, each refusal at its line and column. Each
     language’s target then writes its code from it, and <code>beadc breaking</code> holds it to
-    <a href="#versions">the last release</a>. <code>beadc</code> runs in a Docker image. One
+    <a href="#versions">the last release</a>. <code>beadc</code> runs in a Docker image, published
+    on GitHub’s container registry at each release, attested and signed. One
     contract gives several packages, each with its own selection of procedures.
     <a href="/playground/#packages">The demo’s Packages tab</a> cuts a blueprint into packages
     with <code>beadc</code>’s own code.
@@ -1924,7 +1925,7 @@
     </li>
     <li>
       <strong>Publication</strong
-      ><span>The packages on npm, NuGet and crates.io, and <code>beadc</code>’s image.</span>
+      ><span>The packages on npm, NuGet and crates.io.</span>
     </li>
   </ul>
 </section>

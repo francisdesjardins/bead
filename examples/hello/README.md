@@ -102,7 +102,9 @@ docker build -f ../../builder/Dockerfile -t beadc:local ../..
 $env:BEADC_IMAGE = 'beadc:local'; ./beadc.ps1 generate
 ```
 
-Given no `BEADC_IMAGE`, the wrappers run the image they name, as the engine finds it:
+Given no `BEADC_IMAGE`, the wrappers run the image of the version they name, which the engine pulls
+from GitHub's container registry where it holds none; at that release's tag, it finds nothing to
+change:
 
 ```sh
 ./beadc.sh generate            # or ./beadc.ps1 generate, in PowerShell 7.6
