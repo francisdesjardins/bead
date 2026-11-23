@@ -47,8 +47,12 @@ const STEP_KEYS: [&str; 11] = [
 // the keys that time a step or name its exchange rather than make an act
 const MODIFIERS: [&str; 3] = ["after", "on", "within"];
 
-const WEBSOCKET_OPTION_KEYS: [&str; 12] = [
+const WEBSOCKET_OPTION_KEYS: [&str; 16] = [
     "maximumMessageBytes",
+    "maximumMessageFrames",
+    "messageBytesBudget",
+    "minimumBodyBytesPerSecond",
+    "bodyGracePeriod",
     "heartbeat",
     "hosts",
     "origins",
@@ -422,6 +426,10 @@ fn websocket_server_of(case: &Value, clock: &SharedClock) -> Result<UnderTest, S
     transport.trusted_proxies = strings_of(&options, "trustedProxies");
     transport.unnamed_proxies = count("unnamedProxies");
     transport.maximum_message_bytes = count("maximumMessageBytes");
+    transport.maximum_message_frames = count("maximumMessageFrames");
+    transport.message_bytes_budget = count("messageBytesBudget");
+    transport.minimum_body_bytes_per_second = count("minimumBodyBytesPerSecond");
+    transport.body_grace_period = duration_of(&options, "bodyGracePeriod");
     transport.maximum_connections = count("maximumConnections");
     transport.maximum_connections_per_address = count("maximumConnectionsPerAddress");
     transport.maximum_unsent_bytes = count("maximumUnsentBytes");
@@ -714,11 +722,17 @@ fn frames_of(send: &Map<String, Value>) -> Result<Vec<Frame>, String> {
                 .and_then(Value::as_str)
                 .and_then(hexadecimal::bytes_of)
                 .ok_or("a frame's payload is hexadecimal")?;
+            // * the length its head announces, past the payload given, which alone follows it
+            let length = match frame.get("length") {
+                None => None,
+                Some(length) => Some(length.as_u64().ok_or("a frame's length is a count")?),
+            };
 
             Ok(Frame {
                 fin,
                 opcode,
                 payload,
+                length,
             })
         })
         .collect()

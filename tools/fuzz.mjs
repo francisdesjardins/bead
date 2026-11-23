@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
-// pull request's gate (decision 0006). Nine targets, the same on each side and named alike, one
+// pull request's gate (decision 0006). Ten targets, the same on each side and named alike, one
 // of beadc's and two of the Rust side's own, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
@@ -21,6 +21,10 @@
 //   `spec/transcoding.proto`'s `Everything`, the first byte even, or its `Edges`, odd, the rest
 //   its body: what reads is written, what was written reads, and it writes again to the same
 //   text, byte for byte (decision 0052);
+// - `websocket-frames`: the WebSocket transport's frame meter, spec 15.3, beside the reader of the
+//   side's platform over the same bytes, the first byte picking the side that reads, a server by
+//   its low bit clear, and the size of its reads: the two agree on the bounds of each frame, the
+//   end of each message and the frame the stream fails at (decision 0056);
 // - `blueprint`, the TypeScript side's alone, as beadc has no other: beadc's blueprint reader, its
 //   JSON, its schema and its rules, and its form written back;
 // - `mqtt-packets`, the Rust side's alone: its MQTT 5 client's reader of a broker's packets, which
@@ -101,6 +105,7 @@ export const TWINS = Object.freeze([
   'broker-parcel',
   'proto-codecs',
   'json-form',
+  'websocket-frames',
 ]);
 
 /**
@@ -377,6 +382,62 @@ const MQTT_WEBSOCKET_FRAMES = Object.freeze([
   '82 7F 00 00 00 00 00 01 00 00 30 00',
 ]);
 
+// the key the `websocket-frames` target's seeds are masked by, as a client masks its frames
+// (RFC 6455 §5.3)
+const FRAME_KEY = Buffer.of(0x37, 0xfa, 0x21, 0x3d);
+
+/** Every list of frames `value` holds under `frames`, at any depth: a WebSocket case's sends. */
+const framesUnder = (value) => {
+  const found = [];
+
+  const walk = (inner) => {
+    if (Array.isArray(inner)) {
+      inner.forEach(walk);
+    } else if (inner !== null && typeof inner === 'object') {
+      if (Array.isArray(inner.frames)) {
+        found.push(inner.frames);
+      }
+
+      Object.values(inner).forEach(walk);
+    }
+  };
+
+  walk(value);
+
+  return found;
+};
+
+/**
+ * A WebSocket case's frames as the `websocket-frames` target's seed: the byte that has a server
+ * read them, its low bit clear, then each frame as a client writes it, masked, its head announcing
+ * the length the case gives where it gives one.
+ */
+export const framesSeedOf = (frames) => {
+  return Buffer.concat([
+    Buffer.of(0),
+    ...frames.map((frame) => {
+      const payload = entryBytesOf(frame, 'payload');
+      const announced = frame.length ?? payload.length;
+      const first = (frame.fin ? 0x80 : 0) | frame.opcode;
+      const length = Buffer.alloc(8);
+
+      length.writeBigUInt64BE(BigInt(announced));
+
+      const head =
+        announced < 126
+          ? Buffer.of(first, 0x80 | announced)
+          : announced < 0x1_00_00
+            ? Buffer.concat([Buffer.of(first, 0x80 | 126), length.subarray(6)])
+            : Buffer.concat([Buffer.of(first, 0x80 | 127), length]);
+      const masked = payload.map((byte, index) => {
+        return byte ^ (FRAME_KEY[index % FRAME_KEY.length] ?? 0);
+      });
+
+      return Buffer.concat([head, FRAME_KEY, masked]);
+    }),
+  ]);
+};
+
 // what the `proto-codecs` target reads before its payload: the path, the count and the number of
 // unknown groups, each 0, so the payload is read as it is and written as it was read
 const PLAIN = Buffer.of(0, 0, 0);
@@ -405,7 +466,7 @@ const entryBytesOf = (entry, key) => {
  * mutation tests; the `proto` payloads of `codecs.json` and the bytes its `proto` values are
  * written as, each after three zero bytes, the plain path; the bodies of `transcoding.json`'s
  * readings of `Everything` and of `Edges`, each after its message's byte, its text in UTF-8 or its
- * bytes; `blueprints`, the repository's blueprints as bytes; the packets a broker sends, the Rust
+ * bytes; the frames of the WebSocket cases' sends, as a client writes them; `blueprints`, the repository's blueprints as bytes; the packets a broker sends, the Rust
  * side's packet mutation seeds; and the frames a server sends, the Rust side's frame mutation seeds.
  */
 export const seedsOf = (files) => {
@@ -472,6 +533,7 @@ export const seedsOf = (files) => {
 
       return [Buffer.concat([Buffer.of(index), body])];
     }),
+    'websocket-frames': framesUnder(transports).map(framesSeedOf),
     blueprint: blueprints,
     'mqtt-packets': MQTT_PACKETS.map((packet) => {
       return hexBytesOf(packet);

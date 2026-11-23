@@ -352,6 +352,8 @@ fn bounds_default_to_what_the_file_states() {
             crate::MAXIMUM_CONNECTIONS_PER_ADDRESS,
         ),
         ("maximumMessageBytes", crate::MAXIMUM_MESSAGE_BYTES),
+        ("maximumMessageFrames", crate::MAXIMUM_MESSAGE_FRAMES),
+        ("messageBytesBudget", crate::MESSAGE_BYTES_BUDGET),
         ("maximumOutboxBytes", crate::MAXIMUM_OUTBOX_BYTES),
         ("maximumUnsentBytes", crate::MAXIMUM_UNSENT_BYTES),
         ("maximumWait", milliseconds(crate::MAXIMUM_WAIT)),

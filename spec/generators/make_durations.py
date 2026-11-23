@@ -544,6 +544,16 @@ places = [
         'observed': 'refusal',
     },
     {
+        'id': 'webSocketTransportServer.bodyGracePeriod',
+        'name': "how long a WebSocket server lets a message come before its rate is held",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.12',
+        'ways': [way('options', "the transport server's options, as it is built")],
+        'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
+        'observed': 'held',
+    },
+    {
         'id': 'webSocketTransportServer.headersTimeout',
         'name': "how long a WebSocket server lets an upgrade's head take to come whole",
         'kind': 'timeout',

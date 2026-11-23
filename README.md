@@ -225,7 +225,7 @@ procedures, each under a version of its own. Beside them:
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
 | [`transports.json`](spec/transports.json)                       | 312 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
-| [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
+| [`durations.json`](spec/durations.json)                         | 36 places that take a duration an application gives a side, by 58 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
 | [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
 | [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                                                                                     |
 | [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                                                                              |
@@ -920,7 +920,7 @@ machine.
 
 ## Fuzzing
 
-Every side fuzzes the same nine parsers, guided by coverage, each fed raw bytes:
+Every side fuzzes the same ten parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -939,7 +939,10 @@ it back; `json-form`, protobuf's JSON read by Bead's mapping over `spec/transcod
 `Everything` and `Edges` (transcoding 5.2), the first byte picking the message, where what reads is
 written, what was written reads, and it writes again to the same text, byte for byte, never a
 message's bytes compared, since a map's entries are written in 17.7.6's order and a `-0` as `0` or
-left out (5.6). The Rust side fuzzes all nine, over its core's judgement and codecs and
+left out (5.6); `websocket-frames`, the WebSocket transport's frame meter (spec 15.3) beside its
+platform's reader, `ws`'s, .NET's or tungstenite's, fed the same bytes, the two agreeing on each
+frame's bounds, on each message's end, and on whether the stream fails and at which frame. The Rust
+side fuzzes all ten, over its core's judgement and codecs and
 `bead-protobuf`'s JSON form, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
 and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and

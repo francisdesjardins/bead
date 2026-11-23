@@ -10,20 +10,15 @@
 //! plays in real time on every side (decision 0011); without end, it arms nothing.
 
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
 use core::time::Duration;
-use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER, hold};
 use crate::errors::ProgrammerError;
-use crate::websocket::connection::Wire;
 
 #[cfg(test)]
 mod tests;
@@ -76,84 +71,6 @@ impl Reads {
 
     fn last(&self) -> Duration {
         Duration::from_nanos(self.last.load(Ordering::SeqCst))
-    }
-}
-
-/// A socket whose every read that brings bytes is stamped on its [`Reads`]: a part of a frame, a
-/// control frame and an unsolicited pong each count, as the socket reads them (spec 15.3).
-pub(crate) struct Stamped<S> {
-    socket: S,
-    reads: Arc<Reads>,
-}
-
-impl<S> fmt::Debug for Stamped<S> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Stamped").finish_non_exhaustive()
-    }
-}
-
-impl<S> Stamped<S> {
-    /// `socket`, its reads stamped on `reads`.
-    pub(crate) const fn new(socket: S, reads: Arc<Reads>) -> Self {
-        Self { socket, reads }
-    }
-}
-
-impl<S: AsyncRead + Unpin> AsyncRead for Stamped<S> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let before = buffer.filled().len();
-        let polled = Pin::new(&mut self.socket).poll_read(context, buffer);
-
-        if matches!(polled, Poll::Ready(Ok(()))) && buffer.filled().len() > before {
-            self.reads.stamp();
-        }
-
-        polled
-    }
-}
-
-impl<S: AsyncWrite + Unpin> AsyncWrite for Stamped<S> {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.socket).poll_write(context, bytes)
-    }
-
-    fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffers: &[io::IoSlice<'_>],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.socket).poll_write_vectored(context, buffers)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.socket.is_write_vectored()
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.socket).poll_flush(context)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.socket).poll_shutdown(context)
-    }
-}
-
-impl<S: Wire> Wire for Stamped<S> {
-    fn abort(&self) {
-        self.socket.abort();
-    }
-
-    // ! never stamped: what it sees of its socket is no read
-    fn poll_ended(&self, context: &mut Context<'_>) -> Poll<()> {
-        self.socket.poll_ended(context)
     }
 }
 

@@ -167,6 +167,7 @@ MAXIMUM_CONNECTIONS	MAXIMUM_CONNECTIONS [constant]	-	MAXIMUM_CONNECTIONS [consta
 MAXIMUM_CONNECTIONS_PER_ADDRESS	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	-	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	same
 MAXIMUM_ENVELOPE_PARTS_BYTES	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	-	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	same
 MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	MAXIMUM_MESSAGE_BYTES [constant]	same
+MAXIMUM_MESSAGE_FRAMES	MAXIMUM_MESSAGE_FRAMES [constant]	-	MAXIMUM_MESSAGE_FRAMES [constant]	same
 MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	MAXIMUM_PACKET_SIZE [constant]	same
 MAXIMUM_UNSENT_BYTES	MAXIMUM_UNSENT_BYTES [constant]	-	MAXIMUM_UNSENT_BYTES [constant]	same
 MemoryBroker	IMemoryBroker [record], createMemoryBroker [function]	MemoryBroker [record]	MemoryBroker [record]	same
@@ -180,6 +181,7 @@ MemoryTransportClientConnectOptions	IMemoryTransportClientConnectOptions [record
 MemoryTransportClientOptions	IMemoryTransportClientOptions [record]	MemoryTransportClientOptions [record]	MemoryTransportClientOptions [record]	same
 MemoryTransportServer	MemoryTransportServer [record], createMemoryTransportServer [function]	MemoryTransportServer [record]	MemoryTransportServer [record]	same
 MemoryTransportServerOptions	IMemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	same
+MESSAGE_BYTES_BUDGET	MESSAGE_BYTES_BUDGET [constant]	-	MESSAGE_BYTES_BUDGET [constant]	same
 METRICS_CONTENT_TYPE	METRICS_CONTENT_TYPE [constant]	-	METRICS_CONTENT_TYPE [constant]	same
 METRICS_REGISTRY_DEFAULTS	METRICS_REGISTRY_DEFAULTS [constant]	-	METRICS_REGISTRY_DEFAULTS [constant]	same
 MetricsExposition	IMetricsExposition [record]	MetricsExposition [record]	MetricsExposition [record]	same
