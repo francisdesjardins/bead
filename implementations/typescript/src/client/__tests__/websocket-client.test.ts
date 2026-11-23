@@ -150,7 +150,12 @@ test('createWebSocketClient takes a message of an envelope at most, more when th
       function (
         _url: string,
         _protocols: unknown,
-        options?: { closeTimeout?: number; maxPayload?: number; perMessageDeflate?: false }
+        options?: {
+          closeTimeout?: number;
+          maxFragments?: number;
+          maxPayload?: number;
+          perMessageDeflate?: false;
+        }
       ) {
         given.push(options);
 
@@ -168,7 +173,12 @@ test('createWebSocketClient takes a message of an envelope at most, more when th
     await connecting;
 
     expect(given).toEqual([
-      { closeTimeout: CLOSE_TIMEOUT, maxPayload: expected, perMessageDeflate: false },
+      {
+        closeTimeout: CLOSE_TIMEOUT,
+        maxFragments: 16_384,
+        maxPayload: expected,
+        perMessageDeflate: false,
+      },
     ]);
     await client[Symbol.asyncDispose]();
   }

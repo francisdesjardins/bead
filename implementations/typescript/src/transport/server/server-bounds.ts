@@ -82,6 +82,24 @@ export const SEND_GRACE_PERIOD = 5_000;
 export const HEADERS_TIMEOUT = 30_000;
 
 /**
+ * The bytes a WebSocket server holds of messages partway, by default, across its connections:
+ * 256 MiB (spec 15.12).
+ */
+export const MESSAGE_BYTES_BUDGET = 268_435_456;
+
+/** The frames of one WebSocket message, by default, the first among them (spec 15.3). */
+export const MAXIMUM_MESSAGE_FRAMES = 16_384;
+
+/** How long a WebSocket message comes, by default, before its rate is held: 5 seconds. */
+export const BODY_GRACE_PERIOD = 5_000;
+
+/**
+ * The slowest a WebSocket message may come, by default, once its grace passed: 240 bytes of
+ * payload a second, Kestrel's `MinRequestBodyDataRate` (spec 15.12).
+ */
+export const MINIMUM_BODY_BYTES_PER_SECOND = 240;
+
+/**
  * How long a socket closed in stages reads on and drops what still comes once its write side ended,
  * unless its client closes first: 2 seconds, as Apache httpd lingers (RFC 9112 §9.6).
  */

@@ -10,10 +10,14 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   WS_ERROR_CODE_PREFIX,
   WS_TOO_BIG_CODE,
+  WS_LARGEST_COUNT,
+  WS_TOO_MANY_FRAMES_CODE,
+  WS_TOO_MANY_FRAMES_MESSAGE,
 } from '../shared/constants';
 import { assertHeld, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
+  closedWithOf,
   ConnectError,
   ProgrammerError,
   notOpenOf,
@@ -45,6 +49,7 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import type { Data, ITlsOptions, ITransportMessage } from '../shared/types';
+import { assertCount, MAXIMUM_MESSAGE_FRAMES } from '../server/server-bounds';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -65,6 +70,7 @@ import type {
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export type { ITlsOptions } from '../shared/types';
+export { MAXIMUM_MESSAGE_FRAMES } from '../server/server-bounds';
 export type {
   ICloseEventLike,
   IMessageEventLike,
@@ -233,12 +239,16 @@ export const createWebSocketTransportClient = (
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
+    maximumMessageFrames = MAXIMUM_MESSAGE_FRAMES,
     WebSocket = globalThis.WebSocket,
   } = {
     ...DEFAULTS(),
     ...options,
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
+
+  // ! never without end: `ws` reads a `maxFragments` of 0 as none
+  assertCount('maximumMessageFrames', { value: maximumMessageFrames });
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
   const tls = tlsOf(options?.tls);
 
@@ -470,6 +480,8 @@ export const createWebSocketTransportClient = (
                             new WebSocket(url, protocols ?? [], {
                               closeTimeout:
                                 closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
+                              // ! never without end: `ws` truncates a count to 32 bits
+                              maxFragments: Math.min(maximumMessageFrames, WS_LARGEST_COUNT),
                               maxPayload,
                               // ! no permessage-deflate offer, as the C# client offers none: a
                               // third-party server must not negotiate compression on this side
@@ -586,7 +598,14 @@ export const createWebSocketTransportClient = (
                                 cause: error,
                                 maximumMessageBytes: maxPayload,
                               })
-                            : error;
+                            : error.code === WS_TOO_MANY_FRAMES_CODE &&
+                                error.message === WS_TOO_MANY_FRAMES_MESSAGE
+                              ? closedWithOf('the connection', {
+                                  cause: error,
+                                  code: 1008,
+                                  why: `a message past its maximumMessageFrames, ${String(maximumMessageFrames)} frames`,
+                                })
+                              : error;
                       }
                     };
                     socket.onmessage = ({ data }) => {

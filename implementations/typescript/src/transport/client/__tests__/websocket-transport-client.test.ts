@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
 import { createServer as createTlsServer } from 'node:https';
 import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
@@ -52,6 +53,7 @@ import {
   createWebSocketTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
+  MAXIMUM_MESSAGE_FRAMES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type IWebSocketTransportClientConnectOptions,
@@ -3213,6 +3215,168 @@ const answeringWith = async (frames: Buffer) => {
   };
 };
 
+// * a frame judged at its head over `ws`, which reads heads itself: a client takes no budget and
+// no rate (spec 15.3, decision 0056)
+test.describe('WebSocketTransportClient, the frames it reads at their heads', () => {
+  const [, [, TrackedWs]] = IMPLEMENTATIONS;
+
+  // a client over `ws` connected to a raw server, the close it sends and what it tells, in order
+  const connectRaw = async (
+    raw: Awaited<ReturnType<typeof startRaw>>,
+    options: { maxPayload?: number; maximumMessageFrames?: number } = {}
+  ) => {
+    const client = createWebSocketTransportClient({ ...options, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    endOnClose(socket);
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    return { client, sent, socket, told };
+  };
+
+  // spec 15.3
+  test('fails with 1009 at its head, without waiting for its payload, a frame that would take its message past maximumMessageBytes, a continuation among them', async () => {
+    await using raw = await startRaw();
+    const whole = await connectRaw(raw, { maxPayload: 1_024 });
+    const continued = await connectRaw(raw, { maxPayload: 1_024 });
+
+    // a head that announces 4,096 bytes, none of them sent
+    whole.socket.write(Uint8Array.of(0x82, 126, 0x10, 0x00));
+    // 1,000 bytes, then a continuation's head that announces 100: 1,100 past 1,024
+    continued.socket.write(
+      Buffer.concat([
+        Buffer.from([0x02, 126, 0x03, 0xe8]),
+        new Uint8Array(1_000),
+        Buffer.from([0x80, 100]),
+      ])
+    );
+
+    for (const { sent, told } of [whole, continued]) {
+      await expect
+        .poll(() => {
+          return [sent, told];
+        })
+        .toEqual([
+          [1009],
+          [
+            [
+              'error',
+              'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+            ],
+            ['close', false, false],
+          ],
+        ]);
+    }
+  });
+
+  // spec 15.3; docs/support.md
+  test('fails with 1008 the frame past maximumMessageFrames at its head, an empty frame counting', async () => {
+    await using raw = await startRaw();
+    const whole = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const past = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const withheld = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const heard: unknown[] = [];
+    // three frames of a message, two of them empty
+    const three = Buffer.from([0x02, 1, 0x78, 0x00, 0, 0x00, 0]);
+
+    whole.client.on('message', ({ data }) => {
+      heard.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+
+    // four frames are one message
+    whole.socket.write(Buffer.concat([three, Buffer.from([0x80, 1, 0x79])]));
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([[0x78, 0x79]]);
+
+    // an empty fifth fails it, its head whole
+    past.socket.write(Buffer.concat([three, Buffer.from([0x00, 0, 0x00, 0])]));
+    await expect
+      .poll(() => {
+        return [past.sent, past.told];
+      })
+      .toEqual([
+        [1008],
+        [
+          [
+            'error',
+            'the connection is closed with 1008: a message past its maximumMessageFrames, 4 frames',
+          ],
+          ['close', false, false],
+        ],
+      ]);
+
+    // ! `ws` counts a frame past its `maxFragments` once its payload came, not at its head: a fifth
+    // that announces 10 bytes fails it with its tenth
+    withheld.socket.write(Buffer.concat([three, Buffer.from([0x00, 0, 0x00, 10])]));
+    await sleep(200);
+    expect(withheld.sent).toEqual([]);
+    withheld.socket.write(new Uint8Array(10));
+    await expect
+      .poll(() => {
+        return withheld.sent;
+      })
+      .toEqual([1008]);
+  });
+
+  // RFC 6455 §5.1, §5.2, §5.4, §5.5; spec 15.3; docs/support.md
+  test('fails with 1002 a frame head RFC 6455 forbids before its platform reads it', async () => {
+    await using raw = await startRaw();
+    const forbidden: [string, Uint8Array, number][] = [
+      ['a reserved bit set', Uint8Array.of(0xc2, 0), 1002],
+      ['a reserved opcode', Uint8Array.of(0x83, 0), 1002],
+      ['a control frame not final', Uint8Array.of(0x09, 0), 1002],
+      ['a continuation with no message under way', Uint8Array.of(0x80, 0), 1002],
+      [
+        'a data frame that is not a continuation while a message is under way',
+        Uint8Array.of(0x02, 1, 0x78, 0x82, 1, 0x79),
+        1002,
+      ],
+      ['a masked frame', Uint8Array.of(0x82, 0x80, 0, 0, 0, 0), 1002],
+      ['a control frame longer than 125 bytes', Uint8Array.of(0x89, 126, 0, 126), 1002],
+      // ! `ws` reads a 64-bit length past 2⁵³ − 1 as too long, 1009, its top bit among it
+      [
+        'a 64-bit length with its top bit set',
+        Uint8Array.of(0x82, 127, 0x80, 0, 0, 0, 0, 0, 0, 0),
+        1009,
+      ],
+    ];
+    const sent: unknown[] = [];
+
+    for (const [reason, bytes] of forbidden) {
+      const connected = await connectRaw(raw);
+
+      connected.socket.write(bytes);
+      await expect
+        .poll(() => {
+          return connected.told.at(-1);
+        })
+        .toEqual(['close', false, false]);
+      sent.push([reason, connected.sent]);
+    }
+
+    expect(sent).toEqual(
+      forbidden.map(([reason, , code]) => {
+        return [reason, [code]];
+      })
+    );
+  });
+});
+
 // spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
 test.describe('WebSocketTransportClient, a close its server wrote with its 101', () => {
   test('opens on a 101 written together with a close, hears what came before it once open, and tells one close', async () => {
@@ -3271,7 +3435,12 @@ test.describe('WebSocketTransportClient, its close timeout', () => {
 
     expect(CLOSE_TIMEOUT).toBe(5_000);
     expect(given).toEqual([
-      { closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES, perMessageDeflate: false },
+      {
+        closeTimeout: CLOSE_TIMEOUT,
+        maxFragments: MAXIMUM_MESSAGE_FRAMES,
+        maxPayload: MAXIMUM_MESSAGE_BYTES,
+        perMessageDeflate: false,
+      },
     ]);
   });
 

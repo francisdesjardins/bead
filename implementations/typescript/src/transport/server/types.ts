@@ -468,11 +468,23 @@ export interface IIncomingMessageLike {
   readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
+    /** What its socket holds unwritten, which a close frame written at once is among. */
+    readonly writableLength?: number | undefined;
+    /** Ends its writing, once what it holds is written: a TCP FIN. */
+    end?(): unknown;
+    /**
+     * The listeners of its reads, its WebSocket's own alone once upgraded, which the transport's
+     * frame meter takes the place of (spec 15.3, 15.12).
+     */
+    listeners?(event: 'data'): unknown[];
     /**
      * Each read of its socket once upgraded, what its heartbeat counts as read (spec 15.3); one
      * without it counts each message and pong its WebSocket emits.
      */
-    on?(event: 'data', listener: () => void): unknown;
+    on?(event: 'data', listener: (chunk: Uint8Array) => void): unknown;
+    removeListener?(event: 'data', listener: (chunk: Uint8Array) => void): unknown;
+    /** Reads its socket again, a socket that failed reading on to its peer's end. */
+    resume?(): unknown;
   };
   /** Its target, which names its authority when it is in absolute-form. */
   readonly url?: string | undefined;
@@ -511,11 +523,13 @@ export interface IWebSocketServerConstructor {
    * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
    * closes; `closeTimeout`, the transport's, which `ws` waits on a close within, its own 1009's
    * among them, from ws 8.22; `handleProtocols`, the transport's, which selects no subprotocol
-   * (spec 15.2).
+   * (spec 15.2); `maxFragments` and `maxPayload`, the transport's `maximumMessageFrames` and
+   * `maxPayload`, which its frame meter judges first where it reads the connection's socket.
    */
   new (options: {
     closeTimeout?: number | undefined;
     handleProtocols: () => false;
+    maxFragments?: number | undefined;
     maxPayload?: number | undefined;
     server: Server;
   }): IWebSocketServerLike;
@@ -525,8 +539,15 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
+   * Milliseconds a message may come before `minimumBodyBytesPerSecond` holds it, from its first
+   * byte, on the server's clock: from 1 to 2³¹ − 1, rounded to the nearest whole one; 0 and
+   * `Infinity` are refused. A message past it is cast off before one within it when a charge would
+   * pass `messageBytesBudget`. Defaults to {@link BODY_GRACE_PERIOD}.
+   */
+  bodyGracePeriod?: number | undefined;
+  /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close`,
-   * `stop` and the 1009 a message past `maxPayload` fails it with, on the real clock whatever
+   * `stop` and each close a failure sends, its 1009 among them, on the real clock whatever
    * `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its own. From
    * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end, which the
    * timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
@@ -567,13 +588,21 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
    */
   hosts?: readonly string[] | undefined;
   /**
-   * The largest message a connection may send, in bytes, the spec's `maximumMessageBytes`; `ws`
-   * fails a connection that sends a larger one with 1009, reported on `error` naming the bound, its
-   * close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
+   * The largest message a connection may send, in bytes, the spec's `maximumMessageBytes`: the
+   * head of a frame whose announced length takes its message past it, a continuation's among them,
+   * fails its connection with 1009 without waiting for its payload, reported on `error` naming the
+   * bound, its close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
    * the default envelope's limit: a router whose `maximumEnvelopeBytes` is raised needs it raised
    * alike, as `createWebSocketServer` does.
    */
   maxPayload?: number | undefined;
+  /**
+   * The frames of one message, the first and an empty one among them, control frames aside: the
+   * head of the frame past them fails its connection with 1008, reported on `error` naming it, its
+   * close unclean (spec 15.3). A whole number above 0, never without end; `ws` is given it as its
+   * `maxFragments`. Defaults to {@link MAXIMUM_MESSAGE_FRAMES}.
+   */
+  maximumMessageFrames?: number | undefined;
   /**
    * The connections the server holds at once, across every address it listens on; past them, an
    * upgrade is refused 503 `busy` before its 101, with `Retry-After` (spec 15.2, step 8). An upgrade
@@ -595,6 +624,30 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
    * `createWebSocketServer` derives it from its router's limits.
    */
   maximumUnsentBytes?: number | undefined;
+  /**
+   * The bytes the server holds of messages partway, across its connections (spec 15.12): each byte
+   * of a message, from its first frame's head to its last frame's end, heads, masks and the control
+   * frames between its frames among it, is charged as it is read, never as a head announces it, and
+   * each frame 128 more once its head is whole; a message's charge is released once it is whole, or
+   * once its connection fails. A charge that would pass it casts off as few connections as fit it,
+   * those whose message is past `bodyGracePeriod` first, then the one whose message holds the most,
+   * then the one whose message began first, the newcomer only when it comes first: each fails with
+   * 1013, reported on `error` naming it, its close unclean. What a server holds of a message may
+   * pass its charge, up to twice it, a buffer growing by doubling. It holds where `ws`'s
+   * `WebSocketServer` hands the transport the raw socket of each upgrade, as Node's own upgrade
+   * does. A whole number above 0. Defaults to {@link MESSAGE_BYTES_BUDGET}; its gauge is
+   * `messageBytes`.
+   */
+  messageBytesBudget?: number | undefined;
+  /**
+   * The slowest, in bytes of payload a second, a message may come once `bodyGracePeriod` passed,
+   * on the server's clock: a message that brought _R_ bytes and none more by its first byte plus
+   * the longer of the grace and _R_ at this rate fails its connection with 1008, reported on `error`
+   * naming it, its close unclean; heads, masks and control frames count for nothing, and the time
+   * its router holds the connection paused does not count (spec 15.12). A whole number above 0.
+   * Defaults to {@link MINIMUM_BODY_BYTES_PER_SECOND}.
+   */
+  minimumBodyBytesPerSecond?: number | undefined;
   /**
    * The slowest, in bytes a second, a connection's socket may take what waits for it, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`: each

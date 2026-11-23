@@ -106,6 +106,22 @@ export const WS_ERROR_CODE_PREFIX = 'WS_ERR_';
 /** The code `ws` gives a message past its `maxPayload`, which fails its connection with 1009. */
 export const WS_TOO_BIG_CODE = 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
 
+/**
+ * The code `ws` gives a message past its `maxFragments`, which fails its connection with 1008 once
+ * the payload of the frame past them came, and a read past its `maxBufferedChunks`: its message,
+ * {@link WS_TOO_MANY_FRAMES_MESSAGE}, tells the first.
+ */
+export const WS_TOO_MANY_FRAMES_CODE = 'WS_ERR_TOO_MANY_BUFFERED_PARTS';
+
+/** The message of `ws`'s error for a message past its `maxFragments`. */
+export const WS_TOO_MANY_FRAMES_MESSAGE = 'Too many message fragments';
+
+/**
+ * The most `ws` reads as a count, which it truncates to 32 bits: a `maxFragments` past it would be
+ * none.
+ */
+export const WS_LARGEST_COUNT = 2 ** 31 - 1;
+
 // types
 
 export type CLOSE_EVENT = typeof CLOSE_EVENT;

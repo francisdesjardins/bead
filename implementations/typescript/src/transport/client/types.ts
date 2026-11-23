@@ -411,7 +411,8 @@ export interface IWebSocketLike {
 export interface IWebSocketConstructor {
   /**
    * `options` is `ws`'s alone, its `headers` written on the upgrade, its `closeTimeout` what it
-   * waits on a close within, its own 1009's among them, from ws 8.22; `perMessageDeflate: false`
+   * waits on a close within, its own 1009's among them, from ws 8.22; `maxFragments` the frames of
+   * one message it takes; `perMessageDeflate: false`
    * offers no compression; `ca`, `cert` and `key` its client's TLS, which Node's TLS takes. The
    * global `WebSocket` takes two parameters, and still meets it.
    */
@@ -424,6 +425,7 @@ export interface IWebSocketConstructor {
       closeTimeout?: number;
       headers?: Record<string, string>;
       key?: string;
+      maxFragments?: number;
       maxPayload?: number;
       perMessageDeflate?: false;
     }
@@ -500,6 +502,15 @@ export interface IWebSocketTransportClientOptions extends ITransportClientOption
    * `createWebSocketClient` does.
    */
   maxPayload?: number | undefined;
+  /**
+   * The frames of one message it reads, the first and an empty one among them, control frames
+   * aside, where its `WebSocket` takes a bound — `ws`'s, given it as its `maxFragments`, which
+   * closes a connection that sends more with 1008 once the payload of the frame past them came,
+   * told on `error` naming it and its value (spec 15.3); the global `WebSocket` takes none, its
+   * platform's bound applying. A whole number above 0, never without end. Defaults to
+   * {@link MAXIMUM_MESSAGE_FRAMES}.
+   */
+  maximumMessageFrames?: number | undefined;
   /**
    * Its TLS in Node (spec 15.39), given to `ws` on each connect under `wss` and held unused under
    * `ws`. Refused with a {@link ProgrammerError} as it is built: in a page, beside a `WebSocket`
