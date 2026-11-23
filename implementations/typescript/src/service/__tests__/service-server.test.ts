@@ -607,7 +607,7 @@ test.describe('createServiceServer', () => {
   });
 
   // spec 18.2
-  test('fails a command whose rule throws as it judges, with that throw, before anything goes', async () => {
+  test('fails a command whose rule panics as it judges, with that panic, before anything goes', async () => {
     await using connected = await connectWorker();
     const broken = new Error('this rule fails to judge, on purpose first');
     const procedures = Object.freeze({
