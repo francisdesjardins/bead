@@ -3,9 +3,10 @@
 The mental model a team needs before it adopts Bead: what it writes, what beadc makes of it, what
 runs, and where Bead stands beside gRPC-Web, Connect and SignalR.
 
-> **The packages are not published.** beadc's image is on GitHub's container registry at each
-> release, pinned by its digest, and the runtimes come from a clone of Bead at that release's tag,
-> by path; [the support matrix](../support.md) says what each side plays today and what is ahead.
+> **beadc's image is published; the packages are not.** beadc's image is on GitHub's container
+> registry at each release, attested and signed, and a team pins it by its digest; the runtimes
+> come from a clone of Bead at that release's tag, by path. [The support matrix](../support.md)
+> says what each side plays today and what is ahead.
 
 ## From a `.proto` to what runs
 
