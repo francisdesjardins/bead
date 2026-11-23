@@ -38,8 +38,8 @@ use bead::testing::{
 };
 use bead::{
     BindingOptions, FailureScope, GatewayAuthorization, HttpGatewayOptions, HttpMethod, HttpRoute,
-    HttpRouteTemplate, JsonFormError, MessageForm, MessageFormError, OwnFailure, OwnProblemOptions,
-    RequestPlace, SharedClock,
+    HttpRouteTemplate, JsonFormError, MessageForm, MessageFormError, OwnFailure, RequestPlace,
+    SharedClock,
 };
 use bead_interop::transcoding::generated::bead_http::{HttpRoutes, OPENAPI_DOCUMENT};
 use bead_interop::transcoding::generated::messages::bead::transcoding::v1::Everything;
@@ -628,7 +628,6 @@ fn own_of(name: &str) -> Result<OwnFailure, Failed> {
         "closed" => Ok(OwnFailure::Closed),
         "failed" => Ok(OwnFailure::Failed),
         "jwt" => Ok(OwnFailure::Jwt),
-        "scheme" => Ok(OwnFailure::Scheme),
         "timeout" => Ok(OwnFailure::Timeout),
         "unwritable" => Ok(OwnFailure::Unwritable),
         other => Err(Failed::from(format!(
@@ -694,14 +693,7 @@ fn answer_failure(defaults: &Defaults, entry: &Failing) -> Result<(), Failed> {
         .clone()
         .unwrap_or_else(|| defaults.challenge.clone());
     let problem = if let Some(own) = &failure.own {
-        let mut options = OwnProblemOptions::default();
-
-        options.challenge = Some(challenge);
-        problem_of_own(
-            own_of(own)?,
-            failure.detail.as_deref().unwrap_or(""),
-            &options,
-        )
+        problem_of_own(own_of(own)?, failure.detail.as_deref().unwrap_or(""))
     } else {
         let routes = HttpRoutes::get().map_err(|error| Failed::from(error.to_string()))?;
         let catalogue = routes

@@ -68,20 +68,10 @@ pub enum OwnFailure {
     Failed,
     /// A `JWT` its block cannot hold: 431.
     Jwt,
-    /// An auth-scheme but `Bearer` under `BearerJwt`: 401.
-    Scheme,
     /// Its call's timeout: 504.
     Timeout,
     /// A result it cannot write: 500.
     Unwritable,
-}
-
-/// What a problem of the gateway's own is written with besides its failure and its detail.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct OwnProblemOptions {
-    /// The gateway's challenge, which an auth-scheme but `Bearer` answers; `Bearer` by default.
-    pub challenge: Option<String>,
 }
 
 /// A call's failure, as the gateway's client read it, and where it arose.
@@ -95,7 +85,8 @@ pub struct CallFailure {
     pub scope: FailureScope,
     /// Its detail, empty where it has none.
     pub detail: String,
-    /// Whether its call presented a credential, which a 401 tells as `invalid_token`.
+    /// Whether its call presented a credential of its challenge's auth-scheme, which a 401 tells
+    /// as `invalid_token`.
     pub credential: bool,
     /// The encoding of the request its server could not read.
     pub encoding: Encoding,
@@ -170,8 +161,26 @@ pub const fn phrase_of(status: u16) -> Option<&'static str> {
     })
 }
 
+// the auth-scheme of a field or a challenge, as RFC 9110 §11.1 reads one: its longest run of
+// `tchar` at its start (RFC 9110 §5.6.2), empty where it starts with none
+#[cfg(feature = "gateway")]
+pub(crate) fn auth_scheme_of(value: &str) -> &str {
+    let end = value
+        .bytes()
+        .position(|byte| !is_tchar(byte))
+        .unwrap_or(value.len());
+
+    value.get(..end).unwrap_or("")
+}
+
+// a `tchar` of RFC 9110 §5.6.2: a digit, a letter, or one of `!#$%&'*+-.^_`|~`
+#[cfg(feature = "gateway")]
+fn is_tchar(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+}
+
 // a challenge with `error=` after it: after a space, or after `, ` where it holds parameters
-fn challenge_of(challenge: &str, error: &str) -> String {
+pub(crate) fn challenge_of(challenge: &str, error: &str) -> String {
     let between = if challenge.trim().contains(' ') {
         ", "
     } else {
@@ -620,31 +629,18 @@ pub const fn own_status_of(own: OwnFailure) -> u16 {
         OwnFailure::Closed => 502,
         OwnFailure::Failed | OwnFailure::Unwritable => 500,
         OwnFailure::Jwt => 431,
-        OwnFailure::Scheme => 401,
         OwnFailure::Timeout => 504,
     }
 }
 
 /// The problem of a failure of the gateway's own (7.6).
 ///
-/// Its call's timeout, 504; its connection
-/// closed, 502; a result it cannot write, 500; a `JWT` its block cannot hold, 431; an auth-scheme
-/// but `Bearer` under `BearerJwt`, 401; what no gate foresaw, 500 — `about:blank`, its detail its
-/// words, none for what no gate foresaw.
+/// Its call's timeout, 504; its connection closed, 502; a result it cannot write, 500; a `JWT` its
+/// block cannot hold, 431; what no gate foresaw, 500 — `about:blank`, its detail its words, none for
+/// what no gate foresaw.
 #[must_use]
-pub fn problem_of_own(own: OwnFailure, detail: &str, options: &OwnProblemOptions) -> Problem {
-    let mut problem = problem_of_refusal(own_status_of(own), detail);
-
-    if own == OwnFailure::Scheme {
-        let challenge = options.challenge.as_deref().unwrap_or(DEFAULT_CHALLENGE);
-
-        problem.fields.push(ProblemField {
-            name: "www-authenticate",
-            value: challenge_of(challenge, "invalid_request"),
-        });
-    }
-
-    problem
+pub fn problem_of_own(own: OwnFailure, detail: &str) -> Problem {
+    problem_of_refusal(own_status_of(own), detail)
 }
 
 /// The problem of a refusal of the gateway's own (7.7), `about:blank`, its title its status's

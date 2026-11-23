@@ -874,12 +874,12 @@ async fn words_each_refusal_of_its_gates_exactly_none_of_them_what_its_request_c
                 lines: &[
                     "POST /api/Transcoding/whoAmI HTTP/1.1",
                     JSON_TYPE,
-                    "authorization: Basic YTpi",
+                    "authorization: Bearer\ta.b.c",
                 ],
-                status: 401,
-                words: "an auth-scheme but Bearer",
+                status: 400,
+                words: "Bearer followed by neither a space nor the field's end",
                 body: "{}",
-                reason: None,
+                reason: Some("malformed"),
             },
         ),
         (
@@ -978,20 +978,6 @@ async fn words_each_refusal_of_its_gates_exactly_none_of_them_what_its_request_c
                 words: "a request from a page of another site that shows no origin",
                 body: "{}",
                 reason: Some("origin-refused"),
-            },
-        ),
-        (
-            &jwt,
-            OwnCase {
-                lines: &[
-                    "POST /api/Transcoding/whoAmI HTTP/1.1",
-                    JSON_TYPE,
-                    "authorization: Bearer",
-                ],
-                status: 401,
-                words: "an auth-scheme but Bearer",
-                body: "{}",
-                reason: None,
             },
         ),
     ];
@@ -1751,11 +1737,18 @@ async fn presents_the_authorization_field_elsewhere_or_as_a_jwt_under_bearer_jwt
         "{reported:?}"
     );
 
+    // another auth-scheme presents none, as an empty field does
     let scheme = who_am_i(jwt.port, Some("Basic YTpi".to_owned())).await;
+    let problem = json_of(&scheme);
 
     assert_eq!(
-        (scheme.head.status, field(&scheme, "www-authenticate")),
-        (401, Some("Bearer error=\"invalid_request\""))
+        (
+            scheme.head.status,
+            field(&scheme, "www-authenticate"),
+            &problem["code"],
+            problem.get("detail")
+        ),
+        (401, Some("Bearer"), &serde_json::json!(32), None)
     );
 
     // a token its request's block holds, 1,004 bytes, and one past it
@@ -1768,33 +1761,231 @@ async fn presents_the_authorization_field_elsewhere_or_as_a_jwt_under_bearer_jwt
     jwt.dispose().await.expect("disposed");
 }
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn answers_401_to_a_tab_after_bearer_its_separator_one_or_more_spaces() {
-    let jwt = started_with((
+// a gateway under `bearer-jwt`, its challenge where one is given
+async fn started_bearer_jwt(challenge: Option<&str>) -> TranscodingFixture {
+    let challenge = challenge.map(str::to_owned);
+
+    started_with((
         |options: &mut HttpGatewayOptions| {
             options.authorization = Some(GatewayAuthorization::BearerJwt);
+            options.challenge = challenge;
         },
         true,
     ))
-    .await;
-    // right after Bearer, or after its spaces
-    for authorization in ["Bearer\ta.b.c", "Bearer \ta.b.c"] {
-        let tab = who_am_i(jwt.port, Some(authorization.to_owned())).await;
+    .await
+}
+
+// a POST to `echo`, its authorization where it holds one
+async fn echoed(port: u16, authorization: Option<&str>) -> Response {
+    let fields: Vec<String> = authorization
+        .map(|value| format!("authorization: {value}"))
+        .into_iter()
+        .collect();
+    let fields: Vec<&str> = fields.iter().map(String::as_str).collect();
+
+    posted(
+        port,
+        &Post {
+            path: "/api/Transcoding/echo",
+            fields: &fields,
+            body: "{}",
+        },
+    )
+    .await
+}
+
+// what a refusal is told by: its status, its mark, its challenge and its problem's words
+fn refusal_of(response: &Response) -> (u16, Option<&str>, Option<&str>, serde_json::Value) {
+    (
+        response.head.status,
+        field(response, "bead-refusal"),
+        field(response, "www-authenticate"),
+        json_of(response)["detail"].clone(),
+    )
+}
+
+// transcoding 2.4, 10.1's step 9; RFC 9110 §11.4; RFC 6750 §3.1
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_400_bearer_followed_by_neither_a_space_nor_its_end_under_bearer_jwt_before_its_body_with_invalid_request()
+ {
+    use tokio::io::AsyncWriteExt as _;
+
+    const WORDS: &str = "Bearer followed by neither a space nor the field's end";
+
+    let jwt = started_bearer_jwt(None).await;
+    let realm = started_bearer_jwt(Some("Bearer realm=\"bead\"")).await;
+    let elsewhere = started().await;
+
+    // a tab, a slash or a comma right after Bearer
+    for authorization in ["Bearer\ta.b.c", "Bearer/abc", "Bearer,abc"] {
+        let refused = who_am_i(jwt.port, Some(authorization.to_owned())).await;
 
         assert_eq!(
-            (tab.head.status, field(&tab, "www-authenticate")),
-            (401, Some("Bearer error=\"invalid_request\"")),
+            refusal_of(&refused),
+            (
+                400,
+                Some("malformed"),
+                Some("Bearer error=\"invalid_request\""),
+                serde_json::json!(WORDS)
+            ),
             "{authorization:?}"
         );
     }
 
-    // two spaces present the token, which a server with no JWT verifier refuses
-    let spaces = who_am_i(jwt.port, Some("Bearer  a.b.c".to_owned())).await;
+    // * before its body: 100,000 bytes declared, one sent, answered within a second
+    let port = jwt.port;
+    let mut socket = sent(
+        port,
+        format!(
+            "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{port}\r\n{JSON}\r\nauthorization: Bearer/abc\r\ncontent-length: 100000\r\n\r\n{{"
+        )
+        .as_bytes(),
+    )
+    .await;
+    let came = patience(Duration::from_secs(1), read_until(&mut socket, WORDS))
+        .await
+        .expect("its refusal within a second");
 
-    assert_eq!(spaces.head.status, 500);
+    assert!(came.starts_with("HTTP/1.1 400 "), "{came}");
+    socket.shutdown().await.ok();
+
+    // two authorization fields: told invalid_request under bearer-jwt, and under elsewhere not
+    let two = [
+        "POST /api/Transcoding/whoAmI HTTP/1.1",
+        JSON,
+        "authorization: Bearer good",
+        "authorization: Bearer good",
+    ];
+    let twice = asked(jwt.port, (&two, "{}")).await;
+    let twice_elsewhere = asked(elsewhere.port, (&two, "{}")).await;
+
+    assert_eq!(
+        refusal_of(&twice),
+        (
+            400,
+            Some("malformed"),
+            Some("Bearer error=\"invalid_request\""),
+            serde_json::json!("two authorization fields")
+        )
+    );
+    assert_eq!(
+        refusal_of(&twice_elsewhere),
+        (
+            400,
+            Some("malformed"),
+            None,
+            serde_json::json!("two authorization fields")
+        )
+    );
+
+    // its challenge's parameters, then `, ` and the error
+    let challenged = who_am_i(realm.port, Some("Bearer\ta.b.c".to_owned())).await;
+
+    assert_eq!(
+        (
+            challenged.head.status,
+            field(&challenged, "www-authenticate")
+        ),
+        (
+            400,
+            Some("Bearer realm=\"bead\", error=\"invalid_request\"")
+        )
+    );
+
+    // what follows Bearer's spaces, a tab first among it, its token, which a server with no JWT
+    // verifier refuses
+    for authorization in ["Bearer \ta.b.c", "Bearer  a.b.c"] {
+        let presented = who_am_i(jwt.port, Some(authorization.to_owned())).await;
+
+        assert_eq!(
+            (presented.head.status, &json_of(&presented)["title"]),
+            (500, &serde_json::json!("CREDENTIAL_UNSUPPORTED")),
+            "{authorization:?}"
+        );
+    }
 
     jwt.dispose().await.expect("disposed");
+    realm.dispose().await.expect("disposed");
+    elsewhere.dispose().await.expect("disposed");
+}
+
+// transcoding 2.4; RFC 6750 §3.1
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn presents_no_credential_under_bearer_jwt_for_another_auth_scheme_or_bearer_alone_so_a_procedure_that_needs_none_runs()
+ {
+    let jwt = started_bearer_jwt(None).await;
+
+    for authorization in [
+        "Basic YTpi",
+        "Basic\tYTpi",
+        "Bearerabc",
+        "Bearer.abc",
+        "=abc",
+        "Bearer",
+        "Bearer   ",
+    ] {
+        let echo = echoed(jwt.port, Some(authorization)).await;
+
+        assert_eq!(
+            (echo.head.status, text_of(&echo)),
+            (200, "{}".to_owned()),
+            "{authorization:?}"
+        );
+
+        let who = who_am_i(jwt.port, Some(authorization.to_owned())).await;
+        let problem = json_of(&who);
+
+        assert_eq!(
+            (
+                who.head.status,
+                field(&who, "www-authenticate"),
+                &problem["code"],
+                problem.get("detail")
+            ),
+            (401, Some("Bearer"), &serde_json::json!(32), None),
+            "{authorization:?}"
+        );
+    }
+
+    jwt.dispose().await.expect("disposed");
+}
+
+// transcoding 7.6.8; RFC 9110 §11.1; RFC 6750 §3.1
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tells_invalid_token_only_to_a_credential_of_the_auth_scheme_its_challenge_names() {
+    let elsewhere = started().await;
+    let realm = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.challenge = Some("Bearer realm=\"bead\"".to_owned());
+        },
+        true,
+    ))
+    .await;
+    let cases = [
+        (&elsewhere, "Bearer bad", "Bearer error=\"invalid_token\""),
+        (&elsewhere, "bearer bad", "Bearer error=\"invalid_token\""),
+        (&elsewhere, "Basic YTpi", "Bearer"),
+        (&elsewhere, "Bearerabc", "Bearer"),
+        (&realm, "Basic YTpi", "Bearer realm=\"bead\""),
+        (
+            &realm,
+            "Bearer bad",
+            "Bearer realm=\"bead\", error=\"invalid_token\"",
+        ),
+    ];
+
+    for (fixture, authorization, challenge) in cases {
+        let who = who_am_i(fixture.port, Some(authorization.to_owned())).await;
+
+        assert_eq!(
+            (who.head.status, field(&who, "www-authenticate")),
+            (401, Some(challenge)),
+            "{authorization:?}"
+        );
+    }
+
+    elsewhere.dispose().await.expect("disposed");
+    realm.dispose().await.expect("disposed");
 }
 
 // a request of `method` to `path` with the fetch metadata given, each field where it holds a value

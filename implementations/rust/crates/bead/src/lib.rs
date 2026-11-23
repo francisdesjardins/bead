@@ -229,7 +229,7 @@ pub use transcoding::form::{
     BindingOptions, JsonFormError, MessageForm, MessageFormError, RequestPlace,
 };
 #[cfg(feature = "transcoding")]
-pub use transcoding::problems::{OwnFailure, OwnProblemOptions};
+pub use transcoding::problems::OwnFailure;
 #[cfg(feature = "transcoding")]
 pub use transcoding::routes::{
     HttpMethod, HttpPayload, HttpRoute, HttpRouteInit, HttpRouteTemplate, route_of,
