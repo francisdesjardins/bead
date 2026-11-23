@@ -341,7 +341,7 @@ internal sealed class TlsWire : IAsyncDisposable
                 {
                     status = int.Parse(value, CultureInfo.InvariantCulture);
                 }
-                else if (name == HttpTransport.RefusalHeader)
+                else if (name == HostsAndOrigins.RefusalHeader)
                 {
                     refusal = value;
                 }

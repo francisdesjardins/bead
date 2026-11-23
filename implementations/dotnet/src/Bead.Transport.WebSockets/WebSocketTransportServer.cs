@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 
 namespace Bead.Transport.WebSockets;
 
@@ -212,6 +213,9 @@ public sealed record WebSocketTransportServerOptions
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
+    // what one read of a refused body still coming takes, dropped
+    private const int LingerReadBytes = 65_536;
+
     private readonly WebSocketTransportServerOptions _options;
     private readonly TimeProvider _clock;
     // the networks of the proxies it believes X-Forwarded-For from
@@ -794,8 +798,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the
     // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be;
-    // then, marked, told (spec 15.1)
-    private void Refuse(HttpContext context, HandshakeRefusal refusal)
+    // then, marked, told (spec 15.1); its connection closed in stages behind a body still coming
+    private async Task Refuse(HttpContext context, HandshakeRefusal refusal)
     {
         var response = context.Response;
 
@@ -832,6 +836,60 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             _listeners.Tell(listeners, told);
         }
+
+        await Linger(context);
+    }
+
+    // whether a refusal leaves its body still to come behind its close: over HTTP/1, a request that
+    // declares a body, a Content-Length past 0 or a Transfer-Encoding, each refusal closing its
+    // connection (RFC 9112 §9.6)
+    private static bool IsLingering(HttpContext context)
+    {
+        var request = context.Request;
+
+        return (HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol))
+            && (request.ContentLength is > 0 || request.Headers.ContainsKey(HeaderNames.TransferEncoding));
+    }
+
+    // ! a refusal written before its body is whole closes its socket in stages (spec 15.2, 15.12;
+    // RFC 9112 §9.6): flushed alone, since a completion would follow it at once with its socket's
+    // close, a reset that erases the refusal its client has not read yet; then what still comes is
+    // read and dropped until its client closes or 2 seconds pass, on the real clock, since what it
+    // waits on is the network's. A body read whole ends at once. Kestrel's connection has no
+    // half-close, and a shutdown of its socket races the answer Kestrel still sends: its write side
+    // ends with its close, never first
+    private static async Task Linger(HttpContext context)
+    {
+        if (!IsLingering(context))
+        {
+            return;
+        }
+
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var dropped = new byte[LingerReadBytes];
+
+        lingering.CancelAfter(ServerBounds.Linger);
+
+        try
+        {
+            await context.Response.StartAsync(context.RequestAborted);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+
+            while (await context.Request.Body.ReadAsync(dropped, lingering.Token) > 0)
+            {
+                // dropped
+            }
+        }
+        catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! its 2 seconds passed, its client still sending: its socket closed now, where Kestrel
+            // would read on a chunked body itself once the refusal returned, then reset it
+            context.Abort();
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or BadHttpRequestException)
+        {
+            // its client gone, or its body no more to read
+        }
     }
 
     // a request: one that upgrades becomes a connection, until its socket closes; any other is
@@ -841,7 +899,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     {
         if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
-            Refuse(context, refusal);
+            await Refuse(context, refusal);
 
             return;
         }
@@ -849,7 +907,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // ! a guard: what the judgement takes Kestrel upgrades, and its accept throws on any other
         if (!context.WebSockets.IsWebSocketRequest)
         {
-            Refuse(context, WebSocketHandshake.Malformed);
+            await Refuse(context, WebSocketHandshake.Malformed);
 
             return;
         }
@@ -859,7 +917,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         if (!TakePlace(place.Address))
         {
-            Refuse(context, WebSocketHandshake.Busy);
+            await Refuse(context, WebSocketHandshake.Busy);
 
             return;
         }

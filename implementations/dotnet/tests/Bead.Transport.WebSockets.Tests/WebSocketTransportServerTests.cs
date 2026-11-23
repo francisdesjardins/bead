@@ -4326,6 +4326,101 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }), answers);
     }
 
+    // spec 15.2, 15.12: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Takes_an_upgrade_under_a_signed_Content_Length_plus_0_or_minus_0_as_Kestrel_does_the_judgement_reading_the_0_Kestrel_wrote()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // ! Kestrel reads a sign before the digits as the number, where RFC 9110 §8.6 holds a length
+        // to digits alone, and hands the judgement the 0 it wrote in its place
+        foreach (var length in (string[])["+0", "-0"])
+        {
+            using var tcp = await OpenTcp();
+
+            await tcp.GetStream().WriteAsync(HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"), Cancelled);
+            await ReadHead(tcp.GetStream());
+        }
+
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.2, 15.12; RFC 9112 §9.6: the row "A request's head held to `headersTimeout`, and an
+    // answer's close in stages, as each platform does them" of docs/support.md
+    [Fact]
+    public async Task Closes_in_stages_a_refusal_of_an_upgrade_whose_body_is_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // an upgrade that lists a coding before its chunked, refused 400 unmarked, its head alone,
+        // a chunk of its body sent every 200 ms as the refusal is read
+        using var tcp = await OpenTcp();
+        var socket = tcp.Client;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var chunk = Encoding.ASCII.GetBytes($"40\r\n{new string('a', 64)}\r\n");
+
+        await socket.SendAsync(HandshakeOf("GET / HTTP/1.1", "Transfer-Encoding: gzip, chunked"), Cancelled);
+
+        var sending = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        await socket.SendAsync(chunk, stop.Token);
+                        await Task.Delay(TimeSpan.FromMilliseconds(200), TimeProvider.System, stop.Token);
+                    }
+                }
+                catch (Exception reason) when (reason is SocketException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // its socket closed, or the test done
+                }
+            },
+            Cancelled);
+
+        try
+        {
+            var came = new StringBuilder();
+            var buffer = new byte[65_536];
+
+            while (!came.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+            {
+                var read = await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                Assert.NotEqual(0, read);
+                came.Append(Encoding.ASCII.GetString(buffer, 0, read));
+            }
+
+            var answered = TimeProvider.System.GetTimestamp();
+
+            try
+            {
+                while (await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled) > 0)
+                {
+                    // what follows its answer: nothing
+                }
+            }
+            catch (SocketException)
+            {
+                // ! Kestrel's close, a reset once its client sends on: its write side ends with it
+            }
+
+            var closedWithin = TimeProvider.System.GetElapsedTime(answered);
+
+            // the refusal whole, which closes its connection, then its close within the linger's 2 s
+            Assert.StartsWith("HTTP/1.1 400 ", came.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\r\nConnection: close\r\n", came.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("bead-refusal", came.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.True(closedWithin < TimeSpan.FromSeconds(3), $"closed past 3 s: {closedWithin}");
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await sending;
+        }
+    }
+
     [Fact]
     public async Task Refuses_400_a_head_HTTP_does_not_read_a_control_character_in_its_target_or_a_value_among_it_and_a_version_but_1_x_505()
     {
