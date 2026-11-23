@@ -321,7 +321,7 @@ jobs:
       # cargo-deny's and cargo-llvm-cov's prebuilt releases, each checked by its SHA-256 against
       # the action's manifest
       - if: matrix.os == 'ubuntu-26.04'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
         with:
           tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.1
       - if: matrix.os == 'ubuntu-26.04'
