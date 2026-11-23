@@ -367,10 +367,7 @@ public sealed class TranscodingTests
 
             if (StringOf(given, "own") is { } own)
             {
-                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), StringOf(given, "detail") ?? "", new OwnProblemOptions
-                {
-                    Challenge = StringOf(given, "challenge") ?? Root.GetProperty("defaults").GetProperty("challenge").GetString()!,
-                });
+                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), StringOf(given, "detail") ?? "");
             }
             else
             {

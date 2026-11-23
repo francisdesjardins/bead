@@ -200,6 +200,9 @@ public sealed class HttpGatewayTests
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // the problem of a call that needs a session and presented no credential
+    private const string NoCredential = "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}";
+
     // what a server that stops reading takes at most of what one socket pipelines: its platform's
     // buffers and the loopback's are far below it
     private const long MostTaken = 64L * 1024 * 1024;
@@ -417,10 +420,11 @@ public sealed class HttpGatewayTests
 
             Assert.StartsWith("the server takes none of the scheme this gateway presents: ", Assert.Single(reported), StringComparison.Ordinal);
 
+            // another auth-scheme presents none: the challenge alone, and the problem of no credential
             using var scheme = await jwt.Client.SendAsync(WhoAmI("Basic YTpi"), Cancelled);
 
-            Assert.Equal(HttpStatusCode.Unauthorized, scheme.StatusCode);
-            Assert.Equal("Bearer error=\"invalid_request\"", scheme.Headers.WwwAuthenticate.ToString());
+            Assert.Equal((HttpStatusCode.Unauthorized, "Bearer"), (scheme.StatusCode, scheme.Headers.WwwAuthenticate.ToString()));
+            Assert.Equal(NoCredential, await scheme.Content.ReadAsStringAsync(Cancelled));
 
             // a token its request's block holds, 1,004 bytes, and one past it
             using var held = await jwt.Client.SendAsync(WhoAmI($"Bearer {new string('a', 1_004)}"), Cancelled);
@@ -435,42 +439,133 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // RFC 6750 §2.1: `"Bearer" 1*SP b64token`
+    // transcoding 10.1.9; RFC 9110 §11.4: `auth-scheme [ 1*SP ( token68 / #auth-param ) ]`; RFC 6750 §3.1
     [Fact]
-    public async Task Answers_401_to_a_tab_after_Bearer_its_separator_one_or_more_spaces()
+    public async Task Refuses_400_Bearer_followed_by_neither_a_space_nor_its_end_under_bearer_jwt_before_its_body_with_invalid_request()
+    {
+        const string Words = "Bearer followed by neither a space nor the field's end";
+        var jwt = await Started((options) =>
+        {
+            return options with { Authorization = GatewayAuthorization.BearerJwt };
+        });
+        var realm = await Started((options) =>
+        {
+            return options with { Authorization = GatewayAuthorization.BearerJwt, Challenge = "Bearer realm=\"bead\"" };
+        });
+        var elsewhere = await Started();
+
+        try
+        {
+            // a tab, or any character but a space, right after Bearer
+            foreach (var authorization in new[] { "Bearer\ta.b.c", "Bearer/abc", "Bearer,abc" })
+            {
+                var (status, fields, body) = await WhoAmIOver(jwt.Port, [$"authorization: {authorization}"]);
+
+                Assert.Equal((400, "malformed", "Bearer error=\"invalid_request\""), (status, fields.GetValueOrDefault("bead-refusal"), fields.GetValueOrDefault("www-authenticate")));
+                Assert.Equal(Words, DetailOf(body));
+            }
+
+            // * before its body: a length declared and one byte of it sent, answered at once
+            using (var socket = await Opened(jwt.Port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{jwt.Port}\r\ncontent-type: application/json\r\nauthorization: Bearer/abc\r\ncontent-length: 100000\r\n\r\n{{")))
+            {
+                var since = TimeProvider.System.GetTimestamp();
+                var came = await ReadUntil(socket, "}");
+                var within = TimeProvider.System.GetElapsedTime(since);
+
+                Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+                Assert.Contains(Words, came, StringComparison.Ordinal);
+                Assert.True(within < TimeSpan.FromSeconds(1), $"answered in {within.TotalMilliseconds} ms");
+            }
+
+            // two authorization fields: with the challenge under bearer-jwt, with none under elsewhere
+            string[] twice = ["authorization: Bearer good", "authorization: Bearer good"];
+            var underJwt = await WhoAmIOver(jwt.Port, twice);
+            var underElsewhere = await WhoAmIOver(elsewhere.Port, twice);
+
+            Assert.Equal((400, "malformed", "Bearer error=\"invalid_request\""), (underJwt.Status, underJwt.Fields.GetValueOrDefault("bead-refusal"), underJwt.Fields.GetValueOrDefault("www-authenticate")));
+            Assert.Equal((400, "malformed", null), (underElsewhere.Status, underElsewhere.Fields.GetValueOrDefault("bead-refusal"), underElsewhere.Fields.GetValueOrDefault("www-authenticate")));
+
+            // its error after a challenge that holds parameters, after `, `
+            var underRealm = await WhoAmIOver(realm.Port, ["authorization: Bearer\ta.b.c"]);
+
+            Assert.Equal((400, "Bearer realm=\"bead\", error=\"invalid_request\""), (underRealm.Status, underRealm.Fields.GetValueOrDefault("www-authenticate")));
+
+            // after Bearer's spaces, its token as it stands, a tab first among it, which a server
+            // with no JWT verifier refuses
+            foreach (var authorization in new[] { "Bearer \ta.b.c", "Bearer  a.b.c" })
+            {
+                var (status, _, body) = await WhoAmIOver(jwt.Port, [$"authorization: {authorization}"]);
+
+                using var problem = JsonDocument.Parse(body);
+
+                Assert.Equal((500, 36), (status, problem.RootElement.GetProperty("code").GetInt32()));
+            }
+        }
+        finally
+        {
+            await Stopped(jwt);
+            await Stopped(realm);
+            await Stopped(elsewhere);
+        }
+    }
+
+    // transcoding 2.4.2; RFC 6750 §3.1: a request that attempted no Bearer credential
+    [Fact]
+    public async Task Presents_no_credential_under_bearer_jwt_for_another_auth_scheme_or_Bearer_alone_so_a_procedure_that_needs_none_runs()
     {
         var jwt = await Started((options) =>
         {
             return options with { Authorization = GatewayAuthorization.BearerJwt };
         });
 
-        static HttpRequestMessage WhoAmI(string authorization)
-        {
-            var request = Json("/api/Transcoding/whoAmI", "{}");
-
-            request.Headers.TryAddWithoutValidation("authorization", authorization);
-
-            return request;
-        }
-
         try
         {
-            // right after Bearer, or after its spaces
-            foreach (var authorization in new[] { "Bearer\ta.b.c", "Bearer \ta.b.c" })
+            foreach (var authorization in new[] { "Basic YTpi", "Basic\tYTpi", "Bearerabc", "Bearer.abc", "=abc", "Bearer", "Bearer   " })
             {
-                using var tab = await jwt.Client.SendAsync(WhoAmI(authorization), Cancelled);
+                var echoed = await Over(jwt.Port, ("/api/Transcoding/echo", [$"authorization: {authorization}"]));
+                var (status, fields, body) = await WhoAmIOver(jwt.Port, [$"authorization: {authorization}"]);
 
-                Assert.Equal((HttpStatusCode.Unauthorized, "Bearer error=\"invalid_request\""), (tab.StatusCode, tab.Headers.WwwAuthenticate.ToString()));
+                Assert.Equal((200, "{}"), (echoed.Status, echoed.Body));
+                Assert.Equal((401, "Bearer", NoCredential), (status, fields.GetValueOrDefault("www-authenticate"), body));
             }
-
-            // two spaces present the token, which a server with no JWT verifier refuses
-            using var spaces = await jwt.Client.SendAsync(WhoAmI("Bearer  a.b.c"), Cancelled);
-
-            Assert.Equal(HttpStatusCode.InternalServerError, spaces.StatusCode);
         }
         finally
         {
             await Stopped(jwt);
+        }
+    }
+
+    // transcoding 7.6.8; RFC 6750 §3.1
+    [Fact]
+    public async Task Tells_invalid_token_only_to_a_credential_of_the_auth_scheme_its_challenge_names()
+    {
+        var elsewhere = await Started();
+        var realm = await Started((options) =>
+        {
+            return options with { Challenge = "Bearer realm=\"bead\"" };
+        });
+
+        try
+        {
+            foreach (var (started, authorization, challenge) in new (Fixture Started, string Authorization, string Challenge)[]
+            {
+                (elsewhere, "Bearer bad", "Bearer error=\"invalid_token\""),
+                (elsewhere, "bearer bad", "Bearer error=\"invalid_token\""),
+                (elsewhere, "Basic YTpi", "Bearer"),
+                (elsewhere, "Bearerabc", "Bearer"),
+                (realm, "Basic YTpi", "Bearer realm=\"bead\""),
+                (realm, "Bearer bad", "Bearer realm=\"bead\", error=\"invalid_token\""),
+            })
+            {
+                var (status, fields, _) = await WhoAmIOver(started.Port, [$"authorization: {authorization}"]);
+
+                Assert.Equal((401, challenge), (status, fields.GetValueOrDefault("www-authenticate")));
+            }
+        }
+        finally
+        {
+            await Stopped(elsewhere);
+            await Stopped(realm);
         }
     }
 
@@ -1525,7 +1620,7 @@ public sealed class HttpGatewayTests
                 (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: text/plain"], 415, "this route's body is application/json, unencoded") { Body = "{}", Reason = "type-refused" }),
                 (plain, new(["GET /v1/books/2 HTTP/1.1", JsonType], 400, "content to a route that takes none") { Body = "{}", Reason = "malformed" }),
                 (plain, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, "authorization: Bearer good", "authorization: Bearer good"], 400, "two authorization fields") { Body = "{}", Reason = "malformed" }),
-                (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, "authorization: Basic YTpi"], 401, "an auth-scheme but Bearer") { Body = "{}" }),
+                (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, "authorization: Bearer\ta.b.c"], 400, "Bearer followed by neither a space nor the field's end") { Body = "{}", Reason = "malformed" }),
                 (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, $"authorization: Bearer {new string('a', 1_005)}"], 431, "a token past 1004 bytes") { Body = "{}" }),
                 (small, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType], 413, "a body declared past maximumBodyBytes 16") { Body = Book, Reason = "too-large" }),
                 (small, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType, "transfer-encoding: chunked"], 413, "a body past maximumBodyBytes 16") { Body = $"18\r\n{Book}\r\n0\r\n\r\n", Reason = "too-large" }),
@@ -1534,7 +1629,6 @@ public sealed class HttpGatewayTests
                 (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: application/json; charset"], 415, "this route's body is application/json, unencoded") { Body = "{}", Reason = "type-refused" }),
                 (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: text/plain"], 415, "this route's body is application/json, unencoded") { Reason = "type-refused" }),
                 (plain, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType, "sec-fetch-site: cross-site", "sec-fetch-mode: navigate"], 403, "a request from a page of another site that shows no origin") { Body = "{}", Reason = "origin-refused" }),
-                (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, "authorization: Bearer"], 401, "an auth-scheme but Bearer") { Body = "{}" }),
             })
             {
                 parted.AddRange(PartsOf(await Exchanged(started.Port, OctetsOf(started.Port, expected)), expected));
@@ -4519,6 +4613,26 @@ public sealed class HttpGatewayTests
         await socket.SendAsync(octets, Cancelled);
 
         return socket;
+    }
+
+    // a JSON call of `{}` to `path`, its fields beside it, on a socket of its own: its status, its
+    // fields as they came and its body
+    private static Task<(int Status, Dictionary<string, string> Fields, string Body)> Over(int port, (string Path, string[] Fields) call)
+    {
+        return Exchanged(port, OctetsOf(port, new OwnCase([$"POST {call.Path} HTTP/1.1", "content-type: application/json", .. call.Fields], 0, "") { Body = "{}" }));
+    }
+
+    private static Task<(int Status, Dictionary<string, string> Fields, string Body)> WhoAmIOver(int port, string[] fields)
+    {
+        return Over(port, ("/api/Transcoding/whoAmI", fields));
+    }
+
+    // a problem's detail, none when it holds none
+    private static string? DetailOf(string body)
+    {
+        using var problem = JsonDocument.Parse(body);
+
+        return problem.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
     }
 
     // `octets` written on a socket of its own, and the response read whole, to the socket's end

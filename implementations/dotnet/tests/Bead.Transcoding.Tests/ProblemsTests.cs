@@ -46,10 +46,6 @@ public sealed class ProblemsTests
             "{\"detail\":\"no answer within 5000 ms\",\"status\":504,\"title\":\"Gateway Timeout\",\"type\":\"about:blank\"}",
             Text(HttpProblems.Own(OwnFailure.Timeout, "no answer within 5000 ms").Body));
         Assert.Empty(HttpProblems.Own(OwnFailure.Timeout, "no answer within 5000 ms").Fields);
-        Assert.Equal("Bearer error=\"invalid_request\"", HttpProblems.Own(OwnFailure.Scheme, "x").Fields["www-authenticate"]);
-        Assert.Equal(
-            "Bearer realm=\"bead\", error=\"invalid_request\"",
-            HttpProblems.Own(OwnFailure.Scheme, "x", new OwnProblemOptions { Challenge = "Bearer realm=\"bead\"" }).Fields["www-authenticate"]);
         Assert.Equal(431, HttpProblems.Own(OwnFailure.Jwt, "x").Status);
         Assert.Equal(
             "{\"detail\":\"no route\",\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}",
