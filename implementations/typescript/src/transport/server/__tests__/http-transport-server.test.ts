@@ -69,6 +69,7 @@ import {
   NO_LISTENING_ADDRESSES,
 } from './addresses';
 import { createFakeHTTPServer } from './fake-http-server';
+import { rawResetOverHTTP2 } from './raw-http2';
 import { TLS_FIXTURE } from './tls-fixture';
 import {
   BEARER,
@@ -1564,96 +1565,6 @@ const openAnswerOverHTTP2 = (session: ClientHttp2Session, headers: Record<string
   });
 };
 
-// an HTTP/2 frame (RFC 9113 §4.1): its type, its flags, its stream and its payload
-const frameOf = (
-  type: number,
-  {
-    flags = 0,
-    payload = Buffer.alloc(0),
-    stream = 0,
-  }: { flags?: number; payload?: Buffer; stream?: number }
-) => {
-  const head = Buffer.alloc(9);
-
-  head.writeUIntBE(payload.length, 0, 3);
-  head.writeUInt8(type, 3);
-  head.writeUInt8(flags, 4);
-  head.writeUInt32BE(stream, 5);
-
-  return Buffer.concat([head, payload]);
-};
-
-// a field as a literal never indexed nor Huffman-coded (RFC 7541 §6.2.3), its name and its value
-// shorter than 127 octets
-const literalOf = ([name, value]: readonly [string, string]) => {
-  return Buffer.concat([
-    Buffer.from([0x10, name.length]),
-    Buffer.from(name, 'latin1'),
-    Buffer.from([value.length]),
-    Buffer.from(value, 'latin1'),
-  ]);
-};
-
-/**
- * How the server ends a `POST` over HTTP/2 of the fields given, each written as it is, so that a
- * field may come in two lines where Node's client sends one: the code its stream was reset with,
- * or none when it answered.
- */
-const rawResetOverHTTP2 = (port: number, fields: readonly (readonly [string, string])[]) => {
-  return new Promise<number | undefined>((resolve, reject) => {
-    const socket = connectTLS({
-      ALPNProtocols: ['h2'],
-      ca: TLS_FIXTURE.cert,
-      host,
-      port,
-      servername: 'localhost',
-    });
-    let read = Buffer.alloc(0);
-    const end = (code: number | undefined) => {
-      socket.destroy();
-      resolve(code);
-    };
-
-    socket.once('error', reject);
-    socket.once('secureConnect', () => {
-      const request = [
-        [':method', 'POST'],
-        [':scheme', 'https'],
-        [':authority', `${host}:${String(port)}`],
-        [':path', '/bead'],
-        ['content-type', BEAD_MEDIA_TYPE],
-        ...fields,
-      ] as const;
-
-      // its preface, its SETTINGS, then its HEADERS, END_STREAM and END_HEADERS (RFC 9113 §3.4)
-      socket.write('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
-      socket.write(frameOf(0x4, {}));
-      socket.write(
-        frameOf(0x1, { flags: 0x5, payload: Buffer.concat(request.map(literalOf)), stream: 1 })
-      );
-    });
-    socket.on('data', (chunk: Buffer) => {
-      read = Buffer.concat([read, chunk]);
-
-      while (read.length >= 9 && read.length >= 9 + read.readUIntBE(0, 3)) {
-        const length = read.readUIntBE(0, 3);
-        const [type, flags] = [read.readUInt8(3), read.readUInt8(4)];
-        const payload = read.subarray(9, 9 + length);
-
-        read = read.subarray(9 + length);
-
-        if (type === 0x4 && flags === 0) {
-          socket.write(frameOf(0x4, { flags: 0x1 }));
-        } else if (type === 0x3) {
-          end(payload.readUInt32BE(0));
-        } else if (type === 0x1 || type === 0x7) {
-          end(undefined);
-        }
-      }
-    });
-  });
-};
-
 /** A transport server under TLS, HTTP/2 and HTTP/1.1 on one port, and a session to it. */
 const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) => {
   const server = createHTTPTransportServer({
@@ -2165,6 +2076,73 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(await answerOverHTTP2(session, {})).toEqual([201, undefined]);
   });
 
+  // spec 15.12
+  test('resets over HTTP/2 the stream of a request carrying a connection, or a te other than trailers in lower case, and serves one whose te is trailers', async () => {
+    await using started = await startSecure();
+    const { port, server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 resets a connection and a te other than trailers before the transport reads the
+    // request, but hands trailers on in any case: the transport resets Trailers (RFC 9113 §8.2.2)
+    expect(
+      await Promise.all(
+        [
+          ['connection', 'keep-alive'],
+          ['connection', 'close'],
+          ['te', 'gzip'],
+          ['te', 'trailers, gzip'],
+          ['te', 'Trailers'],
+        ].map((field) => {
+          return rawResetOverHTTP2(port, [field as [string, string]]);
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 5 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // trailers in lower case, a connect drawn
+    expect(await answerOverHTTP2(session, { te: 'trailers' })).toEqual([201, undefined]);
+  });
+
+  // spec 15.12
+  test('resets over HTTP/2 the stream of a request whose Content-Length is signed, a plus or a minus before its 0', async () => {
+    await using started = await startSecure();
+    const { port, server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // a sign is no digit (RFC 9110 §8.6)
+    expect(
+      await Promise.all(
+        ['+0', '-0'].map((length) => {
+          return rawResetOverHTTP2(port, [['content-length', length]]);
+        })
+      )
+    ).toEqual([PROTOCOL_ERROR, PROTOCOL_ERROR]);
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // its digits alone, a connect drawn
+    expect(await answerOverHTTP2(session, { 'content-length': '0' })).toEqual([201, undefined]);
+  });
+
   test('resets over HTTP/2 the stream of a request whose target holds a #, PROTOCOL_ERROR, nothing written, and serves one that holds an encoded #', async () => {
     await using started = await startSecure();
     const { server, session } = started;
@@ -2496,6 +2474,46 @@ test.describe('createHTTPTransportServer, its edges', () => {
     }
 
     // neither the cancel handed on, nor the smuggled connect drawn
+    expect(namesOf(started.events, 'message')).toEqual([]);
+    expect(started.server.clients).toHaveLength(1);
+  });
+
+  // spec 15.12; RFC 9112 §6.3
+  test('refuses 400 unmarked a Transfer-Encoding whose final coding is not chunked on a server whose parser is insecureHTTPParser’s, gzip or identity, and closes its connection before a request pipelined behind it is read', async () => {
+    await using started = await startTransport({
+      createServer: (listener) => {
+        return createServer({ insecureHTTPParser: true }, listener);
+      },
+    });
+    const { connectionToken } = await connect(started.url, started.server);
+    const cancel = Buffer.from(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })).toString('latin1');
+    // * a connect pipelined behind a chunked body, which a final coding other than chunked leaves
+    // unframed: Node's parser hands such a request on under `insecureHTTPParser`
+    const pipelined = `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`;
+
+    for (const coding of ['gzip', 'identity']) {
+      const { read, socket } = await rawSocketOn(portOf(started.url));
+
+      socket.write(
+        `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+          `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nTransfer-Encoding: ${coding}\r\n\r\n` +
+          `${cancel.length.toString(16)}\r\n${cancel}\r\n0\r\n\r\n${pipelined}`,
+        'latin1'
+      );
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+
+      // one answer, unmarked, which closes its connection
+      expect(read.text).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(read.text.split('HTTP/1.1 ')).toHaveLength(2);
+      expect(read.text.toLowerCase()).toContain('connection: close');
+      expect(read.text.toLowerCase()).not.toContain(REFUSAL_HEADER);
+    }
+
+    // neither the cancel handed on, nor the pipelined connect drawn
     expect(namesOf(started.events, 'message')).toEqual([]);
     expect(started.server.clients).toHaveLength(1);
   });

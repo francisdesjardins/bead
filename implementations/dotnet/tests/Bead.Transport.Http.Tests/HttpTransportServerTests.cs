@@ -1815,9 +1815,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         });
     }
 
-    // spec 15.4: the row "A signed `Content-Length`" of docs/support.md
+    // spec 15.4, 15.12: the row "A signed `Content-Length`" of docs/support.md
     [Fact]
-    public async Task Reads_a_signed_Content_Length_as_its_number_as_Kestrel_does_a_connect_drawn_under_plus_0_or_minus_0_and_an_exchange_read_by_plus_its_length()
+    public async Task Reads_a_signed_Content_Length_as_its_number_as_Kestrel_does_a_connect_drawn_under_plus_0_or_minus_0_one_under_plus_5_refused_malformed_as_a_connect_with_a_body_and_an_exchange_read_by_plus_its_length()
     {
         await Start();
 
@@ -1828,6 +1828,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
             await connect.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n\r\n");
             Assert.Equal(201, (await connect.ReadHead()).Status);
+        }
+
+        // five octets under +5, a body, which the transport refuses of a connect as it refuses any
+        using (var five = await Wire.Open(_port))
+        {
+            await five.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: +5\r\n\r\n0\r\n\r\n");
+
+            var head = await five.ReadHead();
+
+            Assert.Equal((400, HttpRefusals.Malformed), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
         }
 
         var (connectionToken, _) = await Connect();
@@ -3438,6 +3448,51 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // none of them, a connect drawn
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead));
+    }
+
+    // spec 15.12: the row "A `connection` or a `te` other than `trailers`, over HTTP/2" of
+    // docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does_and_serves_one_whose_te_is_trailers()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // ! Kestrel refuses each of its own, a te compared with trailers byte for byte, ending the
+        // session where the spec resets the stream (RFC 9113 §5.4.1 lets it)
+        (string, string)[] carried =
+        [
+            ("connection", "keep-alive"),
+            ("connection", "close"),
+            ("te", "gzip"),
+            ("te", "trailers, gzip"),
+            ("te", "Trailers"),
+        ];
+
+        foreach (var field in carried)
+        {
+            Assert.Equal((field, new TlsAnswer(null, null, null, 0x1)), (field, await Http2Of(own, bead, field)));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+
+        // a te of trailers, a connect drawn
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("te", "trailers")));
+    }
+
+    // spec 15.12: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Serves_over_HTTP_2_a_connect_drawn_under_a_signed_Content_Length_plus_0_as_Kestrel_does()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // ! Kestrel reads a sign before the digits as the number, where RFC 9110 §8.6 holds a length
+        // to digits alone, and the transport reads the 0 it wrote
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":authority", $"{Host}:{_port}"), ("content-type", HttpTransport.MediaType), ("content-length", "+0")));
+        Assert.Single(_connections);
     }
 
     [Fact]

@@ -738,6 +738,80 @@ async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specif
     started.stop().await;
 }
 
+// spec 15.12
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_and_serves_one_whose_te_is_trailers()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * h2 resets each before the transport reads the request (RFC 9113 §8.2.2), comparing a `te`
+    // byte for byte, PROTOCOL_ERROR, nothing written
+    for carried in [
+        ("connection", "keep-alive"),
+        ("connection", "close"),
+        ("te", "gzip"),
+        ("te", "trailers, gzip"),
+        ("te", "Trailers"),
+    ] {
+        assert_eq!(
+            http2_of(port, &[own, bead, carried]).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{carried:?}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // a te of trailers, a connect drawn
+    assert_eq!(
+        http2_of(port, &[own, bead, ("te", "trailers")]).await,
+        TlsAnswer::of(201, None),
+        "trailers"
+    );
+    started.stop().await;
+}
+
+// spec 15.12
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_is_signed_a_plus_or_a_minus_before_its_0()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * a sign is no digit (RFC 9110 §8.6): h2 resets the stream before the transport reads the
+    // request, PROTOCOL_ERROR, nothing written
+    for length in ["+0", "-0"] {
+        assert_eq!(
+            http2_of(port, &[own, bead, ("content-length", length)]).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // its digits alone, a connect drawn
+    assert_eq!(
+        http2_of(port, &[own, bead, ("content-length", "0")]).await,
+        TlsAnswer::of(201, None),
+        "0"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn resets_over_http_2_the_stream_of_a_request_whose_target_holds_a_control_character_a_space_del_or_an_octet_past_ascii_protocol_error_and_tells_nothing()
  {

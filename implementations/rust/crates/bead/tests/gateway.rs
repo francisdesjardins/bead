@@ -5102,6 +5102,47 @@ async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specif
     fixture.dispose().await.expect("disposed");
 }
 
+// spec 15.12
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_and_serves_one_whose_te_is_trailers()
+ {
+    // * h2 resets each before the gateway reads the request (RFC 9113 §8.2.2), comparing a `te`
+    // byte for byte, nothing drawn
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.tls = Some(bead::testing::tls::server_config().expect("the server's config"));
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+
+    for carried in [
+        ("connection", "keep-alive"),
+        ("connection", "close"),
+        ("te", "gzip"),
+        ("te", "trailers, gzip"),
+        ("te", "Trailers"),
+    ] {
+        assert_eq!(
+            reset_over_http_2_of(port, &[carried]).await,
+            Some(u32::from(h2::Reason::PROTOCOL_ERROR)),
+            "{carried:?}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "nothing drawn");
+    // a te of trailers, a route served
+    assert_eq!(
+        reset_over_http_2_of(port, &[("te", "trailers")]).await,
+        None,
+        "trailers"
+    );
+
+    fixture.dispose().await.expect("disposed");
+}
+
 // what comes on `socket` until it ends, its octets as text
 async fn text_on(mut socket: tokio::net::TcpStream) -> String {
     use tokio::io::AsyncReadExt as _;
@@ -5270,6 +5311,38 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_a_coding_b
         assert!(!lowered.contains("bead-refusal"), "{came}");
         assert!(!lowered.contains("cache-control"), "{came}");
         assert!(!lowered.contains("vary"), "{came}");
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
+// spec 15.12; transcoding 10.1: hyper refuses a final coding other than chunked itself, 400, and
+// closes the connection before the gateway reads the request (`proto/h1/role.rs:355`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_400_unmarked_a_transfer_encoding_whose_final_coding_is_not_chunked_gzip_or_identity_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let own = format!("{HOST}:{port}");
+
+    for coding in ["gzip", "identity"] {
+        let came = pipelined_on(
+            port,
+            (
+                "HTTP/1.1",
+                &format!("host: {own}\r\ntransfer-encoding: {coding}"),
+            ),
+        )
+        .await;
+        let lowered = came.to_ascii_lowercase();
+
+        // one answer, unmarked, which closes its connection, its socket closed behind it
+        assert!(came.starts_with("HTTP/1.1 400 "), "{coding}: {came}");
+        assert_eq!(came.matches("HTTP/1.1 ").count(), 1, "one answer: {came}");
+        assert!(lowered.contains("\r\nconnection: close\r\n"), "{came}");
+        assert!(!lowered.contains("bead-refusal"), "{came}");
     }
 
     assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");

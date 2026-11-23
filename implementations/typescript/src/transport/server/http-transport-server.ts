@@ -76,6 +76,7 @@ import {
   inTurn,
   isBeadBody,
   isContentLengthCounted,
+  isTeTaken,
   isTransferEncodingTaken,
   joinedOf,
   linesOf,
@@ -1035,7 +1036,9 @@ export const createHTTPTransportServer = (
           // beside a Content-Length, which it hands on under `insecureHTTPParser`, and a
           // Content-Length past 2⁶³ − 1, which Node's parser hands on to 2⁶⁴ − 1
           !isTransferEncodingTaken(request) ||
-          !isContentLengthCounted(request)
+          !isContentLengthCounted(request) ||
+          // and over HTTP/2 a te other than trailers in lower case, which nghttp2 hands on
+          !isTeTaken(request)
         ) {
           return (refuseMalformed(exchange), undefined);
         }
