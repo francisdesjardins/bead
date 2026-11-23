@@ -2754,19 +2754,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // the TypeScript side's fake server alone reports no address, errs late and keeps sessions:
         // Kestrel always reports its port, has no error after listening to raise, and shows no
         // HTTP/2 session, which the gauges here do not count
-        int port;
-
-        using (var probe = new TcpListener(IPAddress.Loopback, 0))
-        {
-            probe.Start();
-            port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-        }
-
         await using var server = new HttpTransportServer();
 
         Assert.Equal(ReadyState.Uninitialized, server.ReadyState);
-        Assert.Equal(new TransportServerAddress(Host, port), await server.Start(new TransportServerStartOptions { Address = Host, Port = port, CancellationToken = Cancelled }));
+
+        var bound = await server.Start(new TransportServerStartOptions { Address = Host, Port = 0, CancellationToken = Cancelled });
+
+        Assert.Equal(Host, bound.Address);
+        Assert.InRange(bound.Port, 1, ushort.MaxValue);
+
+        using var reached = new TcpClient();
+
+        await reached.ConnectAsync(Host, bound.Port, Cancelled);
+        Assert.Equal(bound.Port, ((IPEndPoint)reached.Client.RemoteEndPoint!).Port);
         Assert.Equal(ReadyState.Open, server.ReadyState);
         Assert.DoesNotContain("http2Sessions", server.Gauges().Counts.Keys);
     }

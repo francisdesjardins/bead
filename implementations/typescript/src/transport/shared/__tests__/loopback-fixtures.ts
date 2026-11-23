@@ -64,7 +64,9 @@ const heldFrom = async (address: string, localPort?: number) => {
   const socket = connect({
     host: address,
     port: (listener.address() as AddressInfo).port,
-    ...(localPort === undefined ? {} : { localAddress: address, localPort }),
+    // * an explicit bind holds the local endpoint against a listener on Windows too
+    localAddress: address,
+    ...(localPort === undefined ? {} : { localPort }),
   });
 
   socket.on('error', () => {

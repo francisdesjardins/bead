@@ -298,17 +298,50 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await using var other = new WebSocketClient();
         using var source = new CancellationTokenSource();
+        var waiting = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
         var reconnecting = new TransportClientReconnectOptions
         {
             Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
+            Tap = (delay, attempt) =>
+            {
+                waiting.Writer.TryWrite((delay, attempt));
+            },
         };
 
         await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
-        // nothing listens any more: each attempt fails, then waits a minute
+        var closed = Channel.CreateUnbounded<bool>();
+
+        _client.Transport.Close += (_, _) =>
+        {
+            closed.Writer.TryWrite(true);
+        };
+        other.Transport.Close += (_, _) =>
+        {
+            closed.Writer.TryWrite(true);
+        };
         await _transport.Stop().WaitAsync(Patience, Cancelled);
+        for (var index = 0; index < 2; index++)
+        {
+            Assert.True(await closed.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        }
+
+        using var refused = new ClosedPort();
+
+        foreach (var subject in new[] { _client, other })
+        {
+            await Assert.ThrowsAsync<System.Net.WebSockets.WebSocketException>(() =>
+            {
+                return subject.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = refused.Port, CancellationToken = Cancelled });
+            });
+        }
 
         var byDispose = _client.Reconnect(reconnecting);
         var byToken = other.Reconnect(reconnecting with { CancellationToken = source.Token });
+
+        for (var index = 0; index < 2; index++)
+        {
+            Assert.Equal((TimeSpan.FromMinutes(1), 1), await waiting.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        }
 
         await _client.DisposeAsync();
         await source.CancelAsync();

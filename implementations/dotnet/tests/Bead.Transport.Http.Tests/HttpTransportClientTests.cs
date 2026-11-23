@@ -4135,21 +4135,17 @@ public sealed partial class HttpTransportClientTests
             }));
     }
 
-    // what its connect threw, an HttpRequestException, where the WebSocket transport client's socket
-    // throws: the server gone is told by the listen it holds, which its stop answers, and the attempt
-    // after meets a server stopping, which draws no connection, or its exchange cut
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_connect_threw_when_the_server_is_gone()
     {
+        using var refused = new ClosedPort();
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient();
-        var reconnecting = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // from its close, as the TypeScript side's test reconnects; one attempt, for a port nothing
-        // listens on takes this system two seconds to refuse
         client.Close += (_, _) =>
         {
-            reconnecting.TrySetResult(client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            closed.TrySetResult();
         };
         await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await Eventually(() =>
@@ -4157,11 +4153,15 @@ public sealed partial class HttpTransportClientTests
             return started.Server.Gauges().Counts["listens"] == 1;
         });
         await started.Server.Stop().WaitAsync(Patience, Cancelled);
+        await closed.Task.WaitAsync(Patience, Cancelled);
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+        {
+            return client.Connect(started.Target() with { Port = refused.Port, CancellationToken = Cancelled });
+        });
 
-        var reconnect = await reconnecting.Task.WaitAsync(Patience, Cancelled);
         var thrown = await Assert.ThrowsAsync<ReconnectException>(() =>
         {
-            return reconnect.WaitAsync(Patience, Cancelled);
+            return client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.IsType<HttpRequestException>(thrown.InnerException);

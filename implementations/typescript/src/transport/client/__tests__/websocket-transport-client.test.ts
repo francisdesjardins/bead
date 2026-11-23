@@ -1248,16 +1248,26 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
-        const reconnectOutcome = new Promise<unknown>((resolve) => {
+        await using refused = await closedPort();
+        const closed = new Promise<void>((resolve) => {
           client.once('close', () => {
-            client.reconnect({ delay: 10, maximumAttempts: 2 }).then(resolve, resolve);
+            resolve();
           });
         });
 
         await client.connect({ host, port });
         await stopServer(server);
+        await closed;
+        await expect(client.connect({ host, port: refused.port })).rejects.toBeInstanceOf(
+          ConnectError
+        );
 
-        const reason = await reconnectOutcome;
+        const reason = await client
+          .reconnect({ delay: 10, maximumAttempts: 2 })
+          .catch((error: unknown) => {
+            return error;
+          });
+
         expect(reason).toBeInstanceOf(ReconnectError);
         expect((reason as ReconnectError).cause).toBeInstanceOf(ConnectError);
         expect(client.isClosed()).toBe(true);

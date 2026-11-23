@@ -1300,10 +1300,21 @@ async fn reconnects_to_a_connection_drawn_anew() {
 #[tokio::test]
 async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone() {
     let server = started(&HttpTransportServerOptions::default()).await;
-    let client = client_of(&not_listening());
+    let client = client_of(&HttpTransportClientOptions::default());
+    let told = recorded(&client);
 
     settled(client.connect(&to(server.port))).await.unwrap();
+    until(|| server.server.gauges().unwrap().counts.get("listens") == Some(&1)).await;
     server.stop().await;
+    told.closed(1).await;
+
+    let refused = closed_port().unwrap();
+
+    // * the failed connect keeps a held destination for every reconnection attempt
+    assert!(matches!(
+        settled(client.connect(&to(refused.port()))).await,
+        Err(TransportError::Connect(_))
+    ));
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
     let failed = within(
