@@ -10,11 +10,21 @@ namespace Bead.Transport.WebSockets;
 public sealed record WebSocketTransportClientOptions
 {
     /// <summary>
-    /// The largest message it reads, in bytes: one larger closes its connection with 1009. A
-    /// router's envelope limit at least; an envelope's limit by default, as the TypeScript side's
+    /// The largest message it reads, in bytes: the head of a frame that announces a length taking
+    /// its message past it fails its connection with 1009, at its head (spec 15.3). A router's
+    /// envelope limit at least; an envelope's limit by default, as the TypeScript side's
     /// <c>maxPayload</c> is.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
+
+    /// <summary>
+    /// The frames a message takes at most, the spec's <c>maximumMessageFrames</c>: 16,384 by
+    /// default, and never without end (spec 15.3). The head of the frame past them, an empty one
+    /// counting, fails its connection with 1008, as the TypeScript side's <c>maxFragments</c> does.
+    /// A whole number above 0; any other is an <see cref="ArgumentOutOfRangeException"/> as the
+    /// client is built.
+    /// </summary>
+    public int MaximumMessageFrames { get; init; } = FrameMeter.MaximumMessageFrames;
 
     /// <summary>
     /// How long the connection may stay silent before it is pinged, and how long its pong may take:
@@ -216,6 +226,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         var given = options ?? new WebSocketTransportClientOptions();
 
         HttpRedirects.AssertHandler(given.Handler, nameof(options));
+        ServerBounds.AssertCount((nameof(WebSocketTransportClientOptions.MaximumMessageFrames), given.MaximumMessageFrames));
 
         if (given.Handler is not null && Bead.Tls.IsGiven(given.Tls))
         {
@@ -250,9 +261,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <summary>
     /// What this side failed its open connection for of its own, once, as it ends, before its
     /// unclean close (spec 15.1): a protocol error, the <see cref="WebSocketException"/> its socket
-    /// threw, or a message past <see cref="WebSocketTransportClientOptions.MaximumMessageBytes"/>, an
+    /// threw, or one of its meter's, a frame head RFC 6455 forbids, 1002, a
+    /// <see cref="WebSocketException"/> too; or a message past
+    /// <see cref="WebSocketTransportClientOptions.MaximumMessageBytes"/>, an
     /// <see cref="InvalidDataException"/>, "the connection is closed with 1009: a message past its
-    /// maximumMessageBytes, N bytes"; a listener that throws keeps the close told. A server gone
+    /// maximumMessageBytes, N bytes", or past
+    /// <see cref="WebSocketTransportClientOptions.MaximumMessageFrames"/>, 1008, likewise; a listener that throws keeps the close told. A server gone
     /// without its closing handshake, the heartbeat's drop and this side's own abort past its close
     /// timeout tell their close alone. And what a listener of its messages, its close or its
     /// reconnection threw, the client going on as if it returned.
@@ -958,8 +972,17 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         WebSocketConnection connection;
         var attempt = new CancellationTokenSource();
 
-        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12)
-        var gate = new ReadGate();
+        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12), and
+        // its meter, which judges each frame at its head (spec 15.3): no budget, no rate
+        var gate = new ReadGate
+        {
+            Meter = new FrameMeter(new FrameMeter.MeterOptions
+            {
+                MaximumMessageBytes = MaximumMessageBytes,
+                MaximumMessageFrames = _options.MaximumMessageFrames,
+                IsServer = false,
+            }),
+        };
 
         try
         {
@@ -1186,7 +1209,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             // ! a protocol error alone, which .NET 10 raises as Faulted: a server gone without its
             // closing handshake, its TCP connection ended or reset, is ConnectionClosedPrematurely; its
             // heartbeat's drop an OperationCanceledException around the KeepAliveTimeout's; and once
-            // this side ended it of its own, failed with 1009 or aborted past its close timeout, what
+            // this side ended it of its own, failed by a verdict or aborted past its close timeout, what
             // its socket meets says nothing more (spec 15.1)
             if (!connection.IsEndedHere && reason is WebSocketException { WebSocketErrorCode: WebSocketError.Faulted })
             {
@@ -1227,7 +1250,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         // * its end: its one error, a message past its bound named by it and its value, then its
         // close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
-        failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : connection.AbortFailure;
+        failure ??= connection.FailureOf("the connection") ?? connection.AbortFailure;
 
         if (failure is not null)
         {

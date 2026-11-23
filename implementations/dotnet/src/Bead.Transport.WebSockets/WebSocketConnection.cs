@@ -28,13 +28,13 @@ internal sealed class WebSocketConnection
     private readonly CancellationTokenSource _reading = new();
 
     // what waits for the socket — handed it, in the channel or under SendAsync — and how this side
-    // ended the connection of its own, when it did: dropped behind a bound, and why; failed with
-    // 1009; aborted past its close timeout; what its abort threw; and whether it ended, past which
-    // nothing drops it; under the lock
+    // ended the connection of its own, when it did: dropped behind a bound, and why; failed by a
+    // verdict, its meter's or a message past its bound; aborted past its close timeout; what its
+    // abort threw; and whether it ended, past which nothing drops it; under the lock
     private readonly Lock _gate = new();
     private long _unsent;
     private string? _dropped;
-    private bool _isTooBig;
+    private FrameVerdict? _verdict;
     private bool _isAbandoned;
     private Exception? _abortFailure;
     private bool _isEnded;
@@ -43,6 +43,9 @@ internal sealed class WebSocketConnection
     // awaits then, and each read of its socket's stream where its side gated it; opened for good
     // once the connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
     private readonly ReadGate _read;
+
+    // the message its read holds partway, its read's alone
+    private ArrayBufferWriter<byte> _message = new();
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
         : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
@@ -56,6 +59,10 @@ internal sealed class WebSocketConnection
         _bounds = (bounds.MaximumMessageBytes, bounds.CloseTimeout);
         _pace = bounds.Pace;
         _read = bounds.Gate ?? new ReadGate();
+
+        // * a verdict of its meter fails it, from whatever thread draws it: its own read, the rate's
+        // timer, or another connection's charge that casts it off
+        _read.Meter?.Bind(Fail);
         _sendPace = bounds.Pace is { } pace
             ? new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = pace.MinimumSendBytesPerSecond, SendGracePeriod = pace.SendGracePeriod })
             : null;
@@ -86,20 +93,44 @@ internal sealed class WebSocketConnection
         {
             lock (_gate)
             {
-                return _isTooBig;
+                return _verdict?.Code == WebSocketCloseStatus.MessageTooBig;
             }
         }
     }
 
     /// <summary>
-    /// Its failure with 1009, a message past its bound, as its side reports it through its
-    /// <c>Error</c> (spec 15.1, 15.3): <paramref name="subject"/>, a server's handle or a client's
-    /// connection, then the bound in the spec's spelling and its value; data it does not take, as
-    /// SignalR reports a message past its own.
+    /// The verdict it was failed by, its meter's or a message past its bound, as its side reports it
+    /// through its <c>Error</c> (spec 15.1, 15.3): <paramref name="subject"/>, a server's handle or a
+    /// client's connection, then the bound in the spec's spelling and its value, or the rule broken;
+    /// none while it was failed by none.
     /// </summary>
-    public InvalidDataException TooBigOf(string subject)
+    public Exception? FailureOf(string subject)
     {
-        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with 1009: a message past its maximumMessageBytes, {FailureException.ByteCountOf(_bounds.MaximumMessageBytes)}"));
+        lock (_gate)
+        {
+            return _verdict?.ExceptionOf(subject);
+        }
+    }
+
+    /// <summary>
+    /// Fails it with <paramref name="verdict"/>, its first alone, from any thread (spec 15.3, RFC
+    /// 6455 §7.1.7): its close sent with the verdict's code, then what still comes dropped until
+    /// its peer ends or its close timeout passes, its close unclean whatever the peer answers.
+    /// Nothing once it ended.
+    /// </summary>
+    public void Fail(FrameVerdict verdict)
+    {
+        lock (_gate)
+        {
+            if (_verdict is not null || _isEnded)
+            {
+                return;
+            }
+
+            _verdict = verdict;
+        }
+
+        _ = Close(verdict.Code);
     }
 
     /// <summary>
@@ -128,7 +159,7 @@ internal sealed class WebSocketConnection
         {
             lock (_gate)
             {
-                return _dropped is not null || _isTooBig || _isAbandoned || _abortFailure is not null;
+                return _dropped is not null || _verdict is not null || _isAbandoned || _abortFailure is not null;
             }
         }
     }
@@ -329,10 +360,27 @@ internal sealed class WebSocketConnection
         return _read.IsReadingOn;
     }
 
-    // settles once its read may go on: at once unless its router paused it
-    private Task Resumed()
+    // settles once its read may go on: at once unless its router paused it, the rate's clock of a
+    // message its meter read the start of stopped meanwhile, since nothing of it is read (spec 15.12)
+    private async Task Resumed()
     {
-        return _read.Resumed();
+        var resumed = _read.Resumed();
+
+        if (resumed.IsCompleted)
+        {
+            return;
+        }
+
+        _read.Meter?.Hold();
+
+        try
+        {
+            await resumed;
+        }
+        finally
+        {
+            _read.Meter?.Unhold();
+        }
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
@@ -380,22 +428,25 @@ internal sealed class WebSocketConnection
     /// <summary>
     /// Reads each message whole, bounded, and hands it to <paramref name="deliver"/>, until the
     /// socket closes: a close from the peer is answered, and once this side closes, what still comes
-    /// is read to its close and dropped. A message past the bound fails the connection with 1009
-    /// (RFC 6455 §7.1.7): what comes after is read to the peer's close, or to the close timeout, and
-    /// dropped. What breaks the socket throws; either way, the connection ends.
+    /// is read to its close and dropped. A verdict of its meter fails the connection (RFC 6455
+    /// §7.1.7), what comes after dropped unparsed until the peer ends or the close timeout passes; a
+    /// message past the bound on a socket no meter reads fails it with 1009, what comes after read
+    /// to the peer's close and dropped. What breaks the socket throws; either way, the connection
+    /// ends.
     /// </summary>
     public async Task Read(Action<TransportMessage> deliver)
     {
         try
         {
+            // ! 16 KiB, by which .NET's keep-alive counts a read: a single frame slower than that a
+            // heartbeat is dropped (docs/support.md)
             var buffer = new byte[16 * 1024];
-            var message = new ArrayBufferWriter<byte>();
             var isClosing = false;
 
             while (Socket.State is WebSocketState.Open or WebSocketState.CloseSent)
             {
                 // * no message started while its router paused it (spec 15.12)
-                if (message.WrittenCount == 0 && !isClosing)
+                if (_message.WrittenCount == 0 && !isClosing)
                 {
                     await Resumed();
 
@@ -424,22 +475,17 @@ internal sealed class WebSocketConnection
                     continue;
                 }
 
-                if (message.WrittenCount + received.Count > _bounds.MaximumMessageBytes)
+                // a backstop for a socket no meter reads: a meter judges this at each head
+                if (_message.WrittenCount + received.Count > _bounds.MaximumMessageBytes)
                 {
                     isClosing = true;
-                    message.ResetWrittenCount();
-
-                    lock (_gate)
-                    {
-                        _isTooBig = true;
-                    }
-
-                    _ = Close(WebSocketCloseStatus.MessageTooBig);
+                    _message.ResetWrittenCount();
+                    Fail(FrameVerdict.TooBig(_bounds.MaximumMessageBytes));
 
                     continue;
                 }
 
-                message.Write(buffer.AsSpan(0, received.Count));
+                _message.Write(buffer.AsSpan(0, received.Count));
 
                 // a message partway is read to its end, paused or not
                 _read.Partway(!received.EndOfMessage);
@@ -449,9 +495,18 @@ internal sealed class WebSocketConnection
                     continue;
                 }
 
-                var bytes = message.WrittenSpan.ToArray();
+                var bytes = _message.WrittenSpan.ToArray();
 
-                message.ResetWrittenCount();
+                // ! a writer grown past its read buffer goes with its message: kept, it would hold
+                // what its largest message took for the connection's life
+                if (_message.Capacity > buffer.Length)
+                {
+                    _message = new ArrayBufferWriter<byte>();
+                }
+                else
+                {
+                    _message.ResetWrittenCount();
+                }
 
                 // * a message read whole past a pause is held until resumed, one at most; one this
                 // side closed meanwhile, or whose socket ended while paused, is dropped with its
@@ -482,10 +537,20 @@ internal sealed class WebSocketConnection
         }
 
         OpenGate(true);
+        _read.Meter?.End();
 
         _outgoing.Writer.TryComplete();
         _ended.TrySetResult();
         _sendPace?.Stop();
+    }
+
+    /// <summary>What its read's writer holds room for right now, in bytes: the tests' way to see it let go.</summary>
+    internal int HeldCapacity
+    {
+        get
+        {
+            return _message.Capacity;
+        }
     }
 
     private async Task Write()

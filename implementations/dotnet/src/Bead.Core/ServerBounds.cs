@@ -17,6 +17,9 @@ internal static class ServerBounds
     /// <summary>The slowest, by default, a request's body may come once its grace passed: 240 bytes a second, Kestrel's <c>MinRequestBodyDataRate</c>.</summary>
     public const int MinimumBodyBytesPerSecond = 240;
 
+    /// <summary>The bytes, by default, a WebSocket server holds of messages partway, across its connections: 256 MiB.</summary>
+    public const long MessageBytesBudget = 268_435_456;
+
     /// <summary>The least time, by default, an envelope is given to be taken by its socket.</summary>
     public static readonly TimeSpan SendGracePeriod = TimeSpan.FromSeconds(5);
 
