@@ -34,6 +34,7 @@ import { NeedsSchema } from './generated/transcoding-required_pb';
 import {
   closingAnswerOf,
   MOST_TAKEN,
+  rawAnswerOf,
   rawSocketOn,
   settled,
   statusesOf,
@@ -2265,34 +2266,41 @@ test('serves a request pipelined behind an answer that keeps its connection, in 
 });
 
 // spec 15.12; transcoding 10.1; RFC 9110 §8.6
-test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+test('answers 400 unmarked a Content-Length past 2⁶³ − 1, before its host is judged, and closes its connection', async () => {
   await using fixture = await startTranscoding();
-  const own = `127.0.0.1:${String(fixture.port)}`;
+  const echoOf = (length: string, fields = ''): string => {
+    return (
+      `POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\n` +
+      `${fields}content-length: ${length}\r\n\r\n`
+    );
+  };
+
+  // 2⁶³ − 1 is a length: the host is judged
+  expect(
+    (await rawAnswerOf(fixture.port, echoOf('9223372036854775807', 'connection: close\r\n'))).answer
+  ).toEqual([403, 'host-refused']);
+
+  // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴ − 2 and 2⁶⁴ − 1, which Node's parser hands on; and
+  // 2⁶⁴ and 23 nines, which it answers itself
   const answers: unknown[] = [];
 
-  // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route
   for (const length of [
     '9223372036854775808',
+    '00009223372036854775808',
+    '9'.repeat(19),
     '18446744073709551614',
     '18446744073709551615',
     '18446744073709551616',
+    '9'.repeat(23),
   ]) {
-    answers.push(
-      await closingAnswerOf(
-        fixture.port,
-        `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
-          `content-length: ${length}\r\n\r\n`
-      )
-    );
+    answers.push(await closingAnswerOf(fixture.port, echoOf(length)));
   }
 
-  // Node's parser counts to 2⁶⁴ − 1: a body past maximumBodyBytes, and past it Node answers its own 400
-  expect(answers).toEqual([
-    [413, 'too-large'],
-    [413, 'too-large'],
-    [413, 'too-large'],
-    [400, null],
-  ]);
+  expect(answers).toEqual(
+    Array.from({ length: 7 }, () => {
+      return [400, null];
+    })
+  );
 });
 
 // spec 15.12; RFC 9112 §9.3

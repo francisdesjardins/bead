@@ -75,6 +75,7 @@ import {
   type IExchangeIn,
   inTurn,
   isBeadBody,
+  isContentLengthCounted,
   isTransferEncodingTaken,
   joinedOf,
   linesOf,
@@ -1031,8 +1032,10 @@ export const createHTTPTransportServer = (
           !hasVisibleFields(request.rawHeaders) ||
           !isVisibleTarget(request.url) ||
           // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0, or one
-          // beside a Content-Length, which it hands on under `insecureHTTPParser`
-          !isTransferEncodingTaken(request)
+          // beside a Content-Length, which it hands on under `insecureHTTPParser`, and a
+          // Content-Length past 2⁶³ − 1, which Node's parser hands on to 2⁶⁴ − 1
+          !isTransferEncodingTaken(request) ||
+          !isContentLengthCounted(request)
         ) {
           return (refuseMalformed(exchange), undefined);
         }

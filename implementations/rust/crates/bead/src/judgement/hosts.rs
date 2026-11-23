@@ -319,6 +319,21 @@ pub(crate) fn is_transfer_encoding_framed(http_version: &str, lines: &[&str]) ->
     http_version != "1.0" && first == elements.len().checked_sub(1)
 }
 
+/// Whether `value`, one `Content-Length` field line's value as the parser handed it on, is a count
+/// spec 15.12 takes: one or more ASCII digits and nothing else, whose number is 2⁶³ − 1 at most,
+/// read by value, so its leading zeros count for nothing (RFC 9110 §8.6).
+///
+/// A request whose `Content-Length` is not counted is answered 400 unmarked, or over HTTP/2 its
+/// stream reset, before anything else of it is judged. hyper answers one of 2⁶⁴ − 2 or more
+/// itself over HTTP/1.1, and hands on one between 2⁶³ and 2⁶⁴ − 3; h2 resets the stream of one of
+/// more than 19 digits, and hands on one between 2⁶³ and what 19 digits hold.
+pub(crate) fn is_counted_length(value: &str) -> bool {
+    // ! the digits first: i64's parse takes a leading + or -
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<i64>().is_ok()
+}
+
 /// A request's `Origin` as a refusal tells it (spec 15.1): its field lines as they came, joined by
 /// `, ` (RFC 9110 §5.3); none when it sends none.
 #[must_use]

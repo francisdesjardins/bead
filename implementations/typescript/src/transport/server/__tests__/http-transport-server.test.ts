@@ -1540,6 +1540,29 @@ const resetOf = async (session: ClientHttp2Session, headers: Record<string, stri
   return typeof answer === 'number' ? answer : undefined;
 };
 
+/**
+ * How the server meets a `POST` over HTTP/2 of `headers` whose body never comes, its HEADERS alone
+ * with no END_STREAM: its status and its `bead-refusal`, or the code its stream was reset with.
+ */
+const openAnswerOverHTTP2 = (session: ClientHttp2Session, headers: Record<string, string>) => {
+  return new Promise<[number | undefined, unknown] | number>((resolve) => {
+    const stream = session.request(
+      { ':method': 'POST', ':path': '/bead', 'content-type': BEAD_MEDIA_TYPE, ...headers },
+      { endStream: false }
+    );
+
+    stream.once('response', (response) => {
+      resolve([response[':status'], response[REFUSAL_HEADER]]);
+      stream.close();
+    });
+    stream.on('data', () => {});
+    stream.on('error', () => {});
+    stream.once('close', () => {
+      resolve(stream.rstCode);
+    });
+  });
+};
+
 // an HTTP/2 frame (RFC 9113 §4.1): its type, its flags, its stream and its payload
 const frameOf = (
   type: number,
@@ -2038,6 +2061,61 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(connections).toEqual([]);
     // one line is a length
     expect(await answerOverHTTP2(session, { 'content-length': '0' })).toEqual([201, undefined]);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('resets over HTTP/2 the stream of a request whose Content-Length passes 2⁶³ − 1', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 resets the stream before the transport reads the request: 2⁶³, in 19 digits and in
+    // 23, 19 nines and 2⁶⁴ − 1, each on a connect whose body never comes
+    expect(
+      await Promise.all(
+        [
+          '9223372036854775808',
+          '00009223372036854775808',
+          '9'.repeat(19),
+          '18446744073709551615',
+        ].map((length) => {
+          return openAnswerOverHTTP2(session, { 'content-length': length });
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 4 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('judges over HTTP/2 a Content-Length of more than nineteen digits by its number', async () => {
+    await using started = await startSecure();
+    const { session } = started;
+
+    // 2⁶³ − 1, in 19 digits and in 23, on a connect whose body never comes: a length, so the
+    // transport answers the connect that declares a body as its own
+    expect(
+      await Promise.all(
+        ['9223372036854775807', '00009223372036854775807'].map((length) => {
+          return openAnswerOverHTTP2(session, { 'content-length': length });
+        })
+      )
+    ).toEqual([
+      [400, 'malformed'],
+      [400, 'malformed'],
+    ]);
   });
 
   // spec 15.12
@@ -2579,34 +2657,47 @@ test.describe('createHTTPTransportServer, its edges', () => {
   });
 
   // spec 15.12; RFC 9110 §8.6
-  test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+  test('answers 400 unmarked a Content-Length past 2⁶³ − 1, before its host is judged, and closes its connection', async () => {
     await using started = await startTransport();
+    const connectOf = (length: string, fields = ''): string => {
+      return (
+        `POST /bead HTTP/1.1\r\nHost: elsewhere.test\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+        `${fields}Content-Length: ${length}\r\n\r\n`
+      );
+    };
+
+    // 2⁶³ − 1 is a length: the host is judged
+    expect(
+      (
+        await rawAnswerOf(
+          portOf(started.url),
+          connectOf('9223372036854775807', 'Connection: close\r\n')
+        )
+      ).answer
+    ).toEqual([403, 'host-refused']);
+
+    // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴ − 2 and 2⁶⁴ − 1, which Node's parser hands on; and
+    // 2⁶⁴ and 23 nines, which it answers itself
     const answers: unknown[] = [];
 
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
     for (const length of [
       '9223372036854775808',
+      '00009223372036854775808',
+      '9'.repeat(19),
       '18446744073709551614',
       '18446744073709551615',
       '18446744073709551616',
+      '9'.repeat(23),
     ]) {
-      answers.push(
-        await closingAnswerOf(
-          portOf(started.url),
-          `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
-            `Content-Length: ${length}\r\n\r\n`
-        )
-      );
+      answers.push(await closingAnswerOf(portOf(started.url), connectOf(length)));
     }
 
-    // Node's parser counts to 2⁶⁴ − 1: a connect that declares a body is malformed, and past it Node
-    // answers its own 400
-    expect(answers).toEqual([
-      [400, 'malformed'],
-      [400, 'malformed'],
-      [400, 'malformed'],
-      [400, null],
-    ]);
+    expect(answers).toEqual(
+      Array.from({ length: 7 }, () => {
+        return [400, null];
+      })
+    );
+    expect(started.server.clients).toHaveLength(0);
   });
 
   // spec 15.12; RFC 9112 §9.3

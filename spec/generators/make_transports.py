@@ -259,6 +259,12 @@ LENGTHS = [{'row': 'A `Content-Length` naming one number in several lines, over 
 CL_TE_CASE = ("a request carrying a Content-Length beside a Transfer-Encoding, in either order, is answered 400 unmarked, "
               "before its host is judged, and its connection closed")
 CL_TE = [{'row': 'A `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1', 'language': 'Rust'}]
+# the largest count of a Content-Length (spec 15.12), 2⁶³ − 1, and the values each case sends about it,
+# read by value whatever zeros lead them: two at the count, five past it; 2⁶⁴ − 2 and 2⁶⁴ − 1 stay
+# out, since hyper answers them 431, a row of docs/support.md
+COUNT = 2 ** 63 - 1
+PAST_COUNT = [('counted', str(COUNT)), ('padded', f'0000{COUNT}'), ('past', str(COUNT + 1)),
+              ('beyond', f'0000{COUNT + 1}'), ('nineteen', '9' * 19), ('wide', str(2 ** 64)), ('long', '9' * 23)]
 # a chunked body's last chunk, and a CANCEL of call 5 in one chunk before it
 LAST_CHUNK = text('0\r\n\r\n')
 CHUNKED_CANCEL = ' '.join([text('8\r\n'), cancel(5), text('\r\n0\r\n\r\n')])
@@ -529,6 +535,19 @@ cases = [
          for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD), *framing], length=[],
                            body=LAST_CHUNK),
                       unmarked(on))]),
+    # 15.12: a Content-Length past 2⁶³ − 1, read by value, answered as HTTP answers it before hosts is
+    # read, and its connection closed once answered, on a socket that asks no close; one at the count
+    # goes on to its host
+    ('a request whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged, and its connection closed',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         step
+         for on, length in PAST_COUNT
+         for step in ((send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length),
+                       refused(on, 403, 'host-refused'))
+                      if int(length) <= COUNT else
+                      (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length,
+                            close=False),
+                       unmarked(on), {'expect': {'end': True}, 'on': on}))]),
     # 15.12: a Content-Length beside a Transfer-Encoding, whatever it holds, refused as RFC 9112 §6.3
     # asks, before hosts is read, and its connection closed once answered (§6.1), on a socket that
     # asks no close; a case of its own, since its differs excuses a whole case
@@ -1288,6 +1307,14 @@ websocket = [
                              ('twice', ['0', '0']), ('padded', ['0', '00']))
          for step in (handshake(on, [('content-length', length) for length in lengths], host='elsewhere.test'),
                       unmarked(on))]),
+    # 15.2, step 1, and 15.12: a Content-Length past 2⁶³ − 1, read by value, judged before hosts is
+    # read; one at the count goes on to its host
+    ('an upgrade whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         step
+         for on, length in PAST_COUNT
+         for step in (handshake(on, [('content-length', length)], host='elsewhere.test'),
+                      refused(on, 403, 'host-refused', UPGRADE_REFUSED) if int(length) <= COUNT else unmarked(on))]),
     # 15.2, step 1, and 15.12: a Content-Length beside a Transfer-Encoding, whatever it holds, and a
     # Transfer-Encoding whose final coding is not chunked (RFC 9112 §6.3 items 3 and 4), judged before
     # hosts is read

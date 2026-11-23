@@ -863,14 +863,15 @@ impl ServerInner {
         };
         let target = fields.target();
 
-        // * a field or a target past visible ASCII, a Content-Length that frames no body, or a
-        // Transfer-Encoding spec 15.12 refuses, before anything else, as HTTP answers it, its
-        // connection closed behind it
+        // * a field or a target past visible ASCII, a Content-Length that frames no body or whose
+        // number passes 2⁶³ − 1, or a Transfer-Encoding spec 15.12 refuses, before anything else,
+        // as HTTP answers it, its connection closed behind it
         let is_visible = fields
             .raw_fields()
             .is_some_and(|raw| has_visible_fields(&raw))
             && is_visible_target(Some(&target))
             && fields.has_one_length()
+            && fields.has_counted_length()
             && fields.is_transfer_encoding_framed();
         let Some(authority) = is_visible.then(|| fields.authority(&target)).flatten() else {
             return ready(malformed(&flow));

@@ -2066,24 +2066,54 @@ public sealed class HttpGatewayTests
 
     // spec 15.12; transcoding 10.1; RFC 9110 §8.6
     [Fact]
-    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    public async Task Answers_400_unmarked_a_Content_Length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
     {
         var started = await Started();
 
         try
         {
-            var answers = new List<(int Status, string? Refusal)>();
-
-            // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
-            foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+            string RequestOf(string length, string close)
             {
-                var (status, fields, _) = await Exchanged(started.Port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: {length}\r\n\r\n"));
-
-                answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+                return $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: evil.example\r\ncontent-type: application/json\r\ncontent-length: {length}\r\n{close}\r\n";
             }
 
-            // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
-            Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
+            // ! 2⁶³ − 1, its close asked, from a host the gateway does not take: Kestrel keeps the
+            // connection of a length it counts to read the body it declares, so its head alone is read
+            using (var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(RequestOf("9223372036854775807", "connection: close\r\n"))))
+            {
+                var head = (await ReadUntil(socket, "\r\n\r\n")).Split("\r\n");
+
+                Assert.Equal("HTTP/1.1 403 Forbidden", head[0]);
+                Assert.Contains("bead-refusal: host-refused", head, StringComparer.OrdinalIgnoreCase);
+            }
+
+            var answers = new List<(string Length, int Status, string? Refusal, string Path, string Body)>();
+            string[] lengths =
+            [
+                "9223372036854775808",
+                "00009223372036854775808",
+                "9999999999999999999",
+                "18446744073709551614",
+                "18446744073709551615",
+                "18446744073709551616",
+                "99999999999999999999999",
+            ];
+
+            // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ and 23 nines, on a route,
+            // each read to its socket's close
+            foreach (var length in lengths)
+            {
+                var (status, fields, body) = await Exchanged(started.Port, Encoding.ASCII.GetBytes(RequestOf(length, "")));
+                var path = string.Join(" ", ((string[])["cache-control", "x-content-type-options", "vary"]).Where(fields.ContainsKey));
+
+                answers.Add((length, status, fields.GetValueOrDefault("bead-refusal"), path, body));
+            }
+
+            // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before the gateway reads the request
+            Assert.Equal(lengths.Select((length) =>
+            {
+                return (length, 400, (string?)null, "", "");
+            }), answers);
         }
         finally
         {

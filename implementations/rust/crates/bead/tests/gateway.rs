@@ -4696,6 +4696,53 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_o
     fixture.dispose().await.expect("disposed");
 }
 
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_passes_2_63_1() {
+    // * 2⁶³ and 19 nines h2 hands on, and the gateway resets their stream (spec 15.12) before its
+    // path is matched; 2⁶³ in 23 digits h2 resets itself; PROTOCOL_ERROR, nothing drawn
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.tls = Some(bead::testing::tls::server_config().expect("the server's config"));
+        },
+        true,
+    ))
+    .await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+    let session = http2_session(port).await;
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+
+    for length in [
+        "9223372036854775808",
+        nineteen.as_str(),
+        "00009223372036854775808",
+    ] {
+        let request = http::Request::builder()
+            .method("POST")
+            .uri(format!("https://{HOST}:{port}/api/Transcoding/echo"))
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .header(http::header::CONTENT_LENGTH, length)
+            .body(())
+            .expect("a request");
+        let mut ready = session.clone().ready().await.expect("ready");
+        // ! its stream left open behind its head: h2 resets a length it counts for no content
+        let (response, _sending) = ready.send_request(request, false).expect("sent");
+        let answer = match patience(PATIENCE, response)
+            .await
+            .expect("answered in time")
+        {
+            Ok(response) => Ok(response.status().as_u16()),
+            Err(error) => Err(error.reason()),
+        };
+
+        assert_eq!(answer, Err(Some(h2::Reason::PROTOCOL_ERROR)), "{length}");
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "nothing drawn");
+    fixture.dispose().await.expect("disposed");
+}
+
 // an HTTP/2 frame's type, its flags and its stream (RFC 9113 §4.1)
 struct FrameHead {
     kind: u8,
@@ -5071,57 +5118,105 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
     fixture.dispose().await.expect("disposed");
 }
 
-// spec 15.12; transcoding 10.1; RFC 9110 §8.6
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
- {
+// what a request written raw on `port` is answered, read to its socket's close: its status, and
+// its mark
+async fn closed_answer_of(port: u16, request: &str) -> (String, Option<String>) {
     use tokio::io::AsyncReadExt as _;
 
+    let mut socket = sent(port, request.as_bytes()).await;
+    let mut came = Vec::new();
+
+    patience(PATIENCE, socket.read_to_end(&mut came))
+        .await
+        .expect("its socket closed")
+        .expect("its answer");
+
+    let came = String::from_utf8_lossy(&came).into_owned();
+    let refusal = came
+        .split("\r\n")
+        .find_map(|line| line.strip_prefix("bead-refusal: "))
+        .map(str::to_owned);
+
+    (came.get(9..12).unwrap_or_default().to_owned(), refusal)
+}
+
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
+ {
     let fixture = started().await;
     let port = fixture.port;
-    let mut answers = Vec::new();
+    let drawn = drawn_by(&fixture);
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    // a route, from a host it does not take
+    let asked = |length: &str, close: bool| {
+        let close = if close { "connection: close\r\n" } else { "" };
 
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route, each read to its socket's close
+        format!(
+            "POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\n{JSON}\r\n{close}content-length: {length}\r\n\r\n"
+        )
+    };
+
+    // 2⁶³ − 1 is a length: its host is judged
+    assert_eq!(
+        closed_answer_of(port, &asked("9223372036854775807", true)).await,
+        ("403".to_owned(), Some("host-refused".to_owned())),
+        "2⁶³ − 1"
+    );
+
+    // 2⁶³ in 19 digits and in 23 and 19 nines, which hyper hands on, then 2⁶⁴ and 23 nines, which
+    // it answers 400 itself, each read to its socket's close; hyper answers 2⁶⁴ − 2 and 2⁶⁴ − 1 431
+    // itself, the next test's
     for length in [
         "9223372036854775808",
-        "18446744073709551614",
-        "18446744073709551615",
+        "00009223372036854775808",
+        nineteen.as_str(),
         "18446744073709551616",
+        twenty_three.as_str(),
     ] {
-        let mut socket = sent(
-            port,
-            format!(
-                "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{port}\r\n{JSON}\r\ncontent-length: {length}\r\n\r\n"
-            )
-            .as_bytes(),
-        )
-        .await;
-        let mut came = Vec::new();
-
-        patience(PATIENCE, socket.read_to_end(&mut came))
-            .await
-            .expect("its socket closed")
-            .expect("its answer");
-
-        let came = String::from_utf8_lossy(&came).into_owned();
-
-        answers.push((
-            came.get(9..12).unwrap_or_default().to_owned(),
-            came.contains("bead-refusal: too-large\r\n"),
-        ));
+        assert_eq!(
+            closed_answer_of(port, &asked(length, false)).await,
+            ("400".to_owned(), None),
+            "{length}"
+        );
     }
 
-    // hyper counts to 2⁶⁴ − 3: a body past maximumBodyBytes; 2⁶⁴ − 2 and 2⁶⁴ − 1 hyper refuses
-    // 431, and past them 400
-    assert_eq!(
-        answers,
-        [
-            ("413".to_owned(), true),
-            ("431".to_owned(), false),
-            ("431".to_owned(), false),
-            ("400".to_owned(), false),
-        ]
-    );
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
+    fixture.dispose().await.expect("disposed");
+}
+
+// RFC 9112 §11.2; docs/support.md
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_431_unmarked_a_content_length_of_2_64_2_or_2_64_1_by_its_number_as_hyper_does_and_closes_its_connection()
+ {
+    let fixture = started().await;
+    let port = fixture.port;
+    let drawn = drawn_by(&fixture);
+
+    // * hyper counts to 2⁶⁴ − 3 and answers the two values past it 431, by their number, before
+    // the gateway reads the request: 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ − 2 led by a zero, and 2⁶⁴ − 2 before
+    // a Transfer-Encoding
+    for fields in [
+        "content-length: 18446744073709551614\r\n",
+        "content-length: 18446744073709551615\r\n",
+        "content-length: 018446744073709551614\r\n",
+        "content-length: 18446744073709551614\r\ntransfer-encoding: chunked\r\n",
+    ] {
+        assert_eq!(
+            closed_answer_of(
+                port,
+                &format!(
+                    "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {HOST}:{port}\r\n{JSON}\r\n{fields}\r\n"
+                ),
+            )
+            .await,
+            ("431".to_owned(), None),
+            "{fields:?}"
+        );
+    }
+
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0, "no route served");
     fixture.dispose().await.expect("disposed");
 }
 

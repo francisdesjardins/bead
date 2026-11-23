@@ -7,6 +7,7 @@ import {
   credentialOf,
   hasVisibleFields,
   HOST_REFUSAL,
+  isCountedLength,
   isIPAddress,
   isIPv4Address,
   isListedOrigin,
@@ -808,6 +809,39 @@ test.describe('hosts and origins', () => {
       'null',
       'https://a.test, null',
     ]);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('isCountedLength takes digits alone whose number is 2⁶³ − 1 at most, leading zeros read by value, and refuses any other', () => {
+    // 0, at any width; 1 led by 39 zeros; 2⁶³ − 1, in 19 digits and in 23
+    expect(
+      [
+        '0',
+        '0'.repeat(40),
+        `${'0'.repeat(39)}1`,
+        '9223372036854775807',
+        '00009223372036854775807',
+      ].filter((value) => {
+        return !isCountedLength(value);
+      })
+    ).toEqual([]);
+    // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴; 23 nines; and what is no digits alone
+    expect(
+      [
+        '9223372036854775808',
+        '00009223372036854775808',
+        '9'.repeat(19),
+        '18446744073709551616',
+        '9'.repeat(23),
+        '',
+        '+1',
+        '-0',
+        'abc',
+        '1 2',
+      ].filter((value) => {
+        return isCountedLength(value);
+      })
+    ).toEqual([]);
   });
 
   test('folds ASCII alone: a host that differs past ASCII is another', () => {

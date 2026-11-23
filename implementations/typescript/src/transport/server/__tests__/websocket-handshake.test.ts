@@ -307,6 +307,60 @@ test.describe('refusalOfHandshake', () => {
     ).toEqual(['taken', MALFORMED]);
   });
 
+  // spec 15.2, 15.12; RFC 9110 §8.6
+  test('refuses first, unmarked, a Content-Length whose number passes 2⁶³ − 1, leading zeros read by value, whatever else the request holds', () => {
+    const lengthOf = (value: string) => {
+      return [
+        requestOf([['Content-Length', value]]),
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Content-Length', value],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf([['Content-Length', value]], { method: 'POST', without: ['upgrade'] }),
+      ];
+    };
+
+    // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴ − 1 and 2⁶⁴, which Node's parser hands on and
+    // answers itself; 23 nines; each as it is, from a host it does not take and under another method
+    expect(
+      [
+        '9223372036854775808',
+        '00009223372036854775808',
+        '9'.repeat(19),
+        '18446744073709551615',
+        '18446744073709551616',
+        '9'.repeat(23),
+      ]
+        .flatMap(lengthOf)
+        .map(answerOf)
+    ).toEqual(
+      Array.from({ length: 18 }, () => {
+        return HOST;
+      })
+    );
+    // 2⁶³ − 1, in 19 digits and in 23, is a length: the content it declares is malformed, after its
+    // host; and 0 at any width is none
+    expect(
+      ['9223372036854775807', '00009223372036854775807', '0'.repeat(40)].map((value) => {
+        return answerOf(requestOf([['Content-Length', value]]));
+      })
+    ).toEqual([MALFORMED, MALFORMED, 'taken']);
+    expect(
+      answerOf(
+        requestOf(
+          [
+            ['Host', 'elsewhere.test'],
+            ['Content-Length', '9223372036854775807'],
+          ],
+          { without: ['host'] }
+        )
+      )
+    ).toEqual(HOST_REFUSED);
+  });
+
   test('refuses first, unmarked, a Content-Length beside a Transfer-Encoding, in either order, whatever either holds, or a Transfer-Encoding whose final coding is not chunked, that lists anything after its first chunked, or that an HTTP/1.0 request carries, whatever else the request holds', () => {
     // the pair in either order, a Content-Length of no number among it; a final coding but chunked,
     // across two lines among it, or none; anything after the first chunked, an empty element among

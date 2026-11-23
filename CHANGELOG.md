@@ -38,6 +38,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its turn, the socket kept, and `responses` gains several responses on one socket. The support
   matrix's open row on requests pipelined becomes a platform row: what each platform reads ahead,
   and when each side sees its client leave.
+- Spec 15.12 and 15.2's step 1: a `Content-Length` is counted to 2⁶³ − 1, the largest signed 64-bit
+  count, by its number, its leading zeros counting for nothing. One past it is answered as HTTP's
+  own refusal, before anything else of the request is judged: 400 unmarked over HTTP/1.1 and at a
+  WebSocket's address, its connection closed, and its stream reset `PROTOCOL_ERROR` over HTTP/2.
+  The TypeScript and Rust HTTP transports, gateways and WebSocket judgements answered such a
+  request after its host, 403 `host-refused`, or when the host was taken, 400 `malformed`, 413
+  or 415. The Rust judgement counted no length at any value. RFC 9110 §17.5's 413 is a row of the
+  support matrix's "Leveled down". The platform rows keep hyper's 431 at 2⁶⁴ − 2 and 2⁶⁴ − 1,
+  Kestrel's `GOAWAY` and h2's reset of more than 19 digits over HTTP/2. Two cases of
+  `spec/transports.json` and an exchange of `spec/transcoding.json` play it.
 
 ### Fixed
 
