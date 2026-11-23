@@ -4027,6 +4027,20 @@ EXCHANGES = [
               framed_by([('transfer-encoding', 'chunked')], on='i', http='HTTP/1.0'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'i'}]),
+    # a Transfer-Encoding that lists a coding before its chunked, in one line or in two, refused as
+    # HTTP refuses it before the route reads a body still coded; an empty element before chunked
+    # ignored, the body echoed
+    exchange("a body whose Transfer-Encoding lists a coding before its chunked, in one line or two, refused as "
+             "HTTP refuses it, unmarked, its body empty; an empty element before it is ignored",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [*[step for on, fields in (('a', [('transfer-encoding', 'gzip, chunked')]),
+                                        ('b', [('transfer-encoding', 'x-unknown, chunked')]),
+                                        ('c', [('transfer-encoding', 'gzip'), ('transfer-encoding', 'chunked')]))
+                for step in (framed_by(fields, on=on),
+                             {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                         'body': ''}, 'on': on})],
+              framed_by([('transfer-encoding', ', chunked')], on='d'),
+              answered('{}', on='d')]),
     # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
     # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
     # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)

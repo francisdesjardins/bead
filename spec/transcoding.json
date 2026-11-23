@@ -12815,6 +12815,92 @@
       ]
     },
     {
+      "name": "a body whose Transfer-Encoding lists a coding before its chunked, in one line or two, refused as HTTP refuses it, unmarked, its body empty; an empty element before it is ignored",
+      "clauses": [
+        "10.1",
+        "10.1.1",
+        "spec:15.12"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: gzip, chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: x-unknown, chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "b"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: gzip\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: , chunked\r\nconnection: close\r\n\r\n",
+            "body": "32 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "d"
+        }
+      ]
+    },
+    {
       "name": "a body whose Content-Length names one number in two lines, refused as HTTP refuses it, unmarked, its body empty, as section 15.12 levels it",
       "clauses": [
         "10.1",

@@ -1430,9 +1430,9 @@ WebSocket's address in this order, and answers the first that applies:
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
    path whose percent-decoding holds NUL, a field that holds a control character or an octet past
    US-ASCII, a `Content-Length` that frames no body, one whose number passes 2⁶³ − 1 or one beside
-   a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked` or that lists
-   anything after its first `chunked`, or one an HTTP/1.0 request carries (section 15.12), its HTTP
-   server answers, unmarked.
+   a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked`, that lists a
+   coding before its `chunked` or anything after its first `chunked`, or one an HTTP/1.0 request
+   carries (section 15.12), its HTTP server answers, unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1943,7 +1943,17 @@ line or across its lines. Another `chunked` is one a sender never applies
 tell whether a body that names it twice was coded twice. An empty element after it, which
 [RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2) has a recipient
 ignore, is refused alike, since not every platform's HTTP takes it (`docs/support.md`, "Leveled
-down"). So is an HTTP/1.0 request that carries a `Transfer-Encoding`.
+down"). So is a request whose `Transfer-Encoding` lists a coding before its `chunked`,
+`gzip, chunked` among them, in one line or across its lines. A server decodes no transfer coding
+but `chunked`, and would hand on a body still coded. An empty element before `chunked` is no
+coding, and is ignored ([RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2)).
+[RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server answer a transfer
+coding it does not understand 501. A 501 is heuristically cacheable
+([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), where a refusal of
+HTTP's own carries no `cache-control`, and not every platform's HTTP lets a server see a
+`Content-Length` beside such a field (`docs/support.md`, "Leveled down"). So every side refuses it
+400, as it refuses a final coding other than `chunked`. So is an HTTP/1.0 request that carries a
+`Transfer-Encoding`.
 [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server treat its framing
 as faulty and close its connection, since its sender may have passed on a chunked body it never
 decoded. A server may refuse it all the same, and the refusal reads none of that body. One
