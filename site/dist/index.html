@@ -2250,7 +2250,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <details class="more">
     <summary>The conformance files, in figures</summary>
     <ul>
-      <li><strong>The units</strong>: 411 for the specification,
+      <li><strong>The units</strong>: 412 for the specification,
         185 for debugging and 193 for
         transcoding, each held by the sha256 fingerprint of its text.</li>
       <li><strong>The vectors</strong>: 474, in 17
@@ -2260,9 +2260,9 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         Codes each MQTT 5 acknowledgement names.</li>
       <li><strong>The conversations</strong>: 210, each a script between
         clients and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 304, each at a
+      <li><strong>The transports’ cases</strong>: 312, each at a
         transport’s edge, over HTTP, over WebSocket and over a broker, written byte by byte.</li>
-      <li><strong>The durations</strong>: 35 places that take a duration,
+      <li><strong>The durations</strong>: 36 places that take a duration,
         and what each makes of 19 inputs.</li>
       <li><strong>The payloads</strong>: 184 payloads read and
         54 values written, in <code>raw</code>, <code>text</code>,
@@ -2857,12 +2857,22 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>The pace of a body over HTTP, or of an envelope’s parts over a broker</td>
+            <td>The pace of a body over HTTP, of a WebSocket message, or of an envelope’s parts over a broker</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
             <td class="code-num">16,778,240</td>
             <td>A WebSocket message; past it, 1009</td>
+          </tr>
+          <tr>
+            <td><code>maximumMessageFrames</code></td>
+            <td class="code-num">16,384</td>
+            <td>A WebSocket message’s frames; past them, 1008</td>
+          </tr>
+          <tr>
+            <td><code>messageBytesBudget</code></td>
+            <td class="code-num">268,435,456</td>
+            <td>The WebSocket messages a server holds partway; past it, a connection is cast off with 1013</td>
           </tr>
         </tbody>
       </table>
@@ -2888,7 +2898,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <ul class="chips space" aria-label="In figures">
     <li>8-byte prefix</li>
     <li>23 failure codes</li>
-    <li>411 units in the spec</li>
+    <li>412 units in the spec</li>
   </ul>
   <p class="space">
     Three aims guide each choice. A decoder written by hand reads each field at its place, parsing
@@ -3693,7 +3703,7 @@ message CountDownRequest {
     Where its platform lets it, each end of a WebSocket sends a PING on a connection silent for
     30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
     The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
-    server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
+    server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455), one past <code>maximumMessageFrames</code> with 1008, and a frame RFC 6455 forbids with 1002. A side reads each frame’s head where its platform lets it, and judges it there.
   </p>
   <p>
     A <code>POST</code> with no body connects. The server answers 201 with a 16-byte token in the
@@ -4553,7 +4563,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
     <ul>
-      <li><strong>Les unités</strong> : 411 pour la spécification,
+      <li><strong>Les unités</strong> : 412 pour la spécification,
         185 pour le débogage et 193 pour le
         transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
       <li><strong>Les vecteurs</strong> : 474, en 17
@@ -4563,9 +4573,9 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         à l’octet ; et les Reason Codes que nomme chaque accusé de MQTT 5.</li>
       <li><strong>Les conversations</strong> : 210, chacune un script entre
         des clients et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 304, chacun au bord
+      <li><strong>Les cas des transports</strong> : 312, chacun au bord
         d’un transport, sur HTTP, sur WebSocket et sur un courtier, écrit octet par octet.</li>
-      <li><strong>Les durées</strong> : 35 endroits qui prennent une
+      <li><strong>Les durées</strong> : 36 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
       <li><strong>Les charges</strong> : 184 charges lues et
         54 valeurs écrites, en <code>raw</code>, <code>text</code>,
@@ -5186,12 +5196,22 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>Le rythme d’un corps sur HTTP, ou des parties d’une enveloppe sur un courtier</td>
+            <td>Le rythme d’un corps sur HTTP, d’un message WebSocket, ou des parties d’une enveloppe sur un courtier</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
             <td class="code-num">16 778 240</td>
             <td>Un message WebSocket ; au-delà, 1009</td>
+          </tr>
+          <tr>
+            <td><code>maximumMessageFrames</code></td>
+            <td class="code-num">16 384</td>
+            <td>Les trames d’un message WebSocket ; au-delà, 1008</td>
+          </tr>
+          <tr>
+            <td><code>messageBytesBudget</code></td>
+            <td class="code-num">268 435 456</td>
+            <td>Les messages WebSocket qu’un serveur tient en cours ; au-delà, une connexion est écartée avec 1013</td>
           </tr>
         </tbody>
       </table>
@@ -5217,7 +5237,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <ul class="chips space" aria-label="En chiffres">
     <li>8 octets de préfixe</li>
     <li>23 codes d’échec</li>
-    <li>411 unités dans la spécification</li>
+    <li>412 unités dans la spécification</li>
   </ul>
   <p class="space">
     Trois buts guident chaque choix. Un décodeur écrit à la main lit chaque champ à sa place, sans
@@ -6045,7 +6065,7 @@ message CountDownRequest {
     restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
     sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
-    avec le code 1009 (RFC 6455).
+    avec le code 1009 (RFC 6455), un message au-delà de <code>maximumMessageFrames</code> avec 1008, et une trame que la RFC 6455 interdit avec 1002. Chaque bout lit la tête de chaque trame là où sa plateforme le permet, et la juge là.
   </p>
   <p>
     Un <code>POST</code> sans corps connecte. Le serveur répond 201 avec un jeton de 16 octets dans

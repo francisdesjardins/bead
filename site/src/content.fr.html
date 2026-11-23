@@ -932,12 +932,22 @@
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
             <td class="code-num">240</td>
-            <td>Le rythme d’un corps sur HTTP, ou des parties d’une enveloppe sur un courtier</td>
+            <td>Le rythme d’un corps sur HTTP, d’un message WebSocket, ou des parties d’une enveloppe sur un courtier</td>
           </tr>
           <tr>
             <td><code>maximumMessageBytes</code></td>
             <td class="code-num">16 778 240</td>
             <td>Un message WebSocket ; au-delà, 1009</td>
+          </tr>
+          <tr>
+            <td><code>maximumMessageFrames</code></td>
+            <td class="code-num">16 384</td>
+            <td>Les trames d’un message WebSocket ; au-delà, 1008</td>
+          </tr>
+          <tr>
+            <td><code>messageBytesBudget</code></td>
+            <td class="code-num">268 435 456</td>
+            <td>Les messages WebSocket qu’un serveur tient en cours ; au-delà, une connexion est écartée avec 1013</td>
           </tr>
         </tbody>
       </table>
@@ -1767,7 +1777,7 @@
     restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
     sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
     page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
-    avec le code 1009 (RFC 6455).
+    avec le code 1009 (RFC 6455), un message au-delà de <code>maximumMessageFrames</code> avec 1008, et une trame que la RFC 6455 interdit avec 1002. Chaque bout lit la tête de chaque trame là où sa plateforme le permet, et la juge là.
   </p>
   <p>
     Un <code>POST</code> sans corps connecte. Le serveur répond 201 avec un jeton de 16 octets dans
