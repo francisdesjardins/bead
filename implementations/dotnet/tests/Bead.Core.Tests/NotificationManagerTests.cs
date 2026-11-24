@@ -27,7 +27,7 @@ public sealed class NotificationManagerTests
     // definition
 
     [Fact]
-    public void Forgets_a_removed_subscription_s_metrics_series_and_keeps_another_connection_s_series()
+    public void Forwards_a_subscriptions_metrics_series_until_it_is_removed()
     {
         var registry = new MetricsRegistry();
         var metrics = registry.Give(RouterSide.Server);
