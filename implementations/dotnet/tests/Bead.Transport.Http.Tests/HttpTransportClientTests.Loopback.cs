@@ -198,9 +198,23 @@ public sealed partial class HttpTransportClientTests
 
                 await client.Connect(new HttpTransportClientConnectOptions { Host = named, Port = port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+
+                // ! a quick close sends its DELETE without waiting on it: wait until the server took it
+                await WaitUntilDeleted(named).WaitAsync(Patience, Cancelled);
             }
 
             await application.StopAsync(Cancelled);
+
+            async Task WaitUntilDeleted(string named)
+            {
+                while (!versions.Any((each) =>
+                {
+                    return each.Named == named && each.Request.StartsWith("DELETE ", StringComparison.Ordinal);
+                }))
+                {
+                    await Task.Delay(10, Cancelled);
+                }
+            }
 
             // * the same requests in the same version under either name
             string[] RequestsOf(string named)
