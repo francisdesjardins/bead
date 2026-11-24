@@ -1,6 +1,6 @@
 const metricsRegistry = createMetricsRegistry();
 const server = createServer({ transport }, { metricsRegistry });
 
-// served at /metrics, the text Prometheus reads, and a Grafana behind it
+// served at /metrics, in the text Prometheus reads
 const { contentType, text } = metricsRegistry.exposition();
 // contentType: 'text/plain; version=0.0.4; charset=utf-8'
