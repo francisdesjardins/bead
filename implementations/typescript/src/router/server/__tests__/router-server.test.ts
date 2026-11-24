@@ -845,37 +845,48 @@ test.describe('createRouterServer', () => {
       expect(errors).toEqual([]);
     });
 
-    test('answered after their connection closed send nothing, so the handle is told its session anew', async () => {
-      const { close, deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterServer(transport, {
-        sessionTokenOf: () => {
-          return TOKEN;
-        },
-      });
-      const services = createServiceManager(router);
-      const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
+    test('requests answered after their connection closed send nothing, so the handle is told its session anew', async () => {
+      for (const openFirst of [false, true]) {
+        const { close, deliver, open, sent, transport } = createScriptedTransport();
+        using router = createRouterServer(transport, {
+          sessionTokenOf: () => {
+            return TOKEN;
+          },
+        });
+        const services = createServiceManager(router);
+        const errors = recordErrors(router);
+        const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
 
-      services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
-        if (request.payload === 'late') {
-          await closed;
+        services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
+          if (request.payload === 'late') {
+            await closed;
+          }
+
+          return response(`${request.payload}!`);
+        });
+
+        if (openFirst) {
+          open(first);
         }
+        deliver(first, requestOf(1, { payload: text.encode('late') }));
+        await sleep(0);
+        close(first);
+        onClosed();
+        await sleep(0);
+        expect(sent).toEqual([]);
+        deliver(first, requestOf(3, { payload: text.encode('again') }));
+        await sleep(0);
 
-        return response(`${request.payload}!`);
-      });
-
-      deliver(first, requestOf(1, { payload: text.encode('late') }));
-      await sleep(0);
-      close(first);
-      onClosed();
-      await sleep(0);
-      deliver(first, requestOf(3, { payload: text.encode('again') }));
-      await sleep(0);
-
-      expect(
-        sent.map(({ envelope }) => {
-          return envelope?.header;
-        })
-      ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
+        expect(
+          sent.map(({ envelope }) => {
+            return envelope?.header;
+          })
+        ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
+        expect(sent[0]?.envelope?.kind === EnvelopeKind.RESULT && sent[0].envelope.payload).toEqual(
+          text.encode('again!')
+        );
+        expect(errors).toEqual([]);
+      }
     });
 
     test('are refused when nobody answers them, or they name a destination: this router relays nothing', async () => {
