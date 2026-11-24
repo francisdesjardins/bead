@@ -298,11 +298,21 @@ public sealed partial class RouterServerTests
             }
         };
 
-        Deliver(First, CancelOf(1));
+        using (var held = HoldRouter())
+        {
+            try
+            {
+                Deliver(First, CancelOf(1));
 
-        Assert.True(_transport.IsPaused(First));
+                Assert.True(_transport.IsPaused(First));
+            }
+            finally
+            {
+                held.Set();
+            }
 
-        await Settle();
+            await Settle();
+        }
 
         Assert.Equal(["pause first", "resume first"], _transport.Paces);
         Assert.Equal(["this listener breaks, on purpose first"], Reported());
@@ -316,11 +326,21 @@ public sealed partial class RouterServerTests
                 throw new InvalidOperationException("this handler breaks, on purpose");
             }
         };
-        _transport.DeliverText(First, "not an envelope");
+        using (var held = HoldRouter())
+        {
+            try
+            {
+                _transport.DeliverText(First, "not an envelope");
 
-        Assert.True(_transport.IsPaused(First));
+                Assert.True(_transport.IsPaused(First));
+            }
+            finally
+            {
+                held.Set();
+            }
 
-        await Settle();
+            await Settle();
+        }
 
         Assert.Equal(["pause first", "resume first", "pause first", "resume first"], _transport.Paces);
         Assert.False(_transport.IsPaused(First));
