@@ -9,6 +9,114 @@ namespace Bead.Tests;
 public sealed partial class RouterCoreTests
 {
     [Fact]
+    public async Task Answers_a_resolver_that_panics_PROCEDURE_FAILED_with_no_detail_and_reported()
+    {
+        var peer = new Peer(RouterSide.Server);
+        using var core = peer.Core;
+        var resolver = peer.Resolve();
+        var broken = new InvalidOperationException("this resolver breaks, on purpose");
+
+        resolver.Handling = (_) =>
+        {
+            return Task.FromException(broken);
+        };
+        await peer.Deliver(new Envelope { Header = RequestOf(1), Payload = "hi"u8.ToArray() });
+
+        var failure = Assert.Single(peer.Sent).Failure;
+
+        Assert.NotNull(failure);
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, failure.Code);
+        Assert.Equal("", failure.Detail);
+        Assert.Equal([broken], peer.Reports);
+        Assert.Equal([Handle], peer.ReportedOn);
+    }
+
+    [Fact(Skip = "divergence: a throwing OnSent hook leaves its call waiting after the failed handoff")]
+    public async Task A_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
+    {
+        var peer = new Peer(RouterSide.Server);
+        using var core = peer.Core;
+
+        foreach (var onCallId in new[] { true, false })
+        {
+            var broken = new InvalidOperationException("this hook breaks, on purpose");
+            var request = CallOf(Handle, (Echo, TimeSpan.FromSeconds(1))) with
+            {
+                OnCallId = onCallId ? (_) =>
+                {
+                    throw broken;
+                }
+                : null,
+                OnSent = onCallId ? null : (_) =>
+                {
+                    throw broken;
+                },
+            };
+            var asking = core.Request("hi"u8.ToArray(), request);
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            if (onCallId)
+            {
+                Assert.Empty(peer.Sent);
+            }
+        }
+
+        var next = peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1));
+        var callId = await peer.CallIdOf(next);
+
+        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId } });
+
+        Assert.Equal(callId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+        Assert.Empty(peer.Reports);
+    }
+
+    [Fact]
+    public async Task A_request_whose_send_panics_fails_as_its_transports_throw_would_and_the_router_answers_the_next()
+    {
+        foreach (var asynchronous in new[] { false, true })
+        {
+            var peer = new Peer(RouterSide.Server);
+            using var core = peer.Core;
+            var broken = new IOException("the transport breaks");
+            var refuses = true;
+
+            peer.OnSend = (_) =>
+            {
+                if (!refuses)
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (asynchronous)
+                {
+                    return Task.FromException(broken);
+                }
+
+                throw broken;
+            };
+            var refused = await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            refuses = false;
+
+            var next = peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1));
+            var callId = await peer.CallIdOf(next);
+
+            await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId } });
+
+            Assert.Equal(callId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+            Assert.Empty(peer.Reports);
+        }
+    }
+
+    [Fact]
     public void Refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts()
     {
         foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
