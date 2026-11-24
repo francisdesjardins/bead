@@ -2923,7 +2923,7 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
   });
 
   // spec 15.6, 15.7, 15.12
-  test('a client whose exchangeTimeout is never sends again a non-request refused busy past 2³¹ − 1 ms', async () => {
+  test('a client whose exchange timeout is never sends again a non-request refused busy past 2³¹ minus 1 ms', async () => {
     const clock = createTestClock(Date.UTC(2026, 0, 1));
     const fake = createFakeFetch();
     const client = createHTTPTransportClient({
