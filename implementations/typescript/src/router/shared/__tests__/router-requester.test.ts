@@ -1842,27 +1842,55 @@ test.describe('createRouterCore', () => {
       expect(core.isReserved(2, 'a')).toBe(true);
     });
 
-    test('end nothing more by a chunk whose send failed behind its answer', async () => {
-      const answered = createPort();
-      using answeredCore = createRouterCore(answered.port, { limits });
-      const answering = answeredCore.request(patternOf(200), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
+    test('ends nothing more by a chunk whose send failed behind its answer', async () => {
+      for (const serverCredit of [92, 100]) {
+        for (const side of ['server', 'client'] as const) {
+          const peer = createPort({
+            failures: side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES,
+          });
+          const holding = Promise.withResolvers<void>();
+          const callId = side === 'client' ? 1 : 2;
+          const total = side === 'client' ? 300 : 200;
+          using core = createRouterCore(
+            {
+              ...peer.port,
+              send: (message, connectionHandle) => {
+                const sent = peer.port.send(message, connectionHandle);
 
-      // the chunk's send fails once its call was answered
-      answered.control.sendErrors.set('a', new Error('gone'));
-      answeredCore.receive(creditOf(2, 92), 'a');
-      answeredCore.receive(failedOf(2), 'a');
+                return message.data[1] === EnvelopeKind.CHUNK ? holding.promise : sent;
+              },
+            },
+            { limits }
+          );
+          const asking = core.request(patternOf(total), {
+            connectionHandle: 'a',
+            options,
+            procedure: echo,
+          });
 
-      await expect(answering).rejects.toMatchObject({ code: 21 });
-      await sleep(0);
-      expect(piecesOf(answered.sent)).toEqual([
-        [EnvelopeKind.REQUEST, 2, 200, 44],
-        [EnvelopeKind.CHUNK, 2, 44, 48],
-      ]);
-      expect(answered.reported).toEqual([]);
+          core.receive(creditOf(callId, side === 'client' ? 100 : serverCredit), 'a');
+          expect(piecesOf(peer.sent)).toEqual([
+            [EnvelopeKind.REQUEST, callId, total, 44],
+            [EnvelopeKind.CHUNK, callId, 44, 48],
+          ]);
+
+          if (side === 'server') {
+            core.receive(failedOf(callId), 'a');
+            await expect(asking).rejects.toMatchObject({ code: 21 });
+          } else {
+            core.receive(resultOf(callId), 'a');
+            await expect(asking).resolves.toMatchObject({ header: { callId } });
+          }
+
+          holding.reject(new Error('the transport lost the chunk'));
+          await sleep(0);
+          expect(piecesOf(peer.sent)).toEqual([
+            [EnvelopeKind.REQUEST, callId, total, 44],
+            [EnvelopeKind.CHUNK, callId, 44, 48],
+          ]);
+          expect(peer.reported).toEqual([]);
+        }
+      }
     });
 
     test('wait on a request’s own timer: the inactivity while it goes as a transfer, then its timeout for its answer', async () => {
