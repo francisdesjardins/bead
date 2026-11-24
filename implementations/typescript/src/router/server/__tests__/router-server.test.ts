@@ -457,6 +457,127 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 // definition
 
+test('a token provider that panics fails only its answer and the next answer can announce', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  let called = false;
+  using router = createRouterServer(transport, {
+    sessionTokenOf: () => {
+      if (!called) {
+        called = true;
+
+        throw new Error('no session');
+      }
+
+      return TOKEN;
+    },
+  });
+  const services = createServiceManager(router);
+  const errors = recordErrors(router);
+
+  services.getRequestResolver(echo, { serializer: answering })((request, response) => {
+    return response(`${request.payload}!`);
+  });
+  deliver(first, requestOf(1, { payload: text.encode('hi') }));
+  await sleep(0);
+
+  expect(sent).toEqual([]);
+  expect(errors).toHaveLength(1);
+  deliver(first, requestOf(3, { payload: text.encode('ho') }));
+  await sleep(0);
+
+  expect(answersOf(sent)).toEqual([[first, 'result', 3, 'ho!']]);
+  expect(sent[0]?.envelope?.header).toMatchObject({
+    credential: { scheme: CredentialScheme.OPAQUE, token: TOKEN },
+  });
+});
+
+test('requests that fail in their resolver or do not read are reported with their connection', async () => {
+  const { control, deliver, emitter, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+
+  router.registerResolver(
+    Object.assign(() => {
+      return Promise.reject(new Error('rejected'));
+    }, echo)
+  );
+  router.registerResolver(
+    Object.assign(() => {
+      throw new Error('thrown');
+    }, news)
+  );
+  deliver(first, requestOf(1));
+  await sleep(0);
+  deliver(second, subscribingOf(1));
+  await sleep(0);
+  emitter.emit('message', { data: 'text' }, first);
+  await sleep(0);
+
+  const gone = new Error('gone');
+
+  control.sendErrors.set(second, gone);
+  deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
+  await sleep(0);
+
+  expect(reportedOf(errors)).toEqual([
+    ['rejected', first],
+    ['thrown', second],
+    [ProtocolCode.ENVELOPE_MALFORMED, first],
+    ['gone', second],
+  ]);
+  expect(errors[3]?.[0]).toBe(gone);
+  expect(answersOf(sent)).toEqual([
+    [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+  ]);
+});
+
+test('that fail in their resolver delivered before either settles are reported as their tasks settle after one that does not read', async () => {
+  test.skip(
+    true,
+    'divergence: a synchronous resolver throw is reported before the earlier rejected promise'
+  );
+
+  const { control, deliver, emitter, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+
+  router.registerResolver(
+    Object.assign(() => {
+      return Promise.reject(new Error('rejected'));
+    }, echo)
+  );
+  router.registerResolver(
+    Object.assign(() => {
+      throw new Error('thrown');
+    }, news)
+  );
+  deliver(first, requestOf(1));
+  deliver(second, subscribingOf(1));
+  emitter.emit('message', { data: 'text' }, first);
+  await sleep(0);
+
+  const gone = new Error('gone');
+
+  control.sendErrors.set(second, gone);
+  deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
+  await sleep(0);
+
+  expect(reportedOf(errors)).toEqual([
+    [ProtocolCode.ENVELOPE_MALFORMED, first],
+    ['rejected', first],
+    ['thrown', second],
+    ['gone', second],
+  ]);
+  expect(errors[3]?.[0]).toBe(gone);
+  expect(answersOf(sent)).toEqual([
+    [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+  ]);
+});
+
 test('a request its transport tells once its router is disposed reaches no resolver', async () => {
   const { deliver, sent, transport } = createScriptedTransport();
   using router = createRouterServer(transport);
