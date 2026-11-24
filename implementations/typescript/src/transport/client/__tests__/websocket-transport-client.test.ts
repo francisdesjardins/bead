@@ -140,6 +140,52 @@ test('reads a message of frames past 64 KiB whose first came with its 101', asyn
   }
 });
 
+test('a connect cancelled before its handshake changes nothing, and one cancelled during it ends closed', async () => {
+  const fake = createFakeWebSocket();
+  await using client = createWebSocketTransportClient({ WebSocket: fake.FakeWebSocket });
+
+  await expect(
+    client.connect({ host: '127.0.0.1', port: 8_080, signal: AbortSignal.abort() })
+  ).rejects.toBeInstanceOf(CancelError);
+  expect(client.isUninitialized()).toBe(true);
+  expect(fake.sockets).toEqual([]);
+  const cancelling = new AbortController();
+  const connecting = client.connect({ host: '127.0.0.1', port: 8_080, signal: cancelling.signal });
+
+  expect(fake.sockets).toHaveLength(1);
+  cancelling.abort();
+  await expect(connecting).rejects.toBeInstanceOf(CancelError);
+  expect(client.isClosed()).toBe(true);
+  expect(fake.sockets[0]?.readyState).toBe(3);
+});
+
+test('its own close or dispose raises a clean close, not quick, on both ends', async () => {
+  const server = await startServer();
+
+  try {
+    for (const ending of ['close', 'dispose']) {
+      await using client = createWebSocketTransportClient({ WebSocket: WsClient });
+      const connection = once(server, 'connection');
+      const closed = nextEvent(client, 'close');
+
+      await client.connect({ host, port: portOf(server) });
+      const [socket] = (await connection) as [WsWebSocket];
+      const peerClosed = once(socket, 'close');
+
+      if (ending === 'close') {
+        await client.disconnect();
+      } else {
+        await client[Symbol.asyncDispose]();
+      }
+      expect(await closed).toEqual([true, false]);
+      expect((await peerClosed)[0]).toBe(1000);
+      expect(client.isClosed()).toBe(true);
+    }
+  } finally {
+    await stopServer(server);
+  }
+});
+
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
@@ -821,10 +867,12 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         ['/rpc', '/rpc'],
         [undefined, '/'],
       ] as const) {
-        test(`requests "${expected}" for the pathname ${pathname === undefined ? 'undefined' : `"${pathname}"`}`, async () => {
-          const connection = nextConnection(server);
-          await client.connect({ host, port, pathname });
-          expect((await connection).url).toBe(expected);
+        test.describe(`with pathname ${pathname === undefined ? 'undefined' : `"${pathname}"`}`, () => {
+          test('requests the path its pathname names', async () => {
+            const connection = nextConnection(server);
+            await client.connect({ host, port, pathname });
+            expect((await connection).url).toBe(expected);
+          });
         });
       }
 
