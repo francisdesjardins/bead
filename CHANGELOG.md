@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   WebSocket server bounds, and the recipes tell the closes those bounds make and read the
   transport's `messageBytes` gauge.
 
+### Fixed
+
+- The C# side's WebSocket connection grew a new writer for each message of several reads, so a
+  message of 64 KiB allocated about two-thirds more than in 0.16.0. It now gathers such a message
+  in a buffer rented from the shared pool, given back once the message is whole, and copies a
+  message of one read straight.
+
 ## [0.17.0] - 2026-11-24
 
 ### Added
