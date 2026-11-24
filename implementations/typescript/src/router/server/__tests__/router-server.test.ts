@@ -6750,3 +6750,44 @@ test.describe('createRouterServer, within a telling', () => {
     expect(reportedOf(errors)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, first]]);
   });
 });
+
+test('a listener’s panic is reported and the transport goes on', async () => {
+  const memory = createMemoryTransportServer();
+  using server = createRouterServer(memory);
+  await using transport = createMemoryTransportClient();
+  using client = createRouterClient(transport);
+  const caller = createServiceManager(client);
+  const reported = Promise.withResolvers<{ error: Error; connectionHandle: Handle | '' }>();
+  const routerReports: unknown[] = [];
+  const broken = new Error('this listener breaks, on purpose');
+
+  createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+    (request, response) => {
+      return response(request.payload);
+    }
+  );
+  memory.on('message', () => {
+    throw broken;
+  });
+  memory.on('error', (error, connectionHandle) => {
+    reported.resolve({ error, connectionHandle });
+  });
+  server.on('error', (error) => {
+    routerReports.push(error);
+  });
+  await memory.start();
+
+  try {
+    await transport.connect({ server: memory });
+    await expect(caller.getRequest(echo, { serializer: asking })('hi')()).resolves.toBe('hi');
+
+    const failure = await reported.promise;
+
+    expect(failure.error).toBe(broken);
+    expect(failure.connectionHandle).toBe('type=MEMORY;ip=local;ordinal=1');
+    expect(routerReports).toEqual([]);
+  } finally {
+    await transport.disconnect();
+    await memory.stop();
+  }
+});
