@@ -30,6 +30,32 @@ public sealed class SessionManagerTests
 
     // definition
 
+    [Fact(Skip = "divergence: a superseded session timer callback emits a timeout after touch")]
+    public void A_session_s_timer_that_fired_behind_the_touch_that_restarted_it_reaches_nothing()
+    {
+        var clock = new RefusingTimerClock();
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
+        var reached = new List<string>();
+
+        sessions.SessionInactivityTimeoutReached += (session) =>
+        {
+            reached.Add(session.ConnectionHandle);
+        };
+        sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
+
+        var fired = Assert.Single(clock.Callbacks);
+
+        Assert.True(sessions.Touch(Handle));
+        Assert.Equal(2, clock.Callbacks.Count);
+        fired();
+
+        Assert.Empty(reached);
+        clock.Callbacks[1]();
+
+        Assert.Equal([Handle], reached);
+    }
+
+
     private sealed class RefusingTimerClock : TimeProvider
     {
         private readonly FakeTimeProvider _clock = new();
@@ -38,6 +64,8 @@ public sealed class SessionManagerTests
         internal int RefuseAt { get; set; } = -1;
 
         internal List<ObservedTimer> Timers { get; } = [];
+
+        internal List<Action> Callbacks { get; } = [];
 
         public override DateTimeOffset GetUtcNow()
         {
@@ -67,6 +95,10 @@ public sealed class SessionManagerTests
             var timer = new ObservedTimer(_clock.CreateTimer(callback, state, dueTime, period), dueTime);
 
             Timers.Add(timer);
+            Callbacks.Add(() =>
+            {
+                callback(state);
+            });
 
             return timer;
         }
