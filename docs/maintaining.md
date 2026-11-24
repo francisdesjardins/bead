@@ -77,7 +77,7 @@ can follow in its place.
 | Workflow                                                  | When                                                                 | What it produces                                                                  |
 | --------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | [`bead-tenth-man-round`](#bead-tenth-man-round)           | a change that reaches across the languages, before it is implemented | a design, its reasons and the Tenth Man's table; the decisions left open          |
-| [`bead-implement-both-sides`](#bead-implement-both-sides) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
+| [`bead-implement-every-side`](#bead-implement-every-side) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
 | [`bead-adversarial-review`](#bead-adversarial-review)     | before a freeze: a release, a version of the spec or a companion     | findings by severity and a verdict; nothing in the repository changes             |
 | [`bead-release-documents`](#bead-release-documents)       | on a release branch, after `prepare` and before the finish           | the documents as of the release, one commit                                       |
 | [`bead-page-audit`](#bead-page-audit)                     | at each release, and whenever the page may have drifted              | the page's findings in both languages; with `apply`, the fixes and the build      |
@@ -116,7 +116,7 @@ By hand:
 5. Decide. What a standard or a decision already taken settles is settled; the rest is the
    maintainer's choice.
 
-### bead-implement-both-sides
+### bead-implement-every-side
 
 The workflow implements a settled design in stages: the spec and its conformance first, then the
 sides together, then an integration that runs every gate and the interop once over the settled
