@@ -291,38 +291,41 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Cuts_a_failure_s_detail_to_its_envelope_s_room_and_to_its_own_limit_both_ways()
     {
-        var detail = new string('x', 100);
-
-        async Task<string> AnsweredOf(RouterLimits limits)
+        foreach (var code in new ushort[] { 1, 7 })
         {
-            var server = new Peer(RouterSide.Server, limits);
-            var resolver = server.Resolve();
+            var detail = new string('x', 100);
 
-            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-            await resolver.Fail(0, Failure.OfApplication(7, detail)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            async Task<string> AnsweredOf(RouterLimits limits)
+            {
+                var server = new Peer(RouterSide.Server, limits);
+                var resolver = server.Resolve();
 
-            return server.Sent[^1].Failure!.Detail;
+                await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+                await resolver.Fail(0, Failure.OfApplication(7, detail)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+                return server.Sent[^1].Failure!.Detail;
+            }
+
+            Assert.Equal(32, (await AnsweredOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 })).Length);
+            Assert.Equal(10, (await AnsweredOf(RouterLimits.Default with { MaximumDetailBytes = 10 })).Length);
+
+            // what comes in is cut to its own limit too
+            var client = new Peer(RouterSide.Client, RouterLimits.Default with { MaximumDetailBytes = 10 });
+            var asked = client.Request(new byte[code == 1 ? 1 : 0], TimeSpan.FromSeconds(5));
+
+            await client.Settle();
+            await client.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfApplication(7, detail) });
+            Assert.Equal(10, (await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            })).Detail.Length);
+
+            var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumDetailBytes = 4 });
+            using var serverCore = server.Core;
+            var answering = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+            await server.Deliver(new Envelope { Header = new FailureHeader { CallId = 2 }, Failure = Failure.OfApplication(code, "abcdefgh") });
+            Assert.Equal("abcd", (await Assert.ThrowsAsync<FailureException>(() => { return answering.WaitAsync(Patience, TestContext.Current.CancellationToken); })).Detail);
         }
-
-        Assert.Equal(32, (await AnsweredOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 })).Length);
-        Assert.Equal(10, (await AnsweredOf(RouterLimits.Default with { MaximumDetailBytes = 10 })).Length);
-
-        // what comes in is cut to its own limit too
-        var client = new Peer(RouterSide.Client, RouterLimits.Default with { MaximumDetailBytes = 10 });
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
-
-        await client.Settle();
-        await client.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfApplication(7, detail) });
-        Assert.Equal(10, (await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Detail.Length);
-
-        var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumDetailBytes = 4 });
-        using var serverCore = server.Core;
-        var answering = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
-        await server.Deliver(new Envelope { Header = new FailureHeader { CallId = 2 }, Failure = Failure.OfApplication(1, "abcdefgh") });
-        Assert.Equal("abcd", (await Assert.ThrowsAsync<FailureException>(() => { return answering.WaitAsync(Patience, TestContext.Current.CancellationToken); })).Detail);
     }
 
     [Fact]
@@ -516,6 +519,58 @@ public sealed partial class RouterCoreTests
         Assert.Equal(
             [Credential.Opaque(token), Credential.Opaque(token), Credential.Opaque(token), null, Credential.Opaque(token), Credential.Opaque(token)],
             peer.Sent.Select((envelope) => { return ((ResultHeader)envelope.Header).Credential; }));
+        Assert.Empty(peer.Reports);
+    }
+
+    [Fact]
+    public async Task Hands_an_envelope_within_its_limits_to_its_port_s_transport_traced_refuses_one_past_them_and_sends_nothing_once_its_router_is_disposed()
+    {
+        var peer = new Peer(RouterSide.Server, RouterLimits.Default with
+        {
+            BufferedBytesBudget = 1_024,
+            MaximumPayloadBytes = 1_024,
+            ChunkBytes = 64,
+            MaximumEnvelopeBytes = 64,
+            WindowBytes = 128,
+        });
+        using var core = peer.Core;
+
+        static Envelope EnvelopeOf(int length)
+        {
+            return new Envelope { Header = RequestOf(1), Payload = new byte[length] };
+        }
+
+        await core.Send(EnvelopeOf(4), Handle).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        var sent = Assert.Single(peer.Sent);
+        var trace = Assert.Single(peer.Traces);
+
+        Assert.Equal(RequestOf(1), sent.Header);
+        Assert.Equal(new byte[4], sent.Payload.ToArray());
+        Assert.Equal([Handle], peer.SentOn);
+        Assert.Equal((DebugDirection.Tx, Handle, RequestOf(1)), (trace.Direction, trace.Envelope.ConnectionHandle, trace.Envelope.Header));
+
+        foreach (var length in new[] { 100, 2_000 })
+        {
+            var failure = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return core.Send(EnvelopeOf(length), Handle).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, failure.Code);
+        }
+
+        core.Dispose();
+        await peer.Settle();
+
+        var closed = await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return core.Send(EnvelopeOf(4), Handle).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(RouterCore.Disposed, closed.Message);
+        Assert.Single(peer.Sent);
+        Assert.Single(peer.Traces);
         Assert.Empty(peer.Reports);
     }
 }
