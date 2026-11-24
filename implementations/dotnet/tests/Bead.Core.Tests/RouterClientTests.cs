@@ -391,23 +391,32 @@ public sealed partial class RouterClientTests
     [Fact]
     public async Task Rejects_what_waits_once_its_connection_closed_and_forgets_its_session()
     {
-        var transport = new ScriptedTransport();
-        var scheduler = new SerialScheduler();
-
-        using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
-
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
-
-        var waiting = RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))();
-
-        await scheduler.WhenIdle();
-        Assert.Equal(Token, router.SessionToken);
-        transport.CloseConnection();
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        foreach (var usesServices in new[] { false, true })
         {
-            return waiting.WaitAsync(Patience, Cancelled);
-        });
-        Assert.Null(router.SessionToken);
+            var transport = new ScriptedTransport();
+            var scheduler = new SerialScheduler();
+
+            using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
+
+            var reported = new List<Exception>();
+
+            router.Error += reported.Add;
+            transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
+
+            Task waiting = usesServices
+                ? RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))()
+                : router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+            await scheduler.WhenIdle();
+            Assert.Equal(Token, router.SessionToken);
+            transport.CloseConnection();
+            await Assert.ThrowsAsync<DisconnectException>(() =>
+            {
+                return waiting.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Null(router.SessionToken);
+            Assert.Equal((ushort)ProtocolCode.CallUnknown, Assert.IsType<FailureException>(Assert.Single(reported)).Code);
+        }
     }
 
     [Fact]
