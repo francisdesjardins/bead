@@ -284,7 +284,7 @@ public sealed class EnvelopeCodecHeaderTests
     }
 
     [Fact]
-    public void Raises_its_failures_as_the_side_it_is_given()
+    public void Raises_its_failures_as_the_side_of_the_table_it_is_given()
     {
         var bytes = Vectors.FromHexadecimal("A1 11 00 02  00 00 00 00");
         var failure = Assert.Throws<FailureException>(() =>
@@ -296,7 +296,7 @@ public sealed class EnvelopeCodecHeaderTests
     }
 
     [Fact]
-    public void Sizes_each_header_by_its_kind_and_its_blocks()
+    public void Size_each_header_by_its_kind_and_its_blocks()
     {
         var request = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
         var result = new ResultHeader { CallId = 2 };
@@ -326,7 +326,7 @@ public sealed class EnvelopeCodecHeaderTests
     }
 
     [Fact]
-    public void Writes_big_endian_and_reads_every_call_id_unsigned()
+    public void Write_big_endian_and_read_every_call_id_unsigned()
     {
         var bytes = new byte[8];
 
@@ -343,7 +343,7 @@ public sealed class EnvelopeCodecHeaderTests
     }
 
     [Fact]
-    public void Carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_minus_1()
+    public void Carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1()
     {
         foreach (var creditEnd in new[] { 0L, 1L << 31, (1L << 32) - 1, 1L << 32, (1L << 32) + 1, (1L << 53) - 1 })
         {
@@ -435,7 +435,7 @@ public sealed class EnvelopeCodecHeaderTests
     }
 
     [Fact]
-    public void Reads_a_JWT_byte_0xE9_as_U00E9_and_writes_it_back_as_the_same_byte()
+    public void Reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte()
     {
         var bytes = Vectors.FromHexadecimal("A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  E9 00 00 00");
         IEnvelopeHeader header = new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Credential = Credential.Jwt("é") };

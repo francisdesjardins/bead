@@ -88,13 +88,13 @@ public sealed class EnvelopeCodecTests
     }
 
     [Fact]
-    public void Skips_an_advisory_envelope()
+    public void Skip_an_advisory_envelope()
     {
         Assert.Null(EnvelopeCodec.ReadEnvelope(Vectors.FromHexadecimal("A1 80 00 02  00 00 00 03 | 01"), Options));
     }
 
     [Fact]
-    public void Takes_an_envelope_of_the_largest_size_and_refuses_one_byte_more()
+    public void Take_an_envelope_of_the_largest_size_and_refuse_one_byte_more()
     {
         var exact = new byte[64];
 
@@ -123,7 +123,7 @@ public sealed class EnvelopeCodecTests
     }
 
     [Fact]
-    public void Cuts_a_failure_s_detail_to_the_bytes_it_is_given_a_character_whole()
+    public void Cut_a_failures_detail_to_the_bytes_it_is_given_a_character_whole()
     {
         var bytes = EnvelopeCodec.WriteEnvelope(
             new Envelope
@@ -249,7 +249,7 @@ public sealed class EnvelopeCodecTests
     }
 
     [Fact]
-    public void Refuses_to_write_a_failure_of_code_0_or_of_no_scope()
+    public void Refuses_a_code_that_is_not_an_integer_from_1_to_65535_or_a_scope_that_is_neither()
     {
         Assert.Throws<ArgumentException>(() =>
         {
