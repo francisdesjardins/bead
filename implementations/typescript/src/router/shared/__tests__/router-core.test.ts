@@ -6332,3 +6332,48 @@ test('sends nothing of a call whose timer its clock cannot arm, no request and n
     expect(sent).toEqual([]);
   }
 });
+
+test('holds a duration in whole microseconds, its fraction dropped, a TimeSpan’s ticks over 10', async () => {
+  const registry = createMetricsRegistry();
+  const metrics = registry.attach('client');
+  const series = metrics.declareRequester(echo);
+  const { port, reported } = createPort({ failures: CLIENT_FAILURES });
+  const time = createTestClock();
+  let instant = 0;
+  const clock = {
+    ...time,
+    performance: {
+      now: () => {
+        return instant;
+      },
+    },
+  };
+  using core = createRouterCore(port, { clock, metrics });
+
+  // * each tick is 100 ns: 1.9 us, then 30.6 ms
+  for (const [callId, ticks] of [
+    [1, 19],
+    [3, 306_000],
+  ] as const) {
+    const asking = core.request(Uint8Array.of(0), {
+      connectionHandle: 'a',
+      procedure: echo,
+      options,
+      series,
+    });
+
+    instant += ticks / 10_000;
+    core.receive(resultOf(callId), 'a');
+    await asking;
+  }
+
+  const samples = registry.exposition().text.split('\n');
+
+  expect(samples).toContain(
+    'bead_client_call_duration_seconds_sum{service="2",procedure="echo",type="request"} 0.030601'
+  );
+  expect(samples).toContain(
+    'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="request",le="1e-05"} 1'
+  );
+  expect(reported).toEqual([]);
+});
