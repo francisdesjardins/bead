@@ -509,11 +509,13 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   frame past `MaximumMessageFrames`, 16,384, with 1008, and a head RFC 6455 forbids with 1002.
   What a read brought before that frame is handed on; nothing from it on is. The bytes of messages
   partway are charged to `MessageBytesBudget`, 256 MiB across the connections, as they come, each
-  head 128 more, gauged `messageBytes`. A charge past it casts off connections with 1013: those
-  whose message is past `BodyGracePeriod` first, then the one that holds the most. A message slower
-  than `MinimumBodyBytesPerSecond`, 240, once `BodyGracePeriod`, 5 s, passed fails with 1008, on the
-  server's clock. Its clock runs while a paused connection reads its message on. Each verdict
-  sends its close, then drops what comes, unparsed, until the peer ends or `CloseTimeout` passes.
+  head 128 more, gauged `messageBytes`. A charge decides byte by byte. The byte that would pass the
+  budget casts off the connection whose message holds the most, the asking one's sum counting that
+  byte, then, among equal sums, the one whose message began first. The asking one goes only when it
+  comes first. Each fails with 1013. A message slower than `MinimumBodyBytesPerSecond`, 240, once
+  `BodyGracePeriod`, 5 s, passed fails with 1008, on the server's clock. Its clock runs while a
+  paused connection reads its message on. Each verdict sends its close, then drops what comes,
+  unparsed, until the peer ends or `CloseTimeout` passes.
   The close is unclean whatever the peer answers, and is reported through `Error` the same way.
   Kestrel's upgraded stream has no half-close, so the server's writing ends with its socket. The
   client meters its frames alike, held to `MaximumMessageBytes` and `MaximumMessageFrames`, with no
@@ -546,10 +548,17 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   client's held in an invoker of its own and never disposed by it. A client connects a host it
   judges on the loopback to the loopback itself, through no proxy (spec 13.4, decision 0054): it
   connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to `::1` 250 ms later or as
-  soon as the first fails, and asks no resolver. Its request names the host as given, in its `Host`
-  and in its TLS server name, and a connect that fails says where it went: "…; api.localhost names
-  the loopback: connected to 127.0.0.1 and ::1, no resolver asked". Both clients' own handlers, a
-  gateway's `HttpCaller`'s, the MQTT 5 adapter over TCP and over a WebSocket, and the AMQP 1.0
+  soon as the first fails, and asks no resolver. It reads a host once, as the URL Standard's host
+  parser reads a special scheme's host, whatever its URL's scheme: `127.0.0.1.` and `127.1` connect
+  to `127.0.0.1`. A host the parser fails on, `foo.123` say, is refused before any socket opens: by
+  a broker adapter or a gateway's `HttpCaller` as it is built, by a transport client at its
+  connect. The broker adapters' and the `HttpCaller`'s URLs are .NET's `Uri`, which refuses a
+  percent-escaped host as it parses it. A transport client's host is a string, and a
+  percent-escaped one is read decoded. Its
+  request names the host it read, in its `Host` and in its TLS server name. A connect that fails
+  says where it went: "…; api.localhost names the loopback: connected to 127.0.0.1 and ::1, no
+  resolver asked". Both clients' own handlers, a gateway's `HttpCaller`'s, the MQTT 5 adapter over
+  TCP and over a WebSocket, and the AMQP 1.0
   adapter connect so; the handlers take a host off the machine through the platform's proxy,
   `HttpClient.DefaultProxy`. A `Handler` given connects as it does: over it, a resolver that sends
   a name under `.localhost` on to its DNS server, or a proxy, takes a credential judged secure
