@@ -723,9 +723,8 @@ that a test of each side does:
   and C# ones besides (`sends nothing through the platform’s proxy to a host on the loopback`),
   `amqp-broker-adapter.test.ts` and `AmqpBrokerAdapterTests` (`reaches a localhost name on the
   loopback whatever the platform’s resolver answers`); and on one side alone, `tools/twins.tsv`
-  classing each, `loopback.test.ts` (`answers a lookup of one family with that family’s loopback
-  alone`, `connects to a server on 127.0.0.1 alone with its event loop held past the attempt
-  delay`), `websocket-transport-client.test.ts` (`reaches a localhost name on the loopback whatever
+  classing each, `loopback.test.ts` (`connects to a server on 127.0.0.1 alone with its event loop
+  held past the attempt delay`), `websocket-transport-client.test.ts` (`reaches a localhost name on the loopback whatever
   the platform’s resolver answers, over ws`) and `HttpTransportClientTests`
   (`Sends_a_host_off_the_machine_through_the_platforms_proxy`);
 - the words of a duration's refusal, each side's own, over every input of `spec/durations.json`:
