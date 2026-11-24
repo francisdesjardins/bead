@@ -1,9 +1,9 @@
 import { EventEmitter, once } from 'node:events';
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
 import { createServer as createTlsServer } from 'node:tls';
-import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
+import * as undici from 'undici';
 import {
   isConnectFailure,
   isLocalhostName,
@@ -13,7 +13,6 @@ import {
   loopbackConnector,
   loopbackCreateConnection,
   loopbackFailureOf,
-  loopbackLookup,
   raceLoopback,
   type UndiciConnector,
 } from '../loopback';
@@ -74,16 +73,6 @@ const connectOf = async (port: number): Promise<{ address: string } | Error> => 
   } catch (reason) {
     return reason as Error;
   }
-};
-
-/** What `loopbackLookup` answers `hostname` with, asked with `options`. */
-const lookedUp = (hostname: string, options: { all?: boolean; family?: number | string }) => {
-  return promisify((callback: (error: Error | null, answer: unknown) => void) => {
-    // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback
-    loopbackLookup(hostname, options, (error, address, family) => {
-      callback(error, options.all === true ? address : { address, family });
-    });
-  })();
 };
 
 /** A socket of the test's to `address`, which connects or fails as the test says. */
@@ -177,7 +166,7 @@ const heldRaceOf = ({
 
 // definition
 
-test.describe('loopbackLookup', () => {
+test.describe('loopback', () => {
   // spec 13.4
   test('connects a localhost name to the loopback, asking its resolver nothing', async () => {
     await using listener = await listenOn('127.0.0.1');
@@ -418,54 +407,31 @@ test.describe('loopbackLookup', () => {
 
   // spec 13.4
   test('asks its resolver for any other name, localhost with a trailing dot among them', async () => {
-    using resolver = replaceResolver();
+    // * the replaced resolver answers the loopback, where the test listens
+    using resolver = replaceResolver('127.0.0.1');
+    await using listener = await listenOn('127.0.0.1');
+    const connector = loopbackConnector(undici as unknown as IUndici, {});
+    const connectedOf = (hostname: string) => {
+      return new Promise<Error | Socket | null>((resolve) => {
+        connector({ hostname, port: String(listener.port), protocol: 'http:' }, (error, socket) => {
+          resolve(error ?? socket);
+        });
+      });
+    };
 
     for (const host of ['localhost.', 'a.localhost.', 'localhost.example', '127.0.0.1', '::1']) {
       expect([host, isLocalhostName(host)]).toEqual([host, false]);
     }
 
-    // * handed on to Node's own lookup, which the replaced resolver answers
-    expect(await lookedUp('a.localhost.', { all: true })).toEqual([
-      { address: '192.0.2.7', family: 4 },
-    ]);
+    // * handed on to undici's own connector, which asks Node's resolver
+    for (const hostname of ['localhost.', 'a.localhost.']) {
+      const socket = (await connectedOf(hostname)) as Socket;
 
-    // and asked with its callback alone, as `dns.lookup` may be
-    const answered = await new Promise((resolve) => {
-      // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback
-      loopbackLookup('localhost.', (error, address, family) => {
-        resolve([error, address, family]);
-      });
-    });
+      expect([hostname, socket.remoteAddress]).toEqual([hostname, '127.0.0.1']);
+      socket.destroy();
+    }
 
-    expect([answered, resolver.asked]).toEqual([
-      [null, '192.0.2.7', 4],
-      ['a.localhost.', 'localhost.'],
-    ]);
-  });
-
-  test('answers a lookup of one family with that family’s loopback alone', async () => {
-    expect([
-      await lookedUp(PROBE, { family: 4 }),
-      await lookedUp(PROBE, { family: 6 }),
-      await lookedUp(PROBE, { all: true, family: 'IPv6' }),
-      await lookedUp(PROBE, { all: true, family: 4 }),
-      await lookedUp(PROBE, { family: 'IPv4' }),
-      await lookedUp(PROBE, {}),
-    ]).toEqual([
-      { address: '127.0.0.1', family: 4 },
-      { address: '::1', family: 6 },
-      [{ address: '::1', family: 6 }],
-      [{ address: '127.0.0.1', family: 4 }],
-      { address: '127.0.0.1', family: 4 },
-      // * of either family, the IPv4 loopback first
-      { address: '127.0.0.1', family: 4 },
-    ]);
-
-    // a family the loopback has no address of answers none, as a resolver does
-    await expect(lookedUp(PROBE, { family: 5 })).rejects.toMatchObject({
-      code: 'ENOTFOUND',
-      message: 'no loopback address of family 5',
-    });
+    expect(resolver.asked).toEqual(['localhost.', 'a.localhost.']);
   });
 
   // spec 13.4
