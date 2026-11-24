@@ -365,9 +365,11 @@ if ($digest -and $commit) {
 }
 ```
 
-0.16.0's image alone is `develop`'s, built from its tag, and passes the
-[getting-started guide's block](../docs/guides/getting-started.md#1-pin-bead-and-beadcs-image)
-instead.
+0.16.0's image alone is `develop`'s, built from its tag by a run at develop's commit
+`576bf11182b4a0f65b26680ef394cc7e0ea6801c`: its block names `refs/heads/develop` and that commit
+where the general one names the tag and its commit, in `--source-ref`, `--source-digest`,
+`--certificate-identity` and `--certificate-github-workflow-sha`, and holds the index's
+`org.opencontainers.image.revision` annotation to the tag's commit instead.
 
 The wrappers name the version, not the digest: the digest exists once the release's tag is built,
 after the commit that names the version, and an image cannot print its own digest ([decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).

@@ -153,6 +153,12 @@ A connection's life, on the client:
   heartbeat late, as its platform's timer runs. The C# server pings. A client on the global
   `WebSocket` cannot ping, in a page or in Node; it answers the server's pings by itself, so the
   server's heartbeat covers it.
+- **The server closes a connection that breaks its bounds.** A message past `MaximumMessageBytes`
+  closes its connection with 1009, and one past 16,384 frames closes it with 1008. A message
+  slower than 240 bytes a second, once its first 5 seconds have passed, closes it with 1008 too.
+  The messages still arriving are charged to `MessageBytesBudget`, 256 MiB across the connections. Past it, the server closes
+  the connection whose message holds the most, with 1013. It reports each close through
+  `server.Transport.Error`, naming the bound and its value.
 
 This client, run against the getting-started server on port 8080 while that server was killed and
 started again, reconnected, subscribed again, and answered the server's command on the new
@@ -324,6 +330,25 @@ counts those it answers. What is under way is a series' started count less its h
 Beside it, `await server.Health()` gives the verdict on the server's gauges, its `Status`
 `HealthStatus.Pass`, `Warn` or `Fail`, and `await server.Gauges()` the gauges themselves, which
 the application serves at a `/health` of its own; the library opens no endpoint for either.
+
+The WebSocket transport's own gauges are among them: `connections`, `largestAddressConnections`,
+`unsentBytes`, `largestUnsentBytes`, and `messageBytes`, the bytes of the messages still arriving,
+whose ceiling is `MessageBytesBudget`. They are gauges, not Prometheus families. A host can read
+them from its transport too, here as it stops:
+
+```csharp
+// the transport's gauges, beside the metrics: messageBytes is what messages partway hold, under
+// MessageBytesBudget; no Prometheus family carries it
+var gauges = webSocket.Gauges();
+
+Console.Error.Write($"server: gauges messageBytes={gauges.Counts["messageBytes"]} of {gauges.Ceilings["messageBytes"]}, connections={gauges.Counts["connections"]}\n");
+```
+
+Once its clients have gone, it prints:
+
+```text
+server: gauges messageBytes=0 of 268435456, connections=0
+```
 
 A TypeScript client or server counts alike: `createMetricsRegistry()`, from
 `@francisdesjardins/bead/client` or `/server`, given as `metricsRegistry`, and `exposition()`
