@@ -366,6 +366,18 @@ test('refuses a second start while the first is still starting', async () => {
   expect(server.isOpen()).toBe(true);
 });
 
+test('names a connection to its listeners by its handle and nothing of its credential', async () => {
+  await using started = await startDated({});
+  await using client = createWebSocketTransportClient({ WebSocket: WsClient });
+  const connection = nextServerEvent(started.server, 'connection');
+
+  await client.connect({ host, port: started.port, credential: 'Bearer secret' });
+  const [, handle] = await connection;
+
+  expect(handle).not.toContain('secret');
+  expect(JSON.stringify(started.server.clients)).not.toContain('secret');
+});
+
 test('refuses a stop while starting and stops once started', async () => {
   const fake = createFakeWebSocketServer();
   await using server = createWebSocketTransportServer({
