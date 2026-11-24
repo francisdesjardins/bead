@@ -530,6 +530,9 @@ test.describe('loopbackLookup', () => {
     const createdOf = (options: Record<string, unknown>) => {
       return new Promise<Error | Socket>((resolve) => {
         loopbackCreateConnection('localhost', { timeout: 5_000 })(
+          // * the test reads the name each handshake sends, names no certificate holds among them,
+          // and trusts nothing it reads
+          // nosemgrep: problem-based-packs.insecure-transport.js-node.bypass-tls-verification.bypass-tls-verification
           { defaultPort: 443, host: 'localhost', port, rejectUnauthorized: false, ...options },
           (error, socket) => {
             resolve(error ?? (socket as Socket));
