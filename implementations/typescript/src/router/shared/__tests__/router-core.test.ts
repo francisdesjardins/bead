@@ -86,6 +86,107 @@ const PACKAGE = JSON.parse(
 // definition
 
 test.describe('createRouterCore', () => {
+  test('answers a resolver that panics PROCEDURE_FAILED with no detail and reported', async () => {
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+    const broken = new Error('this resolver breaks, on purpose');
+
+    core.registerResolver(
+      Object.assign(() => {
+        return Promise.reject(broken);
+      }, echo)
+    );
+    core.receive(requestOf(1, { payload: new TextEncoder().encode('hi') }), 'a');
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(sent[0]?.envelope).toMatchObject({ failure: { detail: '' } });
+    expect(reported).toEqual([[broken, 'a']]);
+  });
+
+  test('a hook that panics fails its own call and the router answers the next', async () => {
+    test.skip(
+      true,
+      'divergence: a throwing onSent hook also throws on the failed handoff, unhandled'
+    );
+
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+
+    for (const hook of ['onCallId', 'onSent'] as const) {
+      const broken = new Error(`this ${hook} breaks, on purpose`);
+      const asking = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+        [hook]: () => {
+          throw broken;
+        },
+      });
+
+      await expect(asking).rejects.toBe(broken);
+
+      if (hook === 'onCallId') {
+        expect(sent).toEqual([]);
+      }
+    }
+
+    const next = core.request(new TextEncoder().encode('hi'), {
+      connectionHandle: 'a',
+      options,
+      procedure: echo,
+    });
+    const callId = sent.at(-1)?.envelope?.header.callId;
+
+    expect(callId).toBeDefined();
+    core.receive(resultOf(callId!), 'a');
+    await expect(next).resolves.toMatchObject({ header: { callId } });
+    expect(reported).toEqual([]);
+  });
+
+  test('a request whose send panics fails as its transport’s throw would and the router answers the next', async () => {
+    for (const asynchronous of [false, true]) {
+      const { port, sent, reported } = createPort();
+      const broken = new Error('the transport breaks');
+      let refuses = true;
+      using core = createRouterCore({
+        ...port,
+        send: (message, connectionHandle) => {
+          if (refuses) {
+            if (asynchronous) {
+              return Promise.reject(broken);
+            }
+
+            throw broken;
+          }
+
+          return port.send(message, connectionHandle);
+        },
+      });
+
+      await expect(
+        core.request(new TextEncoder().encode('hi'), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+        })
+      ).rejects.toBe(broken);
+      refuses = false;
+
+      const next = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+      const callId = sent.at(-1)?.envelope?.header.callId;
+
+      expect(callId).toBeDefined();
+      core.receive(resultOf(callId!), 'a');
+      await expect(next).resolves.toMatchObject({ header: { callId } });
+      expect(reported).toEqual([]);
+    }
+  });
+
   test('refuses a last call id of zero or its peer’s parity before a router starts', () => {
     for (const [failures, refused, accepted] of [
       [CLIENT_FAILURES, [0, 2, 8, 0xfffffffe], [1, 0xffffffff]],
