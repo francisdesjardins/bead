@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net.WebSockets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
 
@@ -235,6 +236,31 @@ public sealed class FrameMeterTests
     }
 
     // definition
+
+    [Fact]
+    public void Counts_a_message_s_time_only_while_its_connection_is_not_paused()
+    {
+        var clock = new FakeTimeProvider();
+        var meter = new FrameMeter(new FrameMeter.MeterOptions
+        {
+            MaximumMessageBytes = 64,
+            IsServer = true,
+            Rate = new FrameMeter.RateOptions { MinimumBodyBytesPerSecond = 240, BodyGracePeriod = TimeSpan.FromSeconds(3), Clock = clock },
+        });
+        var first = FrameOf((0x02, new byte[10], false));
+
+        Assert.Equal(first.Length, meter.Read(first));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        meter.Hold();
+        clock.Advance(TimeSpan.FromSeconds(9));
+        Assert.Null(meter.Verdict);
+        meter.Unhold();
+        clock.Advance(TimeSpan.FromMilliseconds(1_999));
+        Assert.Null(meter.Verdict);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, meter.Verdict?.Code);
+        meter.End();
+    }
 
     [Fact]
     public void Fails_with_1009_at_its_head_a_frame_that_takes_its_message_past_its_bound_a_continuation_s_among_them()
