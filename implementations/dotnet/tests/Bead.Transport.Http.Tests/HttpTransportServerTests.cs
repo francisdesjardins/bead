@@ -2188,6 +2188,33 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Connect();
     }
 
+    // spec 15.12: a listen's answer frees its place even when the read stop hides its client's close
+    [Fact]
+    public async Task Frees_a_listen_within_maximumWait_once_its_client_leaves_with_requests_pipelined_past_the_read_stop()
+    {
+        await Start(new HttpTransportServerOptions { MaximumWait = TimeSpan.FromSeconds(1) });
+        var (connectionToken, _) = await Connect(isListening: true);
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 60000\r\n\r\n");
+        await Until(() => { return Count("listens") == 1; });
+        Assert.Contains(_time.Armed, (armed) => { return armed.Delay == TimeSpan.FromSeconds(1); });
+        var taken = await wire.Taken(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n", 1_000))));
+
+        Assert.True(taken < MostTaken, $"{taken} octets taken before the read stop");
+        Assert.True(await wire.IsKept(), "the held listen keeps its socket");
+        wire.Dispose();
+        _time.Advance(TimeSpan.FromSeconds(1));
+        await Until(() => { return Count("listens") == 0; });
+        Assert.Equal((1L, 0L, 0L), (Count("connections"), Count("waitingExchanges"), Count("bodyBytes")));
+        Assert.Empty(_server.Gauges().Anomalies);
+        using var next = await ListenOf(connectionToken, new() { After = "0", Wait = "0" });
+
+        Assert.Equal(HttpStatusCode.NoContent, next.StatusCode);
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal(0L, Count("connections"));
+    }
+
     // spec 15.12; RFC 9112 §9.3
     [Fact]
     public async Task Answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
