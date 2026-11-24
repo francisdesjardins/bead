@@ -44,8 +44,10 @@ internal sealed class WebSocketConnection
     // once the connection closes, which reads on to its peer's Close (RFC 6455 §7.1.1)
     private readonly ReadGate _read;
 
-    // the message its read holds partway, its read's alone
-    private ArrayBufferWriter<byte> _message = new();
+    // the message its read holds partway, its read's alone: a buffer rented from the shared pool once
+    // a message takes more than one read, given back once the message is whole, and its bytes so far
+    private byte[]? _message;
+    private int _messageBytes;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
         : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
@@ -455,7 +457,7 @@ internal sealed class WebSocketConnection
             while (Socket.State is WebSocketState.Open or WebSocketState.CloseSent)
             {
                 // * no message started while its router paused it (spec 15.12)
-                if (_message.WrittenCount == 0 && !isClosing)
+                if (_messageBytes == 0 && !isClosing)
                 {
                     await Resumed();
 
@@ -485,36 +487,37 @@ internal sealed class WebSocketConnection
                 }
 
                 // a backstop for a socket no meter reads: a meter judges this at each head
-                if (_message.WrittenCount + received.Count > _bounds.MaximumMessageBytes)
+                if (_messageBytes + received.Count > _bounds.MaximumMessageBytes)
                 {
                     isClosing = true;
-                    _message.ResetWrittenCount();
+                    Release();
                     Fail(FrameVerdict.TooBig(_bounds.MaximumMessageBytes));
 
                     continue;
                 }
-
-                _message.Write(buffer.AsSpan(0, received.Count));
 
                 // a message partway is read to its end, paused or not
                 _read.Partway(!received.EndOfMessage);
 
                 if (!received.EndOfMessage)
                 {
+                    Append(buffer.AsSpan(0, received.Count));
+
                     continue;
                 }
 
-                var bytes = _message.WrittenSpan.ToArray();
+                byte[] bytes;
 
-                // ! a writer grown past its read buffer goes with its message: kept, it would hold
-                // what its largest message took for the connection's life
-                if (_message.Capacity > buffer.Length)
+                // * a message of one read is copied whole, no buffer rented
+                if (_messageBytes == 0)
                 {
-                    _message = new ArrayBufferWriter<byte>();
+                    bytes = buffer.AsSpan(0, received.Count).ToArray();
                 }
                 else
                 {
-                    _message.ResetWrittenCount();
+                    Append(buffer.AsSpan(0, received.Count));
+                    bytes = _message.AsSpan(0, _messageBytes).ToArray();
+                    Release();
                 }
 
                 // * a message read whole past a pause is held until resumed, one at most; one this
@@ -532,8 +535,46 @@ internal sealed class WebSocketConnection
         }
         finally
         {
+            Release();
             End();
         }
+    }
+
+    // adds a read to the message partway, its buffer rented anew where it holds too little, twice as
+    // large up to the message's bound, what it held copied over and the old one given back
+    private void Append(ReadOnlySpan<byte> read)
+    {
+        var needed = _messageBytes + read.Length;
+
+        if (_message is null || _message.Length < needed)
+        {
+            var grown = Math.Min((_message?.Length ?? 0) * 2L, _bounds.MaximumMessageBytes);
+            var rented = ArrayPool<byte>.Shared.Rent(Math.Max(needed, (int)grown));
+
+            if (_message is not null)
+            {
+                _message.AsSpan(0, _messageBytes).CopyTo(rented);
+                ArrayPool<byte>.Shared.Return(_message);
+            }
+
+            _message = rented;
+        }
+
+        read.CopyTo(_message.AsSpan(_messageBytes));
+        _messageBytes = needed;
+    }
+
+    // ! the message's buffer goes back to the pool once its message is whole or dropped: kept, it
+    // would hold what the connection's largest message took for its life
+    private void Release()
+    {
+        if (_message is not null)
+        {
+            ArrayPool<byte>.Shared.Return(_message);
+            _message = null;
+        }
+
+        _messageBytes = 0;
     }
 
     // its end, told once, however it went: what still waits on the connection settles — the write
@@ -553,12 +594,12 @@ internal sealed class WebSocketConnection
         _sendPace?.Stop();
     }
 
-    /// <summary>What its read's writer holds room for right now, in bytes: the tests' way to see it let go.</summary>
+    /// <summary>What its read's buffer holds room for right now, in bytes: the tests' way to see it let go.</summary>
     internal int HeldCapacity
     {
         get
         {
-            return _message.Capacity;
+            return _message?.Length ?? 0;
         }
     }
 
