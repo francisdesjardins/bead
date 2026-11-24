@@ -133,7 +133,8 @@ and AMQP 1.0 on RabbitMQ 4 its second
   what its transport carries — relays that forward it to the destination that verifies it, and
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. Every
-  implementation plays them, the Rust side the part it reaches; the three call each other in CI over
+  implementation plays them, the Rust side with their AMQP 1.0 cases ahead, with its binding; the
+  three call each other in CI over
   WebSocket, HTTP and MQTT 5, and the TypeScript and C# ones over AMQP 1.0 too, and through each
   other's gateway.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
@@ -153,12 +154,10 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the rules a security pass brings to every side: a bound on what a server reads of a
-  connection ahead of the request it serves, and on a `Content-Length`.
-- **Then**: the Rust side's AMQP 1.0 binding, a record of its own
+- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   a row of the [support matrix](docs/support.md#differences) ahead.
-- **After it**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
+- **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
   a connection's close code carried on `close`
@@ -1102,9 +1101,9 @@ against each server.
 - `node tools/check-validations.mjs [typescript|csharp|rust]`: each side's validators of
   `spec/validations.proto`, committed beside its verdicts test, are what beadc writes for it;
   `--write` writes them. It needs the builder installed.
-- `node tools/check-transcoding.mjs [typescript|csharp]`: each side's route table and document of
-  `spec/transcoding.proto`, committed beside its gateway's tests, are what beadc writes for it;
-  `--write` writes them. It needs the builder installed.
+- `node tools/check-transcoding.mjs [typescript|csharp|rust]`: each side's route table and
+  document of `spec/transcoding.proto`, committed beside its gateway's tests, are what beadc writes
+  for it; `--write` writes them. It needs the builder installed.
 - `node tools/mqtt-broker.mjs start|stop|run -- <command…>`: a Mosquitto 2.1.2 of the run's own,
   by its digest under Docker or natively with `--native <folder>`, that `spec/transports.json`'s
   `brokers.mqtt` describes, its access control spec 15.31's, under a container name, loopback ports
@@ -1125,9 +1124,9 @@ against each server.
   whatever the command's end. What it shares with
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
-- `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
-  committed `site/dist/index.html` and `site/dist/404.html` byte for byte
-  ([The page](#the-page)).
+- `node site/check.mjs`: the page's SVGs are their sources' renders, each icon the mark's, and its
+  build gives the committed `site/dist/index.html`, `site/dist/privacy/index.html` and
+  `site/dist/404.html` byte for byte ([The page](#the-page)).
 - `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
   axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
   installed, with Playwright's Chromium.

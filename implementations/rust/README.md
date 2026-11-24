@@ -188,8 +188,12 @@ that serves the network in the clear, its options say `secure: Some(false)`
 
 A client connects `localhost`, or a name that ends in `.localhost`, to the loopback itself and
 asks no resolver: `127.0.0.1` first, then `::1` 250 ms later or once the first fails, whatever its
-scheme. Its `Host` and its TLS server name keep the name. It reads no proxy, for any host. A connect
-that fails says the name went to the loopback
+scheme. It reads a host once, as the URL Standard's host parser reads a special scheme's host:
+`127.0.0.1.` and `127.1` connect to `127.0.0.1` and are named so. A host the parser fails on,
+`foo.123` say, is refused before any socket opens: by the MQTT 5 adapter and the caller as they are
+built, by a transport client at its connect (spec 13.4). Its request names the host it read, in its
+`Host` and in its TLS server name. It reads no proxy, for any host. A connect that fails says the
+name went to the loopback
 ([decision 0054](../../docs/decisions/0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 Behind a proxy, a server over HTTP or WebSocket believes `X-Forwarded-For` from the proxies

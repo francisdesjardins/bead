@@ -577,18 +577,22 @@ export const STATUSES = Object.freeze([
   ],
   [429, ['CAPACITY_EXCEEDED, retry-after: 1', 'CAPACITY_EXCEEDED, retry-after: 1']],
   [
+    431,
+    ['a JWT past 1004 bytes, under bearer-jwt', 'un JWT de plus de 1004 octets, sous bearer-jwt'],
+  ],
+  [
     500,
     [
-      'PROCEDURE_FAILED, and what is said only between the gateway and its server',
-      'PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur',
+      'PROCEDURE_FAILED; what is said only between the gateway and its server; a protocol code the specification does not name; the gateway’s own configuration; a result its JSON form cannot hold, or what no gate foresaw',
+      'PROCEDURE_FAILED ; ce qui ne se dit qu’entre la passerelle et son serveur ; un code de protocole que la spécification ne nomme pas ; la configuration de la passerelle elle-même ; un résultat que sa forme JSON ne peut tenir, ou ce qu’aucune porte n’a prévu',
     ],
   ],
   [501, ['SERVICE_UNKNOWN, PROCEDURE_UNKNOWN', 'SERVICE_UNKNOWN, PROCEDURE_UNKNOWN']],
   [
     502,
     [
-      'an answer the gateway could not take; DESTINATION_LOST; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request',
-      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto',
+      'an answer the gateway could not take; DESTINATION_LOST, or the exchange’s connection closed before its answer; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request',
+      'une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST, ou la connexion de l’échange fermée avant sa réponse ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto',
     ],
   ],
   [503, ['DESTINATION_UNREACHABLE, retry-after: 1', 'DESTINATION_UNREACHABLE, retry-after: 1']],
@@ -796,16 +800,16 @@ export const PARTS = Object.freeze([
         sides: ['C#'],
         ahead: ['The Web Worker transport'],
         says: [
-          'WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined',
-          'WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints',
+          'WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined; a Web Worker ahead, with its core in a page',
+          'WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints ; un Web Worker à venir, avec son cœur dans une page',
         ],
       },
       {
         sides: ['Rust'],
         ahead: ["Rust's AMQP 1.0 binding", 'The Web Worker transport'],
         says: [
-          'WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined',
-          'WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints',
+          'WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined; AMQP 1.0 and a Web Worker ahead',
+          'WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints ; AMQP 1.0 et un Web Worker à venir',
         ],
       },
     ],

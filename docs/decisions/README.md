@@ -63,8 +63,6 @@ document, `examples/hello`'s Rust half serves a gateway, and the interop runs bo
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **the rules a security pass brings to every side**: a bound on what a server reads of a
-  connection ahead of the request it serves, and on a `Content-Length`;
 - **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, under a record of its own
@@ -101,6 +99,10 @@ that meets the Tenth Man:
   cases have one, with the outcomes the spec names for a client's call
   ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
   ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+- **a step over HTTP/2 in the conformance files**, by a round of its own, where each side's own
+  test holds its answer to a request HTTP/2 refuses
+  ([0004](0004-one-behaviour-in-every-language.md),
+  [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md));
 - **a relay across languages in the interop**, one side's relay in front of the other's
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
@@ -202,6 +204,12 @@ that meets the Tenth Man:
   TLS object for the brokers, on every side at once; the interop over TLS, each side's client
   presenting `spec/pki`'s certificate to the others' servers through a TLS front; and a gateway
   caller's `tls`, on every side at once;
+- what
+  [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)
+  keeps ahead of a client's connect: one behaviour on every side for the platform's proxy, for a
+  host off the machine, by a decision of its own; and a dialer of the TypeScript side's own over
+  `node:http` and `node:https`, so that its HTTP client and caller connect the loopback themselves
+  without undici, by a round of its own;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and

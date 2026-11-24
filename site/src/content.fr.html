@@ -10,9 +10,9 @@
       Un service se déclare une fois, dans un <code>.proto</code>. <code>beadc</code> en génère le
       serveur et le client typés dans chaque langage. Une passerelle qu’offre chaque côté sert les
       mêmes procédures en HTTP et en JSON, pour les équipes qui ne parlent pas Bead. Une
-      spécification tient les côtés à un même comportement : chacun joue ses fichiers de
-      conformance, le côté Rust la part qu’il atteint, et la matrice de support liste chaque endroit
-      où ils diffèrent encore.
+      spécification tient les côtés à un même comportement, et chacun joue ses fichiers de
+      conformance. Le côté Rust en a les cas d’AMQP 1.0 à venir, avec sa liaison. La matrice de
+      support liste chaque endroit où les côtés diffèrent encore.
     </p>
   </header>
   <section id="statut" class="status" data-toc="Où en est Bead">
@@ -33,9 +33,9 @@
       écrite par des agents d’IA sous les portes du dépôt : les autres implantations, le
       générateur, une grande partie de ce qui a changé depuis du côté TypeScript, et bien des
       lectures que la spécification fait des normes. Ces lectures et les idiomes de chaque langage
-      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
-      sa sécurité ni sa lecture des normes qu’il suit ; une équipe qui le reprend le revoit comme son
-      propre code.
+      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Le cœur de
+      Bead, sa sécurité et sa lecture des normes qu’il suit n’ont été revus par personne qui ait les
+      connaissances pour en juger ; une équipe qui le reprend le revoit comme son propre code.
     </p>
     <p id="methode">
       Sur <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>, son auteur
@@ -122,8 +122,8 @@
     </li>
     <li>
       <strong>Un courtier est un transport de plus</strong
-      ><span>Sur MQTT 5, et sur AMQP 1.0 côtés TypeScript et C#, les deux bouts gardent l’API qu’ils
-        ont sur un WebSocket.</span>
+      ><span>Sur MQTT 5 de tous les côtés, et sur AMQP 1.0 avec RabbitMQ 4 côtés TypeScript et C#,
+        les deux bouts gardent l’API qu’ils ont sur un WebSocket.</span>
     </li>
     <li>
       <strong>Un même crédit cadence un abonnement comme un transfert</strong
@@ -132,14 +132,14 @@
     </li>
     <li>
       <strong>Les fichiers de conformance sont la forme exécutable de la spécification</strong
-      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui, et le côté Rust en joue la
-        part qu’il atteint.</span>
+      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui. Le côté Rust en a les cas
+        d’AMQP 1.0 à venir, avec sa liaison.</span>
     </li>
   </ul>
   <p class="space">
     Le guide d’architecture place Bead
     <a href="{{blob path="docs/guides/architecture-overview.md"}}#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
-    Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
+    Son tableau cite ou résume les pages propres aux trois autres projets. Ce qui manque à Bead à côté
     d’eux : ses paquets ne sont pas publiés, et il parle trois langages.
   </p>
 </section>
@@ -210,8 +210,8 @@
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <p>
-    Ce que le fil peut et qu’une passerelle ne porte pas est listé, pas caché : la session d’une
-    connexion, une commande et la fenêtre d’un flux, chacune une ligne du registre
+    La session d’une connexion, une commande et la fenêtre d’un flux sont portées par le fil et non
+    par une passerelle. Chacune est une ligne du registre
     <a href="{{blob path="docs/support.md"}}#leveled-down">« Leveled down »</a> de la matrice (§2.5,
     §2.6 et §8.8 du compagnon). La reprise d’un flux y a aussi sa ligne (§8.3) : les Server-Sent
     Events l’offrent, et un abonnement Bead ne garde aucune notification après sa fin.
@@ -264,15 +264,16 @@
     <code>raw</code> en <code>application/octet-stream</code>. Les bibliothèques protobuf courantes
     ne s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, de
     chaque côté. Il écrit une seule forme : aucun blanc, les membres dans l’ordre des numéros de
-    champ, les entrées d’une map triées. Dans la CI, la suite de conformité de protobuf joue ce
+    champ, les entrées d’une map triées. Dans la CI, la suite de conformance de protobuf joue ce
     mapping de chaque côté par ses tests JSON, et le codec de chaque côté par ses tests binaires.
   </p>
   <h3 id="transcodage-echecs">Un échec, un problème</h3>
   <p>
-    Chaque échec répond un problème de la RFC 9457, <code>application/problem+json</code>.
-    <code>code</code> et <code>scope</code> portent ce que le fil porte, et <code>detail</code> le
-    détail de l’échec. Le statut dépend de là où le code est né : ce que l’appelant peut réparer
-    donne un 4xx, ce qui se passe entre la passerelle et son serveur un 5xx.
+    La passerelle répond à chaque échec par un problème de la RFC 9457,
+    <code>application/problem+json</code>. <code>code</code> et <code>scope</code> portent ce que le
+    fil porte, et <code>detail</code> le détail de l’échec. Le statut dépend de là où l’échec est
+    né : ce que l’appelant peut réparer donne un 4xx, et ce qu’il ne peut pas réparer, dans le
+    serveur, dans la passerelle ou entre les deux, un 5xx.
   </p>
   {{statuses}}
   <p class="space">
@@ -403,13 +404,14 @@
     Les trois côtés répondent à une même spécification, et aux fichiers de conformance qui en sont
     la forme exécutable : chaque unité de la spécification est citée par un fichier, ou porte la
     raison pour laquelle aucun ne la cite. Chaque côté joue ces fichiers depuis <code>spec/</code>,
-    le côté Rust la part qu’il atteint, et les trois s’appellent les uns les autres dans la CI. Là
-    où ils diffèrent encore, chaque écart est une ligne de la matrice de support, avec le test qui le
-    montre.
+    et les trois s’appellent les uns les autres dans la CI. Le côté Rust en a les cas d’AMQP 1.0 à
+    venir, avec sa liaison. Là où les côtés diffèrent encore, chaque écart est une ligne de la
+    matrice de support, avec le test qui le montre.
   </p>
   <p>
-    TypeScript et C# sont à parité de comportement. Le côté Rust a les parties ci-dessous, et ce
-    qui lui manque est à venir.
+    TypeScript et C# sont à parité de comportement, sauf le cœur du côté C# dans une page et dans un
+    worker, à venir avec son transport Web Worker. Le côté Rust a les parties ci-dessous, et ce qui
+    lui manque est à venir.
   </p>
   {{implementations}}
   <p class="space">
@@ -424,7 +426,7 @@
     Les côtés se mesurent aussi. TypeScript et C# mesurent les mêmes couches dans les mêmes
     unités : le codec de l’enveloppe, une charge JSON, le mapping JSON de protobuf, un
     <code>echo</code> sur HTTP, sur WebSocket et en mémoire, des notifications cadencées et un
-    transfert de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
+    écho de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
     mémoire ; ses couches sur la boucle locale sont à venir. Sur la
     branche de chaque sortie, la CI mesure chaque côté contre la sortie précédente. Elle fait
     tourner les deux arbres tour à tour sur une même machine et les compare. Une régression est lue
@@ -737,8 +739,8 @@
       ouvert la session. Il tient le rôle d’un cookie de session, lié à sa connexion.
     </li>
     <li>
-      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie sur
-      place, avec les clés que son application lui donne.
+      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie
+      lui-même, avec les clés ou le jeu de clés que son application lui donne.
     </li>
     <li>
       <strong><code>ELSEWHERE</code></strong> : le justificatif voyage dans le transport, et le
@@ -828,8 +830,8 @@
   <details class="more" id="securite-relais">
     <summary>Un relais</summary>
     <p>
-      Un relais termine chaque jambe et fait suivre un JWT tel quel à la destination de son
-      audience, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
+      Un relais termine chaque jambe et fait suivre un justificatif porteur tel quel à la
+      destination que choisit le demandeur, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
       sa propre session à n’importe quel demandeur. <a href="#relais">Les relais</a> détaillent le
       tout.
     </p>
@@ -1209,8 +1211,8 @@
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
     teste un code du protocole. Un échec propre à la procédure se teste par le catalogue que beadc
-    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>, qui vérifie aussi que
-    l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
+    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>. Ce test vérifie aussi
+    que l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
     <code>Failure</code> du côté Rust posent les mêmes questions.
   </p>
   {{code of="failure"}}
@@ -1281,7 +1283,8 @@
       définies d’une énumération ; les règles d’une liste et d’une map ; et le <code>oneof</code>.
       Il refuse toute autre règle avec <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL et le motif
       d’octets parmi elles. Il n’en ignore aucune : une règle écrite et non jouée laisserait passer
-      ce qu’un serveur protovalidate refuse.
+      ce qu’un serveur protovalidate refuse. Bead ne juge que les requêtes : les règles d’un message
+      qu’aucune requête n’atteint valent un avertissement, <code>VALIDATE_RULES_UNPLAYED</code>.
       <a href="#suite">Les règles en CEL sont à venir, puis le reste des règles qu’il refuse.</a>
     </p>
     <p>
@@ -1333,9 +1336,9 @@
   <h3 id="abonnements-rythme">Au rythme du client</h3>
   <p>
     Avec PACED à côté de SUBSCRIPTION, le serveur n’envoie que les notifications que le client a
-    accordées. Le client accorde à mesure que ses rappels finissent, un rappel asynchrone une fois
-    son travail fini. Avec une fenêtre d’une notification, il accorde la suivante quand ils ont
-    fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
+    accordées. Le client accorde à mesure que ses rappels finissent. Un rappel asynchrone finit une
+    fois son travail fait. Avec une fenêtre d’une notification, le client accorde la suivante quand
+    ses rappels ont fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
     porte au-delà de ce qu’ils ont fini, et accorde de nouveau à la moitié de la fenêtre. Il
     accorde par un CREDIT qui porte PACED. Ce crédit compte des notifications, comme le
     <code>REQUEST_N</code> de RSocket. Mais il est absolu, comme le crédit d’un transfert.
@@ -1343,11 +1346,11 @@
   <p>
     Au-delà de son crédit, une notification attend dans une file. Le serveur peut lui donner une
     clé. Une notification de même clé remplace celle qui attend, et l’état d’une entité ne garde
-    ainsi que sa dernière valeur : quarante-cinq changements d’un article, pendant qu’un rappel va
-    chercher ses données, arrivent en deux notifications. Sans clé, chaque événement est gardé,
-    dans l’ordre. Une file pleine, 64 notifications ou 1 Mio par défaut, termine l’abonnement par
-    <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en silence : le client se réabonne et relit
-    l’état.
+    ainsi que sa dernière valeur. Si un article change quarante-cinq fois pendant qu’un rappel va
+    chercher ses données, le client reçoit deux notifications : le premier changement, puis le
+    dernier. Sans clé, chaque événement est gardé, dans l’ordre. Une file pleine, 64 notifications
+    ou 1 Mio par défaut, termine l’abonnement par <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en
+    silence : l’application du client se réabonne et relit l’état.
   </p>
   <figure class="figure">
     <figcaption>Un abonnement cadencé, son rappel qui va chercher</figcaption>
@@ -1740,8 +1743,7 @@
     </table>
   </div>
   <p class="space">
-    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP. Les règles
-    de reprise de gRPC reposent sur la même différence : si la procédure a pu tourner.
+    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP.
   </p>
   <details class="more">
     <summary>Ce qu’un relais ne fait pas, et ce que ses demandeurs partagent</summary>
@@ -1775,10 +1777,10 @@
     <code>POST</code> porte une enveloppe (§15.4 à §15.12).
   </p>
   <p>
-    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un PING sur une connexion
-    restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
+    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un ping sur une connexion
+    restée silencieuse 30 s, et la coupe si aucun pong ne lui fait écho. Un pair parti
     sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
-    page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
+    page ou de Node, n’en envoie aucun, et les pings du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455), un message au-delà de <code>maximumMessageFrames</code> avec 1008, et une trame que la RFC 6455 interdit avec 1002. Chaque bout lit la tête de chaque trame là où sa plateforme le permet, et la juge là.
   </p>
   <p>
@@ -1790,10 +1792,10 @@
     pour remettre chaque réponse à l’échange de sa requête.
   </p>
   <p>
-    Le serveur marque chacun de ses refus dans le champ <code>bead-refusal</code>, et seul un refus
-    marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut, le 502 d’une
-    passerelle par exemple, a pu venir après que la requête a tourné, et compte comme un échange
-    perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
+    Le transport marque chacun de ses propres refus dans le champ <code>bead-refusal</code>, et seul
+    un refus marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut qu’un
+    2xx, le 502 d’une passerelle par exemple, a pu venir après que la requête a tourné, et compte
+    comme un échange perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
     <code>DESTINATION_LOST</code>. Un client ne suit aucune redirection : elle porterait le jeton de
     la connexion là où personne ne l’a jugé.
   </p>
@@ -1830,7 +1832,7 @@
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur répond 408, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
       reste, 400 non marqué sur HTTP/1.1 (§15.12).
@@ -1985,9 +1987,10 @@
         DevTools.</span>
     </li>
     <li>
-      <strong>Plus de conformance</strong
-      ><span>La partie client sur HTTP et WebSocket, un relais entre langages, et un même corpus lu
-        pareil par les analyseurs de chaque côté.</span>
+      <strong>Plus de tests partagés</strong
+      ><span>La partie client des transports dans la conformance, sur HTTP et WebSocket, un relais
+        entre langages dans l’interop, et un même corpus lu pareil par les analyseurs de chaque
+        côté.</span>
     </li>
     <li>
       <strong>L’âge d’une connexion</strong

@@ -365,7 +365,7 @@ if ($digest -and $commit) {
 }
 ```
 
-0.16.0's image alone was built by a run from `develop`, which built its tag, and passes the
+0.16.0's image alone is `develop`'s, built from its tag, and passes the
 [getting-started guide's block](../docs/guides/getting-started.md#1-pin-bead-and-beadcs-image)
 instead.
 

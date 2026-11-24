@@ -308,6 +308,15 @@ pub(crate) fn is_wrapper(message: &MessageDescriptor) -> bool {
         )
 }
 
+/// The message of `pool` an `Any`'s type URL names after its last `/`, spelled as its full name
+/// (5.4.6); none for a name the pool holds no message of.
+pub(crate) fn message_named(pool: &DescriptorPool, type_name: &str) -> Option<MessageIndex> {
+    // ! buffa's lookup takes a leading dot, a descriptor's reference: a type URL's name is whole,
+    // so `.google.protobuf.Any` names none, as on the TypeScript and C# sides
+    pool.message_index(type_name)
+        .filter(|&index| pool.message(index).full_name() == type_name)
+}
+
 /// The well-known types whose JSON is a form of their own, under an `Any`'s `value` (5.4.6).
 pub(crate) fn is_own_form(full_name: &str) -> bool {
     matches!(
