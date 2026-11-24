@@ -318,7 +318,8 @@ docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.ps1 > be
 ```
 
 A team verifies the image a version names, its provenance by GitHub's CLI and its signature by
-cosign 3, then pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
+cosign 3, which reads the signature as the workflow stores it, where cosign 2 finds none. It then
+pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
 Bead at the version's tag, reads the digest of the image's index once, and checks the image by it:
 each check passes only for this repository's `image.yml`, run on GitHub's runners from the tag
 `v<version>` at the commit the clone holds, a commit on `main`. It sets `BEADC_IMAGE` only once

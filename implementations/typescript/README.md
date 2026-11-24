@@ -1915,9 +1915,12 @@ createServer((request, reply) => {
     reply.writeHead(404);
     reply.end();
   }
-}).listen(9_464);
+}).listen(9_464, '127.0.0.1');
 await server.transport.start({ port });
 ```
+
+The exposition names every procedure and its traffic, so it listens on the loopback here; a
+deployment gives it the address its Prometheus scrapes.
 
 A client built in a page announces itself to the page's DevTools hook, when it has one
 ([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).

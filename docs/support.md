@@ -551,8 +551,9 @@ that a test of each side does:
 - HTTP/2 and TLS, which every side's HTTP server serves: open, as the transports' cases play
   HTTP/1.1 in clear; a step over HTTP/2 in the conformance files is ahead;
 - the close of a socket after a refusal of the server's own of a request that declares a body,
-  which needs the requests behind it in that request's own write, and which no case writes; three
-  framing cases send on a socket that asks no close and play the close a framing refusal asks, and
+  which needs the requests behind it in that request's own write, and which no case writes; the
+  framing cases send on a socket that asks no close and play, by an expectation `end`, the close a
+  framing refusal asks, and
   the cases of the step `behind` play the order of a socket's requests, pipelining, and the keep
   after a refusal of a request that declares no body;
 - the transport's contract with its router, its events, its handles and its gauges, which each side's
