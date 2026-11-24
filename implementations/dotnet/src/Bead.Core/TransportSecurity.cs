@@ -50,6 +50,28 @@ internal static class TransportSecurity
     }
 
     /// <summary>
+    /// The host a client dials, judges and names, read once as the URL Standard's host parser reads
+    /// a special scheme's host, whatever its URL's scheme (spec 13.4), an IPv6 one bracketed first
+    /// when it is bare: <c>127.0.0.1.</c> and <c>127.1</c> read as <c>127.0.0.1</c>,
+    /// <c>LOCALHOST</c> as <c>localhost</c>, a percent-escaped host decoded. A host the parser fails
+    /// on, <c>foo.123</c> or <c>x%20.localhost</c> among them, is an <see cref="ArgumentException"/>,
+    /// <c>&lt;host&gt; is no host a URL can name</c>.
+    /// </summary>
+    public static string DialedHost(string host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        var bracketed = host.Contains(':', StringComparison.Ordinal) && !host.StartsWith('[') ? $"[{host}]" : host;
+
+        if (UrlHost.Parse(bracketed) is not { } parsed)
+        {
+            throw new ArgumentException($"{host} is no host a URL can name");
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
     /// Whether a host is a localhost name as the URL Standard's host parser reads it:
     /// <c>localhost</c>, or a name that ends in <c>.localhost</c>, compared in ASCII lower case;
     /// never <c>localhost.</c> nor a name that ends in <c>.localhost.</c>. A client connects such a

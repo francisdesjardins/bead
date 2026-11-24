@@ -2020,6 +2020,32 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; transcoding 10.1; RFC 9112 §7.1; docs/support.md, a chunk size past 2³¹ − 1 over HTTP/1.1
+    [Fact]
+    public async Task Answers_400_unmarked_and_closes_a_chunk_size_past_what_Kestrel_holds()
+    {
+        var started = await Started();
+
+        try
+        {
+            var port = started.Port;
+
+            // * 2³¹, past the int Kestrel holds a chunk size in, on a socket that asks no close
+            var came = Encoding.ASCII.GetString(await Received(port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n80000000\r\n            ")));
+
+            // one answer, never the 200 Kestrel writes of a request left unanswered, its connection
+            // closed behind it
+            Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+            Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+            Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // spec 15.12; transcoding 10.1
     [Fact]
     public async Task Refuses_400_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_over_HTTP_1_0_too_and_closes_its_connection_before_a_request_smuggled_behind_it_is_read()

@@ -14,8 +14,8 @@
 # last, so a plain build gives it and runs no test.
 
 # ! the frontend and the base by their digests: one Dockerfile dialect on every engine, and the
-# base named once, for its FROM and its labels. A release bumps both by hand, and shellcheck's in
-# ci.yml with them
+# base named once, for its FROM and its labels. A release bumps both by hand, and with them
+# shellcheck's in ci.yml and BuildKit's and buildx's in image.yml
 ARG NODE_IMAGE=node:26.13.1-trixie-slim
 ARG NODE_DIGEST=sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 # ! the licences of what the image adds to its base, its label's expression, which

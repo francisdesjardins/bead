@@ -150,7 +150,7 @@ that meets the Tenth Man:
 - what
   [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md)
   keeps ahead: the HTTP transport's `bodyBytesBudget` and a broker's `heldBytesBudget`, which refuse
-  the newcomer, brought to its cast-off, those past their grace first, then the most;
+  the newcomer, brought to its cast-off, the most first;
 - what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a share of the
   budget per connection or per address, with
   [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection;

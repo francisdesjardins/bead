@@ -2134,6 +2134,74 @@ async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
 }
 
+// spec 13.4
+#[tokio::test]
+async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+ {
+    for host in ["127.0.0.1.", "127.1"] {
+        let server = hearing(None).await;
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked);
+
+        settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+            host,
+            server.port,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(
+            server.heard.lock().unwrap()[0]
+                .headers()
+                .get("host")
+                .and_then(|named| named.to_str().ok())
+                .map(str::to_owned),
+            Some(format!("127.0.0.1:{}", server.port)),
+            "{host}: named 127.0.0.1"
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{host}: none asked"
+        );
+        client.dispose();
+    }
+}
+
+// spec 13.4
+#[tokio::test]
+async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+ {
+    let server = hearing(None).await;
+
+    for host in ["foo.123", "x%20.localhost"] {
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked);
+        let failed = settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+            host,
+            server.port,
+        )))
+        .await;
+
+        assert!(
+            matches!(&failed, Err(TransportError::Connect(error)) if error.message() == format!("{host} is no host a URL can name")),
+            "{host}: {failed:?}"
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{host}: none asked"
+        );
+    }
+
+    crate::testing::rest(Duration::from_millis(50)).await;
+    assert_eq!(
+        server.accepted.load(Ordering::SeqCst),
+        0,
+        "no socket opened to its server"
+    );
+}
+
 // ── A raw server ─────────────────────────────────────────────────────────────────────────────
 
 /// A server that completes each upgrade by hand and hands the test its socket, raw: what goes
@@ -4134,6 +4202,56 @@ impl ClientListener for PausingAtOnce {
         if let Some(client) = self.client.lock().unwrap().as_ref() {
             client.pause();
         }
+    }
+}
+
+// spec 15.3 and 15.12; RFC 6455 §7.1.7
+#[tokio::test]
+async fn closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+ {
+    let mut server = raw().await;
+
+    // * a head RFC 6455 forbids right behind the message paused on, or behind a second one past
+    // 125 bytes, in one write: never resumed, it fails at once, the second never handed
+    for between in [Vec::new(), frame_of(0x2, &[0x78; 200])] {
+        let client = client_of(&WebSocketTransportClientOptions {
+            heartbeat: Some(NEVER),
+            ..WebSocketTransportClientOptions::default()
+        });
+        let recorder = recorded(&client);
+        let pausing = Arc::new(PausingAtOnce {
+            client: Mutex::new(Some(client.clone())),
+        });
+
+        client.listen(Arc::<PausingAtOnce>::clone(&pausing));
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+        let mut written = frame_of(0x2, &[1]);
+
+        written.extend(between);
+        written.extend(reserved_frame());
+        socket.write_all(&written).await.unwrap();
+
+        assert_eq!(close_code_from(&mut socket).await, Some(1002), "1002");
+        socket.shutdown().await.unwrap();
+        closes_within(&recorder, 1).await;
+
+        let told = told_of(&recorder);
+
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert!(
+            told[0].starts_with(
+                "error: the connection is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3"
+            ),
+            "{told:?}"
+        );
+        assert_eq!(
+            recorder.messages(),
+            [Bytes::from_static(&[1])],
+            "the message paused on alone"
+        );
+        pausing.client.lock().unwrap().take();
     }
 }
 

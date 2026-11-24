@@ -113,14 +113,19 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException("an AMQP link authenticates by a password or by its client certificate", nameof(options));
         }
 
+        // * its host read once, as the URL Standard reads a special scheme's (spec 13.4): judged,
+        // dialed and named as read, one that parser fails on refused as it is built
+        var host = TransportSecurity.DialedHost(options.Uri.Host);
+
         _options = options with
         {
+            Uri = new UriBuilder(options.Uri) { Host = host }.Uri,
             Tls = tls,
             // ! never without end: a link that counts nothing lost waits on a dead connection forever
             IdleTimeout = Clocks.AssertHeldWithin((nameof(AmqpBrokerAdapterOptions.IdleTimeout), nameof(AmqpBrokerAdapterOptions.IdleTimeout)), (options.IdleTimeout, LongestIdleTimeout)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(AmqpBrokerAdapterOptions.ConnectTimeout), nameof(AmqpBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
-        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme == "amqps", options.Uri.Host));
+        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme == "amqps", host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
 

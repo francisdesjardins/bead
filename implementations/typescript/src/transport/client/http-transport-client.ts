@@ -36,7 +36,7 @@ import {
   loopbackFailureOf,
   resolvesUndici,
 } from '../shared/loopback';
-import { isLoopbackUrl, isSecureUrl } from '../shared/secure';
+import { isLoopbackUrl, isSecureUrl, urlHostOf } from '../shared/secure';
 import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
 import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
 import {
@@ -865,6 +865,13 @@ export const createHTTPTransportClient = (
                   attempt.isDisposed = true;
                   reject(reason);
                 };
+
+                // * read once as the URL Standard reads it: a host it fails on opens no socket
+                if (urlHostOf(url) === undefined) {
+                  reject(new ConnectError(`${host} is no host a URL can name`));
+
+                  return undefined;
+                }
 
                 fetchImpl(url, {
                   headers: {

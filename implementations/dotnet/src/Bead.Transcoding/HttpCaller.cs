@@ -80,6 +80,8 @@ public sealed record HttpEvent<TResult, TNotification>
 /// </summary>
 public sealed class HttpCaller : IDisposable
 {
+    private const string UrlRefused = "an HTTP client URL uses HTTP or HTTPS without user information, query or fragment";
+
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private readonly HttpClient _http;
     private readonly Uri _url;
@@ -94,7 +96,20 @@ public sealed class HttpCaller : IDisposable
 
         if (!url.IsAbsoluteUri || (url.Scheme != "http" && url.Scheme != "https") || url.UserInfo.Length != 0 || url.Query.Length != 0 || url.Fragment.Length != 0)
         {
-            throw new ArgumentException("an HTTP client URL uses HTTP or HTTPS without user information, query or fragment", nameof(url));
+            throw new ArgumentException(UrlRefused, nameof(url));
+        }
+
+        // * its host read once, as the URL Standard reads it (spec 13.4): judged, dialed and named as
+        // read, one that parser fails on refused as it is built, in the words of any URL it refuses
+        string host;
+
+        try
+        {
+            host = TransportSecurity.DialedHost(url.Host);
+        }
+        catch (ArgumentException)
+        {
+            throw new ArgumentException(UrlRefused, nameof(url));
         }
 
         _options = options ?? new HttpCallerOptions();
@@ -107,7 +122,7 @@ public sealed class HttpCaller : IDisposable
         var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
         HttpRedirects.AssertHandler(handler, nameof(options));
 
-        _url = url;
+        _url = new UriBuilder(url) { Host = host }.Uri;
         _http = new HttpClient(handler, disposeHandler: _options.Handler is null) { Timeout = Timeout.InfiniteTimeSpan };
         _form = new JsonForm(routes.SelectMany((route) =>
         {

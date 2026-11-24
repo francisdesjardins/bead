@@ -154,8 +154,9 @@ pub(crate) struct MeterStep {
     pub(crate) taken: usize,
     /// What it handed for them.
     pub(crate) handed: Handed,
-    /// What they charge a server's budget: the bytes of a message partway, a control frame's
-    /// between its frames among them, and 128 a head once whole (spec 15.12).
+    /// What they charge a server's budget: the payload bytes of a message partway, a control
+    /// frame's between its frames among them, and a head's bytes and 128 more once it is whole,
+    /// at its last byte (spec 15.12).
     pub(crate) charge: u64,
     /// The payload of a data frame they bring, which a server's rate counts.
     pub(crate) payload: u64,
@@ -356,11 +357,8 @@ impl FrameMeter {
             }
         }
 
+        // * a head not yet whole charges nothing: its bytes are charged once it is
         let mut step = MeterStep::of(taken, Handed::Held);
-
-        if self.is_charged {
-            step.charge = u64::try_from(taken).unwrap_or(u64::MAX);
-        }
 
         step.begins = begins;
 
@@ -518,8 +516,9 @@ impl FrameMeter {
         };
         let mut step = MeterStep::of(taken, Handed::Head(handed));
 
+        // * a head whole: every byte of it, those of the reads before among them, and 128
         if is_charged {
-            step.charge = u64::try_from(taken)
+            step.charge = u64::try_from(head.length)
                 .unwrap_or(u64::MAX)
                 .saturating_add(FRAME_CHARGE);
         }
@@ -835,7 +834,13 @@ impl<S> Meter<S> {
                         is_overflowing = true;
                     }
                 }
+                // ! what the region brought before the judged frame is charged first: a cast-off
+                // at an earlier byte wins over the verdict, whose head charges nothing
                 Handed::Verdict(verdict) => {
+                    if !self.charge(charge) {
+                        return charged_from;
+                    }
+
                     self.draw(Verdict::Head(verdict));
 
                     return written;

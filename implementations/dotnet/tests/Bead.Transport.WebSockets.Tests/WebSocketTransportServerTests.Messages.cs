@@ -279,7 +279,7 @@ public sealed partial class WebSocketTransportServerTests
 
     // spec 15.12, its cast-off order
     [Fact]
-    public async Task Casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_messageBytesBudget_the_newcomer_only_when_it_holds_the_most()
+    public async Task Casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_messageBytesBudget_its_own_only_when_it_comes_first()
     {
         await Start(new WebSocketTransportServerOptions { MessageBytesBudget = 500 });
 
@@ -327,51 +327,6 @@ public sealed partial class WebSocketTransportServerTests
             Assert.Equal(
                 new object[] { $"IOException: {handle} is closed with 1013: the messages partway would pass messageBytesBudget, 500 bytes", "close" },
                 await EndedOf(told, handle));
-        }
-    }
-
-    // spec 15.12, its cast-off order's first step
-    [Fact]
-    public async Task Casts_off_a_message_past_its_grace_before_one_within_it()
-    {
-        var clock = new FakeTimeProvider(Now);
-
-        await Start(new WebSocketTransportServerOptions { Clock = clock, MessageBytesBudget = 3_200 });
-
-        var (ada, adaStream, _) = await Raw();
-
-        using (ada)
-        {
-            // ada's 1,440 octets hold her 6 seconds; past 5.5, she is past her grace
-            await adaStream.WriteAsync(MaskedFrame((Fragment, new byte[1_440])), Cancelled);
-            await UntilHeld(1_576);
-
-            // * at 5 s, ada is within her grace, not past it: carol's 1,636, the most, is cast off
-            clock.Advance(TimeSpan.FromMilliseconds(5_000));
-
-            var (carol, carolStream, _) = await Raw();
-
-            using (carol)
-            {
-                await carolStream.WriteAsync(MaskedFrame((Fragment, new byte[1_500])), Cancelled);
-
-                Assert.Equal(1013, await FirstCloseCodeOf(carolStream));
-                await UntilHeld(1_576);
-            }
-
-            clock.Advance(TimeSpan.FromMilliseconds(500));
-
-            var (bob, bobStream, _) = await Raw();
-
-            using (bob)
-            {
-                // * bob's 1,636, more than ada holds, would take it to 3,212: ada is cast off
-                await bobStream.WriteAsync(MaskedFrame((Fragment, new byte[1_500])), Cancelled);
-
-                Assert.Equal(1013, await FirstCloseCodeOf(adaStream));
-                await UntilHeld(1_636);
-                Assert.True(IsQuiet(bob));
-            }
         }
     }
 
@@ -573,6 +528,140 @@ public sealed partial class WebSocketTransportServerTests
             Assert.Equal((false, silentHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
             Assert.True(watch.Elapsed >= TimeSpan.FromMilliseconds(250), $"closed after {watch.Elapsed}");
         }
+    }
+
+    // spec 15.3
+    [Fact]
+    public async Task Closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var told = Told();
+
+        // * its router pauses on every message, and never resumes
+        _server.Message += (_, connectionHandle) =>
+        {
+            _server.Pause(connectionHandle);
+        };
+
+        // one write: a message whole, then a head of a reserved opcode; then the same with a second
+        // message past 125 octets between them, which the pause holds
+        foreach (var between in new byte[][] { [], MaskedFrame((Whole, new byte[300])) })
+        {
+            var (tcp, stream, connectionHandle) = await Raw();
+
+            using (tcp)
+            {
+                await stream.WriteAsync(Joined(MaskedFrame((Whole, [0x61, 0x62, 0x63])), between, MaskedFrame((0x83, [0x78]))), Cancelled);
+
+                var (message, handle) = await Next(_messages);
+
+                Assert.Equal((3, connectionHandle), (message.Bytes.Length, handle));
+                Assert.Equal(1002, await FirstCloseCodeOf(stream));
+            }
+
+            Assert.Equal(
+                new object[] { $"WebSocketException: {connectionHandle} is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3", "close" },
+                await EndedOf(told, connectionHandle));
+        }
+
+        Assert.True(_messages.Reader.Count == 0);
+    }
+
+    // spec 15.12; docs/support.md, what a paused WebSocket connection's platform reads below its pause
+    [Fact]
+    public async Task Charges_what_a_paused_connection_s_read_brought_as_an_unpaused_one_s()
+    {
+        await Start(new WebSocketTransportServerOptions { MessageBytesBudget = 1_050 });
+
+        var (paused, pausedStream, pausedHandle) = await Raw();
+        var (heavy, heavyStream, heavyHandle) = await Raw();
+
+        _server.Message += (_, connectionHandle) =>
+        {
+            if (connectionHandle == pausedHandle)
+            {
+                _server.Pause(connectionHandle);
+            }
+        };
+
+        using (paused)
+        using (heavy)
+        {
+            // * one write: a message whole, which its router pauses on, and 400 octets of the next:
+            // its read brought them, and they are charged, 536
+            await pausedStream.WriteAsync(Joined(MaskedFrame((Whole, [0x61, 0x62, 0x63])), MaskedFrame((Fragment, new byte[400]))), Cancelled);
+
+            Assert.Equal(pausedHandle, (await Next(_messages)).ConnectionHandle);
+            await UntilHeld(ChargeOf(400));
+
+            // heavy's 600 whole: its unit at 515 meets the paused 536, which is cast off, and its
+            // message is handed on
+            await heavyStream.WriteAsync(MaskedFrame((Whole, new byte[464])), Cancelled);
+
+            Assert.Equal(1013, await FirstCloseCodeOf(pausedStream));
+
+            var (message, connectionHandle) = await Next(_messages);
+
+            Assert.Equal((464, heavyHandle), (message.Bytes.Length, connectionHandle));
+            await UntilHeld(0);
+        }
+    }
+
+    // docs/support.md, what a paused WebSocket connection's platform reads below its pause
+    [Fact]
+    public async Task Drops_unmetered_what_it_reads_once_its_socket_ended_while_paused()
+    {
+        await Start(new WebSocketTransportServerOptions { MessageBytesBudget = 100_000 });
+
+        var told = Told();
+        var (paused, pausedStream, pausedHandle) = await Raw();
+        var (live, liveStream, liveHandle) = await Raw();
+
+        _server.Message += (_, connectionHandle) =>
+        {
+            if (connectionHandle == pausedHandle)
+            {
+                _server.Pause(connectionHandle);
+            }
+        };
+
+        using (live)
+        {
+            using (paused)
+            {
+                // a message whole, which its router pauses on; then 60,000 octets of the next, which
+                // wait below its gate, unread and charged nothing
+                await pausedStream.WriteAsync(MaskedFrame((Whole, [0x61, 0x62, 0x63])), Cancelled);
+
+                Assert.Equal(pausedHandle, (await Next(_messages)).ConnectionHandle);
+
+                await pausedStream.WriteAsync(MaskedFrame((Fragment, new byte[60_000])), Cancelled);
+
+                // live's 70,142, more than the paused one's 60,136 would hold
+                await liveStream.WriteAsync(MaskedFrame((Fragment, new byte[70_000])), Cancelled);
+                await UntilHeld(ChargeOf(70_000));
+
+                // * its peer ends: what .NET reads of it after is dropped unmetered, and casts no one off
+                paused.Client.Shutdown(SocketShutdown.Send);
+
+                await Until(() =>
+                {
+                    return told.Any((each) =>
+                    {
+                        return each.ConnectionHandle == pausedHandle && each.Name == "close";
+                    });
+                });
+            }
+
+            Assert.True(IsQuiet(live));
+            Assert.Equal(ChargeOf(70_000), MessageBytes);
+        }
+
+        Assert.DoesNotContain(told, (each) =>
+        {
+            return each.ConnectionHandle == liveHandle && each.Name == "error";
+        });
     }
 
     // docs/support.md, a single WebSocket frame read slower than its heartbeat

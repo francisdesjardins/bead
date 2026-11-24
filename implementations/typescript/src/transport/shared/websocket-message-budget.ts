@@ -9,24 +9,22 @@ export interface IMessageHolder {
   /** Its message began: among equal sums, the one that began first is cast off first. */
   begin(): void;
   /**
-   * Charges its message `bytes`, casting off as few other holders as fit them, each by its
-   * `castOff`; false when it is cast off itself, its charge not taken and what it held released,
-   * its own `castOff` left to its caller, which fails it once it handed on what came before.
+   * Charges its message `bytes`, as so many charges of one, each other holder a unit finds first
+   * cast off by its `castOff`; false when it is cast off itself, what it held released, its own
+   * `castOff` left to its caller, which fails it once it handed on what came before.
    */
   charge(bytes: number): boolean;
   /** Its message whole, or its connection failed: what it held released. Idempotent. */
   release(): void;
 }
 
-/** What one holder is: how it is cast off, and whether its message is past its grace. */
+/** What one holder is: how it is cast off. */
 export interface IMessageHolderOptions {
   /**
    * Fails its connection with 1013, at once, once the budget released what it held: a holder
    * another's charge casts off.
    */
   castOff: () => void;
-  /** Whether its message partway is past its `bodyGracePeriod`, on its rate's clock. */
-  isPastGrace: () => boolean;
 }
 
 /** The bytes a server holds of messages partway, across its connections (spec 15.12). */
@@ -51,12 +49,14 @@ interface IEntry extends IMessageHolderOptions {
 // definition
 
 /**
- * A budget of `messageBytesBudget` bytes, shared by a server's connections (spec 15.12). A charge
- * that would pass it casts off holders, as few as fit it, its own charge counted in its own sum:
- * those whose message is past its grace before those within it, then the one that holds the most,
- * then the one whose message began first. The asking holder is cast off only when it comes first,
- * or when its own sum would pass the budget alone, which no other's cast-off fits; each one cast
- * off fails with 1013, IANA's "Try Again Later".
+ * A budget of `messageBytesBudget` bytes, shared by a server's connections (spec 15.12). A charge of
+ * _n_ decides as _n_ charges of one, each taken in the room left. A unit that finds none judges the
+ * order for itself: the holder whose message holds the most, the asking one's sum counting that
+ * unit, then, among equal sums, the one whose message began first. The one that comes first is cast
+ * off and its charge released at once, then the next unit is judged; the asking holder is cast off
+ * only when it comes first, so a charge that passes the budget alone casts off each holder before it,
+ * then its own. A holder with nothing charged is in no order. Each one cast off fails with 1013,
+ * IANA's "Try Again Later", as Redis's client eviction casts off the client that holds the most.
  */
 export const createMessageBudget = (messageBytesBudget: number): IMessageBudget => {
   const entries = new Map<IMessageHolder, IEntry>();
@@ -68,54 +68,57 @@ export const createMessageBudget = (messageBytesBudget: number): IMessageBudget 
     entry.sum = 0;
   };
 
-  // whom a charge of `bytes` by `asking` casts off, in order; none where it fits
-  const castOffBy = (asking: IEntry, bytes: number): IEntry[] => {
+  // whether `entry`, its sum `sum`, comes before `other` in the order: the larger sum, then, among
+  // equal sums, the message begun first
+  const isBefore = (entry: IEntry, { other, sum }: { other: IEntry; sum: number }): boolean => {
+    return sum > other.sum || (sum === other.sum && entry.began < other.began);
+  };
+
+  // * the loop every side takes: `asking` takes what room is left, then the next unit judges the
+  // order, casting off the first other holder, or `asking` itself when it comes first; those cast
+  // off, in order, and whether `asking` is among them
+  const castOffBy = (asking: IEntry, bytes: number): { gone: IEntry[]; isCastOff: boolean } => {
+    // * a charge that fits judges nothing
     if (held + bytes <= messageBytesBudget) {
-      return [];
+      asking.sum += bytes;
+      held += bytes;
+
+      return { gone: [], isCastOff: false };
     }
 
-    const sumOf = (entry: IEntry): number => {
-      return entry === asking ? entry.sum + bytes : entry.sum;
-    };
-
-    // ! no other's cast-off fits a sum past the budget alone
-    if (sumOf(asking) > messageBytesBudget) {
-      return [asking];
-    }
-
-    const holders = [...entries.values()].filter((entry) => {
-      return entry === asking || entry.sum > 0;
-    });
-    const isPast = new Map(
-      holders.map((entry) => {
-        return [entry, entry.isPastGrace()];
+    const others = [...entries.values()]
+      .filter((entry) => {
+        return entry !== asking && entry.sum > 0;
       })
-    );
-    const order = holders.toSorted((a, b) => {
-      return (
-        Number(isPast.get(b)) - Number(isPast.get(a)) || sumOf(b) - sumOf(a) || a.began - b.began
-      );
-    });
-
-    if (order[0] === asking) {
-      return [asking];
-    }
-
+      .toSorted((a, b) => {
+        return b.sum - a.sum || a.began - b.began;
+      });
     const gone: IEntry[] = [];
-    let total = held + bytes;
+    let units = bytes;
 
-    for (const entry of order) {
-      if (total <= messageBytesBudget) {
-        break;
+    for (;;) {
+      const taken = Math.min(Math.max(messageBytesBudget - held, 0), units);
+
+      asking.sum += taken;
+      held += taken;
+      units -= taken;
+
+      if (units === 0) {
+        return { gone, isCastOff: false };
       }
 
-      if (entry !== asking) {
-        gone.push(entry);
-        total -= entry.sum;
+      const top = others.shift();
+
+      if (top === undefined || isBefore(asking, { other: top, sum: asking.sum + 1 })) {
+        releaseOf(asking);
+
+        return { gone, isCastOff: true };
       }
+
+      // * released at once, so the next unit meets the budget settled
+      releaseOf(top);
+      gone.push(top);
     }
-
-    return gone;
   };
 
   const holderOf = (options: IMessageHolderOptions): IMessageHolder => {
@@ -130,27 +133,14 @@ export const createMessageBudget = (messageBytesBudget: number): IMessageBudget 
         entry.began = ordinal;
       },
       charge: (bytes) => {
-        const gone = castOffBy(entry, bytes);
+        const { gone, isCastOff } = castOffBy(entry, bytes);
 
-        // * released before any is cast off, so what a cast-off does meets the budget settled
+        // * told once the charge settled, so what a cast-off does meets the budget settled
         for (const each of gone) {
-          releaseOf(each);
+          each.castOff();
         }
 
-        const isTaken = !gone.includes(entry);
-
-        if (isTaken) {
-          entry.sum += bytes;
-          held += bytes;
-        }
-
-        for (const each of gone) {
-          if (each !== entry) {
-            each.castOff();
-          }
-        }
-
-        return isTaken;
+        return !isCastOff;
       },
       release: () => {
         releaseOf(entry);

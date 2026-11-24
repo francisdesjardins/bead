@@ -133,13 +133,16 @@ interface IExchangeEntry extends IEntry {
     /** Requests written in one write on the socket of the exchange named, behind what it carried. */
     behind?: { body?: string; head: string }[];
     close?: string;
-    expect?: {
-      body?: string;
-      bodyBytes?: string;
-      fields: Record<string, ExpectedField>;
-      status: number;
-      stream?: string;
-    };
+    /** A response, or the end of the exchange's socket, nothing more on it, `{ end: true }`. */
+    expect?:
+      | {
+          body?: string;
+          bodyBytes?: string;
+          fields: Record<string, ExpectedField>;
+          status: number;
+          stream?: string;
+        }
+      | { end: true };
     on?: string;
     send?: { body?: string; head: string };
     until?: Record<string, number>;
@@ -885,7 +888,34 @@ test.describe('plays transcoding.json', () => {
                 )
               );
             }
-          } else if (step.expect !== undefined && step.on !== undefined) {
+          } else if (step.expect !== undefined && 'end' in step.expect && step.on !== undefined) {
+            const peer = peers.get(step.on);
+
+            if (peer === undefined) {
+              throw new Error(`no exchange ${step.on}`);
+            }
+
+            // * its socket read to its end, as the transports player reads one: nothing past the
+            // responses read
+            const deadline = performance.now() + PATIENCE;
+
+            while (!peer.isEnded) {
+              if (performance.now() > deadline) {
+                throw new Error(`${step.on}: its socket did not end within ${String(PATIENCE)} ms`);
+              }
+
+              await Promise.race([peer.next(), sleep(50)]);
+            }
+
+            expect(
+              Buffer.concat(peer.received).length - peer.taken,
+              `${step.on}: the octets past the responses`
+            ).toBe(0);
+          } else if (
+            step.expect !== undefined &&
+            !('end' in step.expect) &&
+            step.on !== undefined
+          ) {
             const peer = peers.get(step.on);
 
             if (peer === undefined) {

@@ -153,3 +153,108 @@ async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no
     assert_eq!(*locked(&asked), Vec::<String>::new(), "none asked");
     client.dispose();
 }
+
+// spec 13.4
+#[tokio::test]
+async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+ {
+    for host in ["127.0.0.1.", "127.1"] {
+        let fake = fake().await;
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked, &not_listening());
+        let connecting = client.connect(&HttpTransportClientConnectOptions::new(host, fake.port));
+        let call = fake.call_of(0).await;
+
+        call.answer(&drawn(false));
+        settled(connecting).await.unwrap();
+        assert_eq!(
+            call.field("host").map(str::to_owned),
+            Some(format!("127.0.0.1:{}", fake.port)),
+            "{host}: named 127.0.0.1"
+        );
+        assert_eq!(*locked(&asked), Vec::<String>::new(), "{host}: none asked");
+        client.dispose();
+    }
+}
+
+// spec 13.4
+#[tokio::test]
+async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+ {
+    let fake = fake().await;
+
+    for host in ["foo.123", "x%20.localhost"] {
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked, &not_listening());
+        let failed =
+            settled(client.connect(&HttpTransportClientConnectOptions::new(host, fake.port))).await;
+
+        assert!(
+            matches!(&failed, Err(TransportError::Connect(error)) if error.message() == format!("{host} is no host a URL can name")),
+            "{host}: {failed:?}"
+        );
+        assert_eq!(*locked(&asked), Vec::<String>::new(), "{host}: none asked");
+        client.dispose();
+    }
+
+    assert!(
+        fake.makes_no_call_of(0).await,
+        "no socket opened to its server"
+    );
+}
+
+// spec 13.4; RFC 7301: its socket raced, the TLS and ALPN laid over it are what an IP literal's are
+#[tokio::test]
+async fn negotiates_the_http_version_with_a_localhost_name_that_it_negotiates_with_127_0_0_1() {
+    // * a server that offers HTTP/2 first by ALPN, then HTTP/1.1
+    let mut config = (*crate::testing::tls::server_config().unwrap()).clone();
+
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let mut negotiated = Vec::new();
+
+    for host in [HOST, "localhost"] {
+        let listener = TcpListener::bind((HOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = client_of(&HttpTransportClientOptions {
+            client_config: Some(crate::testing::tls::client_config().unwrap()),
+            ..not_listening()
+        });
+        let connecting = client.connect(&HttpTransportClientConnectOptions {
+            secured: Some(true),
+            ..HttpTransportClientConnectOptions::new(host, port)
+        });
+        let (socket, _) = within(listener.accept()).await.unwrap();
+        let mut secured = within(acceptor.accept(socket)).await.unwrap();
+        let protocol = secured
+            .get_ref()
+            .1
+            .alpn_protocol()
+            .map(|protocol| String::from_utf8_lossy(protocol).into_owned());
+        let (read, _) = within(request_of(&mut secured)).await.unwrap();
+        let line = String::from_utf8_lossy(&read)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+
+        negotiated.push((
+            protocol,
+            line.rsplit(' ').next().unwrap_or_default().to_owned(),
+        ));
+        drop(secured);
+        drop(listener);
+        drop(settled(connecting).await);
+        client.dispose();
+    }
+
+    assert_eq!(
+        negotiated,
+        [
+            (Some("http/1.1".to_owned()), "HTTP/1.1".to_owned()),
+            (Some("http/1.1".to_owned()), "HTTP/1.1".to_owned())
+        ],
+        "HTTP/1.1 by both, as it offers it alone"
+    );
+}

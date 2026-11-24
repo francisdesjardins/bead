@@ -1,9 +1,9 @@
 # 0054 — A client connects the loopback's names to the loopback itself, through no resolver and no proxy
 
 - **Status**: accepted
-- **Scope**: the protocol's 13.4, a client's connect of a host it judges on the loopback, and the
-  sentence of 15.12 on a client by `localhost`, in [`spec/spec.md`](../../spec/spec.md); every
-  side's dialers, the table below written whole: the WebSocket and HTTP transport clients, the
+- **Scope**: the protocol's 13.4, a client's connect of a host it judges on the loopback, that host
+  read once, and the sentence of 15.12 on a client by `localhost`, in
+  [`spec/spec.md`](../../spec/spec.md); every side's dialers, the table below written whole: the WebSocket and HTTP transport clients, the
   gateway's caller, the MQTT 5 and AMQP 1.0 adapters; the predicate of a localhost name, the C#
   side's proxy bypass and the TypeScript side's lookup, by their names below; and the twins that
   hold them. A client's judgement of a host, and RFC 6750 §5.3's rule, stay
@@ -86,7 +86,7 @@ and AMQPNetLite connect each address in turn: against a server on `127.0.0.1` al
   trusts a localhost name only where the user agent follows the draft's rules. It takes `localhost.`
   and a name that ends in `.localhost.`, which every Bead server refuses (15.12, 0024).
 - **[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)**: race a name's families, an attempt every
-  250 ms (§5), ordered by RFC 6724 (§4).
+  250 ms, each kept until one connects (§5), ordered by RFC 6724 (§4).
 - **[RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)**: the default policy gives
   `::1/128` precedence 50 and IPv4 35, so `::1` first; a host may configure another.
 - **[RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066#section-3)** and
@@ -140,31 +140,41 @@ name that ends in `.localhost`, read as its side's URL host parser reads it, to 
 asks it of software that makes the security decision 13.4 makes, and RFC 6761 §6.3 lets it. So the
 condition on which Secure Contexts trusts such a name holds on every dialer Bead owns.
 
+The host is read once, by the side's URL host parser, a broker's URL's host as a special scheme's;
+the address read is connected and named, and a host the parser fails on is refused before any
+socket opens.
+
 The judgement does not change (0010): `localhost.` and a name that ends in `.localhost.` stay off
 the loopback, the two departures from Secure Contexts named in 13.4, since a server compares a host
 as it comes and refuses both (15.12), and a client and a server read one set of names.
 
 ### The race, `127.0.0.1` first
 
-A client races the two addresses as RFC 8305 races a name's families: `127.0.0.1` first, then `::1`
-250 ms later, or at once when the first fails; the first connected is kept and the other
-cancelled. This departs from RFC 6724's default policy, which puts `::1` first, and 13.4 names the
+A client races the two addresses as RFC 8305 §5 races its attempts: `127.0.0.1` first, then `::1`
+250 ms later, or at once when the first fails. Every attempt is kept until one connects, as RFC 8305
+§5 keeps them; the first connected is kept and the other closed. The early start on a failure is
+Bead's own. A connect given up ends every attempt. The TypeScript side runs the race itself, since
+Node's `autoSelectFamily` closes an attempt at its delay, and hands the raced socket to the TLS and
+HTTP code it would have used, so a localhost name negotiates what an IP literal does.
+
+`127.0.0.1` first departs from RFC 6724's default policy, which puts `::1` first, and 13.4 names the
 departure:
 
 - a Bead server on its defaults listens on `127.0.0.1`, beside `::1` or alone where the IPv6
   loopback is absent (15.12);
 - a server given `127.0.0.1` alone, the commoner single-family server, cannot be pre-empted by a
-  process on `[::1]:p` for a Bead client over a dialer it owns, as it is on Windows for every client
-  by `localhost` that tries `::1` first;
+  process on `[::1]:p` for a Bead client over a dialer it owns while `127.0.0.1:p` accepts within
+  the delay, as it is on Windows for every client by `localhost` that tries `::1` first; on a slower
+  accept, a process on `[::1]:p` that accepts first wins on every side, as the race has it;
 - the cost falls on a server given `::1` alone: 250 ms a connect by `localhost`, and a process on
   `127.0.0.1:p` pre-empts it for every Bead client over a dialer it owns.
 
 ### The name kept, whatever the scheme
 
-The request names the host as its URL does, in its `Host` (or `:authority`) and in its TLS server
-name alike: only the address it connects to is Bead's own. The rule holds for `ws`, `wss`, `http`,
-`https`, `mqtt`, `mqtts`, `amqp` and `amqps` alike, since a name's destination does not depend on
-its scheme, and the connectors that carry it take none.
+The request names the host as its URL serializes it, in its `Host` (or `:authority`) and in its TLS
+server name alike: only the address it connects to is Bead's own. The rule holds for `ws`, `wss`,
+`http`, `https`, `mqtt`, `mqtts`, `amqp` and `amqps` alike, since a name's destination does not
+depend on its scheme, and the connectors that carry it take none.
 
 ### A failed connect says why, and nothing points the name elsewhere
 
@@ -190,8 +200,10 @@ of its documentation:
   `WebSocket`, which take no `lookup` and no `Agent` of the package's. undici stays an optional peer
   ([0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md)),
   so the package runs in Node with nothing else installed; with it, the default dialers are Bead's
-  own. The difference is a row of [`docs/support.md`](../support.md)'s Differences, `A host on the
-  loopback connected directly, a localhost name asking no resolver`, of kind platform.
+  own. The difference is two rows of [`docs/support.md`](../support.md)'s Differences: `A host on
+  the loopback connected directly, a localhost name asking no resolver`, of kind platform, for the
+  WebSocket client; and `A localhost name over the TypeScript HTTP client and caller in Node without
+  undici`, of kind open, since `node:http` could carry a dialer of the side's own.
 
 ### Each side's dialers
 
@@ -206,14 +218,14 @@ of its documentation:
 | C#         | MQTT adapter over TCP, `mqtt`, `mqtts`                          | owned, MQTTnet                                                         | `MqttClientTcpOptions.StreamProvider`, a provider of Bead's over `HappyEyeballs.ConnectAsync`, MQTTnet layering TLS on it                                                                     |
 | C#         | MQTT adapter over a WebSocket, `ws`, `wss`                      | owned, MQTTnet                                                         | `GuardedAdapterFactory`'s WebSocket channel, whose `ClientWebSocket` connects through a Bead handler                                                                                          |
 | C#         | AMQP adapter, `amqp`, `amqps`                                   | owned, AMQPNetLite                                                     | a `TransportProvider` of Bead's for `AMQP` and `AMQPS`, over `HappyEyeballs.ConnectAsync`, its TLS an `SslStream` of its own                                                                  |
-| TypeScript | WebSocket client, HTTP client and caller, the defaults in Node  | owned where undici resolves; Node's global dialers, not owned, without | undici's own `WebSocket` and `fetch` with the client's `Agent({ connect: { lookup, autoSelectFamily } })`, the TLS path's `Agent` merged in                                                   |
-| TypeScript | WebSocket client, `ws` given                                    | owned, its options Bead's                                              | `lookup` and `autoSelectFamily` in its options; `ws` reads no proxy                                                                                                                           |
+| TypeScript | WebSocket client, HTTP client and caller, the defaults in Node  | owned where undici resolves; Node's global dialers, not owned, without | undici's own `WebSocket` and `fetch` with the client's `Agent`, whose `connect` races the loopback and hands the socket to undici's own connector, the TLS path's `Agent` merged in           |
+| TypeScript | WebSocket client, `ws` given                                    | owned, its options Bead's                                              | a `createConnection` in its options that races the loopback, under `wss` handing the socket to `tls.connect` with the options `ws` built; `ws` reads no proxy                                 |
 | TypeScript | WebSocket client, another constructor given, or a page's        | not owned                                                              | none: judged by name, the residual stated                                                                                                                                                     |
 | TypeScript | HTTP client and caller, a `fetch` given, or a page's            | not owned                                                              | none: judged by name, the residual stated                                                                                                                                                     |
-| TypeScript | MQTT adapter in Node, `mqtt`, `mqtts`                           | owned, MQTT.js                                                         | a stream builder of Bead's, `net.connect` or `tls.connect` with `lookup` and `autoSelectFamily`, since MQTT.js's own TCP stream drops `lookup` and both of its own go through its SOCKS proxy |
-| TypeScript | MQTT adapter in Node, `ws`, `wss`                               | owned, MQTT.js over `ws`                                               | `lookup` and `autoSelectFamily` in `wsOptions`                                                                                                                                                |
+| TypeScript | MQTT adapter in Node, `mqtt`, `mqtts`                           | owned, MQTT.js                                                         | a stream builder of Bead's that races the loopback, under `mqtts` handing the socket to its TLS, since MQTT.js's own TCP stream drops `lookup` and both of its own go through its SOCKS proxy |
+| TypeScript | MQTT adapter in Node, `ws`, `wss`                               | owned, MQTT.js over `ws`                                               | a `createConnection` in `wsOptions` that races the loopback, as for a `ws` given                                                                                                              |
 | TypeScript | MQTT adapter in a page                                          | not owned, the browser's `WebSocket`                                   | none: judged by name, the residual stated                                                                                                                                                     |
-| TypeScript | AMQP adapter, `amqp`, `amqps`                                   | owned, rhea                                                            | rhea's `connect` option, `net.connect` or `tls.connect` with `lookup` and `autoSelectFamily`, since rhea's own drops them in the clear                                                        |
+| TypeScript | AMQP adapter, `amqp`, `amqps`                                   | owned, rhea                                                            | rhea's `connect` option, which races the loopback, under `amqps` handing the socket to its TLS, since rhea's own connect in the clear drops its options                                       |
 
 The relays dial nothing: a relay's leg B is a router over one of these clients. No side fetches a
 key set. The Rust side's AMQP 1.0 binding is ahead, and carries the rule through `connect_racing`.
@@ -225,8 +237,10 @@ The predicate of a localhost name is `isLocalhostName` on the TypeScript side
 and `is_localhost_name` on the Rust side (`judgement/security.rs`), `pub(crate)`. The C# side's
 proxy bypass is `LoopbackBypassProxy`, internal to `Bead.Core`, which keeps the platform's proxy for
 a host off the machine and bypasses it for every host judged on the loopback. The TypeScript side's
-lookup is `loopbackLookup`, beside the predicate. No public member is added on any side
-([0047](0047-every-side-shows-one-public-surface.md)).
+lookup is `loopbackLookup`, beside the predicate, and its race `raceLoopback`, which
+`loopbackConnector` hands undici's `Agent` and `loopbackCreateConnection` hands `ws`; it reads a
+host once by `urlHostOf`. The C# side reads a host once by `TransportSecurity.DialedHost`. No
+public member is added on any side ([0047](0047-every-side-shows-one-public-surface.md)).
 
 ## Consequences
 
@@ -242,8 +256,9 @@ lookup is `loopbackLookup`, beside the predicate. No public member is added on a
 - **The TypeScript side in Node without undici** keeps Node's global `fetch` and `WebSocket` for its
   default dialers, and with them its platform's resolver for a localhost name and, under
   `NODE_USE_ENV_PROXY`, the environment's proxy for every host: the row `A host on the loopback
-  connected directly, a localhost name asking no resolver`. A `ws` given, MQTT.js and rhea connect
-  the loopback themselves, undici or not.
+  connected directly, a localhost name asking no resolver`, and for its HTTP client and caller the
+  open row `A localhost name over the TypeScript HTTP client and caller in Node without undici`. A
+  `ws` given, MQTT.js and rhea connect the loopback themselves, undici or not.
 - **The platform's proxy, for a host off the machine** differs three ways: the C# side's handlers
   read `HttpClient.DefaultProxy`, Node's global dialers read the environment's under
   `NODE_USE_ENV_PROXY`, MQTT.js the SOCKS proxy `MQTTJS_SOCKS_PROXY` names, and the Rust side reads
@@ -257,6 +272,15 @@ lookup is `loopbackLookup`, beside the predicate. No public member is added on a
     `tries the IPv4 loopback first for a localhost name, then the IPv6 one an attempt delay after`,
     `asks its resolver for any other name, localhost with a trailing dot among them`, and
     `says that a localhost name it could not connect went to the loopback, no resolver asked`;
+  - the race: `connects by the next family 250 ms after an attempt that has not connected`,
+    `cancels the attempts left once one connects`, `keeps an attempt that has not connected by its
+    delay while the next one starts, the first to connect winning and the other closed`, and `ends
+    every attempt, leaving no socket, once its connect is given up`;
+  - a host read once, on each client, caller and broker adapter: `connects a host written
+    127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1` and `refuses a
+    host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens`; and the
+    adapters' tests of a secure link over `mqtts` and `wss`, and over `amqps`, take `LOCALHOST`,
+    `127.1` and a percent-escaped host;
   - each WebSocket client, HTTP client, caller and broker adapter: `reaches a localhost name on the
     loopback whatever the platform’s resolver answers`, through a seam that stands for the
     platform's resolver, a listener on `127.0.0.1` receiving the connect by `bead-probe.localhost`;
@@ -265,19 +289,22 @@ lookup is `loopbackLookup`, beside the predicate. No public member is added on a
     the platform's, or as MQTT.js's own, receiving nothing; on the C# side alone,
     `Sends_a_host_off_the_machine_through_the_platforms_proxy`;
   - on each side's HTTP client: `keeps a localhost name in its Host and its TLS server name while it
-    connects the loopback`, under `spec/pki`'s `named-server`;
+    connects the loopback`, under `spec/pki`'s `named-server`, and `negotiates the HTTP version with
+    a localhost name that it negotiates with 127.0.0.1`;
   - on the TypeScript side alone: `answers a lookup of one family with that family’s loopback alone`,
-    Node's `lookup` callback; in its WebSocket and HTTP clients, `reaches a host on the loopback
-    through undici’s own dialer where undici resolves, and through Node’s global one where it does
-    not`; and in its WebSocket client, `reaches a localhost name on the loopback whatever the
-    platform’s resolver answers, over ws`, a `ws` given.
-- **Its gates**: the twins on every side, `tools/check-twins.mjs`, and `spec/units.txt`'s 13.4 and
-  15.12, acknowledged where their text moves.
+    Node's `lookup` callback; `connects to a server on 127.0.0.1 alone with its event loop held past
+    the attempt delay`, Node's event loop; in its WebSocket and HTTP clients, `reaches a host on the
+    loopback through undici’s own dialer where undici resolves, and through Node’s global one where
+    it does not`; and in its WebSocket client, `reaches a localhost name on the loopback whatever
+    the platform’s resolver answers, over ws`, a `ws` given.
+- **Its gates**: the twins on every side, the race's and a host's read once among them,
+  `tools/check-twins.mjs`, and `spec/units.txt`'s 13.4 and 15.12, acknowledged where their text
+  moves.
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round at xhigh effort, which also revised
+two rounds at xhigh effort. The first also revised
 [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s answer to
 its row on a client's `localhost`. Each claim was checked against each side's code and by probes of
 Node, undici, .NET, MQTTnet and AMQPNetLite. Ten objections: eight accepted, two in part, none
@@ -285,7 +312,14 @@ refused. Two questions went to the user. The first, undici and the TypeScript pa
 neither option drafted, a connect failing without the package or the package a dependency: undici
 stays an optional peer, and without it Node's global dialers connect, judged by name. The second,
 the platform's proxy for a host off the machine, was taken by its recommendation: an open row, its
-closing a decision of its own. The objections, with the answers that hold:
+closing a decision of its own. The second round, on the race kept and the host read once, is shared
+with [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md),
+[0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md) and
+[0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md),
+each of which keeps its own objections. Each claim was checked against each side's code, undici
+8.12.4 and `ws` 8.23.0, and by probes. Four objections here: three accepted, one of them carried
+further, and one in part, none refused. No question went to the user. The objections, with the
+answers that hold:
 
 ### On a client's connect of the loopback's names
 
@@ -301,3 +335,12 @@ closing a decision of its own. The objections, with the answers that hold:
 | **O8.** A test through the platform's resolver proves nothing on Windows, which answers `api.localhost` with the loopback, and a test of the connector alone does not reach the dialers that bypass it.                                                                                                                                                                                                                                                                                                                 | **Accepted.** Each side has a connector twin through its resolver seam (`RacingOptions.resolve`, `HappyEyeballsOptions.Resolve`, the lookup), asserting that a listener on `127.0.0.1` accepts and the seam is never asked. Each dialer has an end-to-end twin through a seam that stands for the platform's resolver: the TypeScript tests replace `dns.lookup`, which `net`, the global `fetch` and `ws` all ask; the C# side adds an internal `HappyEyeballs.PlatformResolve`; the Rust side hands each client its `RacingOptions`. The proxy twins run alike on every OS. Every seam is internal, so the public surface does not change (0047).                                                                                                                                                                                                               |
 | **O9.** Deployments the change breaks must be told why. A `.localhost` name that a hosts file or `extra_hosts` maps elsewhere now reaches the loopback and fails with no reason. curl keeps an override, `--resolve`; Bead offers none.                                                                                                                                                                                                                                                                                 | **In part.** A changelog line says it. A failed connect by a localhost name says it went to the loopback and asked no resolver, and a twin holds that on each side. 13.4 says no option points such a name elsewhere: a host off the machine is named by its own name or address. That Bead offers no override is true of its own dialers only, since a handler, a `fetch` or a WebSocket the application gives connects as the application likes, under the residual stated.                                                                                                                                                                                                                                                                                                                                                                                     |
 | **O10.** A simpler design was passed over. Only the clear needs the loopback for 13.4, and MQTT over TCP and AMQP carry no `Host`. So scope the hardening to the clear, hand those libraries the literal `127.0.0.1`, and judge in the clear where no hook exists.                                                                                                                                                                                                                                                      | **In part.** The premise holds: 13.4 needs the loopback only in the clear, and MQTT over TCP and AMQP carry no `Host`. The scheme split is refused. The connectors that carry the rule take no scheme, a name's destination should not depend on its scheme, and every hook proven for the clear carries TLS. The literal is refused: it drops `::1` and the race that the Rust side's MQTT 5 link gives, which would be a divergence, and the hooks are public, their connects probed end to end, what follows a connect held by each adapter's suite. No dialer Bead owns lacks a hook, so none is judged in the clear.                                                                                                                                                                                                                                         |
+
+### On the race kept and the host read once
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **O11.** The proposal's connector for a localhost name races the TCP socket, then lays TLS itself. That offers no ALPN, so every undici client speaks HTTP/1.1 to `localhost` and HTTP/2 to `127.0.0.1`, and it drops undici's session cache, keep-alive, `setNoDelay`, high-water mark and 10 s connect timer. Build on undici's own connector: on `https:`, `buildConnector(tls)` given the raced socket as `httpSocket`; on `http:`, keep-alive and `setNoDelay` set as undici sets them. | **Accepted, and carried further.** Verified: undici's `lib/core/connect.js` offers `h2` by ALPN (`:76`, `:98`), keeps a session cache (`:85-108`), sets keep-alive and `setNoDelay` (`:141-149`), and lays TLS over a socket it is given as `httpSocket` (`:99`), which it refuses on `http:` (`:110`); probed, a localhost name negotiates HTTP/2 through undici's connector and HTTP/1.1 through one that lays TLS itself. The race's attempts also take the 64 KiB high-water mark undici sets on `http:` (`:115`). The principle reaches every path: `ws`'s `wss` hands the raced socket to `tls.connect` with the options `ws` built, the MQTT 5 adapter to its own mirror of MQTT.js's TLS, and rhea to its own. A twin on every side: `negotiates the HTTP version with a localhost name that it negotiates with 127.0.0.1`. |
+| **O12.** The race has no bound of its own, and the signal the proposal gives it cannot reach undici's or `ws`'s path. A connect given up leaves both attempts running until the kernel ends them, about two minutes on Linux by `tcp_syn_retries`. Give the race a timer: undici's 10 s, `ws`'s `options.timeout`, the brokers' remaining `connectTimeout`; fail with an error `isConnectFailure` reads; add a twin.                                                                         | **In part.** Verified: undici calls a connector with no signal (`connect.js:77`), and `ws` hands `createConnection` its request options. But Bead's WebSocket client passes `ws` no `handshakeTimeout`, so `options.timeout` is undefined there. That `createConnection` is built per connect, so it closes over that connect's own signal and the time its `timeout` leaves. The shared undici `Agent` takes a timer of 10 s, undici's own; the brokers, the time their `connectTimeout` leaves. At the bound every attempt still open counts a `connect ETIMEDOUT` of Node's shape, so 13.4's sentence comes. The twin is on every side: `ends every attempt, leaving no socket, once its connect is given up`.                                                                                                                   |
+| **O13.** 13.4's "its client refuses it as it is built" is false on every side: a transport client gets its host at each connect, and the C# side refuses no such host. The C# side would also newly refuse hosts .NET dials, such as `ws://foo.123`, with no twin and no line of the changelog. Say where the refusal falls, refuse in the C# adapters' constructors, add a twin everywhere, and name the C# refusal.                                                                        | **Accepted.** Verified: the Rust side refuses at the connect of its WebSocket and HTTP clients, and its MQTT 5 adapter as it is built; the C# adapters judge a host and refuse none; probed, .NET's `Uri` takes `ws://foo.123` and `mqtt://foo.123` as names and keeps `127.0.0.1.` as given. 13.4 says where the refusal falls, by a broker adapter or a caller as it is built, by a transport client at its connect, each side raising its own kind of error. RFC 3696 §2 keeps a top-level label from being all numeric, so the C# refusal is sound, and the changelog names it. The twin: `refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens`.                                                                                                                                       |
+| **O14.** The proposal rewrites the C# `Connects_by_the_next_family_…` and `Cancels_the_attempts_left_…` so that their earlier attempt connects late, and the cancellation test no longer pins a pending attempt cancelled. The TypeScript test of an attempt kept needs a seam to hold one attempt back, as the C# side's `Connect` and `Clock` give.                                                                                                                                        | **Accepted.** Verified: `HappyEyeballsOptions` takes its `Connect` and its `Clock`. Both C# bodies stay, and the test of an attempt kept goes beside them on every side: `keeps an attempt that has not connected by its delay while the next one starts, the first to connect winning and the other closed`. `raceLoopback` takes an `attempt` factory and a `clock`. The test of an event loop held past the delay stays the TypeScript side's own, a row of `tools/twins.tsv`.                                                                                                                                                                                                                                                                                                                                                   |

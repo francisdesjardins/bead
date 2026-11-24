@@ -140,6 +140,29 @@ export const replaceResolver = (answer: string = ELSEWHERE): Disposable & { aske
 };
 
 /**
+ * Node's own `dns.lookup` watched, until disposed: every name it is asked for noted, then handed on
+ * to it, so that a host the URL Standard reads as an address is seen to ask no resolver.
+ */
+export const watchResolver = (): Disposable & { asked: string[] } => {
+  const dns = process.getBuiltinModule('node:dns') as unknown as IDnsLike;
+  const { lookup } = dns;
+  const asked: string[] = [];
+
+  // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own shape, which Node calls
+  dns.lookup = (hostname, options, callback) => {
+    asked.push(hostname);
+    lookup(hostname, options, callback);
+  };
+
+  return {
+    asked,
+    [Symbol.dispose]: () => {
+      dns.lookup = lookup;
+    },
+  };
+};
+
+/**
  * A Node where the package undici does not resolve, until disposed: its module resolution, which
  * `process.getBuiltinModule('node:module')` reaches, finds none.
  */
@@ -253,7 +276,8 @@ export const startHeard = async (
 
 /**
  * A listener on 127.0.0.1 that takes each connection and ends it once it is sent its first bytes,
- * answering nothing: a socket that opened and closed unanswered.
+ * answering nothing: a socket that opened and closed unanswered. It counts the connections it took
+ * that are still open, so a client that sent nothing is seen to have closed its own.
  */
 export const startDropping = async () => {
   const sockets = new Set<Socket>();
@@ -261,6 +285,9 @@ export const startDropping = async () => {
     sockets.add(socket);
     socket.on('error', () => {
       // a client that gave up
+    });
+    socket.once('close', () => {
+      sockets.delete(socket);
     });
     socket.once('data', () => {
       socket.end();
@@ -271,6 +298,9 @@ export const startDropping = async () => {
   await once(listener, 'listening');
 
   return {
+    get open(): number {
+      return sockets.size;
+    },
     port: (listener.address() as AddressInfo).port,
     [Symbol.asyncDispose]: () => {
       for (const socket of sockets) {

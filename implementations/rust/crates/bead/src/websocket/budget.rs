@@ -2,15 +2,17 @@
 //! what all its connections' messages partway hold, and a rate each must come at once its grace
 //! passed.
 //!
-//! The budget is charged as bytes come, never as a head announces them: every byte from a
-//! message's first head to its last frame's end, the heads and the control frames between its
-//! frames among them, and 128 a head once whole. A message's charge is released once it is whole,
-//! or at once at its connection's verdict, which charges nothing after. A charge that would pass
-//! the budget casts off holders until it fits, as few as needed, the charge counted in its own
-//! holder's sum: those past their grace before those within it, then the one that holds the most,
-//! as Redis evicts the clients that hold the most, then the one whose message began first. The
-//! asking holder is cast off only when it comes first, its charge then not taken. Each holder cast
-//! off fails with 1013, IANA's "Try Again Later", its charge released at once.
+//! The budget is charged as bytes come, never as a head announces them: each payload byte of a
+//! message partway as it is read, a control frame's between its frames among them, and each
+//! frame's head once whole, its bytes and 128 more. A message's charge is released once it is
+//! whole, or at once at its connection's verdict, which charges nothing after. A charge of _n_
+//! decides as _n_ charges of one, each taking the room left. When none is left, the order is judged
+//! for that one unit: the holder whose message holds the most first, the asking one's sum counting
+//! that unit, as Redis evicts the clients that hold the most, then, among equal sums, the one whose
+//! message began first. The one that comes first is cast off, and the next unit judged; the asking
+//! holder is cast off only when it comes first, so a charge that passes the budget alone casts off
+//! each holder before it, then its own. Each holder cast off fails with 1013, IANA's "Try Again
+//! Later", its charge released at once. A holder with nothing charged is in no order.
 //!
 //! The rate is the body's of spec 15.12: a message that brought _R_ bytes of payload, and none more,
 //! by its first byte plus the longer of `bodyGracePeriod` and _R_ at `minimumBodyBytesPerSecond`
@@ -149,11 +151,6 @@ impl MessageBudget {
             armed: None,
             is_stopped: false,
         }
-    }
-
-    // whether a message, its first byte `elapsed` ago on its rate's clock, is within its grace
-    fn is_within(&self, elapsed: Option<Duration>) -> bool {
-        elapsed.is_none_or(|elapsed| elapsed <= self.bounds.body_grace_period)
     }
 }
 
@@ -322,8 +319,8 @@ impl Holding {
         self.payload = 0;
     }
 
-    /// Charges `bytes` of its message partway, casting off what holders the budget needs: false,
-    /// nothing charged, once it is cast off itself.
+    /// Charges `bytes` of its message partway, unit by unit, casting off the holders that come
+    /// before it when no room is left: false once it is cast off itself, its charge released.
     pub(crate) fn charge(&mut self, bytes: u64) -> bool {
         if self.is_stopped || self.is_cast_off() {
             return false;
@@ -336,84 +333,84 @@ impl Holding {
 
         let budget = &self.budget;
         let ceiling = budget.budget();
-        let cast: Vec<Arc<Partway>> = {
+        let (cast, is_kept) = {
             let mut state = locked(&budget.state);
 
             if self.is_cast_off() {
                 return false;
             }
 
-            let own = state
-                .holders
-                .entry(self.id)
-                .or_insert_with(|| Entry {
-                    charge: 0,
-                    began: self.began,
-                    partway: Arc::clone(&self.partway),
-                })
-                .charge;
-
+            state.holders.entry(self.id).or_insert_with(|| Entry {
+                charge: 0,
+                began: self.began,
+                partway: Arc::clone(&self.partway),
+            });
             self.is_entered = true;
 
-            let total = state.held.saturating_add(bytes);
-
-            if total <= ceiling {
+            if state.held.saturating_add(bytes) <= ceiling {
                 take(&mut state, (self.id, bytes));
 
                 return true;
             }
 
-            let asking = own.saturating_add(bytes);
-            let mut order: Vec<(bool, Reverse<u64>, u64, u64)> = state
+            // * the others in the order a unit is judged by: the most first, then the message
+            // begun first; their sums stay as they are while this charge is decided
+            let mut order: Vec<(Reverse<u64>, u64, u64)> = state
                 .holders
                 .iter()
-                .map(|(id, entry)| {
-                    let sum = if *id == self.id { asking } else { entry.charge };
-
-                    (
-                        budget.is_within(entry.partway.elapsed()),
-                        Reverse(sum),
-                        entry.began,
-                        *id,
-                    )
-                })
+                .filter(|(id, entry)| **id != self.id && entry.charge > 0)
+                .map(|(id, entry)| (Reverse(entry.charge), entry.began, *id))
                 .collect();
 
             order.sort_unstable();
 
-            // * the asking holder first, or holding past the budget alone: it alone is cast off
-            if asking > ceiling || order.first().is_none_or(|first| first.3 == self.id) {
-                drop(state);
-                self.cast_off_itself();
-
-                return false;
-            }
-
-            let mut left = total;
+            let mut others = order.into_iter().peekable();
+            let mut left = bytes;
             let mut cast = Vec::new();
+            let is_kept = loop {
+                let taken = ceiling.saturating_sub(state.held).min(left);
 
-            for (_, Reverse(sum), _, id) in order {
-                if left <= ceiling {
-                    break;
+                take(&mut state, (self.id, taken));
+                left = left.saturating_sub(taken);
+
+                if left == 0 {
+                    break true;
                 }
 
-                if id == self.id {
-                    continue;
+                // * the next unit judged: the asking holder, its sum counting it, against the
+                // first of the others
+                let unit = state
+                    .holders
+                    .get(&self.id)
+                    .map_or(0, |entry| entry.charge)
+                    .saturating_add(1);
+                let is_first = others.peek().is_none_or(|(Reverse(sum), began, _)| {
+                    unit > *sum || (unit == *sum && self.began < *began)
+                });
+
+                if is_first {
+                    if let Some(entry) = state.holders.remove(&self.id) {
+                        state.held = state.held.saturating_sub(entry.charge);
+                    }
+
+                    self.is_entered = false;
+                    self.partway.is_cast_off.store(true, Ordering::SeqCst);
+
+                    break false;
                 }
 
-                if let Some(entry) = state.holders.remove(&id) {
+                if let Some((_, _, id)) = others.next()
+                    && let Some(entry) = state.holders.remove(&id)
+                {
                     state.held = state.held.saturating_sub(entry.charge);
                     entry.partway.is_cast_off.store(true, Ordering::SeqCst);
                     cast.push(entry.partway);
                 }
+            };
 
-                left = left.saturating_sub(sum);
-            }
-
-            take(&mut state, (self.id, bytes));
             drop(state);
 
-            cast
+            (cast, is_kept)
         };
 
         // * told outside the budget's lock: each takes effect in its own connection's turn
@@ -421,13 +418,12 @@ impl Holding {
             partway.tell(Outside::CastOff);
         }
 
-        true
-    }
+        // cast off by its own charge: its rate's clock stopped, its timer disarmed
+        if !is_kept {
+            self.end();
+        }
 
-    // cast off by its own charge: its charge released, never taken
-    fn cast_off_itself(&mut self) {
-        self.partway.is_cast_off.store(true, Ordering::SeqCst);
-        self.end();
+        is_kept
     }
 
     /// Its message brought `payload` bytes more, which move its deadline: its timer is armed

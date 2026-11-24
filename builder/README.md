@@ -318,17 +318,56 @@ docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.ps1 > be
 ```
 
 A team verifies the image a version names, its provenance by GitHub's CLI and its signature by
-cosign 3, then pins it by its digest in `BEADC_IMAGE`, in its CI and its shells; the run of
-`image.yml` prints that digest, and `docker buildx imagetools inspect` reads it:
+cosign 3, then pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
+Bead at the version's tag, reads the digest of the image's index once, and checks the image by it:
+each check passes only for this repository's `image.yml`, run on GitHub's runners from the tag
+`v<version>` at the commit the clone holds, a commit on `main`. It sets `BEADC_IMAGE` only once
+every check passes, and leaves the shell open when one fails. The release's run of `image.yml`
+runs it, in both shells, against the image it just signed:
+
+<!-- verify-image -->
 
 ```sh
-gh attestation verify oci://ghcr.io/francisdesjardins/beadc:<version> --owner francisdesjardins
-cosign verify ghcr.io/francisdesjardins/beadc:<version> \
-  --certificate-identity-regexp '^https://github\.com/francisdesjardins/bead/\.github/workflows/image\.yml@refs/(tags/v[0-9]+\.[0-9]+\.[0-9]+|heads/(develop|main))$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-docker buildx imagetools inspect ghcr.io/francisdesjardins/beadc:<version>
-export BEADC_IMAGE=ghcr.io/francisdesjardins/beadc@sha256:<digest>
+v=<version>
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+commit="$(git -C bead-pinned rev-parse HEAD)"
+digest="$(docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}')"
+image="ghcr.io/francisdesjardins/beadc@$digest"
+[ -n "$digest" ] && [ -n "$commit" ] &&
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+  gh attestation verify "oci://$image" --repo francisdesjardins/bead \
+    --signer-workflow francisdesjardins/bead/.github/workflows/image.yml \
+    --source-ref "refs/tags/v$v" --source-digest "$commit" --deny-self-hosted-runners &&
+  cosign verify "$image" \
+    --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-github-workflow-sha "$commit" &&
+  export BEADC_IMAGE="$image"
 ```
+
+```powershell
+# in PowerShell 7.6 (pwsh), not Windows PowerShell
+$v = '<version>'
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+$commit = git -C bead-pinned rev-parse HEAD
+$digest = docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}'
+$image = "ghcr.io/francisdesjardins/beadc@$digest"
+if ($digest -and $commit) {
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+    gh attestation verify "oci://$image" --repo francisdesjardins/bead `
+      --signer-workflow francisdesjardins/bead/.github/workflows/image.yml `
+      --source-ref "refs/tags/v$v" --source-digest $commit --deny-self-hosted-runners &&
+    cosign verify $image `
+      --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" `
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+      --certificate-github-workflow-sha $commit &&
+    Set-Item Env:BEADC_IMAGE $image
+}
+```
+
+0.16.0's image alone was built by a run from `develop`, which built its tag, and passes the
+[getting-started guide's block](../docs/guides/getting-started.md#1-pin-bead-and-beadcs-image)
+instead.
 
 The wrappers name the version, not the digest: the digest exists once the release's tag is built,
 after the commit that names the version, and an image cannot print its own digest ([decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).

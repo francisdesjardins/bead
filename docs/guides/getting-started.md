@@ -55,52 +55,71 @@ work/
 Clone Bead at the tag of the release you pin, then verify beadc's image of that release and pin it
 by its digest. The image holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your
 machine needs no protobuf toolchain of its own
-([the image](../../builder/README.md#the-image-and-its-wrappers)). For 0.16.0:
+([the image](../../builder/README.md#the-image-and-its-wrappers)). For 0.16.0, from `work/`:
+
+<!-- verify-image -->
 
 ```sh
-git clone --branch v0.16.0 https://github.com/francisdesjardins/bead bead-pinned
-
-gh attestation verify oci://ghcr.io/francisdesjardins/beadc:0.16.0 --owner francisdesjardins
-cosign verify ghcr.io/francisdesjardins/beadc:0.16.0 \
-  --certificate-identity-regexp '^https://github\.com/francisdesjardins/bead/\.github/workflows/image\.yml@refs/(tags/v[0-9]+\.[0-9]+\.[0-9]+|heads/(develop|main))$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-docker buildx imagetools inspect ghcr.io/francisdesjardins/beadc:0.16.0
+v=0.16.0
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+commit="$(git -C bead-pinned rev-parse HEAD)"
+digest="$(docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}')"
+image="ghcr.io/francisdesjardins/beadc@$digest"
+[ -n "$digest" ] && [ -n "$commit" ] &&
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+  gh attestation verify "oci://$image" --repo francisdesjardins/bead \
+    --signer-workflow francisdesjardins/bead/.github/workflows/image.yml \
+    --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+  cosign verify "$image" \
+    --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
+  [ "$(docker buildx imagetools inspect "$image" --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}')" = "$commit" ] &&
+  export BEADC_IMAGE="$image"
 ```
 
-`gh attestation verify` checks the build provenance GitHub attested for the image, and exits 0
-when it holds. `cosign verify` checks the image's signature, made keylessly by
-`.github/workflows/image.yml`. Beside the signatures' claims, which it writes as JSON, it prints:
-
-```text
-Verification for ghcr.io/francisdesjardins/beadc:0.16.0 --
-The following checks were performed on each of these signatures:
-  - The cosign claims were validated
-  - Existence of the claims in the transparency log was verified offline
-  - The code-signing certificate was verified using trusted certificate authority certificates
+```powershell
+# in PowerShell 7.6 (pwsh)
+$v = '0.16.0'
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+$commit = git -C bead-pinned rev-parse HEAD
+$digest = docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}'
+$image = "ghcr.io/francisdesjardins/beadc@$digest"
+$revision = docker buildx imagetools inspect $image --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}'
+if ($digest -and $commit -and $revision -eq $commit) {
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+    gh attestation verify "oci://$image" --repo francisdesjardins/bead `
+      --signer-workflow francisdesjardins/bead/.github/workflows/image.yml `
+      --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+    cosign verify $image `
+      --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop `
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+      --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
+    Set-Item Env:BEADC_IMAGE $image
+}
 ```
 
-The identity the regexp accepts is that workflow, run from a release's tag or from `develop` or
-`main`. 0.16.0's certificate names `image.yml@refs/heads/develop`, the run that built the tag
-`v0.16.0`, so a regexp of tags alone refuses it. `imagetools inspect` begins with the digest of the
-image's index, the one name that cannot move, then lists a manifest for each platform:
+The block reads the digest of the image's index once, the one name that cannot move, and checks
+the image by it. `gh attestation verify` checks the build provenance GitHub attested for it, and
+`cosign verify` its signature, made keylessly. Each passes only for this repository's
+`.github/workflows/image.yml`, run on GitHub's runners on the release's tag and its commit, and the
+`merge-base` line holds that commit to `main`. 0.16.0 is the one exception: its image was built by
+a run from `develop`, at develop's commit `576bf111`, which built the tag `v0.16.0`. Its provenance
+and its certificate name that branch and that commit, which the block names in their place, and the
+block also holds the index's `org.opencontainers.image.revision` to the tag's commit, the one the
+clone holds. `BEADC_IMAGE` is set
+only once every check passes; a check that fails says why and leaves it unset. For 0.16.0 it names
+`ghcr.io/francisdesjardins/beadc@sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff`.
 
-```text
-Name:      ghcr.io/francisdesjardins/beadc:0.16.0
-MediaType: application/vnd.oci.image.index.v1+json
-Digest:    sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff
-```
-
-Pin that digest, and pull the image by it:
+Pull the image by it:
 
 ```sh
-export BEADC_IMAGE=ghcr.io/francisdesjardins/beadc@sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff
 docker pull "$BEADC_IMAGE"
 docker run --rm "$BEADC_IMAGE" version
 ```
 
 ```powershell
 # in PowerShell 7.6 (pwsh)
-$env:BEADC_IMAGE = 'ghcr.io/francisdesjardins/beadc@sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff'
 docker pull $env:BEADC_IMAGE
 ```
 
@@ -119,7 +138,8 @@ spec 0.17.0
 options 58500
 ```
 
-A later release is the same, with its version and its own digest.
+A later release's image is built from its own tag: its block is
+[the image's general one](../../builder/README.md#the-image-and-its-wrappers), set to its version.
 
 Or build the image from the clone, and name it instead:
 

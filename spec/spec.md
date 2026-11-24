@@ -99,6 +99,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   router, sections 15.2 and 15.12;
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
   a client's TLS, the authorities it trusts and the certificate it presents, section 15.39;
+- [0054](../docs/decisions/0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md):
+  a client's connect of a host on the loopback, to the loopback itself, through no resolver and
+  no proxy, sections 13.4 and 15.12;
 - [0056](../docs/decisions/0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md):
   a WebSocket message held partway to a budget and a rate, its frames read at their heads, sections
   15.3 and 15.12.
@@ -885,15 +888,18 @@ potentially trustworthy, its condition that the user agent keep such a name on t
 every dialer the client owns (below); a server by the address it listens on (section 15.12), in
 127.0.0.0/8, `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an
 in-memory transport or a router called in process. A broker's transport is secure while its own leg
-and its peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
-which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
-space among them, is not, nor is `localhost.`, nor a name that ends in `.localhost.`, which it
-keeps as given. These two are Bead's departures from Secure Contexts, which takes both: every server
-refuses them, since it compares a host as it comes (section 15.12), and a client and a server read
-one set of names. Any other host leaves the machine in the clear. A server cannot tell what stands
-in front of it: its application MAY say so, and is then believed whatever the server listens on —
-TLS terminated before it, which makes it secure, or a proxy that serves the network in the clear,
-which leaves it in the clear.
+and its peer's are (section 15.22). Every client reads a host alike, once, as that parser reads a
+special scheme's host whatever its URL's scheme, `mqtt` and `amqp` among them, and judges, connects
+and names the host it read: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on
+the loopback, connected to 127.0.0.1 and named so, and ask no resolver. A host it fails on, one
+followed by a space among them, is refused before any socket opens: by a broker adapter or a caller
+as it is built, by a transport client at its connect. Nor is `localhost.` on the loopback, nor a
+name that ends in `.localhost.`, which it keeps as given. These two are Bead's departures from
+Secure Contexts, which takes both: every server refuses them, since it compares a host as it comes
+(section 15.12), and a client and a server read one set of names. Any other host leaves the machine
+in the clear. A server cannot tell what stands in front of it: its application MAY say so, and is
+then believed whatever the server listens on — TLS terminated before it, which makes it secure, or
+a proxy that serves the network in the clear, which leaves it in the clear.
 
 A client connects a host it judges on the loopback to the loopback itself, through no proxy, its
 own or its platform's. It connects `localhost` and a name that ends in `.localhost` to `127.0.0.1`
@@ -903,18 +909,21 @@ asks this of application software that makes a security decision on such a name 
 item 2). That draft has expired; its rules are the ones by which Secure Contexts conditions its
 trust in such a name. [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets
 application software treat the name so (item 2). A client races the two addresses as
-[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305) races a name's families, an attempt every 250 ms.
-`127.0.0.1` goes first, since a server on its defaults listens there (section 15.12), where
+[RFC 8305 §5](https://www.rfc-editor.org/rfc/rfc8305#section-5) races its attempts: `127.0.0.1`
+at once, then `::1` 250 ms later, or at once when the attempt before it fails, which is Bead's
+own; each attempt is kept until one connects, the first connected kept and the other closed. A
+connect given up ends every attempt. `127.0.0.1` goes first, since a server on its defaults listens
+there (section 15.12), where
 [RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
-first. Its request names the host as its URL does, in its `Host` and in its TLS server name,
-whatever its scheme. A connect whose every attempt failed says that it went to the loopback and
-asked no resolver. No option points such a name elsewhere: a host off the machine is named by its
-own name or address.
+first. Its request names the host as its URL serializes it, in its `Host` and in its TLS server
+name, whatever its scheme. A connect whose every attempt failed says that it went to the loopback
+and asked no resolver. No option points such a name elsewhere: a host off the machine is named by
+its own name or address.
 
 A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
 `localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps
 such a name on the loopback. Such a dialer is one its application gives it, a page's, which its user
-agent connects, or its platform's own, which a side takes where it can build none of its own
+agent connects, or its platform's own, which a side takes where it has not built one of its own
 ([`docs/support.md`](../docs/support.md), "Differences"). There, a resolver that sends a name under
 `.localhost` on to its DNS server, as glibc's and musl's do, a proxy, or a user agent that does not
 follow the draft's rules takes a credential judged secure wherever it answers, in the clear.
@@ -1492,9 +1501,14 @@ end — frames each counting, an empty one among them, fails it with 1008
 ([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)); a head that breaks
 [RFC 6455 §5.2](https://www.rfc-editor.org/rfc/rfc6455#section-5.2), §5.4 or §5.5 fails it
-with 1002. Each closes the connection and is reported as a 1009 is. What a read brings before the
-frame so judged is read as it would be; nothing from that frame on is. A page's `WebSocket` fails
-a message as its browser does. A text message that is not UTF-8 fails the connection with 1007
+with 1002, but for a data frame's length not in its minimal form, which a side takes as every
+platform's reader takes it. A control frame's length is read in its 7 bits alone, so one written in
+a longer form fails with 1002 whatever its value (§5.2, §5.5). Each closes the connection and is
+reported as a 1009 is. What a read brings before the frame so judged is read as it would be, and
+charged (section 15.12); nothing from that frame on is. A verdict drawn behind what a read handed
+on takes effect once that is read, even while its router pauses the connection: what the pause
+holds is dropped, as on any failure. A page's `WebSocket` fails a message as its browser does. A
+text message that is not UTF-8 fails the connection with 1007
 ([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
 (section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
@@ -1815,8 +1829,11 @@ asks a server to sustain a connection. An answer written before its request's bo
 on and dropping what still comes until its client closes or 2 seconds pass, so its client reads the
 answer before the close ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)).
 Nothing of such an exchange is handed on, and the close of its socket closes no Bead connection.
-What HTTP refuses of its own closes the connection. Over HTTP/1, a server answers the requests of
-one socket in the order they came
+What HTTP refuses of its own closes the connection. A chunk size a server cannot hold is refused as
+HTTP's own, 400 unmarked ([RFC 9112 §7.1](https://www.rfc-editor.org/rfc/rfc9112#section-7.1)),
+never answered 2xx (section 15.7); past 2⁶⁴ − 1, every server refuses it
+([`docs/support.md`](../docs/support.md), "Differences"). Over HTTP/1, a server answers the
+requests of one socket in the order they came
 ([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and serves none
 received behind an answer that closes it: none is judged, handed on or told
 ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close
@@ -1824,21 +1841,26 @@ its socket after its request was read whole — a drop past a bound, a failure u
 serves a request once the answers before it on that socket ended.
 
 A WebSocket server holds each message partway, from the first byte of its first frame's head to
-the last byte of its last frame. Each byte it reads of it is charged to `messageBytesBudget` as it
-comes, its frames' heads and the control frames between them among it, and each head 128 more once
-whole; never what a head announces. A message's charge is released once it is whole, or once its
-connection fails, which charges nothing after. A charge that would pass the budget casts off
-connections, as few as fit it, its own charge counted in its own: those whose message is past
-`bodyGracePeriod` before those within it, then the one whose message holds the most, then the one
-whose message began first; each fails with 1013
+the last byte of its last frame. What it reads of it is charged to `messageBytesBudget` as it
+comes: each byte of payload as it is read, a control frame's between its frames among them, and
+each frame's head once whole, its bytes and 128 more; never what a head announces. A charge of _n_
+decides as _n_ charges of one: one that would pass the budget casts off the connection whose
+message holds the most, its own sum counting that one, then, among equal sums, the one whose
+message began first; each fails with 1013
 ([IANA's WebSocket Close Code Number Registry](https://www.iana.org/assignments/websocket/websocket.xhtml#close-code-number)),
-its own connection only when it comes first. A message that brought _R_ bytes of payload, and
-none more, by its first byte plus max(`bodyGracePeriod`, ⌈_R_ × 1,000 /
-`minimumBodyBytesPerSecond`⌉) milliseconds fails its connection with 1008
-([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), on the server's
-clock, the time its router holds the connection paused while nothing of it is read not counted.
-Each fails as section 15.3 says, reported naming the bound and its value. What a side holds of a
-message may pass its charge, up to twice it where a side's buffer grows by doubling.
+its charge released at once, its own connection only when it comes first. So a message whose
+charge alone passes the budget casts off each holder that comes before it, then its own
+connection. A head that draws a verdict is never whole and charges nothing, and what came before
+it is charged first, so a cast-off at an earlier byte wins over that verdict. A message's charge is
+released once it is whole, or once its connection fails, which charges nothing after. A paused
+connection is charged what its read before the pause brought, and nothing it has not read. A
+message that brought _R_ bytes of payload, and none more, by its first byte plus
+max(`bodyGracePeriod`, ⌈_R_ × 1,000 / `minimumBodyBytesPerSecond`⌉) milliseconds fails its
+connection with 1008 ([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)),
+on the server's clock, the time its router's pause holds its reads not counted. Each fails as
+section 15.3 says, reported naming the bound and its value. What a side holds of a message may pass
+its charge, up to twice it where a side's buffer grows by doubling, and by what its platform reads
+below a pause, a bound of the platform's ([`docs/support.md`](../docs/support.md), "Differences").
 
 Over HTTP/1, a server holds no more of a socket than a bound of its own of what it read behind the
 answer under way and has not served, its platform's

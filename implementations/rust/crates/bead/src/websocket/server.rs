@@ -103,8 +103,9 @@ pub struct WebSocketTransportServerOptions {
     /// none; never without end.
     pub maximum_message_frames: Option<u64>,
     /// What its connections' messages partway hold together, every byte their frames bring and
-    /// 128 a frame, past which a charge casts off the connections that hold the most, those past
-    /// their grace first, with 1013 (spec 15.12): [`MESSAGE_BYTES_BUDGET`] when none.
+    /// 128 a frame, past which a charge casts off with 1013 the connections whose messages hold the
+    /// most, then the one begun first, its own only when it comes first (spec 15.12):
+    /// [`MESSAGE_BYTES_BUDGET`] when none.
     pub message_bytes_budget: Option<u64>,
     /// The slowest, in bytes of payload a second, a message may come once its grace passed, past
     /// which its connection fails with 1008 (spec 15.12): [`crate::MINIMUM_BODY_BYTES_PER_SECOND`]
@@ -239,7 +240,7 @@ pub(crate) struct ServerInner {
 /// message, or a close's reason, that is no UTF-8, with 1007 (spec 15.3). What a read brings before
 /// the frame so judged is handed on; nothing from it on. Each message partway is charged to
 /// `message_bytes_budget` as its bytes come, and a charge that would pass it casts off with 1013
-/// the connections whose messages hold the most, those past their grace first; a message that
+/// the connections whose messages hold the most, then the one begun first; a message that
 /// comes slower than `minimum_body_bytes_per_second` once `body_grace_period` passed since its
 /// first byte fails with 1008, on its clock, its time paused not counted (spec 15.12). Each is
 /// reported naming its bound, its close sent, its writing ended, and what comes after dropped

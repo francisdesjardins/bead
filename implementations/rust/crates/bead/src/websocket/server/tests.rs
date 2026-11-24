@@ -5095,7 +5095,7 @@ async fn charges_a_message_partway_every_byte_its_frames_bring_and_128_a_frame_p
 
 // spec 15.12.19
 #[tokio::test]
-async fn casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_message_bytes_budget_the_newcomer_only_when_it_holds_the_most()
+async fn casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_message_bytes_budget_its_own_only_when_it_comes_first()
  {
     let stepping = SteppingClock::new(dated_at());
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
@@ -5183,63 +5183,114 @@ async fn casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a
     stopped(&server).await;
 }
 
-// spec 15.12.16 and 15.12.19
+// spec 15.12.19: a paused connection's charge is what its read before the pause brought
 #[tokio::test]
-async fn casts_off_a_message_past_its_grace_before_one_within_it() {
+async fn charges_what_a_paused_connection_s_read_brought_as_an_unpaused_one_s() {
     let stepping = SteppingClock::new(dated_at());
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        message_bytes_budget: Some(3_200),
+        message_bytes_budget: Some(1_050),
         ..holding_on(&stepping)
     })
     .await;
-    let mut ada = peer_of(port).await;
+    let pausing = Arc::new(PausingAtOnce {
+        server: Mutex::new(Some(server.clone())),
+    });
 
-    recorder.connections(1).await;
-    ada.socket
-        .write_all(&masked_of(0x2, (&[0x78; 1_440], false)))
-        .await
-        .unwrap();
-    until_message_bytes(&server, 1_576).await;
-    until_due(&stepping, Duration::from_secs(6)).await;
+    server.listen(Arc::<PausingAtOnce>::clone(&pausing));
 
-    // * at 5 s, ada is within her grace, not past it: carol's 1,636, the most, is cast off
-    stepping.advance(Duration::from_millis(5_000)).await;
+    let mut v = peer_of(port).await;
+    let mut h = peer_of(port).await;
+    let handles = recorder.connections(2).await;
 
-    let mut carol = peer_of(port).await;
+    // * one write: a whole message, which its router pauses on, then a frame of 400 its read
+    // brought with it, charged as it came: its head's 8 bytes, 128 and its 400
+    let mut written = masked_of(0x2, (b"abc", true));
 
-    recorder.connections(2).await;
-    carol
-        .socket
-        .write_all(&masked_of(0x2, (&[0x78; 1_500], false)))
+    written.extend(masked_of(0x2, (&[0x78; 400], false)));
+    v.socket.write_all(&written).await.unwrap();
+    until_message_bytes(&server, 536).await;
+    assert_eq!(recorder.messages(1).await.len(), 1, "the whole one");
+
+    // * h's 600 passes 1,050 at its 515th unit: v, who then holds the most, cast off
+    h.socket
+        .write_all(&masked_of(0x2, (&[0x78; 464], true)))
         .await
         .unwrap();
     assert_eq!(
-        heard_on(&mut carol, PATIENCE).await,
+        heard_on(&mut v, PATIENCE).await,
         Some(heard_close(1013)),
-        "carol"
+        "v, paused"
     );
-    until_message_bytes(&server, 1_576).await;
-    stepping.advance(Duration::from_millis(500)).await;
+    let (message, from) = recorder.messages(2).await.remove(1);
 
-    // * bob's 1,636 would pass 3,200: ada, past her grace, goes before bob, who holds more
-    let mut bob = peer_of(port).await;
+    assert_eq!(
+        (message.data, from),
+        (Bytes::from(vec![0x78; 464]), Arc::clone(&handles[1])),
+        "h's whole"
+    );
+    until_message_bytes(&server, 0).await;
+    pausing.server.lock().unwrap().take();
+    stopped(&server).await;
+}
 
-    recorder.connections(3).await;
-    bob.socket
-        .write_all(&masked_of(0x2, (&[0x78; 1_500], false)))
-        .await
-        .unwrap();
+// spec 15.3 and 15.12; RFC 6455 §7.1.7
+#[tokio::test]
+async fn closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+    let pausing = Arc::new(PausingAtOnce {
+        server: Mutex::new(Some(server.clone())),
+    });
+
+    server.listen(Arc::<PausingAtOnce>::clone(&pausing));
+
+    // * a head RFC 6455 forbids right behind the message paused on, or behind a second one past
+    // 125 bytes, in one write: never resumed, it fails at once, the second never handed
+    let plays = [Vec::new(), masked_of(0x2, (&[0x78; 200], true))];
+
+    for (index, between) in plays.into_iter().enumerate() {
+        let mut peer = peer_of(port).await;
+        let handle = recorder.connections(index + 1).await.remove(index);
+        let mut written = masked_of(0x2, (&[1], true));
+
+        written.extend(between);
+        written.extend_from_slice(&[0x83, 0x80, 1, 2, 3, 4]);
+        peer.socket.write_all(&written).await.unwrap();
+
+        assert_eq!(
+            heard_on(&mut peer, PATIENCE).await,
+            Some(heard_close(1002)),
+            "play {index}: 1002"
+        );
+        assert_eq!(
+            recorder.errors(index + 1).await.remove(index),
+            (
+                format!(
+                    "{handle} is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3"
+                ),
+                Some(Arc::clone(&handle))
+            ),
+            "play {index}: reported"
+        );
+        drop(peer);
+        assert_eq!(
+            recorder.closes(index + 1).await.remove(index),
+            (false, handle),
+            "play {index}: told closed, unclean, while still paused"
+        );
+    }
+
+    rest(Duration::from_millis(100)).await;
     assert_eq!(
-        heard_on(&mut ada, PATIENCE).await,
-        Some(heard_close(1013)),
-        "ada"
+        recorder.count(|told| told.messages.len()),
+        2,
+        "the messages paused on alone"
     );
-    until_message_bytes(&server, 1_636).await;
-    assert_eq!(
-        heard_on(&mut bob, Duration::from_millis(100)).await,
-        None,
-        "bob kept"
-    );
+    pausing.server.lock().unwrap().take();
     stopped(&server).await;
 }
 

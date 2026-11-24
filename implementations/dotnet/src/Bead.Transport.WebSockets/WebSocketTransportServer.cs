@@ -577,6 +577,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         {
             var builder = WebApplication.CreateSlimBuilder();
 
+            // ! Kestrel's socket transport reads a connection on below its gate, a paused one's
+            // among them: bounded at 64 KiB, so a paused connection holds its gate's buffer, charged,
+            // and 64 KiB more at most, uncharged (spec 15.12)
+            builder.WebHost.UseSockets((sockets) =>
+            {
+                sockets.MaxReadBufferSize = ServerBounds.SocketReadBufferBytes;
+            });
             builder.Logging.ClearProviders();
             builder.Services.Configure<HostOptions>((host) =>
             {

@@ -74,6 +74,7 @@ import {
   startDropping,
   startHeard,
   startPlatformProxy,
+  watchResolver,
   withoutUndici,
 } from '../../shared/__tests__/loopback-fixtures';
 
@@ -691,6 +692,27 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           await expect(connecting).rejects.toHaveProperty('cause', 'why');
           expect(client.isClosed()).toBe(true);
           expect(client.socket).toBeNull();
+          await allClosed();
+
+          // * and by a localhost name, its handshake reached over the loopback's race (spec 13.4)
+          const named = new AbortController();
+          const held = pendingHandshakes.length;
+          const connectingByName = client.connect({
+            host: 'localhost',
+            port: portOf(gatedServer),
+            signal: named.signal,
+            timeout: Infinity,
+          });
+
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(held + 1);
+          named.abort('why');
+
+          await expect(connectingByName).rejects.toBeInstanceOf(CancelError);
+          expect(client.isClosed()).toBe(true);
           await allClosed();
         } finally {
           for (const done of pendingHandshakes) {
@@ -3385,6 +3407,37 @@ test.describe('WebSocketTransportClient, the frames it reads at their heads', ()
       })
     );
   });
+
+  // spec 15.3, 15.12; RFC 6455 §7.1.7
+  test('closes at once a connection whose verdict falls behind a message its router paused on, dropping what the pause holds', async () => {
+    await using raw = await startRaw();
+
+    // * the head right behind the paused message, then a second message past 125 bytes between
+    for (const between of [[], [frameOf(0x2, new Uint8Array(200))]]) {
+      const connected = await connectRaw(raw);
+      const heard: unknown[] = [];
+
+      connected.client.on('message', ({ data }) => {
+        heard.push(typeof data === 'string' ? data : 'binary');
+        connected.client.pause();
+      });
+      connected.socket.write(
+        Buffer.concat([frameOf(0x1, Buffer.from('paused')), ...between, RESERVED_FRAME])
+      );
+
+      // never resumed: its verdict closes it all the same
+      await expect
+        .poll(() => {
+          return [connected.sent, connected.told.at(-1)];
+        })
+        .toEqual([[1002], ['close', false, false]]);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      expect(heard).toEqual(['paused']);
+      expect(connected.told.length).toBe(2);
+    }
+  });
 });
 
 // spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
@@ -4392,6 +4445,53 @@ test.describe('WebSocketTransportClient, on the loopback', () => {
       await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
     ).toBe(true);
     expect([resolver.asked, server.hosts]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    await using server = await startNoting();
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        expect([written, await openedTo(client, { host: written, port: server.port })]).toEqual([
+          written,
+          true,
+        ]);
+      }
+    }
+
+    expect([resolver.asked, new Set(server.hosts)]).toEqual([
+      [],
+      new Set([`127.0.0.1:${String(server.port)}`]),
+    ]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', async () => {
+    using resolver = watchResolver();
+
+    for (const written of ['foo.123', 'x%20.localhost']) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        const refused = await settledOf(() => {
+          return client.connect({ host: written, port: 1 });
+        });
+
+        expect([refused instanceof ConnectError, (refused as Error).message]).toEqual([
+          true,
+          `${written} is no host a URL can name`,
+        ]);
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+
+    expect(resolver.asked).toEqual([]);
   });
 
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over ws', async () => {

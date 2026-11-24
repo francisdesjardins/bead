@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import * as ws from 'ws';
 import { closeFrameOf, frameOf, type IFrame, OPCODES } from '../../server/__tests__/http-peer';
 import { createFrameMeter, HEAD_CHARGE, rateDueOf } from '../websocket-frame-meter';
+import { createMessageBudget } from '../websocket-message-budget';
 
 // the part of `ws`'s `Receiver` the test reads: the reader `ws` hands a socket's reads to
 interface IReceiverLike {
@@ -209,5 +210,100 @@ test.describe('createFrameMeter', () => {
     expect(
       rateDueOf(1_000, { bodyGracePeriod: 5_000, minimumBodyBytesPerSecond: 240, payload: 1_440 })
     ).toBe(7_000);
+  });
+
+  // RFC 6455 §5.5, §7.1.7; spec 15.3, 15.12
+  test('charges a frame’s head once whole, so a head that draws a verdict charges nothing and a cast-off at an earlier byte wins over it', () => {
+    const meterOf = () => {
+      return createFrameMeter({
+        maximumMessageBytes: MAXIMUM_MESSAGE_BYTES,
+        maximumMessageFrames: 16_384,
+        side: 'server',
+      });
+    };
+    const chargesOf = (shares: readonly { charge: number; isFirst: boolean }[]) => {
+      return shares.map(({ charge, isFirst }) => {
+        return { charge, isFirst };
+      });
+    };
+    const first = frameOf({ fin: false, opcode: OPCODES.BINARY, payload: new Uint8Array(600) });
+    // a ping whose 7 bits say 126: past a control frame's 125, judged at its second byte
+    const longPing = frameOf({
+      fin: true,
+      length: 126,
+      opcode: OPCODES.PING,
+      payload: new Uint8Array(0),
+    });
+
+    // * a head split across reads: its message begins at its first byte, charging nothing, and the
+    // read that makes it whole charges its 8 bytes and 128
+    const split = meterOf();
+    const begun = split.read(first.subarray(0, 3));
+    const whole = split.read(first.subarray(3, 8));
+
+    expect([chargesOf(begun.shares), chargesOf(whole.shares)]).toEqual([
+      [{ charge: 0, isFirst: true }],
+      [{ charge: 8 + HEAD_CHARGE, isFirst: false }],
+    ]);
+
+    // a head that draws its verdict at its second byte, behind 600 bytes of its message: the
+    // message's charge stands, the ping's first byte charging nothing
+    const behind = meterOf().read(Buffer.concat([first, longPing]));
+
+    expect([behind.handed, behind.verdict?.code, chargesOf(behind.shares)]).toEqual([
+      first.length,
+      1002,
+      [{ charge: 8 + 600 + HEAD_CHARGE, isFirst: true }],
+    ]);
+
+    // a message's first head that draws its verdict at its second byte, unmasked: none of its frame
+    // is charged, its message never begun
+    const unmasked = Uint8Array.of(0x82, 0x05);
+    const alone = meterOf().read(unmasked);
+
+    expect([alone.handed, alone.verdict?.code, alone.shares]).toEqual([0, 1002, []]);
+
+    // * a budget of 500 the shares before the verdict are charged to: the cast-off, at the 501st
+    // byte, wins over the verdict that comes after it
+    const budget = createMessageBudget(500);
+    const holder = budget.holderOf({
+      castOff: () => {
+        // the asking holder's cast-off is its caller's
+      },
+    });
+    const outcomes = behind.shares.map(({ charge, isFirst }) => {
+      if (isFirst) {
+        holder.begin();
+      }
+
+      return holder.charge(charge);
+    });
+
+    expect([outcomes, budget.held]).toEqual([[false], 0]);
+
+    // * exactly the budget, then that ping: it fits, and the verdict stands
+    const fits = meterOf().read(
+      Buffer.concat([
+        frameOf({
+          fin: false,
+          opcode: OPCODES.BINARY,
+          payload: new Uint8Array(500 - 8 - HEAD_CHARGE),
+        }),
+        longPing,
+      ])
+    );
+    const edge = createMessageBudget(500).holderOf({
+      castOff: () => {
+        // never cast off
+      },
+    });
+
+    edge.begin();
+    expect([
+      fits.verdict?.code,
+      fits.shares.map(({ charge }) => {
+        return edge.charge(charge);
+      }),
+    ]).toEqual([1002, [true]]);
   });
 });

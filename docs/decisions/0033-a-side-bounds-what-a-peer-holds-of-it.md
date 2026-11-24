@@ -246,8 +246,9 @@ recipient limit what it processes. Past it, the server reads nothing more of the
 answers ahead end, and its client is paced by its TCP window
 ([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)), as a paused connection's
 peer is ([0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)). The bound
-is the platform's, its size and its unit named in `docs/support.md`, never in the spec. Kestrel
-reads ahead to its input pipe's `MaxRequestBufferSize`, 1 MB by default, at which Bead leaves it.
+is the platform's, its size and its unit named in `docs/support.md`, never in the spec. Kestrel's
+socket transport reads ahead to its `MaxReadBufferSize`, 1 MiB by default, at which Bead leaves its
+HTTP servers; `MaxRequestBufferSize` bounds no read there.
 hyper reads one read ahead, and none while its buffer holds a request. Node hands a whole read to
 its parser, so the TypeScript side holds 32 requests unserved, `MAXIMUM_UNSERVED_REQUESTS`, plus the
 rest of the read that brought the 33rd. It then stops reading the socket, pausing it again in a

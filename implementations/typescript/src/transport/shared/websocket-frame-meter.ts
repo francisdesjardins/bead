@@ -16,8 +16,10 @@ export interface IFrameVerdict {
 /** What one read brought of one message partway (spec 15.12). */
 export interface IMessageShare {
   /**
-   * What it charges: each byte of the message it brought, heads, masks and control frames between
-   * its frames among them, and 128 for each head made whole in it.
+   * What it charges: each payload byte of the message it brought, a control frame's between its
+   * frames among them, and each head made whole in it, a control frame's included, its bytes and
+   * 128 more at its last byte. A head not yet whole charges nothing, and nothing of what it
+   * announces is charged.
    */
   readonly charge: number;
   /** Where in the read it begins. */
@@ -37,7 +39,10 @@ export interface IMeteredRead {
    * drew a verdict, through the peer's close, or all of them.
    */
   readonly handed: number;
-  /** The messages partway it brought, in their order; none once it drew a verdict. */
+  /**
+   * The messages partway it brought, in their order: once it drew a verdict, those it brought
+   * before the frame that drew it, none of that frame's, whose head is never whole.
+   */
   readonly shares: readonly IMessageShare[];
   /** The verdict it drew, at `handed`. */
   readonly verdict: IFrameVerdict | undefined;
@@ -73,8 +78,8 @@ type Share = { -readonly [K in keyof IMessageShare]: IMessageShare[K] };
 // constants
 
 /**
- * What each frame's head of a message partway charges beside its bytes, once whole (spec 15.12):
- * what a side keeps of each frame it holds.
+ * What each frame's head of a message partway charges beside its bytes, at its last byte once whole
+ * (spec 15.12): what a side keeps of each frame it holds.
  */
 export const HEAD_CHARGE = 128;
 
@@ -235,6 +240,8 @@ export const createFrameMeter = ({
     // first bytes already, which its platform's reader acts on no sooner than the meter, which
     // judges each byte of a head before it hands it on
     let frameAt = headLength > 0 || isInPayload ? 0 : -1;
+    // the shares this read built before the frame under way: a verdict keeps those alone
+    let sharesBefore = 0;
 
     // the share of the message partway this read brought, from `from`
     const shareAt = (from: number): Share => {
@@ -249,7 +256,7 @@ export const createFrameMeter = ({
     const fail = (verdict: IFrameVerdict): IMeteredRead => {
       isDone = true;
 
-      return { handed: Math.max(frameAt, 0), shares: [], verdict };
+      return { handed: Math.max(frameAt, 0), shares: shares.slice(0, sharesBefore), verdict };
     };
 
     // the frame's payload came whole: the peer's close ends the read, a final data frame its message
@@ -298,6 +305,7 @@ export const createFrameMeter = ({
 
       if (headLength === 0) {
         frameAt = at;
+        sharesBefore = shares.length;
       }
 
       head[headLength] = byte;
@@ -351,13 +359,15 @@ export const createFrameMeter = ({
         }
       }
 
+      // * a head of a message partway is its share's from its first byte here, and charges once
+      // whole, its bytes, those an earlier read brought among them, and 128 at its last byte
       if (isPartway) {
-        shareAt(at - 1).charge += 1;
+        shareAt(at - 1);
       }
 
       if (headLength === headNeeded) {
         if (isPartway) {
-          shareAt(at).charge += HEAD_CHARGE;
+          shareAt(at).charge += headNeeded + HEAD_CHARGE;
         }
 
         headLength = 0;
