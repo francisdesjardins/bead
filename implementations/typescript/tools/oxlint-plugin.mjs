@@ -38,6 +38,8 @@ const LISTED_RESTS = Object.freeze({
   'IServiceResolverOptions.nameAfter(...never[])':
     'the bound of any callable, which a function named after its procedure keeps whole',
   // the tests'
+  'IReceiverLike._write(...never[])':
+    "`ws`'s own parse, a chunk, its encoding and its end, which a fuzz target calls below its stream",
   'batch(...Uint8Array[])': 'a batch of envelopes, as many as a case puts in it',
   'batchOf(...Uint8Array[])': 'a batch of envelopes, as many as a case puts in it',
   'createFakeHTTPServer.createServer.on(...never[])': 'a fake taking a listener of any event',
