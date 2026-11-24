@@ -4606,6 +4606,39 @@ test.describe('WebSocketTransportServer, a message partway', () => {
   });
 
   // spec 15.12, decision 0046
+  test('counts a message’s time only while its connection is not paused', async () => {
+    const clock = createTestClock(DATED);
+    await using started = await startDated({ clock, heartbeat: Infinity, bodyGracePeriod: 3_000 });
+    const { server } = started;
+    const { connectionHandle, exchange } = await connectOn(started);
+
+    try {
+      exchange.write(binaryOf(10, { fin: false, length: 100 }));
+      await expect
+        .poll(() => {
+          return duesOn(clock);
+        })
+        .toEqual([3_000]);
+      await clock.tickAsync(1_000);
+      server.pause(connectionHandle);
+      expect(duesOn(clock)).toEqual([]);
+      await clock.tickAsync(9_000);
+      expect(await exchange.next(100)).toBeUndefined();
+      server.resume(connectionHandle);
+      await expect
+        .poll(() => {
+          return duesOn(clock);
+        })
+        .toEqual([2_000]);
+      await clock.tickAsync(1_999);
+      expect(await exchange.next(100)).toBeUndefined();
+      await clock.tickAsync(1);
+      expect(await exchange.next(2_000)).toEqual({ close: 1008 });
+    } finally {
+      exchange.destroy();
+    }
+  });
+
   test('counts the time of a message partway only while it reads its connection', async () => {
     const clock = createTestClock(DATED);
     await using started = await startDated({ clock, heartbeat: Infinity });
