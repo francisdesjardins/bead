@@ -135,7 +135,7 @@ test('builds its router with the limits given', async () => {
   ).rejects.toMatchObject({ detail: 'a payload is 8 bytes at most, not 13' });
 });
 
-test('createWebSocketClient takes a message of an envelope at most, more when the transport says so, and never less', async () => {
+test('takes a message of an envelope at most, more when the transport says so, and never less', async () => {
   // envelopes of 256 bytes
   const small = { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 };
 
