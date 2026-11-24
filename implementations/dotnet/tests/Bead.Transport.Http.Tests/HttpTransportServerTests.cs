@@ -3986,7 +3986,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12
     [Fact]
-    public async Task Gauges_the_connections_its_busiest_address_holds_against_maximumConnectionsPerAddress_which_its_health_warns_on_at_80_percent()
+    public async Task Gauges_the_connections_its_busiest_address_holds_against_maximum_connections_per_address_which_its_health_warns_on_at_80()
     {
         await Start(new HttpTransportServerOptions { MaximumConnectionsPerAddress = 5 });
 
