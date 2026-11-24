@@ -7,6 +7,34 @@ namespace Bead.Tests;
 public sealed class LoopbacksTests
 {
     [Fact]
+    public async Task Propagates_a_bind_failure_that_names_no_code_as_it_is()
+    {
+        var reason = new IOException("bind");
+        var calls = 0;
+        var thrown = await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return Loopbacks.Bind((_) =>
+            {
+                calls++;
+                return Task.FromResult(new object());
+            }, new LoopbackBinding
+            {
+                FindOpenPort = true,
+                DrawPort = () =>
+                {
+                    return 42000;
+                },
+                IPv6Refusal = (_) =>
+                {
+                    return reason;
+                },
+            });
+        });
+        Assert.Same(reason, thrown);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public async Task Draws_another_port_for_an_occupied_loopback_in_the_platform_bind_failure()
     {
         var reason = new AggregateException(new InvalidOperationException("another listener"), new IOException("bind", new SocketException((int)SocketError.AddressAlreadyInUse)));
