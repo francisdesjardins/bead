@@ -46,6 +46,43 @@ class Thing {
 
 // definition
 
+test('writes an integer past 2 to the 53 from its digits as the double nearest them', () => {
+  const value = PAYLOAD_CODECS.json.decode(utf8('9007199254740993'));
+
+  expect(written(value)).toBe('9007199254740992');
+});
+
+test('writes a string as written when it holds no escape and is UTF-8, and from its characters otherwise', () => {
+  for (const [text, expected] of [
+    ['"é<\u007f"', '"é<\u007f"'],
+    ['"\\u0041\\u003e"', '"A>"'],
+  ]) {
+    expect(written(PAYLOAD_CODECS.json.decode(utf8(text!)))).toBe(expected);
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.decode(Uint8Array.of(0x22, 0xff, 0x22));
+    })
+  ).toEqual(['SyntaxError', 'not UTF-8']);
+});
+
+test('refuses a number past the largest double that an element parsed leniently holds as it is written', () => {
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    expect(
+      refusalOf(() => {
+        return PAYLOAD_CODECS.json.encode(value);
+      })
+    ).toEqual(['TypeError', 'not a finite number']);
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.decode(utf8('[1E400]'));
+    })
+  ).toEqual(['SyntaxError', 'a number past a double']);
+});
+
 test('gives spec 17’s codecs by their encoding’s name', () => {
   const raw = PAYLOAD_CODECS.raw.decode(new Uint8Array([1, 2]));
 
