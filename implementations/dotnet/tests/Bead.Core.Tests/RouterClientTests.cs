@@ -10,6 +10,48 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterClientTests
 {
+    [Fact]
+    public async Task Go_to_the_resolver_registered_for_their_procedure_on_even_call_ids_which_answers()
+    {
+        using var scripted = new ScriptedRouter();
+        var seen = new List<(string ConnectionHandle, string Payload)>();
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            seen.Add((props.ConnectionHandle, Convert.ToHexString(props.Payload.Span)));
+            return scripted.Router.Respond(RouterAnswer.OfPayload(new byte[] { 7 }), new AnswerTarget(props.ConnectionHandle, props.Header));
+        }));
+        scripted.Transport.Deliver(new Envelope { Header = RequestHeaderOf(30), Payload = new byte[] { 3 } });
+        await scripted.Settle();
+
+        var answer = Assert.Single(scripted.Transport.Envelopes);
+
+        Assert.Equal([(RouterClient.ServerConnectionHandle, "03")], seen);
+        Assert.Equal((EnvelopeKind.Result, 30u, (Credential?)null, "07"), (answer.Kind, answer.Header.CallId, Assert.IsType<ResultHeader>(answer.Header).Credential, Convert.ToHexString(answer.Payload.Span)));
+        Assert.Empty(scripted.Errors);
+
+        using var link = new Link();
+        var ask = Service with { ProcedureId = 2, ProcedureName = "ask" };
+        var clock = Service with { ProcedureId = 3, ProcedureName = "clock" };
+        var command = link.ServerServices.GetCommand(clock, new RequestDependencies<string, string> { Serializer = Text });
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+        link.Server.Error += (reason, _) => { reports.Enqueue(reason); };
+        link.Client.Error += reports.Enqueue;
+        link.ServerServices.GetRequestResolver(ask, new RequestResolverDependencies<string, string> { Serializer = Text })(async (request, response) =>
+        {
+            await response.Answer(await command("now")(new CommandOptions { ConnectionHandle = request.ConnectionHandle, Timeout = TimeSpan.FromSeconds(1) }));
+        });
+        link.ClientServices.GetCommandResolver(clock, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
+        {
+            return response.Answer("noon");
+        });
+
+        Assert.Equal("noon", await link.ClientServices.GetRequest(ask, new RequestDependencies<string, string> { Serializer = Text })("")().WaitAsync(Patience, Cancelled));
+        Assert.Equal([2u], link.ClientReceived.OfType<RequestHeader>().Select((header) => { return header.CallId; }));
+        Assert.Empty(reports);
+    }
+
     // constants
 
     private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
@@ -2395,7 +2437,7 @@ public sealed partial class RouterClientTests
     }
 
     // text in UTF-8, a request, its result and a notification alike
-    private sealed class TextPayloads : INotificationSerializerClient<string, string, string>
+    private sealed class TextPayloads : INotificationSerializerClient<string, string, string>, IRequestSerializerServer<string, string>
     {
         public ReadOnlyMemory<byte> Encode(string request)
         {
