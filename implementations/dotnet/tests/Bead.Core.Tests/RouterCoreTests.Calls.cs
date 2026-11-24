@@ -1881,4 +1881,48 @@ public sealed partial class RouterCoreTests
 
         Assert.Equal((1L, 0L), (counts["answeringCalls"], counts["receivingTransfers"]));
     }
+    private sealed class RefusingCallClock : TimeProvider
+    {
+        private readonly Exception _reason;
+
+        public RefusingCallClock(Exception reason)
+        {
+            _reason = reason;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            throw _reason;
+        }
+    }
+
+    [Fact]
+    public async Task Sends_nothing_of_a_call_whose_timer_its_clock_cannot_arm_no_request_and_no_cancel()
+    {
+        foreach (var size in new[] { 8, 200 })
+        {
+            var broken = new InvalidOperationException("the call timer broke");
+            var port = new Sessionless();
+            using var core = new RouterCore(port, new RouterCoreOptions
+            {
+                Clock = new RefusingCallClock(broken),
+                Limits = Chunked with { TransferInactivityTimeout = TimeSpan.FromSeconds(30) },
+            });
+            var call = core.Request(Enumerable.Repeat((byte)7, size).ToArray(), new CoreRequest
+            {
+                ConnectionHandle = Handle,
+                Procedure = Echo,
+                Options = new ResolvedRequestOptions { Timeout = TimeSpan.FromMinutes(1) },
+            });
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return call.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            await core.Loop.WhenIdle().WaitAsync(Patience, TestContext.Current.CancellationToken);
+            Assert.Empty(port.Sent);
+        }
+    }
+
 }
