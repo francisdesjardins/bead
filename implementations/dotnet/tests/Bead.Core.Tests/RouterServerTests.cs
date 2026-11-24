@@ -15,6 +15,46 @@ namespace Bead.Tests;
 public sealed partial class RouterServerTests : IDisposable
 {
     [Fact]
+    public async Task A_token_provider_that_panics_fails_only_its_answer_and_the_next_answer_can_announce()
+    {
+        var called = false;
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                if (!called)
+                {
+                    called = true;
+
+                    throw new InvalidOperationException("no session");
+                }
+
+                return Token;
+            },
+        });
+        EchoOf((request, response) =>
+        {
+            return response.Answer($"{request.Payload}!");
+        });
+        Deliver(First, RequestOf(1, payload: "hi"));
+        await Settle();
+
+        Assert.Empty(_transport.Sent);
+        Assert.Single(_errors);
+
+        Deliver(First, RequestOf(3, payload: "ho"));
+        await Settle();
+
+        var envelope = Assert.Single(_transport.Sent).Envelope;
+        var header = Assert.IsType<ResultHeader>(envelope.Header);
+
+        Assert.Equal(3u, header.CallId);
+        Assert.Equal(Credential.Opaque(Token), header.Credential);
+        Assert.Equal("ho!", Encoding.UTF8.GetString(envelope.Payload.Span));
+    }
+
+    [Fact]
     public async Task A_request_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
     {
         Start();
@@ -672,7 +712,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_that_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
+    public async Task That_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
     {
         var gone = new IOException("gone");
 
