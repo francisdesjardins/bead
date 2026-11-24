@@ -290,4 +290,15 @@ public sealed class EnvelopeCodecTests
             });
         });
     }
+    [Fact]
+    public void Write_no_chunk_without_a_byte()
+    {
+        var envelope = new Envelope { Header = new ChunkHeader { CallId = 7, Offset = 0, IsLast = true }, Payload = ReadOnlyMemory<byte>.Empty };
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            EnvelopeCodec.WriteEnvelope(envelope, 1_024);
+        });
+    }
+
 }

@@ -510,4 +510,63 @@ public sealed class EnvelopeCodecHeaderTests
             }
         }
     }
+    [Fact]
+    public void Refuses_a_field_out_of_its_range_naming_it_before_writing_anything()
+    {
+        foreach (var name in new[] { "a call id of 0", "a service id of 0", "a procedure id of 0", "a destination id of 0" })
+        {
+            var (header, words) = Unwritable[name];
+            var written = Enumerable.Repeat((byte)0x55, 1_024).ToArray();
+            var refused = Assert.ThrowsAny<ArgumentException>(() =>
+            {
+                EnvelopeCodec.WriteHeader(header, written);
+            });
+
+            Assert.StartsWith(words, refused.Message, StringComparison.Ordinal);
+            Assert.All(written, (value) =>
+            {
+                Assert.Equal(0x55, value);
+            });
+        }
+
+        var request = new RequestHeader { CallId = 1, ServiceId = 0x1000, ProcedureId = 0x1000 };
+        var bytes = new byte[16];
+
+        EnvelopeCodec.WriteHeader(request, bytes);
+        Assert.Equal(new byte[] { 0x10, 0, 0x10, 0 }, bytes[8..12]);
+        EnvelopeCodec.WriteHeader(request with { CallId = uint.MaxValue, ServiceId = ushort.MaxValue, ProcedureId = ushort.MaxValue, DestinationId = uint.MaxValue }, bytes);
+        Assert.Equal(Vectors.FromHexadecimal("A1 10 02 04 FF FF FF FF FF FF FF FF FF FF FF FF"), bytes);
+        EnvelopeCodec.WriteHeader(request with { CallId = 1u << 31, ServiceId = 1, ProcedureId = 1, DestinationId = 1u << 31 }, bytes);
+        Assert.Equal(Vectors.FromHexadecimal("A1 10 02 04 80 00 00 00 00 01 00 01 80 00 00 00"), bytes);
+    }
+
+    [Fact]
+    public void Refuses_an_offset_an_end_or_a_total_that_is_not_a_whole_number_from_0_to_2_53_1()
+    {
+        foreach (var value in new[] { 1L << 53, long.MaxValue })
+        {
+            (IEnvelopeHeader Header, string Field)[] headers =
+            [
+                (new ChunkHeader { CallId = 1, Offset = value, IsLast = true }, "offset"),
+                (new CreditHeader { CallId = 1, CreditEnd = value }, "creditEnd"),
+                (new ResultHeader { CallId = 1, Total = value }, "total"),
+            ];
+
+            foreach (var (header, field) in headers)
+            {
+                var written = Enumerable.Repeat((byte)0x55, 1_024).ToArray();
+                var refused = Assert.ThrowsAny<ArgumentException>(() =>
+                {
+                    EnvelopeCodec.WriteHeader(header, written);
+                });
+
+                Assert.StartsWith($"{field} is a whole number from 0 to 2⁵³ − 1, got {value}", refused.Message, StringComparison.Ordinal);
+                Assert.All(written, (octet) =>
+                {
+                    Assert.Equal(0x55, octet);
+                });
+            }
+        }
+    }
+
 }
