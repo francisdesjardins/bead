@@ -393,3 +393,58 @@ test('carries raw bytes as they are, and text in UTF-8 read strictly, its byte o
     }).toThrow();
   }
 });
+
+test('writes a JSON value in its canonical form and a type through it', () => {
+  const value = { b: 1, a: [true, null, 'x'] };
+
+  expect(written(value)).toBe('{"a":[true,null,"x"],"b":1}');
+  expect(PAYLOAD_CODECS.json.decode(PAYLOAD_CODECS.json.encode(value))).toEqual(value);
+
+  const reading: { name: string; value: number } = { name: 't', value: 0.5 };
+  const bytes = PAYLOAD_CODECS.json.encode(reading);
+
+  expect(new TextDecoder().decode(bytes)).toBe('{"name":"t","value":0.5}');
+  expect(PAYLOAD_CODECS.json.decode(bytes)).toEqual(reading);
+});
+
+test('refuses what a JSON payload does not read in its own words', () => {
+  const cases: [Uint8Array, string][] = [
+    [Uint8Array.of(0x22, 0xff, 0x22), 'not UTF-8'],
+    [Uint8Array.of(0xef, 0xbb, 0xbf, 0x31), 'a byte order mark'],
+    [new Uint8Array(), 'not JSON'],
+    [utf8('[1,]'), 'not JSON'],
+    [utf8('{"a":1,"a":2}'), 'a name twice'],
+    [utf8('"abc'), 'not JSON'],
+    [utf8(`"${BACKSLASH}ud800"`), 'a surrogate alone'],
+    [utf8(`{"${BACKSLASH}udc00":1}`), 'a surrogate alone'],
+    [utf8('1E400'), 'a number past a double'],
+    [utf8(`${'['.repeat(65)}${']'.repeat(65)}`), 'nested past 64'],
+  ];
+
+  for (const [bytes, words] of cases) {
+    expect(
+      refusalOf(() => {
+        return PAYLOAD_CODECS.json.decode(bytes);
+      })
+    ).toEqual(['SyntaxError', words]);
+  }
+});
+
+test('refuses a JSON value that does not write and a text either way in its own words', () => {
+  let deep: unknown = [];
+
+  for (let depth = 1; depth < 65; depth += 1) {
+    deep = [deep];
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.encode(deep);
+    })
+  ).toEqual(['TypeError', 'nested past 64']);
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.text.decode(Uint8Array.of(0xc3));
+    })
+  ).toEqual(['SyntaxError', 'not UTF-8']);
+});
