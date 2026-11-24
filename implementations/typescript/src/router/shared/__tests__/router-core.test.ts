@@ -400,7 +400,7 @@ test.describe('createRouterCore', () => {
 
   test.describe('takes what comes in', () => {
     // debugging 5.2
-    test('read, traced, then dispatched; what does not read is reported, not traced', async () => {
+    test('reads, traces, then dispatches what comes in, and reports what does not read untraced', async () => {
       const { port, reported, traced } = createPort();
       using core = createRouterCore(port);
       const seen: IRequestResolverProps<Handle>[] = [];
@@ -2194,7 +2194,7 @@ test.describe('createRouterCore', () => {
       }
     });
 
-    test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
+    test('a credential of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
       const order: string[] = [];
       const carried: unknown[] = [];
       const { port, reported, sent } = createPort({
@@ -3141,7 +3141,7 @@ test.describe('createRouterCore', () => {
   });
 
   test.describe('cancels', () => {
-    test('forget a call its requester cancels, then abort its signal: nothing answers it, and its call id is free', async () => {
+    test('forgets a call its requester cancels, then cancels its signal: nothing answers it, and its call id is free', async () => {
       const offered: string[] = [];
       const { port, reported, sent } = createPort({
         onCancel: (callId, connectionHandle) => {
@@ -3368,7 +3368,7 @@ test.describe('createRouterCore', () => {
       }
     };
 
-    test('detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once', async () => {
+    test('detaches calls before settling an incoming resolver awaiting an outgoing call, and counts its incoming close once', async () => {
       const { atReturn, before, caught, reported, sentAfter, settled, snapshots, steps, text } =
         await closeAwaiting({ forward: false, incoming: 1 });
 
@@ -5655,7 +5655,7 @@ test.describe('createRouterCore', () => {
     });
 
     // spec 12.10
-    test('end the transfers it sends on a connection that goes, and on a router disposed, sending nothing more', async () => {
+    test('ends the transfers it sends on a connection that goes, and on a router disposed, sending nothing more', async () => {
       const answering = createAnswering();
       using core = answering.core;
       const { reported, sent } = answering;
