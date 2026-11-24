@@ -627,6 +627,49 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
     // definition
 
     [Fact]
+    public async Task Keeps_the_error_the_implementation_reported_as_the_connect_error_cause()
+    {
+        using var closed = new ClosedPort();
+        var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
+        {
+            return _client.Connect(Target with { Port = closed.Port, CancellationToken = Cancelled });
+        });
+
+        Assert.Equal(SocketError.ConnectionRefused, Assert.IsType<SocketException>(failure.GetBaseException()).SocketErrorCode);
+    }
+
+    [Fact]
+    public async Task Passes_the_protocols_to_the_handshake()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = ["echo"], CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            Assert.Contains("\r\nSec-WebSocket-Protocol: echo\r\n", Encoding.ASCII.GetString(head), StringComparison.OrdinalIgnoreCase);
+            await Listener.Upgrade(peer, (head, "Sec-WebSocket-Protocol: echo\r\n"));
+            await connecting.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Open, _client.ReadyState);
+        }
+    }
+
+    [Fact]
+    public async Task Carries_no_credential_the_envelope_alone_goes()
+    {
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        _server.Message += (message, _) => { messages.Writer.TryWrite(message); };
+        await _client.Connect(Target with { CancellationToken = Cancelled });
+        await _client.Send(new TransportMessage("hello"u8.ToArray(), false) { Credential = Bearer });
+        var received = await Next(messages);
+
+        Assert.Equal("hello"u8.ToArray(), received.Bytes.ToArray());
+        Assert.False(received.IsText);
+        Assert.Null(received.Credential);
+        Assert.False(_client.Carries(Bearer));
+    }
+
+    [Fact]
     public async Task Reads_a_message_of_frames_past_64_KiB_whose_first_came_with_its_101()
     {
         using var listener = new Listener(IPAddress.Loopback);
