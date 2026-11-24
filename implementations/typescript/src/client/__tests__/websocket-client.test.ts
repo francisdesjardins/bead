@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { IClient } from '../types';
 import { closedPort } from '../../transport/shared/__tests__/loopback-fixtures';
 import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import { WebSocketServer as WsServer } from 'ws';
@@ -119,6 +120,14 @@ const answerTo = (
 };
 
 // definition
+
+test('each client is an IClient', () => {
+  const facade = createWebSocketClient();
+  const client: IClient = facade;
+
+  expect(client.router).toBe(facade.router);
+  expect(client.services).toBe(facade.services);
+});
 
 test('createWebSocketClient runs on the global WebSocket by default, not yet connected', () => {
   const client = createWebSocketClient();
