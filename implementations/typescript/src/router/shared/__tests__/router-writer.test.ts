@@ -239,62 +239,64 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([['a', 'failure', 1, ProtocolCode.ENVELOPE_TOO_LARGE]]);
     });
 
-    test('cut a failure’s detail to its envelope’s room, and to its own limit, both ways', async () => {
-      const detail = 'x'.repeat(100);
-      const failure = { code: 1, detail, scope: FailureScope.APPLICATION };
+    test('cuts a failure’s detail to its envelope’s room, and to its own limit, both ways', async () => {
+      for (const code of [1, 7]) {
+        const detail = 'x'.repeat(100);
+        const failure = { code, detail, scope: FailureScope.APPLICATION };
 
-      for (const [limits, length] of [
-        [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 32],
-        [{ maximumDetailBytes: 10 }, 10],
-      ] as const) {
-        const { port, sent } = createPort();
-        using core = createRouterCore(port, { limits });
+        for (const [limits, length] of [
+          [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 32],
+          [{ maximumDetailBytes: 10 }, 10],
+        ] as const) {
+          const { port, sent } = createPort();
+          using core = createRouterCore(port, { limits });
 
-        await core.respond({ failure }, await openerOn(core)(1));
+          await core.respond({ failure }, await openerOn(core)(1));
 
-        const [{ envelope } = { envelope: undefined }] = sent;
+          const [{ envelope } = { envelope: undefined }] = sent;
 
-        expect(envelope?.kind === EnvelopeKind.FAILURE && envelope.failure.detail).toHaveLength(
-          length
+          expect(envelope?.kind === EnvelopeKind.FAILURE && envelope.failure.detail).toHaveLength(
+            length
+          );
+        }
+
+        const { port } = createPort();
+        using core = createRouterCore(port, { limits: { maximumDetailBytes: 4 } });
+        const asking = core.request(new Uint8Array(0), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+        });
+
+        await sleep(0);
+        core.receive(
+          envelopeOf({
+            failure: { code, detail: 'abcdefgh', scope: FailureScope.APPLICATION },
+            header: { callId: 2, kind: EnvelopeKind.FAILURE },
+            kind: EnvelopeKind.FAILURE,
+          }),
+          'a'
         );
+
+        await expect(asking).rejects.toMatchObject({ detail: 'abcd' });
+
+        const client = createPort({ failures: CLIENT_FAILURES });
+        using clientCore = createRouterCore(client.port, { limits: { maximumDetailBytes: 10 } });
+        const asked = clientCore.request(new Uint8Array(code === 1 ? 1 : 0), {
+          connectionHandle: 'a',
+          options: { timeout: 5_000 },
+          procedure: echo,
+        });
+        clientCore.receive(
+          envelopeOf({
+            kind: EnvelopeKind.FAILURE,
+            header: { kind: EnvelopeKind.FAILURE, callId: 1 },
+            failure: { code: 7, detail, scope: FailureScope.APPLICATION },
+          }),
+          'a'
+        );
+        await expect(asked).rejects.toMatchObject({ detail: 'x'.repeat(10) });
       }
-
-      const { port } = createPort();
-      using core = createRouterCore(port, { limits: { maximumDetailBytes: 4 } });
-      const asking = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
-
-      await sleep(0);
-      core.receive(
-        envelopeOf({
-          failure: { code: 1, detail: 'abcdefgh', scope: FailureScope.APPLICATION },
-          header: { callId: 2, kind: EnvelopeKind.FAILURE },
-          kind: EnvelopeKind.FAILURE,
-        }),
-        'a'
-      );
-
-      await expect(asking).rejects.toMatchObject({ detail: 'abcd' });
-
-      const client = createPort({ failures: CLIENT_FAILURES });
-      using clientCore = createRouterCore(client.port, { limits: { maximumDetailBytes: 10 } });
-      const asked = clientCore.request(Uint8Array.of(1), {
-        connectionHandle: 'a',
-        options: { timeout: 5_000 },
-        procedure: echo,
-      });
-      clientCore.receive(
-        envelopeOf({
-          kind: EnvelopeKind.FAILURE,
-          header: { kind: EnvelopeKind.FAILURE, callId: 1 },
-          failure: { code: 7, detail, scope: FailureScope.APPLICATION },
-        }),
-        'a'
-      );
-      await expect(asked).rejects.toMatchObject({ detail: 'x'.repeat(10) });
     });
   });
 
