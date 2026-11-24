@@ -28,8 +28,7 @@ fn holding_of(budget: &Arc<MessageBudget>, bytes: u64) -> Holding {
 
 // spec 15.12.19
 #[tokio::test]
-async fn casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_message_bytes_budget_its_own_only_when_it_comes_first()
- {
+async fn casts_off_other_budget_holders_or_refuses_the_asker_when_the_next_byte_passes_the_bound() {
     let clock = clock();
     let budget = budget_of(&clock, 500);
     let ada = holding_of(&budget, 194);
