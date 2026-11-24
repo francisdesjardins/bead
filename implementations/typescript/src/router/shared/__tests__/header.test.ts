@@ -587,3 +587,50 @@ test.describe('readHeader', () => {
     expect(failure).toMatchObject({ origin: 'local', side: 'client' });
   });
 });
+
+test('refuses to write a header and writes nothing', () => {
+  const request = { callId: 3, kind: 0x10, procedureId: 1, serviceId: 2 } as const;
+  const cases: { header: EnvelopeHeader; words: string }[] = [
+    {
+      header: { callId: 0, kind: 0x11 },
+      words: 'callId is an integer from 1 to 4294967295, got 0',
+    },
+    {
+      header: { ...request, serviceId: 0 },
+      words: 'serviceId is an integer from 1 to 65535, got 0',
+    },
+    {
+      header: { ...request, procedureId: 0 },
+      words: 'procedureId is an integer from 1 to 65535, got 0',
+    },
+    {
+      header: { ...request, destinationId: 0 },
+      words: 'destinationId is an integer from 1 to 4294967295, got 0',
+    },
+    {
+      header: { ...request, paced: true },
+      words: 'a 0x10 header paces nothing: a request that opens a subscription does, or a credit',
+    },
+    {
+      header: { callId: 7, isLast: true, kind: 0x14, offset: 2 ** 53 },
+      words: 'offset is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+    {
+      header: { callId: 7, creditEnd: 2 ** 53, kind: 0x15 },
+      words: 'creditEnd is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+    {
+      header: { callId: 3, kind: 0x11, total: 2 ** 53 },
+      words: 'total is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+  ];
+
+  for (const { header, words } of cases) {
+    const bytes = new Uint8Array(1_024).fill(0x55);
+
+    expect(() => {
+      return writeHeader(header, bytes);
+    }).toThrow(new ProgrammerError(words));
+    expect(bytes).toEqual(new Uint8Array(1_024).fill(0x55));
+  }
+});
