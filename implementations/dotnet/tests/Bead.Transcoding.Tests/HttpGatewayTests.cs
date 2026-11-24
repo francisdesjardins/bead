@@ -1182,7 +1182,18 @@ public sealed class HttpGatewayTests
                 {
                     var cell = $"{reader}, {framing}";
                     var before = (Calls: Volatile.Read(ref calls), Told: told.Count);
-                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body)));
+                    var octets = EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body));
+                    var answered = await Exchanged(port, octets);
+
+                    // ! the address's one place is released as the call before it ends, which its client
+                    // may see answered first: a 503 busy is tried again after its retry-after, as a client
+                    // does by RFC 9110 §10.2.3
+                    for (var tried = 0; tried < 3 && answered.Status == 503 && answered.Fields.GetValueOrDefault("bead-refusal") == "busy"; tried++)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(1), Cancelled);
+                        answered = await Exchanged(port, octets);
+                    }
+
                     var made = Volatile.Read(ref calls) - before.Calls;
                     List<string> reported;
 
