@@ -336,7 +336,13 @@ each gateway's `resets over HTTP/2 the stream of a request whose target or a fie
 past visible ASCII, PROTOCOL_ERROR, nothing written`; each transport server's `refuses as it would
 though a refusal listener throws, the throw reported with no connection`; each WebSocket client's
 `names the status and the reason of an upgrade refused`, and each HTTP client's connect named with
-its reason. `docs/support.md` names them.
+its reason. `docs/support.md` names them. A chunk size past what a server holds is held by the case
+`a chunk size past 2⁶⁴ − 1 is answered 400 unmarked and its connection closed, never a 2xx` of
+`spec/transports.json` and the exchange `a chunk size past 2⁶⁴ − 1 is answered 400 unmarked at the
+gateway and its connection closed` of `spec/transcoding.json`, whose `expect` of `end` reads that
+its socket ended, as the transports' file's does; and below 2⁶⁴ − 1, on the C# side, by
+`Answers_400_unmarked_and_closes_a_chunk_size_past_what_Kestrel_holds`, the row `A chunk size past
+2³¹ − 1 over HTTP/1.1` of `docs/support.md`.
 
 ## The Tenth Man
 
@@ -353,8 +359,13 @@ large to count met it in a round of its own, at xhigh effort: nine objections, e
 one in part; a transfer coding before `chunked` met it in a round of its own, at xhigh effort: five
 objections, four accepted and one in part; and HTTP's framing refusals played to their close, a
 signed `Content-Length` and HTTP/2's connection-specific fields met it in a round of their own, at
-xhigh effort: nine objections, seven accepted and two in part. Its objections, each with the answer
-that holds:
+xhigh effort: nine objections, seven accepted and two in part; and a chunk size past what a server
+holds met it in a round at xhigh effort shared with
+[0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md),
+[0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md) and
+[0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md),
+each of which keeps its own objections: one objection here, accepted. Its objections, each with the
+answer that holds:
 
 ### On a refusal told and the default listening address
 
@@ -453,3 +464,15 @@ the three platforms: seven accepted and two in part, the proposal amended.
 | The untested line is Bead's for one step on one side only. hyper and Kestrel refuse a bare final coding before Bead, and Node's default parser before the TypeScript gateway and exchange. Under `insecureHTTPParser`, where Bead's predicate is the only guard, nothing holds it.     | Accepted. The TypeScript transport and gateway each gain a test on a server built with `insecureHTTPParser: true`: a bare `gzip` and a bare `identity` refused 400 and closed before a request pipelined behind them is read. The conformance steps stay, since they pin the platforms. Their comments say, from a rerun of the mutant probe, which side's line each step holds.                                                                                                                                                                                                                                |
 | "Each cell names its test" cannot be reached by cases. A `differs` excuses C# from the whole case, so its WebSocket address, gateway and HTTP/2 stay untested, and the HTTP/2 cells of every side need tests the proposal does not count.                                              | Accepted. The cases hold the TypeScript and Rust sides. C# gains three tests, each citing the row and each turning when Kestrel refuses a sign: an upgrade taken under `+0` and `-0`, a gateway body served under `+2`, and a connect drawn over HTTP/2 under `+0`. TypeScript and Rust gain a test resetting a signed length over HTTP/2. No cell of the row reads "not tested".                                                                                                                                                                                                                               |
 | The proposal sends `+0` and `+5`, but the row names `-0` too, which Kestrel reads as 0. The row's last cell already promises the cases. Its C# cell leaves out that a connect under `+5` with its five octets is refused 400 `malformed`, marked.                                      | Accepted. `-0` is sent beside `+0` at every surface. The last cell keeps its lift and drops the promise, which the cases now keep. The C# test of HTTP/1.1 adds the connect under `+5` and is renamed for it, and the C# cell says so.                                                                                                                                                                                                                                                                                                                                                                          |
+
+### On a chunk size past what a server holds
+
+The proposal: a chunk size a server cannot hold refused as HTTP's own, 400 unmarked, its connection
+closed, never answered 2xx (15.7, 15.12), the C# side refusing one past 2³¹ − 1 at once, where
+Kestrel stops counting, and every side one past 2⁶⁴ − 1; a case of each conformance file past
+2⁶⁴ − 1, the transcoding file's `expect` taking `end`. One objection, checked against Kestrel on the
+wire: accepted. No rule changes.
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The proposal refuses the broad catch, any `IOException` while the request is not aborted, as racing a client gone; that costs nothing, since a FIN already gets a 400 and a 400 to a reset socket goes nowhere. The broad catch's real cost is its scope: the transport's catch spans the answer's write, the gateway's the body's read alone. Keep the transport narrow, take the broad catch at the gateway, and have the row say that the C# test holds Kestrel's undocumented shape. | **Accepted.** Verified on the wire: Kestrel throws `IOException: Bad chunk size data.` with an inner `OverflowException`; the transport's catch reads any `IOException` as a client gone across the whole exchange, the answer's write included; the gateway's outer catch does the same, and its body read catches `BadHttpRequestException` alone. The transport filters on the inner `OverflowException`; the gateway's body read catches any `IOException` while the request is not aborted. The platform row names its test as the one that holds Kestrel's shape. |
