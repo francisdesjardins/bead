@@ -868,25 +868,33 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Cancels_a_call_waiting_once_throwing_and_reserving_its_call_id_on_its_connection_alone()
     {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
+        foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
+        {
+            foreach (var requestLength in new[] { 0, 1 })
+            {
+                var client = new Peer(side);
+                var callId = side == RouterSide.Client ? 1u : 2u;
+                using var core = client.Core;
+                var asked = client.Request(new byte[requestLength], TimeSpan.FromSeconds(5));
 
-        await client.Settle();
-        client.Core.Cancel(new CallAddress(1, Handle));
-        client.Core.Cancel(new CallAddress(1, Handle));
-        await client.Settle();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        Assert.Single(client.Sent, (envelope) =>
-        {
-            return envelope.Header is CancelHeader;
-        });
-        await client.Deliver(ResultOf(1));
-        Assert.Empty(client.Reports);
-        await client.Deliver(ResultOf(1), "other");
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
+                await client.Settle();
+                client.Core.Cancel(new CallAddress(callId, Handle));
+                client.Core.Cancel(new CallAddress(callId, Handle));
+                await client.Settle();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                {
+                    return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+                });
+                Assert.Single(client.Sent, (envelope) =>
+                {
+                    return envelope.Header is CancelHeader;
+                });
+                await client.Deliver(ResultOf(callId));
+                Assert.Empty(client.Reports);
+                await client.Deliver(ResultOf(callId), "other");
+                Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
+            }
+        }
     }
 
     [Fact]
