@@ -15,6 +15,109 @@ namespace Bead.Tests;
 public sealed partial class RouterServerTests : IDisposable
 {
     [Fact]
+    public async Task Ask_answer_subscribe_notify_unsubscribe_and_command_each_other_over_the_wire()
+    {
+        await using var transport = new Bead.Transport.WebSockets.WebSocketTransportServer();
+        var loop = new SerialScheduler();
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)7, 16).ToArray());
+        using var server = new RouterServer(transport, new RouterServerOptions
+        {
+            SessionTokenOf = (_) => { return token; },
+            Scheduler = loop,
+            ResolverScheduler = loop,
+        });
+        await using var client = new Bead.Transport.WebSockets.WebSocketClient();
+        var services = new ServiceManager(server);
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var traces = new System.Collections.Concurrent.ConcurrentQueue<(DebugDirection Direction, EnvelopeKind Kind, uint CallId, CredentialScheme? Scheme)>();
+        var heard = System.Threading.Channels.Channel.CreateUnbounded<string>();
+        var dropped = new TaskCompletionSource<Procedure>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unsubscribed = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var ping = Echo with { ProcedureId = 40, ProcedureName = "ping" };
+        INotificationResolver<string>? news = null;
+
+        server.Error += (reason, _) => { reports.Enqueue(reason); };
+        client.Router.Error += reports.Enqueue;
+        transport.Error += (reason, _) => { reports.Enqueue(reason); };
+        transport.Close += (_, _) => { closed.TrySetResult(); };
+        client.Router.Debug += (direction, envelope) =>
+        {
+            var credential = envelope.Header switch
+            {
+                RequestHeader request => request.Credential,
+                ResultHeader result => result.Credential,
+                FailureHeader failure => failure.Credential,
+                _ => null,
+            };
+            traces.Enqueue((direction, envelope.Header.Kind, envelope.Header.CallId, credential?.Scheme));
+        };
+        services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            asked.TrySetResult(request.ConnectionHandle);
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        news = services.GetNotificationResolver(News, new NotificationResolverDependencies<string, string, string> { Serializer = Text })(async (_, response) =>
+        {
+            await response.Answer((await response.RegisterNotification()).ToString(CultureInfo.InvariantCulture));
+            await news!.Notify("first");
+            firstSent.TrySetResult();
+        });
+        services.GetRequestResolver(UnsubscribeProcedure, new RequestResolverDependencies<string, string> { Serializer = Text })(async (request, response) =>
+        {
+            var id = uint.Parse(request.Payload, CultureInfo.InvariantCulture);
+            var removed = await server.Unsubscribe(new CallAddress(id, request.ConnectionHandle));
+            await response.Answer(removed.ToString(CultureInfo.InvariantCulture));
+        });
+        client.Services.GetCommandResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) => { return response.Answer("pong"); });
+
+        var bound = await transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+        await client.Connect(new Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled });
+        Assert.Equal("HI", await client.Services.GetRequest(Echo, new RequestDependencies<string, string> { Serializer = Text })("hi")().WaitAsync(Patience, Cancelled));
+        Assert.Equal(token, client.Router.SessionToken);
+
+        var unsubscribe = client.Services.GetRequest(UnsubscribeProcedure, new RequestDependencies<string, string> { Serializer = Text });
+        var notification = client.Services.GetNotification(News, new NotificationDependencies<string, string, string>
+        {
+            Serializer = Text,
+            Unsubscribe = async (id, response) =>
+            {
+                unsubscribed.Enqueue($"{id} {response} {await unsubscribe(id.ToString(CultureInfo.InvariantCulture))()}");
+            },
+        });
+        var registration = await notification.Register("subscribe", (payload) =>
+        {
+            Assert.True(heard.Writer.TryWrite(payload));
+            return Task.CompletedTask;
+        })().WaitAsync(Patience, Cancelled);
+
+        await firstSent.Task.WaitAsync(Patience, Cancelled);
+        await news.Notify("flash").WaitAsync(Patience, Cancelled);
+        Assert.Equal("first", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("flash", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("pong", await services.GetCommand(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
+            new CommandOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
+        await registration.Unregister().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["3 3 True"], unsubscribed);
+        Assert.Equal(0, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Contains((DebugDirection.Rx, EnvelopeKind.Request, 2u, (CredentialScheme?)null), traces);
+        Assert.Equal([(DebugDirection.Rx, EnvelopeKind.Result, 1u, (CredentialScheme?)CredentialScheme.Opaque)], traces.Where((entry) => { return entry.Scheme is not null; }));
+
+        client.Services.Dropped += (procedure, _) => { dropped.TrySetResult(procedure); };
+        await notification.Register("subscribe", (_) => { return Task.CompletedTask; })().WaitAsync(Patience, Cancelled);
+        Assert.Equal(1, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Contains((DebugDirection.Tx, EnvelopeKind.Request, 7u, (CredentialScheme?)null), traces);
+        await client.Disconnect().WaitAsync(Patience, Cancelled);
+        Assert.Equal(News, await dropped.Task.WaitAsync(Patience, Cancelled));
+        await closed.Task.WaitAsync(Patience, Cancelled);
+        await loop.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal(0, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Empty(reports);
+    }
+
+    [Fact]
     public async Task A_listener_s_panic_is_reported_and_the_transport_goes_on()
     {
         await using var link = await ServiceLink.Open();
@@ -554,38 +657,49 @@ public sealed partial class RouterServerTests : IDisposable
             }));
     }
 
-    [Fact]
-    public async Task Requests_are_asked_their_admission_once_on_their_header_before_their_payload_is_read()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Requests_are_asked_their_admission_once_on_their_header_before_their_payload_is_read(bool sequential)
     {
-        var asked = new List<uint>();
+        var asked = new List<AdmissionRequest>();
+        var decoded = new List<ReadOnlyMemory<byte>>();
 
         Start();
-        Services.GetRequestResolver(
-            Echo,
-            new RequestResolverDependencies<string, string>
+        Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+        {
+            Serializer = new NonEmptyText(decoded.Add),
+            BeforeRequest = new BeforeRequest((request) =>
             {
-                Serializer = new NonEmptyText(),
-                BeforeRequest = new BeforeRequest((request) =>
-                {
-                    asked.Add(request.Header.CallId);
+                asked.Add(request);
+                return request.Header.CallId == 31;
+            }),
+        })((request, response) => { return response.Answer($"{request.Payload}!"); });
 
-                    return request.Header.CallId == 31;
-                }),
-            })((request, response) =>
+        if (sequential)
+        {
+            Deliver(First, RequestOf(31, payload: "hi"));
+            await Settle();
+            Deliver(First, RequestOf(33));
+        }
+        else
+        {
+            _scheduler.Post(() =>
             {
-                return response.Answer($"{request.Payload}!");
+                Deliver(First, RequestOf(31, payload: "hi"));
+                Deliver(First, RequestOf(33));
             });
-
-        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
-        Deliver(First, RequestOf(31, payload: "hi"));
+        }
         await Settle();
+        Assert.Equal([31u, 33u], asked.Select((request) => { return request.Header.CallId; }));
+        Assert.Equal([First, First], asked.Select((request) => { return request.ConnectionHandle; }));
+        Assert.Equal(["6869"], decoded.Select((bytes) => { return Convert.ToHexString(bytes.Span); }));
+        string[] expected = sequential
+            ? ["first result 31 hi!", "first failure 33 AccessDenied"]
+            : ["first failure 33 AccessDenied", "first result 31 hi!"];
 
-        // refused before it is read: undecodable, it is refused all the same
-        Deliver(First, RequestOf(33));
-        await Settle();
-
-        Assert.Equal([31u, 33u], asked);
-        Assert.Equal(["first result 31 hi!", "first failure 33 AccessDenied"], SentSince());
+        Assert.Equal(expected, SentSince());
+        Assert.Empty(_errors);
     }
 
     [Fact]
@@ -831,58 +945,79 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Same(failure, _errors[0].Reason);
     }
 
-    [Fact]
-    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does(bool sequential)
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var other = sequential ? SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA") : SessionToken.FromBytes(Enumerable.Repeat((byte)2, 16).ToArray());
         var order = new List<string>();
+        var admissions = new List<CallSession?>();
+        var callbacks = new List<CallSession?>();
+        var without = sequential ? 1u : 31u;
+        var withSession = sequential ? 3u : 33u;
+        var refused = sequential ? 5u : 35u;
 
         Start(new RouterServerOptions
         {
-            // none for a request presenting none, the connection's for one presenting its token, and
-            // none for one whose OPAQUE does not hold
             SessionOf = (request, signal) =>
             {
                 var (connectionHandle, header) = (request.ConnectionHandle, request.Header);
-
                 order.Add($"session {NameOf(connectionHandle)} {header.CallId} {(signal.IsCancellationRequested ? "aborted" : "live")}");
-
                 return ValueTask.FromResult(header.Credential is null ? null : CallSession.ConnectionSessionOf(header.Credential, (token, "ada")));
             },
         });
-        Services.GetRequestResolver(
-            Echo,
-            new RequestResolverDependencies<string, string>
+        Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+        {
+            Serializer = Text,
+            BeforeRequest = new BeforeRequest((request) =>
             {
-                Serializer = Text,
-                BeforeRequest = new BeforeRequest((request) =>
-                {
-                    order.Add($"admit {request.Header.CallId} {request.Session?.Data ?? "none"}");
+                order.Add($"admit {request.Header.CallId} {request.Session?.Data ?? "none"}");
+                admissions.Add(request.Session);
+                return true;
+            }),
+        })((request, response) =>
+        {
+            order.Add($"callback {request.Header.CallId} {request.Session?.Data ?? "none"}");
+            callbacks.Add(request.Session);
+            return response.Answer("ok");
+        });
 
-                    return true;
-                }),
-            })((request, response) =>
+        if (sequential)
+        {
+            Deliver(First, RequestOf(without));
+            await Settle();
+            Deliver(First, Presenting(RequestOf(withSession), token));
+            await Settle();
+            Deliver(First, Presenting(RequestOf(refused), other));
+        }
+        else
+        {
+            _scheduler.Post(() =>
             {
-                order.Add($"callback {request.Header.CallId} {request.Session?.Data ?? "none"}");
-
-                return response.Answer("ok");
+                Deliver(First, RequestOf(without));
+                Deliver(First, Presenting(RequestOf(withSession), token));
+                Deliver(First, Presenting(RequestOf(refused), other));
             });
-        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
-        Deliver(First, RequestOf(1));
+        }
         await Settle();
-        Deliver(First, Presenting(RequestOf(3), token));
-        await Settle();
-        Deliver(First, Presenting(RequestOf(5), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
-        await Settle();
-
-        Assert.Equal(
-            [
-                "session first 1 live", "admit 1 none", "callback 1 none",
-                "session first 3 live", "admit 3 ada", "callback 3 ada",
-                "session first 5 live",
-            ],
-            order);
-        Assert.Equal(["first result 1 ok", "first result 3 ok", "first failure 5 SessionRequired"], SentSince());
+        Assert.Equal(sequential ? new[]
+        {
+            $"session first {without} live", $"admit {without} none", $"callback {without} none",
+            $"session first {withSession} live", $"admit {withSession} ada", $"callback {withSession} ada",
+            $"session first {refused} live",
+        } : [
+            $"session first {without} live", $"admit {without} none",
+            $"session first {withSession} live", $"admit {withSession} ada", $"session first {refused} live",
+            $"callback {without} none", $"callback {withSession} ada",
+        ], order);
+        Assert.NotNull(admissions[1]);
+        Assert.Same(admissions[1], callbacks[1]);
+        Assert.Equal(sequential
+            ? new[] { $"first result {without} ok", $"first result {withSession} ok", $"first failure {refused} SessionRequired" }
+            : [$"first failure {refused} SessionRequired", $"first result {without} ok", $"first result {withSession} ok"], SentSince());
+        Assert.Empty(_errors);
     }
 
     [Fact]
@@ -2301,9 +2436,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Equal(new ResultHeader { CallId = 9, Credential = Token }, _transport.Sent[0].Envelope.Header);
     }
 
-    // the TypeScript side links a WebSocket client and server over the wire, both sockets real;
-    // the test project references no transport, so a client's router is linked to this server's in
-    // memory
+    // a scripted client and server linked in memory
     [Fact]
     public async Task A_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_command_each_other_over_a_link()
     {
@@ -2932,10 +3065,12 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     // text, in UTF-8, either way, which reads no empty payload
-    private sealed class NonEmptyText : IRequestSerializerServer<string, string>
+    private sealed class NonEmptyText(Action<ReadOnlyMemory<byte>>? decoded = null) : IRequestSerializerServer<string, string>
     {
         public string Decode(ReadOnlyMemory<byte> request)
         {
+            decoded?.Invoke(request);
+
             if (request.IsEmpty)
             {
                 throw new FormatException("no text");
