@@ -270,6 +270,17 @@ public sealed class HappyEyeballsTests
         listener.Start();
 
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        // given up before it began: no connection made, and no socket stays
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", port), new HappyEyeballsOptions
+            {
+                CancellationToken = new CancellationToken(canceled: true),
+            }).WaitAsync(Patience, Cancelled);
+        });
+        Assert.False(listener.Pending());
+
         var clock = new FakeTimeProvider();
         var givenUp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
