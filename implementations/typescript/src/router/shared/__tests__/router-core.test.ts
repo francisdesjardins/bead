@@ -6307,3 +6307,28 @@ test.describe('a linked client and server core', () => {
     expect(link.received).toEqual([]);
   });
 });
+
+test('sends nothing of a call whose timer its clock cannot arm, no request and no cancel', async () => {
+  for (const size of [8, 200]) {
+    const clock = createTestClock();
+    const broken = new Error('the call timer broke');
+    const { port, sent } = createPort();
+
+    clock.setTimeout = () => {
+      throw broken;
+    };
+    using core = createRouterCore(port, {
+      clock,
+      limits: { ...limits, transferInactivityTimeout: 30_000 },
+    });
+    const call = core.request(new Uint8Array(size).fill(7), {
+      connectionHandle: 'a',
+      options: { timeout: 60_000 },
+      procedure: echo,
+    });
+
+    await expect(call).rejects.toBe(broken);
+    await sleep(0);
+    expect(sent).toEqual([]);
+  }
+});
