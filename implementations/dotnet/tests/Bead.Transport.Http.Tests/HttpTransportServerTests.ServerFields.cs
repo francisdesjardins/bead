@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 
@@ -13,6 +14,54 @@ namespace Bead.Transport.Http.Tests;
 /// </summary>
 public sealed partial class HttpTransportServerTests
 {
+    [Fact]
+    public async Task Keeps_an_HTTP_2_session_past_headers_timeout_while_an_answer_is_under_way()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        using var http = SecureClient();
+        using var drew = await Fetch(http, Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20));
+
+        Assert.Equal(201, (int)drew.StatusCode);
+        var token = HeaderOf(drew, HttpTransport.ConnectionTokenHeader);
+        var handle = Assert.Single(_server.ConnectionHandles);
+        var asking = Fetch(http, Over(PostOf(SecureUrl, (token, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
+        await Until(() => { return _messages.Count == 1; });
+        Assert.Single(_messages);
+        // * the answer waits past the head's timeout many times over, and its linger
+        await Task.Delay(TimeSpan.FromSeconds(3), Cancelled);
+        Assert.False(asking.IsCompleted);
+        var answer = EnvelopeOf(EnvelopeKind.Result, 1);
+        await _server.Send(new TransportMessage(answer, false), handle);
+        using var asked = await asking;
+        Assert.Equal((200, HttpVersion.Version20), ((int)asked.StatusCode, asked.Version));
+        Assert.Equal(answer, await BytesOf(asked));
+    }
+
+    [Fact(Skip = "divergence: HTTP/2 sessions with no preface or no head stay open past HeadersTimeout")]
+    public async Task Ends_an_HTTP_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        byte[] settled = [.. Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"), 0, 0, 0, 4, 0, 0, 0, 0, 0];
+        byte[][] prefixes = [[], settled, [.. settled, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0x82]];
+        var wires = new List<TlsWire>();
+        try
+        {
+            foreach (var prefix in prefixes)
+            {
+                wires.Add(await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2)));
+            }
+            var endings = await Task.WhenAll(wires.Select((wire, index) =>
+            {
+                return wire.EndsAfterRaw(prefixes[index], TimeSpan.FromSeconds(5));
+            }));
+            Assert.Equal([true, true, true], endings);
+        }
+        finally
+        {
+            foreach (var wire in wires) { await wire.DisposeAsync(); }
+        }
+    }
+
     [Fact]
     public async Task Checks_every_request_field_for_visible_bytes_and_edge_whitespace_before_admission()
     {
