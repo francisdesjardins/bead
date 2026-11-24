@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The workflow that implements a settled design is `bead-implement-every-side`, and it runs the
+  Rust side by default, beside the spec, TypeScript and C#.
+
 - The guides for teams take beadc's published image: getting started verifies 0.16.0's with `gh
   attestation verify` and `cosign verify`, pins it by its digest and builds its scenario with it,
   and shows the two timeouts of a call whose resolver waits on a person.

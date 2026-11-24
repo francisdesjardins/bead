@@ -1,7 +1,7 @@
 export const meta = {
-  name: 'bead-implement-both-sides',
+  name: 'bead-implement-every-side',
   description:
-    'Implement a settled design on both sides: the spec and its conformance first, then TypeScript and C# together (or the stages a design names), then the integration with every gate and a commit plan or a series of commits',
+    'Implement a settled design on every side: the spec and its conformance first, then TypeScript, C# and Rust side by side (or the stages a design names), then the integration with every gate and a commit plan or a series of commits',
   whenToUse:
     'Once a design is settled (a round of the Tenth Man answered, its decisions taken by the user), on its branch, checked out',
   phases: [
@@ -20,8 +20,8 @@ export const meta = {
 //   and its own; its `rationale.md` beside it, the reasons and the Tenth Man's table, read where a
 //   stage needs a reason, and whole by the spec's, which writes the record; a design of one file,
 //   without those sections, is read for what it holds;
-// - parts: the stages to run, ['spec', 'typescript', 'csharp'] by default; 'rust', named here
-//   where the design reaches the Rust side, has a default task as the three do;
+// - parts: the stages to run, ['spec', 'typescript', 'csharp', 'rust'] by default, every side the
+//   protocol has; a design that leaves one out names the others, and says why;
 // - stages: { <key>: { task, effort? } }, a stage of the design's own (a folder the four do not
 //   cover) or one of the four replaced; each task says which files are the stage's alone;
 // - first: the stages that run before the others, in order, ['spec'] by default;
@@ -58,7 +58,7 @@ const STAGES = args.stages || {};
 // ! every stage `stages` names runs, whether or not `parts` names it: a stage of the design's own
 // left out of `parts` once ran nowhere, and the integration wrote it in its place
 const PARTS = [
-  ...new Set([...(args.parts || ['spec', 'typescript', 'csharp']), ...Object.keys(STAGES)]),
+  ...new Set([...(args.parts || ['spec', 'typescript', 'csharp', 'rust']), ...Object.keys(STAGES)]),
 ];
 const OUT = `${SCRATCH}/${SLUG}`;
 const SUITES = args.suites || 'local';
