@@ -211,6 +211,91 @@ const FROM = { address: host, port: expect.any(Number) as unknown };
 // where a scripted server's HTTP server listens: for real, on a port the system picked
 const SCRIPTED = { address: host, findOpenPort: true };
 
+test('settles a send after its connection ends without writing or holding bytes', async () => {
+  const fake = createFakeWebSocketServer();
+  await using server = createWebSocketTransportServer({
+    heartbeat: Infinity,
+    WebSocketServer: fake.FakeWebSocketServer,
+  });
+  const starting = server.start(SCRIPTED);
+  fake.instances[0]?.emit('listening');
+  await starting;
+  const socket = createFakeSocket();
+  const handle = fake.connect(socket, { server });
+  (socket as { readyState: number }).readyState = 3;
+  socket.hear('close', 1006);
+
+  await server.send({ data: Uint8Array.of(1, 2, 3) }, handle);
+  await server.close(handle);
+  expect(socket.sent).toEqual([]);
+  expect(socket.wasTerminated).toBe(false);
+  expect(server.gauges().counts['unsentBytes']).toBe(0);
+});
+
+test('ends a read without delivering data once the socket is closed or closing', async () => {
+  const fake = createFakeWebSocketServer();
+  await using server = createWebSocketTransportServer({
+    heartbeat: Infinity,
+    WebSocketServer: fake.FakeWebSocketServer,
+  });
+  const starting = server.start(SCRIPTED);
+  fake.instances[0]?.emit('listening');
+  await starting;
+  const socket = createFakeSocket({ onClose: 'ignore' });
+  const handle = fake.connect(socket, { server });
+  const messages: unknown[] = [];
+  server.on('message', (message) => {
+    messages.push(message);
+  });
+  const closing = server.close(handle);
+  (socket as { readyState: number }).readyState = 2;
+  socket.hear('message', Uint8Array.of(1, 2), true);
+  (socket as { readyState: number }).readyState = 3;
+  socket.hear('close', 1000);
+  await closing;
+  await server.send({ data: Uint8Array.of(3) }, handle);
+
+  expect(messages).toEqual([]);
+  expect(socket.closeCodes).toEqual([1000]);
+  expect(socket.sent).toEqual([]);
+  expect(socket.wasTerminated).toBe(false);
+  expect(server.gauges().counts['unsentBytes']).toBe(0);
+});
+
+test('settles a send after its queue bound drops the socket without aborting twice', async () => {
+  const fake = createFakeWebSocketServer();
+  await using server = createWebSocketTransportServer({
+    heartbeat: Infinity,
+    maximumUnsentBytes: 65_536,
+    WebSocketServer: fake.FakeWebSocketServer,
+  });
+  const starting = server.start(SCRIPTED);
+  fake.instances[0]?.emit('listening');
+  await starting;
+  const socket = createFakeSocket();
+  const terminate = socket.terminate.bind(socket);
+  let drops = 0;
+  socket.terminate = () => {
+    drops += 1;
+    terminate();
+  };
+  const handle = fake.connect(socket, { server });
+  const errors: string[] = [];
+  server.on('error', (error) => {
+    errors.push(error.message);
+  });
+
+  await server.send({ data: new Uint8Array(65_537) }, handle);
+  await server.send({ data: Uint8Array.of(1) }, handle);
+
+  expect(drops).toBe(1);
+  expect(socket.sent).toEqual([]);
+  expect(server.gauges().counts['unsentBytes']).toBe(0);
+  expect(errors).toEqual([
+    `${handle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+  ]);
+});
+
 // the key of RFC 6455 §1.3's handshake
 const KEY = 'dGhlIHNhbXBsZSBub25jZQ==';
 
@@ -2353,7 +2438,7 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
     await server.stop();
   });
 
-  test('drops a connection that never answers its close once close timeout has passed, telling no error', async () => {
+  test('drops a connection that never answers its close once the timeout passed, telling no error', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({
       closeTimeout: 20,
@@ -4565,6 +4650,146 @@ test.describe('WebSocketTransportServer, a message partway', () => {
   const chargedOf = (server: WebSocketTransportServer): number | undefined => {
     return server.gauges().counts['messageBytes'];
   };
+
+  test('fails a peer’s close of a status no end sends as a protocol error answered 1002', async () => {
+    await using started = await startDated({ heartbeat: Infinity, closeTimeout: 100 });
+    const errors: Error[] = [];
+    started.server.on('error', (error) => {
+      errors.push(error);
+    });
+    for (const status of [1005, 1006, 999, 1002]) {
+      const before = errors.length;
+      const { exchange } = await connectOn(started);
+      const closed = nextServerEvent(started.server, 'close');
+      try {
+        exchange.send([
+          { fin: true, opcode: OPCODES.CLOSE, payload: Uint8Array.of(status >> 8, status & 0xff) },
+        ]);
+        expect(await exchange.next(2_000)).toEqual({ close: 1002 });
+        exchange.end();
+        await closed;
+        expect(errors.length - before).toBe(status === 1002 ? 0 : 1);
+        if (status !== 1002) {
+          expect(errors.at(-1)).toMatchObject({ code: 'WS_ERR_INVALID_CLOSE_CODE' });
+        }
+      } finally {
+        exchange.destroy();
+      }
+    }
+  });
+
+  test('takes whatever its hosts, the hosts every server takes, and any page of its own, and refuses 403 any other host, an empty one and none, before its method and its upgrade', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    for (const authority of ['bead.test', 'BEAD.test:8080', '127.0.0.1', 'localhost', '[::1]']) {
+      const { text } = await answerOf(
+        started.port,
+        requestOf('GET / HTTP/1.1', [`Host: ${authority}`])
+      );
+      expect(text.split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
+    }
+    await expectAnswered(started.port, {
+      answer: refusedWith('403 Forbidden', { refusal: 'host-refused' }),
+      requests: [
+        requestOf('POST / HTTP/1.1', ['Host: elsewhere.test', 'Upgrade']),
+        requestOf('GET / HTTP/1.1', ['Host: ']),
+      ],
+    });
+  });
+
+  test('fails a text message or a close’s reason that is no UTF-8, answered 1007', async () => {
+    await using started = await startDated({ heartbeat: Infinity, closeTimeout: 100 });
+    const heard = heardOf(started.server);
+    const errors: Error[] = [];
+    started.server.on('error', (error) => {
+      errors.push(error);
+    });
+    for (const [opcode, payload] of [
+      [OPCODES.TEXT, [0xff, 0xfe]],
+      [OPCODES.CLOSE, [0x03, 0xe8, 0xff, 0xfe]],
+    ] as const) {
+      const { exchange } = await connectOn(started);
+      const closed = nextServerEvent(started.server, 'close');
+      try {
+        exchange.send([{ fin: true, opcode, payload: Uint8Array.from(payload) }]);
+        expect(await exchange.next(2_000)).toEqual({ close: 1007 });
+        exchange.end();
+        expect((await closed)[0]).toBe(false);
+        expect(errors.at(-1)).toMatchObject({ code: 'WS_ERR_INVALID_UTF8' });
+        expect(heard).toEqual([]);
+      } finally {
+        exchange.destroy();
+      }
+    }
+  });
+
+  test('discards more data after a message passes its bound before the peer answers its close', async () => {
+    await using started = await startDated({
+      heartbeat: Infinity,
+      maxPayload: 64,
+      closeTimeout: 100,
+    });
+    const heard = heardOf(started.server);
+    const errors: Error[] = [];
+    started.server.on('error', (error) => {
+      errors.push(error);
+    });
+    const { exchange } = await connectOn(started);
+    const closed = nextServerEvent(started.server, 'close');
+    try {
+      exchange.write(
+        Buffer.concat([
+          maskedFrame(OPCODES.BINARY, new Uint8Array(65)),
+          maskedFrame(OPCODES.BINARY, Uint8Array.of(1)),
+        ])
+      );
+      expect(await exchange.next(2_000)).toEqual({ close: 1009 });
+      exchange.end();
+      expect((await closed)[0]).toBe(false);
+      expect(heard).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.message).toContain('maximumMessageBytes, 64 bytes');
+    } finally {
+      exchange.destroy();
+    }
+  });
+
+  test('shuts its write side once its failing close went so a peer that answers and waits ends it', async () => {
+    await using started = await startDated({
+      heartbeat: Infinity,
+      maxPayload: 64,
+      closeTimeout: Infinity,
+    });
+    const connection = nextServerEvent(started.server, 'connection');
+    const socket = connectTcp({ allowHalfOpen: true, host, port: started.port });
+    const received: Buffer[] = [];
+    socket.on('data', (chunk: Buffer) => {
+      received.push(chunk);
+    });
+    socket.on('error', () => {});
+    const ended = once(socket, 'end');
+    socket.write(upgradeRequest());
+    const [, handle] = await connection;
+    const closed = nextServerEvent(started.server, 'close');
+    const heard = heardOf(started.server);
+    const errors: Error[] = [];
+    started.server.on('error', (error) => {
+      errors.push(error);
+    });
+    try {
+      socket.write(maskedFrame(OPCODES.BINARY, new Uint8Array(65)));
+      await ended;
+      expect(closeCodeOf(Buffer.concat(received))).toBe(1009);
+      socket.end(maskedFrame(OPCODES.CLOSE, Uint8Array.of(0x03, 0xf1)));
+
+      expect(await closed).toEqual([false, handle]);
+      expect(framesOf(Buffer.concat(received))).toEqual([[0x88, [0x03, 0xf1]]]);
+      expect(heard).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.message).toContain('maximumMessageBytes, 64 bytes');
+    } finally {
+      socket.destroy();
+    }
+  });
 
   // a binary frame of `bytes` bytes, whole or a first fragment, a client's, masked
   const binaryOf = (
