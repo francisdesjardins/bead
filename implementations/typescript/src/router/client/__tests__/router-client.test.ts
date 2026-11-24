@@ -3900,3 +3900,84 @@ test('fails a result that does not decode here as undecodable', async () => {
   });
   expect(reported).toEqual([]);
 });
+
+test('answers the command its server asks it on an even call id', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const seen: unknown[] = [];
+
+  router.registerResolver(
+    Object.assign(async (props: IRequestResolverProps<'server'>) => {
+      seen.push({ connectionHandle: props.connectionHandle, payload: props.payload });
+
+      await router.respond({ payload: Uint8Array.of(7) }, props);
+    }, service)
+  );
+
+  deliver({
+    header: requestHeaderOf(30),
+    kind: EnvelopeKind.REQUEST,
+    payload: Uint8Array.of(3),
+  });
+  await sleep(0);
+
+  expect(seen).toEqual([{ connectionHandle: 'server', payload: Uint8Array.of(3) }]);
+  expect(sent).toEqual([
+    {
+      header: { callId: 30, kind: EnvelopeKind.RESULT },
+      kind: EnvelopeKind.RESULT,
+      payload: Uint8Array.of(7),
+    },
+  ]);
+
+  const pipe = createPipedTransports({ connectionHandle: 'type=MEMORY;ip=local;ordinal=1' });
+  using server = createRouterServer(pipe.server);
+  using client = createRouterClient(pipe.client);
+  const json = PAYLOAD_CODECS.json;
+  const ask: IProcedure = {
+    serviceId: 1,
+    procedureId: 8,
+    procedureName: 'ask',
+    serviceRevision: 1,
+  };
+  const clockOf: IProcedure = {
+    serviceId: 1,
+    procedureId: 9,
+    procedureName: 'clock',
+    serviceRevision: 1,
+  };
+  const serverServices = createServiceManager(server);
+  const clientServices = createServiceManager(client);
+  const command = serverServices.getCommand(clockOf, { serializer: json });
+  const received: number[] = [];
+  const reports: unknown[] = [];
+
+  server.on('error', (error) => {
+    reports.push(error);
+  });
+  client.on('error', (error) => {
+    reports.push(error);
+  });
+  serverServices.getRequestResolver(ask, { serializer: json })(
+    async ({ connectionHandle }, response) => {
+      return response(
+        await command('What time is it where you are?')({ connectionHandle, timeout: 1_000 })
+      );
+    }
+  );
+  clientServices.getCommandResolver(clockOf, { serializer: json })((request, response) => {
+    expect(request.payload).toBe('What time is it where you are?');
+    return response('noon');
+  });
+  client.on('debug', ({ direction, header }) => {
+    if (direction === 'rx' && header.kind === EnvelopeKind.REQUEST) {
+      received.push(header.callId);
+    }
+  });
+  pipe.open();
+  await expect(clientServices.getRequest(ask, { serializer: json })(null)(options)).resolves.toBe(
+    'noon'
+  );
+  expect(received).toEqual([2]);
+  expect(reports).toEqual([]);
+});
