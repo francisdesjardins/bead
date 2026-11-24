@@ -15,6 +15,32 @@ namespace Bead.Tests;
 public sealed partial class RouterServerTests : IDisposable
 {
     [Fact]
+    public async Task A_listener_s_panic_is_reported_and_the_transport_goes_on()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new InvalidOperationException("this listener breaks, on purpose");
+        var reported = new TaskCompletionSource<(Exception Reason, string ConnectionHandle)>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        link.Server.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        link.Transport.Message += (_, _) => { throw broken; };
+        link.Transport.Error += (reason, connectionHandle) =>
+        {
+            reported.TrySetResult((reason, connectionHandle));
+        };
+
+        Assert.Equal("hi", await link.Client.Services.GetRequest(Echo, new RequestDependencies<string, string> { Serializer = Text })("hi")().WaitAsync(Patience, Cancelled));
+
+        var failure = await reported.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Same(broken, failure.Reason);
+        Assert.Equal(ServiceLink.Handle, failure.ConnectionHandle);
+        Assert.Empty(link.Reported);
+    }
+
+    [Fact]
     public async Task A_token_provider_that_panics_fails_only_its_answer_and_the_next_answer_can_announce()
     {
         var called = false;
