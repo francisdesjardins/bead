@@ -5342,9 +5342,13 @@ test.describe('createRouterCore', () => {
       expect(codesOf(reported)).toEqual([['failed behind its answer', 'a']]);
     });
 
-    test('free the call of an answer that could not go out, so its call id opens again', async () => {
-      for (const message of ['the transport is closing', 'the transport refused the result']) {
-        const { port, reported } = createPort();
+    test('an answer whose send panics fails as its transport’s throw would, and its call id opens again', async () => {
+      for (const message of [
+        'the transport is closing',
+        'the transport refused the result',
+        'the transport breaks',
+      ]) {
+        const { port, reported, sent } = createPort();
         const seen: IRequestResolverProps<Handle>[] = [];
         let isRefusing = true;
         const refused = new Error(message);
@@ -5386,7 +5390,18 @@ test.describe('createRouterCore', () => {
         );
         await sleep(0);
 
-        expect(seen).toHaveLength(2);
+        expect(
+          seen.map(({ header }) => {
+            return header.callId;
+          })
+        ).toEqual([1, 1]);
+        await answerOf({ core, seen }, { index: 1, payload: Uint8Array.of(2) });
+        expect(sent).toHaveLength(1);
+        expect(sent[0]?.envelope).toMatchObject({
+          kind: EnvelopeKind.RESULT,
+          header: { callId: 1 },
+          payload: Uint8Array.of(2),
+        });
         expect(reported).toEqual([]);
       }
     });
