@@ -1612,6 +1612,95 @@ async fn stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_soc
     started.stop().await;
 }
 
+// spec 15.12: a listen's answer frees its place even when the read stop hides its client's close
+#[tokio::test]
+async fn frees_a_listen_within_maximum_wait_once_its_client_leaves_with_requests_pipelined_past_the_read_stop()
+ {
+    use tokio::io::AsyncWriteExt as _;
+
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started(&HttpTransportServerOptions {
+        clock: Some(Arc::<SteppingClock>::clone(&clock)),
+        maximum_wait: Some(Duration::from_secs(1)),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = &drawn.head.fields[CONNECTION_TOKEN_HEADER];
+    let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+
+    socket
+        .write_all(
+            head_of(
+                ("GET", "/bead"),
+                (
+                    port,
+                    &[
+                        &format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+                        &format!("{AFTER_HEADER}: 0"),
+                        &format!("{WAIT_HEADER}: 60000"),
+                    ],
+                ),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    until(|| started.server.gauges().unwrap().counts["listens"] == 1).await;
+    assert!(
+        clock.dues().contains(&Duration::from_secs(1)),
+        "maximumWait bounds its wait"
+    );
+    let batch =
+        core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), 1_000).collect::<String>();
+    let octets = taken(&mut socket, batch.as_bytes()).await;
+
+    assert!(
+        octets < MOST_TAKEN,
+        "{octets} octets taken before the read stop"
+    );
+    assert!(
+        is_kept(&mut socket).await,
+        "the held listen keeps its socket"
+    );
+    drop(socket);
+    clock.advance(Duration::from_secs(1)).await;
+    until(|| started.server.gauges().unwrap().counts["listens"] == 0).await;
+
+    let gauges = started.server.gauges().unwrap();
+
+    assert_eq!(
+        (
+            gauges.counts["connections"],
+            gauges.counts["waitingExchanges"],
+            gauges.counts["bodyBytes"]
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(gauges.anomalies, Vec::<String>::new());
+    assert_eq!(
+        listen_of(port, (token, (Some("0"), Some("0"))))
+            .await
+            .response(PATIENCE)
+            .await
+            .unwrap()
+            .head
+            .status,
+        204,
+        "a listen's place is available on the kept Bead connection"
+    );
+    started.stop().await;
+    assert_eq!(started.server.gauges().unwrap().counts["connections"], 0);
+}
+
 // spec 15.12; RFC 9112 §9.3
 #[tokio::test]
 async fn answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
