@@ -19,6 +19,16 @@ const until = async (holds: () => boolean): Promise<void> => {
 // definition
 
 test.describe('heartbeat', () => {
+  test('takes a duration a timer holds or never for none, and refuses zero and one past the longest timer', () => {
+    expect(assertHeartbeat(20)).toBe(20);
+    expect(assertHeartbeat(Infinity)).toBe(Infinity);
+    for (const heartbeat of [0, 2 ** 31]) {
+      expect(() => {
+        assertHeartbeat(heartbeat);
+      }).toThrow(/a heartbeat/u);
+    }
+  });
+
   test('drops an unanswered ping after a delayed beat without arming a timer for less than nothing', () => {
     for (const crossesDeadline of [false, true]) {
       const heard: string[] = [];
