@@ -45,6 +45,141 @@ public sealed partial class RouterCoreTests
         });
     }
 
+    private sealed record AnsweringCounts
+    {
+        public required int Started { get; init; }
+
+        public required string Seconds { get; init; }
+
+        public Dictionary<string, int> Endings { get; init; } = [];
+    }
+
+    private static void AssertAnsweringCounts(MetricsRegistry registry, AnsweringCounts counts)
+    {
+        const string Labels = "service=\"1\",procedure=\"echo\",type=\"request\"";
+        var expected = new List<string>();
+
+        if (counts.Started > 0)
+        {
+            expected.Add($"bead_server_call_started_total{{{Labels}}} {counts.Started}");
+        }
+
+        if (counts.Endings.Count > 0)
+        {
+            expected.Add($"bead_server_call_duration_seconds_count{{{Labels}}} {counts.Endings.Values.Sum()}");
+        }
+
+        if (counts.Seconds != "0")
+        {
+            expected.Add($"bead_server_call_duration_seconds_sum{{{Labels}}} {counts.Seconds}");
+        }
+
+        foreach (var (ending, count) in counts.Endings)
+        {
+            expected.Add($"bead_server_call_handled_total{{{Labels},outcome=\"{ending}\"}} {count}");
+        }
+
+        var actual = registry.Exposition().Text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where((line) =>
+        {
+            return line.StartsWith("bead_server_call_", StringComparison.Ordinal)
+                && line.Contains(Labels, StringComparison.Ordinal)
+                && !line.Contains("_bucket{", StringComparison.Ordinal)
+                && !line.EndsWith(" 0", StringComparison.Ordinal);
+        });
+
+        Assert.Equal(expected.Order(StringComparer.Ordinal), actual.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Counts_no_ending_for_an_absent_call_or_a_stale_header_on_a_replacement_call()
+    {
+        var registry = new MetricsRegistry();
+        var port = new CountedPort((RouterSide.Server, registry));
+        using var core = port.Core;
+        var resolver = new Held(core);
+
+        core.RegisterResolver(resolver);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 0, Seconds = "0" });
+        port.Deliver(new Envelope { Header = RequestOf(1) });
+        await port.Loop.WhenIdle();
+
+        var first = resolver.Requests[0].Header;
+
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget("b", first)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, first with { })).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 1, Seconds = "0" });
+        port.Deliver(new Envelope { Header = new CancelHeader { CallId = 1 } });
+        await port.Loop.WhenIdle();
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, first)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        port.Deliver(new Envelope { Header = RequestOf(1) });
+        await port.Loop.WhenIdle();
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, first)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(3))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        var replacement = resolver.Requests[1].Header;
+
+        Assert.Equal(1, core.Gauges().Counts["answeringCalls"]);
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 2, Seconds = "0", Endings = new() { ["cancelled"] = 1 } });
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, replacement)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, replacement)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Equal(0, core.Gauges().Counts["answeringCalls"]);
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 2, Seconds = "0", Endings = new() { ["cancelled"] = 1, ["result"] = 1 } });
+    }
+
+    [Fact]
+    public async Task Count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_as_it_is_taken_closed_with_its_connection_an_error_as_it_is_closed_unanswered()
+    {
+        var registry = new MetricsRegistry();
+        var port = new CountedPort((RouterSide.Server, registry));
+        using var core = port.Core;
+        var resolver = new Held(core);
+
+        core.RegisterResolver(resolver);
+
+        foreach (var (callId, connectionHandle) in new[] { (1u, Handle), (3u, Handle), (5u, "b"), (7u, Handle) })
+        {
+            core.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(callId) }), connectionHandle);
+        }
+
+        await port.Loop.WhenIdle();
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 4, Seconds = "0" });
+        await port.Clock.Advance(TimeSpan.FromMilliseconds(2));
+
+        var result = resolver.Requests.Single((request) => { return request.Header.CallId == 1; });
+        var resultTarget = new AnswerTarget(result.ConnectionHandle, result.Header);
+
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), resultTarget).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), resultTarget).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 4, Seconds = "0.002", Endings = new() { ["result"] = 1 } });
+        port.Deliver(new Envelope { Header = new CancelHeader { CallId = 3 } });
+        await port.Loop.WhenIdle();
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 4, Seconds = "0.004", Endings = new() { ["result"] = 1, ["cancelled"] = 1 } });
+        core.RejectPending("b closed", "b");
+        await port.Loop.WhenIdle();
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 4, Seconds = "0.006", Endings = new() { ["result"] = 1, ["cancelled"] = 1, ["closed"] = 1 } });
+
+        var unanswered = resolver.Requests.Single((request) => { return request.Header.CallId == 7; });
+        var broken = new IOException("the answer cannot be handed off");
+
+        port.Thrown = broken;
+        Assert.Same(broken, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(unanswered.ConnectionHandle, unanswered.Header)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }));
+        Assert.Equal(0, core.Gauges().Counts["answeringCalls"]);
+        AssertAnsweringCounts(registry, new AnsweringCounts { Started = 4, Seconds = "0.008", Endings = new() { ["result"] = 1, ["cancelled"] = 1, ["closed"] = 1, ["error"] = 1 } });
+    }
+
     // definition
 
     // debugging 9.2 and 9.4.21
