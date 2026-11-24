@@ -2262,6 +2262,28 @@ public sealed class HttpGatewayTests
                 $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: +2\r\nconnection: close\r\n\r\n{{}}"));
 
             Assert.Equal((200, "{}"), (answered.Status, answered.Body));
+
+            // * -0 frames an empty JSON body; its problem leaves the socket available for a canary
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(
+                $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: -0\r\n\r\n"));
+            var reader = new Exchanges.Reader(socket);
+            var head = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+            var body = await reader.ReadBody(head).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(400, head.Status);
+            Assert.Equal("application/problem+json", head.Fields["content-type"]);
+            Assert.Equal(157, body.Length);
+            Assert.DoesNotContain("close", head.Fields.GetValueOrDefault("connection", ""), StringComparison.OrdinalIgnoreCase);
+            using var problem = JsonDocument.Parse(body);
+
+            Assert.Equal("PAYLOAD_UNDECODABLE", problem.RootElement.GetProperty("title").GetString());
+            Assert.Equal(400, problem.RootElement.GetProperty("status").GetInt32());
+            await socket.SendAsync(Encoding.ASCII.GetBytes(
+                $"GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\n\r\n"), Cancelled);
+            var canary = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(200, canary.Status);
+            Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(await reader.ReadBody(canary).WaitAsync(Patience, Cancelled)));
         }
         finally
         {
