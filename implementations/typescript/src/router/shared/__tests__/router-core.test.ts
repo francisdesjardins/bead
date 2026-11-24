@@ -1649,71 +1649,97 @@ test.describe('createRouterCore', () => {
       });
     };
 
-    test('of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
-      const asked: string[] = [];
-      const sessionOf = ({ header }: ISessionRequest<Handle>) => {
-        asked.push(`resolve ${String(header.callId)}`);
-
-        return undefined;
-      };
-      const resolver = Object.assign(resolverOf(echo), {
-        admit: ({ header }: IAdmissionRequest<Handle>) => {
-          asked.push(`admit ${String(header.callId)}`);
+    test('a credential of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
+      for (const sourceOrder of [false, true]) {
+        const asked: string[] = [];
+        const sessionOf = ({ header }: ISessionRequest<Handle>) => {
+          asked.push(`resolve ${String(header.callId)}`);
 
           return undefined;
-        },
-      });
-      const opaqueOnly = createPort({ sessionOf });
-      const every = createPort({
-        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
-        sessionOf,
-      });
-      using first = createRouterCore(opaqueOnly.port);
-      using second = createRouterCore(every.port);
+        };
+        const resolver = Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            asked.push(`admit ${String(header.callId)}`);
 
-      first.registerResolver(resolver);
-      second.registerResolver(resolver);
+            return undefined;
+          },
+        });
+        const opaqueOnly = createPort({ sessionOf });
+        const every = createPort({
+          credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+          sessionOf,
+        });
+        using first = createRouterCore(opaqueOnly.port);
+        using second = createRouterCore(every.port);
 
-      for (const [callId, credential] of [
-        [1, JWT],
-        [3, ELSEWHERE],
-        [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
-      ] as const) {
-        first.receive(requestOf(callId, { credential }), 'a');
+        first.registerResolver(resolver);
+        second.registerResolver(resolver);
+
+        for (const [callId, credential] of [
+          [1, JWT],
+          [3, ELSEWHERE],
+          [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
+        ] as const) {
+          first.receive(requestOf(callId, { credential }), 'a');
+        }
+
+        // a scheme to come, to a procedure no route reaches: the route refuses it first
+        if (sourceOrder) {
+          first.receive(
+            requestOf(7, {
+              credential: { bytes: new Uint8Array(0), scheme: 7 },
+              procedure: unknown,
+            }),
+            'a'
+          );
+        }
+        second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
+        first.receive(
+          requestOf(11, { credential: { bytes: Uint8Array.of(1, 2), scheme: 7 } }),
+          'a'
+        );
+        if (!sourceOrder) {
+          first.receive(
+            requestOf(7, {
+              credential: { bytes: new Uint8Array(0), scheme: 7 },
+              procedure: unknown,
+            }),
+            'a'
+          );
+        }
+        second.receive(
+          requestOf(3, { credential: { bytes: new Uint8Array(0), scheme: 0xffff } }),
+          'a'
+        );
+        first.receive(
+          requestOf(9, {
+            credential: { bytes: new Uint8Array(0), scheme: 7 },
+            procedure: { ...echo, serviceId: 9 },
+          }),
+          'a'
+        );
+
+        expect(failuresOf(opaqueOnly.sent)).toEqual([
+          [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          ...(sourceOrder
+            ? [
+                [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+                [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+              ]
+            : [
+                [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+                [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+              ]),
+          [9, ProtocolCode.SERVICE_UNKNOWN, 'no service 9'],
+        ]);
+        expect(failuresOf(every.sent)).toEqual([
+          [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+          [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+        ]);
+        expect(asked).toEqual([]);
       }
-
-      // a scheme to come, to a procedure no route reaches: the route refuses it first
-      first.receive(
-        requestOf(7, { credential: { bytes: new Uint8Array(0), scheme: 7 }, procedure: unknown }),
-        'a'
-      );
-      second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
-      first.receive(requestOf(11, { credential: { bytes: Uint8Array.of(1, 2), scheme: 7 } }), 'a');
-      second.receive(
-        requestOf(3, { credential: { bytes: new Uint8Array(0), scheme: 0xffff } }),
-        'a'
-      );
-      first.receive(
-        requestOf(9, {
-          credential: { bytes: new Uint8Array(0), scheme: 7 },
-          procedure: { ...echo, serviceId: 9 },
-        }),
-        'a'
-      );
-
-      expect(failuresOf(opaqueOnly.sent)).toEqual([
-        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
-        [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [9, ProtocolCode.SERVICE_UNKNOWN, 'no service 9'],
-      ]);
-      expect(failuresOf(every.sent)).toEqual([
-        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
-        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
-      ]);
-      expect(asked).toEqual([]);
     });
 
     test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', async () => {
