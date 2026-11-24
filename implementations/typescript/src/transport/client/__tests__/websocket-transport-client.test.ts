@@ -1390,6 +1390,30 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.isOpen()).toBe(true);
       });
 
+      test('throws a ReconnectException from what its socket threw when the server is gone', async () => {
+        const failed = new Promise<unknown>((resolve) => {
+          client.once('close', () => {
+            client.reconnect({ maximumAttempts: 1 }).then(resolve, resolve);
+          });
+        });
+        await client.connect({ host, port });
+        // * stop listening before its close reaches the client, as a transport stop does
+        const stopping = new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        });
+        for (const socket of server.clients) {
+          socket.close(1000);
+        }
+        await stopping;
+        const failure = await failed;
+
+        expect(failure).toBeInstanceOf(ReconnectError);
+        expect((failure as ReconnectError).cause).toBeInstanceOf(ConnectError);
+        expect(client.isClosed()).toBe(true);
+      });
+
       test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
         await using refused = await closedPort();
         const closed = new Promise<void>((resolve) => {
