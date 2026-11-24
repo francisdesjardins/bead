@@ -1199,26 +1199,36 @@ test.describe('createRouterCore', () => {
     });
 
     // spec 10.4
-    test('cancel a call still waiting once: rejected, told, and its call id reserved on its connection alone', async () => {
-      const { port, sent } = createPort();
-      using core = createRouterCore(port);
-      const waiting = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
+    test('cancels a call waiting once, throwing and reserving its call id on its connection alone', async () => {
+      for (const side of ['server', 'client'] as const) {
+        for (const requestLength of [0, 1]) {
+          const { port, reported, sent } = createPort({
+            failures: side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES,
+          });
+          using core = createRouterCore(port);
+          const callId = side === 'client' ? 1 : 2;
+          const waiting = core.request(new Uint8Array(requestLength), {
+            connectionHandle: 'a',
+            options,
+            procedure: echo,
+          });
 
-      await sleep(0);
-      core.cancel({ callId: 2, connectionHandle: 'a' });
-      core.cancel({ callId: 2, connectionHandle: 'a' });
-
-      await expect(waiting).rejects.toBeInstanceOf(CancelError);
-      expect(answersOf(sent)).toEqual([
-        ['a', EnvelopeKind.REQUEST, 2],
-        ['a', EnvelopeKind.CANCEL, 2],
-      ]);
-      expect(core.isReserved(2, 'a')).toBe(true);
-      expect(core.isReserved(2, 'b')).toBe(false);
+          await sleep(0);
+          core.cancel({ callId, connectionHandle: 'a' });
+          core.cancel({ callId, connectionHandle: 'a' });
+          await expect(waiting).rejects.toBeInstanceOf(CancelError);
+          expect(answersOf(sent)).toEqual([
+            ['a', EnvelopeKind.REQUEST, callId],
+            ['a', EnvelopeKind.CANCEL, callId],
+          ]);
+          expect(core.isReserved(callId, 'a')).toBe(true);
+          expect(core.isReserved(callId, 'b')).toBe(false);
+          core.receive(resultOf(callId), 'a');
+          expect(reported).toEqual([]);
+          core.receive(resultOf(callId), 'b');
+          expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'b']]);
+        }
+      }
     });
 
     test('reserve a call id as long as its call was given, or 5 s when it was given no time or waited without end, on its clock', () => {
@@ -2295,7 +2305,7 @@ test.describe('createRouterCore', () => {
     const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
 
     // debugging 9.3, 9.6.3 and 9.6.4
-    test('count a call made refused before it goes, no call id free or PAYLOAD_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
+    test('counts a call made refused before it goes, no call id free or PAYLOAD_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');
       const { port } = createPort();
