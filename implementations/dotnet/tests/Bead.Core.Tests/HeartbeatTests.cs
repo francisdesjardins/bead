@@ -10,6 +10,27 @@ namespace Bead.Tests;
 public sealed class HeartbeatTests
 {
     [Fact]
+    public async Task Arms_nothing_for_never_and_a_stop_clears_the_timer()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var heard = new List<string>();
+        var hooks = new HeartbeatHooks
+        {
+            Ping = () => { heard.Add("ping"); },
+            Drop = () => { heard.Add("drop"); },
+        };
+        var never = new Heartbeat(Timeout.InfiniteTimeSpan, hooks, new HeartbeatOptions { Clock = clock });
+        Assert.Empty(clock.Dues());
+        var heartbeat = new Heartbeat(TimeSpan.FromMilliseconds(20), hooks, new HeartbeatOptions { Clock = clock });
+
+        heartbeat.Stop();
+        await clock.Advance(TimeSpan.FromMilliseconds(40));
+        Assert.Empty(clock.Dues());
+        Assert.Empty(heard);
+        never.Stop();
+    }
+
+    [Fact]
     public void Takes_a_duration_a_timer_holds_or_never_for_none_and_refuses_zero_and_one_past_the_longest_timer()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(20), Clocks.AssertHeld(("a heartbeat", "Heartbeat"), TimeSpan.FromMilliseconds(20)));
