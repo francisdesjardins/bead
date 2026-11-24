@@ -2761,6 +2761,61 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; the row "A `Content-Length` HTTP refuses, over HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_names_one_number_twice_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var (application, port) = await MountedOverTls(gateway);
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        await using (application)
+        {
+            foreach (var lengths in (string[][])[["0", "0"], ["0", "00"]])
+            {
+                (string, string)[] fields = [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}"), .. lengths.Select((length) =>
+                {
+                    return ("content-length", length);
+                })];
+
+                Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Over(port, fields));
+            }
+
+            Assert.Equal(0, Volatile.Read(ref drawn));
+            Assert.Equal(new TlsAnswer(200, null, null), await Http2Over(port, [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}"), ("content-length", "0")]));
+            await application.StopAsync(Cancelled);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1; RFC 9110 §8.6
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_passes_2_63_1_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var (application, port) = await MountedOverTls(gateway);
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        await using (application)
+        {
+            foreach (var length in (string[])["9223372036854775808", "9999999999999999999", "00009223372036854775808"])
+            {
+                await using var wire = await TlsWire.Open(port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+                // * its body never comes: Kestrel refuses the length with no END_STREAM mismatch
+                Assert.Equal(new TlsAnswer(null, null, null, 0x1), await wire.AskOpen([(":method", "POST"), (":path", "/api/Transcoding/echo"), (":authority", $"127.0.0.1:{port}"), ("content-type", "application/json"), ("content-length", length)]));
+            }
+
+            Assert.Equal(0, Volatile.Read(ref drawn));
+            await application.StopAsync(Cancelled);
+        }
+    }
+
     // what the gateway answers an echo of the version, the authority and the Transfer-Encoding given,
     // on a socket it asks kept alive, a GET pipelined behind its chunked body: everything that came,
     // to the socket's close
