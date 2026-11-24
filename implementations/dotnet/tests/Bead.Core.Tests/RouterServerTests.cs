@@ -618,8 +618,10 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
-    [Fact]
-    public async Task Requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew(bool openFirst)
     {
         var closed = new TaskCompletionSource();
 
@@ -640,12 +642,18 @@ public sealed partial class RouterServerTests : IDisposable
             await response.Answer($"{request.Payload}!");
         });
 
+        if (openFirst)
+        {
+            _transport.Open(First);
+        }
+
         Deliver(First, RequestOf(1, payload: "late"));
         await Settle();
         _transport.Closed(First);
         await Settle();
         closed.SetResult();
         await Settle();
+        Assert.Empty(_transport.Sent);
         Deliver(First, RequestOf(3, payload: "again"));
         await Settle();
 
@@ -655,6 +663,8 @@ public sealed partial class RouterServerTests : IDisposable
             {
                 return entry.Envelope.Header;
             }));
+        Assert.Equal("again!", Encoding.UTF8.GetString(Assert.Single(_transport.Sent).Envelope.Payload.Span));
+        Assert.Empty(_errors);
     }
 
     [Fact]
