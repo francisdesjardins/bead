@@ -7,6 +7,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { bytesOf } from '../../../router/shared/envelope';
 import {
   CancelError,
   ConnectError,
@@ -856,10 +857,39 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         }
       });
 
-      test('offers its protocols in the handshake', async () => {
+      test('passes the protocols to the handshake', async () => {
         const connection = nextConnection(server);
         await client.connect({ host, port, protocols: ['echo'] });
         expect((await connection).socket.protocol).toBe('echo');
+      });
+
+      test('offers its protocols in the handshake', async () => {
+        const offered = Promise.withResolvers<string | string[] | undefined>();
+        let answer: ((taken: boolean) => void) | undefined;
+        const held = await startServer({
+          verifyClient: (info, done) => {
+            answer = done;
+            offered.resolve(info.req.headers['sec-websocket-protocol']);
+          },
+        });
+        const controller = new AbortController();
+        try {
+          const connecting = client.connect({
+            host,
+            port: portOf(held),
+            protocols: ['echo'],
+            signal: controller.signal,
+          });
+          const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+
+          expect(await offered.promise).toBe('echo');
+          controller.abort();
+          await cancelled;
+          expect(client.isClosed()).toBe(true);
+        } finally {
+          answer?.(false);
+          await stopServer(held);
+        }
       });
 
       for (const [pathname, expected] of [
@@ -3028,6 +3058,51 @@ const toldBy = (client: WebSocketTransportClient): unknown[][] => {
 
   return told;
 };
+
+for (const [label, WebSocket] of IMPLEMENTATIONS) {
+  test.describe(`WebSocketTransportClient, close ordering on ${label}`, () => {
+    test('raises no message for what comes after it sent its close', async () => {
+      await using raw = await startRaw();
+      await using client = createWebSocketTransportClient({ WebSocket });
+      const upgraded = raw.next();
+      const messages: number[][] = [];
+      const early = Promise.withResolvers<void>();
+      client.on('message', ({ data }) => {
+        messages.push([...new Uint8Array(bytesOf(data))]);
+        early.resolve();
+      });
+      await client.connect({ host, port: raw.port });
+      const socket = await upgraded;
+      socket.write(frameOf(0x2, Uint8Array.of(1)));
+      await early.promise;
+      const sent = once(socket, 'data');
+      const closing = client.disconnect();
+
+      expect(closeCodeOfMasked((await sent)[0] as Buffer)).toBe(1000);
+      socket.end(
+        Buffer.concat([frameOf(0x2, Uint8Array.of(2)), frameOf(0x8, Uint8Array.of(0x03, 0xe8))])
+      );
+      await closing;
+      expect(messages).toEqual([[1]]);
+    });
+  });
+}
+
+test('pings once silent for 30 seconds, waits 30 seconds and asks for the root over ws when told nothing', async () => {
+  using timeouts = spyTimeouts();
+  const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
+  await using client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+  const connecting = client.connect({ host, port: 80 });
+  const before = timeouts.delays.length;
+  made[0]?.fireOpen();
+  await connecting;
+
+  expect(timeouts.delays.slice(before)).toEqual([30_000]);
+  expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
+  expect(CLOSE_TIMEOUT).toBe(5_000);
+  expect(MAXIMUM_MESSAGE_BYTES).toBe(16_778_240);
+  await client.disconnect();
+});
 
 // spec 15.1
 test.describe('WebSocketTransportClient, what its error tells', () => {
