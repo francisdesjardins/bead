@@ -451,7 +451,14 @@ public sealed class BrokerTransportServerTests
             },
             "its refusal reported");
         Assert.Equal(["the name interop is not served: its broker refused its subscription, its broker refused the subscription to bead/s/interop: 0x87"], reported);
-        Assert.True(participant.IsLinked);
+        // ! the refusal is reported as its server links anew, before the participant calls its
+        // link up, on another thread: wait for the link rather than read it at once
+        await BrokerPair.Until(
+            () =>
+            {
+                return participant.IsLinked;
+            },
+            "its link kept");
         Assert.Equal(0, server.Gauges().Counts["names"]);
     }
 

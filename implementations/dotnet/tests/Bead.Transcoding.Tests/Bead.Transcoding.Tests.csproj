@@ -29,6 +29,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- what stands in for the platform's resolver and its proxy, and the listener that reads what
+         reaches the loopback (spec 13.4), with the collection of the tests that set them -->
+    <Compile Include="../Shared/StandIns.cs" Link="StandIns.cs" />
+    <Compile Include="../Shared/PlatformSeams.cs" Link="PlatformSeams.cs" />
+    <!-- the HTTP transport's socket over TLS, which writes HTTP/2 by hand: what Kestrel answers a
+         gateway's request before the gateway reads it -->
+    <Compile Include="../Bead.Transport.Http.Tests/TlsWire.cs" Link="TlsWire.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- what a gateway answers of spec/transcoding.proto, which Generated/ holds as beadc writes it,
          its route table and its document among it, an output with a gateway -->
     <Content Include="../../../../spec/transcoding.json" Link="transcoding.json" CopyToOutputDirectory="PreserveNewest" />

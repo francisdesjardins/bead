@@ -68,7 +68,7 @@ use crate::mqtt::packets::{
 };
 use crate::mqtt::quota::{Queued, SendQuota};
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
-use crate::net::racing::RacingOptions;
+use crate::net::racing::{RacingOptions, Resolve};
 use crate::net::tls::{ClientTls, TlsOptions, read_tls};
 use crate::owner::{Owned, Owner, WeakOwner};
 use crate::platform::{self, Handle};
@@ -320,6 +320,15 @@ impl MqttBrokerAdapter {
     /// password beside its provider or either beside a client certificate, a Maximum Packet Size
     /// outside 1 to 268,435,460, or a Keep Alive or a connect timeout spec 1.4 does not hold.
     pub fn new(options: &MqttBrokerAdapterOptions) -> Result<Self, ProgrammerError> {
+        Self::resolving(None, options)
+    }
+
+    /// An adapter whose link's connects ask `resolve` for a name's addresses: the platform's
+    /// resolver when none, a test's otherwise.
+    pub(crate) fn resolving(
+        resolve: Option<Resolve>,
+        options: &MqttBrokerAdapterOptions,
+    ) -> Result<Self, ProgrammerError> {
         // * in whole seconds rounded up, as its CONNECT announces it and its link runs it (spec
         // 15.26)
         let keep_alive = Duration::from_secs(u64::from(seconds_of(hold_within(
@@ -396,7 +405,10 @@ impl MqttBrokerAdapter {
             delivery,
             groups,
             capabilities,
-            racing: RacingOptions::on(platform_clock),
+            racing: RacingOptions {
+                resolve,
+                ..RacingOptions::on(platform_clock)
+            },
             clock: Arc::clone(&clock),
             listeners: Listeners::default(),
             is_linked: AtomicBool::new(false),

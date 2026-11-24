@@ -3,6 +3,7 @@ import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind } from '../../../router/shared/constants';
 import { createTestClock, tcpSocketsClosed, timersBy } from '../../shared/__tests__/fixtures';
+import { noop } from '../../shared/noop';
 import {
   AFTER_HEADER,
   BEAD_MEDIA_TYPE,
@@ -20,6 +21,7 @@ import {
   headerOf,
   inTurn,
   MAXIMUM_UNSERVED_REQUESTS,
+  UNSERVED_REQUESTS_BUDGET,
   isBeadBody,
   joinedOf,
   linesOf,
@@ -84,6 +86,41 @@ const UNNAMED_ANSWER = Object.freeze({
   'access-control-expose-headers': null,
   vary: 'Origin',
 });
+
+/**
+ * A fake of Node's HTTP/1 socket, as the bound of its read touches it: its pauses and resumes
+ * counted, each resume telling its `resume` as Node's does, and its destroys counted.
+ */
+const pausableOf = (socket: { writableEnded?: boolean } = {}) => {
+  const state = { destroys: 0, isPaused: false, pauses: 0, resumes: 0 };
+  const emitter = Object.assign(new EventEmitter(), {
+    ...socket,
+    destroy: () => {
+      state.destroys += 1;
+    },
+    pause: () => {
+      state.isPaused = true;
+      state.pauses += 1;
+    },
+    resume: () => {
+      state.isPaused = false;
+      state.resumes += 1;
+      emitter.emit('resume');
+    },
+  });
+
+  return { socket: emitter, state };
+};
+
+/** A request on `socket` handed to `inTurn` behind an answer under way; its response, to emit. */
+const unservedOn = (socket: IHTTPRequestLike['socket'], serve: () => void): EventEmitter => {
+  const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: 1, socket };
+  const response = Object.assign(new EventEmitter(), { socket: null });
+
+  inTurn({ request, response: response as unknown as IHTTPResponseLike }, serve);
+
+  return response;
+};
 
 // definition
 
@@ -1071,67 +1108,129 @@ test.describe('an exchange in its turn', () => {
     expect(served).toEqual(['HTTP/2', 'held', 'waiting']);
   });
 
-  // RFC 9112 §9.3
-  test('destroys a socket that holds more than MAXIMUM_UNSERVED_REQUESTS requests unserved, behind an answer under way or one that closes its connection, and counts each served one off', () => {
+  // spec 15.12; RFC 9112 §9.3
+  test('pauses a socket that holds more than MAXIMUM_UNSERVED_REQUESTS requests unserved, pauses it again as it resumes, and resumes it once half are left', () => {
     const served: number[] = [];
-    const socketOf = (socket: Partial<IHTTPRequestLike['socket']> = {}) => {
-      const destroyed = { count: 0 };
-
-      return {
-        destroyed,
-        socket: {
-          ...socket,
-          destroy: () => {
-            destroyed.count += 1;
-          },
-        },
-      };
-    };
-    const serving = (socket: IHTTPRequestLike['socket'], index: number) => {
-      const request: IHTTPRequestLike = { ...requestLikeOf([]), httpVersionMajor: 1, socket };
-      const response = Object.assign(new EventEmitter(), { socket: null });
-
-      inTurn({ request, response: response as unknown as IHTTPResponseLike }, () => {
+    const waiting = pausableOf();
+    const responses = Array.from({ length: MAXIMUM_UNSERVED_REQUESTS + 1 }, (_, index) => {
+      return unservedOn(waiting.socket, () => {
         served.push(index);
       });
-
-      return response;
-    };
-
-    // * behind an answer under way, its bound waiting
-    const waiting = socketOf();
-    const responses = Array.from({ length: MAXIMUM_UNSERVED_REQUESTS }, (_, index) => {
-      return serving(waiting.socket, index);
     });
 
-    expect(waiting.destroyed.count).toBe(0);
+    // * past the bound its read stops, and the socket is kept
+    expect(waiting.state).toEqual({ destroys: 0, isPaused: true, pauses: 1, resumes: 0 });
 
-    // one served counts off, so one more waits, and the next is past the bound
-    responses[0]?.emit('socket');
-    serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS);
+    // Node resumes it as it hands on a request it parsed: paused again
+    waiting.socket.resume();
 
-    expect([served, waiting.destroyed.count]).toEqual([[0], 0]);
+    expect([waiting.state.isPaused, waiting.state.pauses]).toEqual([true, 2]);
 
-    const past = serving(waiting.socket, MAXIMUM_UNSERVED_REQUESTS + 1);
-
-    expect(waiting.destroyed.count).toBe(1);
-
-    // the one past it is never served
-    past.emit('socket');
-
-    expect(served).toEqual([0]);
-
-    // * behind an answer that closes its connection, none served, its bound dropped
-    const closing = socketOf({ writableEnded: true });
-
-    for (let index = 0; index < MAXIMUM_UNSERVED_REQUESTS; index += 1) {
-      serving(closing.socket, index);
+    // served, each counted off, in turn; paused until half are left, 16, then resumed
+    for (const response of responses.slice(0, MAXIMUM_UNSERVED_REQUESTS / 2)) {
+      response.emit('socket');
     }
 
-    expect(closing.destroyed.count).toBe(0);
+    expect(waiting.state.isPaused).toBe(true);
 
-    serving(closing.socket, MAXIMUM_UNSERVED_REQUESTS);
+    responses[MAXIMUM_UNSERVED_REQUESTS / 2]?.emit('socket');
 
-    expect([served, closing.destroyed.count]).toEqual([[0], 1]);
+    expect(waiting.state).toEqual({ destroys: 0, isPaused: false, pauses: 2, resumes: 2 });
+    expect(served).toEqual(
+      Array.from({ length: MAXIMUM_UNSERVED_REQUESTS / 2 + 1 }, (_, index) => {
+        return index;
+      })
+    );
+
+    // no longer held: a resume of Node's leaves it read
+    waiting.socket.resume();
+
+    expect([waiting.state.isPaused, waiting.state.pauses]).toEqual([false, 2]);
+    waiting.socket.emit('close');
+  });
+
+  // spec 15.12; RFC 9112 §9.6
+  test('holds a socket paused past MAXIMUM_UNSERVED_REQUESTS behind an answer that closes its connection, serving none', () => {
+    const served: number[] = [];
+    const closing = pausableOf({ writableEnded: true });
+    const responses = Array.from({ length: MAXIMUM_UNSERVED_REQUESTS + 1 }, (_, index) => {
+      return unservedOn(closing.socket, () => {
+        served.push(index);
+      });
+    });
+
+    expect(closing.state).toEqual({ destroys: 0, isPaused: true, pauses: 1, resumes: 0 });
+
+    // never served, so never resumed by Bead: Node's resume is paused again
+    for (const response of responses) {
+      response.emit('socket');
+    }
+
+    closing.socket.resume();
+
+    expect([served, closing.state.isPaused, closing.state.destroys]).toEqual([[], true, 0]);
+    closing.socket.emit('close');
+  });
+
+  // spec 15.12
+  test('destroys the socket whose request would take the requests unserved across sockets past UNSERVED_REQUESTS_BUDGET, and releases the count of a socket that closes', () => {
+    const sockets: ReturnType<typeof pausableOf>[] = [];
+    const served: number[] = [];
+    let held = 0;
+
+    try {
+      // * sockets of 32 each, until one is destroyed rather than hold its request; past the budget, a
+      // reader that never refuses fails below rather than run on
+      for (let isRefused = false; !isRefused && held <= UNSERVED_REQUESTS_BUDGET;) {
+        const each = pausableOf();
+
+        sockets.push(each);
+
+        for (let index = 0; index < MAXIMUM_UNSERVED_REQUESTS && !isRefused; index += 1) {
+          unservedOn(each.socket, noop);
+          isRefused = each.state.destroys > 0;
+          held += isRefused ? 0 : 1;
+        }
+      }
+
+      // ! the total is the process's, which a test before this one in its worker may hold part of:
+      // the budget is met at or before this test's own count reaches it, then exactly
+      expect(held).toBeLessThanOrEqual(UNSERVED_REQUESTS_BUDGET);
+      expect(sockets.at(-1)?.state.destroys).toBe(1);
+
+      // a socket that closes releases its whole count: as many places, and none more
+      sockets[0]?.socket.emit('close');
+
+      const next = pausableOf();
+
+      sockets.push(next);
+
+      for (let index = 0; index < MAXIMUM_UNSERVED_REQUESTS; index += 1) {
+        unservedOn(next.socket, () => {
+          served.push(index);
+        });
+      }
+
+      expect(next.state.destroys).toBe(0);
+
+      const past = pausableOf();
+
+      sockets.push(past);
+
+      const refused = unservedOn(past.socket, () => {
+        served.push(-1);
+      });
+
+      expect(past.state.destroys).toBe(1);
+
+      // the request it refused is never served
+      refused.emit('socket');
+
+      expect(served).toEqual([]);
+    } finally {
+      for (const { socket } of sockets) {
+        socket.emit('close');
+      }
+    }
   });
 });

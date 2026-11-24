@@ -77,7 +77,7 @@ can follow in its place.
 | Workflow                                                  | When                                                                 | What it produces                                                                  |
 | --------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | [`bead-tenth-man-round`](#bead-tenth-man-round)           | a change that reaches across the languages, before it is implemented | a design, its reasons and the Tenth Man's table; the decisions left open          |
-| [`bead-implement-both-sides`](#bead-implement-both-sides) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
+| [`bead-implement-every-side`](#bead-implement-every-side) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
 | [`bead-adversarial-review`](#bead-adversarial-review)     | before a freeze: a release, a version of the spec or a companion     | findings by severity and a verdict; nothing in the repository changes             |
 | [`bead-release-documents`](#bead-release-documents)       | on a release branch, after `prepare` and before the finish           | the documents as of the release, one commit                                       |
 | [`bead-page-audit`](#bead-page-audit)                     | at each release, and whenever the page may have drifted              | the page's findings in both languages; with `apply`, the fixes and the build      |
@@ -116,7 +116,7 @@ By hand:
 5. Decide. What a standard or a decision already taken settles is settled; the rest is the
    maintainer's choice.
 
-### bead-implement-both-sides
+### bead-implement-every-side
 
 The workflow implements a settled design in stages: the spec and its conformance first, then the
 sides together, then an integration that runs every gate and the interop once over the settled
@@ -410,6 +410,14 @@ file, a key or a property was added
 10. **The push, on the maintainer's word.** The one line `tag` prints:
     `git push --atomic origin main develop vX.Y.Z <document tags> :release/X.Y.Z`. Then follow the
     runs of `main` and `develop`.
+11. **The image.** The tag starts `image.yml`, which builds beadc's image from the tag's commit,
+    publishes it under the release's version, attested and signed, verifies it by the builder's
+    README's block and prints its digest
+    ([0055](decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)):
+    `gh run list --workflow image.yml --limit 1`. GitHub starts no run when more than three tags are
+    pushed at once; then dispatch it on the tag, `gh workflow run image.yml --ref vX.Y.Z`. A run
+    that failed once its index was pushed, at the attestation, the signature or the verification,
+    takes `gh run rerun <run> --failed`: a new dispatch refuses the version the registry holds.
 
 A hotfix starts from `main` with `git flow hotfix start X.Y.Z` and follows the same steps;
 `prepare` also takes every `beadc breaking` waiver out of `ci.yml`, each moot since the release

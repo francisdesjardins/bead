@@ -7,6 +7,7 @@ import mqtt, {
   type IClientOptions,
   type IDisconnectPacket,
   type IPublishPacket,
+  type IStream,
   type KeepaliveManager,
   type MqttClient,
   type Packet,
@@ -26,9 +27,17 @@ import {
   topicOf,
 } from './mqtt-packets';
 import { guardPackets } from './mqtt-packet-guard';
-import { isSecureUrl } from './secure';
+import {
+  isConnectFailure,
+  isLocalhostName,
+  loopbackCreateConnection,
+  loopbackSentenceOf,
+  raceLoopback,
+} from './loopback';
+import { noop } from './noop';
+import { isLoopbackUrl, isSecureUrl, urlHostOf } from './secure';
 import { withSlicedSends } from './sliced-sends';
-import { assertTls, isNode, nodeTlsOf, tlsOf } from './tls';
+import { assertTls, builtinOf, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -221,6 +230,106 @@ const mqttWebSocketOptions = (
   return { maxPayload: Math.max(WS_MESSAGE_BYTES, maximumPacketSize), perMessageDeflate: false };
 };
 
+// the part of `node:net` and `node:tls` a link on the loopback connects by
+interface INetLike {
+  connect(options: object): IStream;
+  isIP(host: string): number;
+}
+
+interface ITlsConnectLike {
+  connect(options: object): IStream & { readonly authorized: boolean };
+}
+
+/** The port an `mqtt` or `mqtts` URL names, or its scheme's own. */
+const mqttPortOf = (url: string): number => {
+  const parsed = new URL(url);
+
+  return parsed.port === '' ? (parsed.protocol === 'mqtts:' ? 8883 : 1883) : Number(parsed.port);
+};
+
+/** A host read by {@link urlHostOf} as a socket dials it: an IPv6 address out of its brackets. */
+const bareOf = (host: string): string => {
+  return host.replace(/^\[(.*)\]$/u, '$1');
+};
+
+/**
+ * A client of MQTT.js over `mqtt` or `mqtts` whose stream Bead connects, for a host on the loopback:
+ * a localhost name over `raced`, the socket its race of the loopback won, asking no resolver, and
+ * no host through a proxy (spec 13.4). MQTT.js's own streams go through the SOCKS proxy
+ * `MQTTJS_SOCKS_PROXY` names.
+ */
+// ! what `mqtt.connect` derives from the URL, and its TCP and TLS streams, mirrored: a bump of
+// MQTT.js re-reads its lib/connect/index.js, tcp.js and tls.js
+const loopbackLinkOf = (
+  url: string,
+  { clientOptions, raced }: { clientOptions: IClientOptions; raced: IStream | undefined }
+): MqttClient => {
+  const parsed = new URL(url);
+  const isTls = parsed.protocol === 'mqtts:';
+  const protocol = isTls ? 'mqtts' : 'mqtt';
+  const host = bareOf(urlHostOf(url) ?? '');
+  const port = mqttPortOf(url);
+  const clientId = parsed.searchParams.get('clientId');
+  const username = decodeURIComponent(parsed.username);
+  const options: IClientOptions = {
+    ...clientOptions,
+    defaultProtocol: protocol,
+    host,
+    hostname: host,
+    port,
+    protocol,
+    // the URL's user information over the options', as MQTT.js reads it
+    ...(username === ''
+      ? {}
+      : parsed.password === ''
+        ? { username }
+        : { password: decodeURIComponent(parsed.password), username }),
+    ...(clientId === null ? {} : { clientId }),
+  };
+  const net = builtinOf('node:net') as INetLike;
+  // * its stream built once, `reconnectPeriod` 0: over the raced socket, or one of its own
+  const connect = raced === undefined ? { host, port } : { host, port, socket: raced };
+  const client = new mqtt.MqttClient((built) => {
+    if (!isTls) {
+      return raced ?? net.connect(connect);
+    }
+
+    const rejectUnauthorized = built.options.rejectUnauthorized !== false;
+    const { path: _path, ...rest } = built.options as IClientOptions & { path?: unknown };
+    const connection = (builtinOf('node:tls') as ITlsConnectLike).connect({
+      ...rest,
+      ...connect,
+      rejectUnauthorized,
+      ...(net.isIP(host) === 0 && built.options.servername === undefined
+        ? { servername: host }
+        : {}),
+    });
+    const onError = (error: Error): void => {
+      if (rejectUnauthorized) {
+        built.emit('error', error);
+      }
+
+      connection.end();
+    };
+
+    connection.on('secureConnect', () => {
+      if (rejectUnauthorized && !connection.authorized) {
+        connection.emit('error', new Error('TLS not authorized'));
+      } else {
+        connection.removeListener('error', onError);
+      }
+    });
+    connection.on('error', onError);
+
+    return connection;
+  }, options);
+
+  // as `mqtt.connect` does, so that an error nobody else listens to never throws
+  client.on('error', noop);
+
+  return client;
+};
+
 // a Reason Code as a refusal names it
 const reasonOf = (code: number): string => {
   return `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
@@ -301,7 +410,9 @@ const assertAuthentication = ({
  * as MQTT.js reads a CONNACK of 0x00 whose Maximum QoS is not 0, whatever comes after it; any other
  * CONNACK fails its start, naming its code, and sends nothing. Its leg is secure under TLS or to the
  * loopback.
- * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
+ * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame. In Node,
+ * it connects a host on the loopback to the loopback itself, a localhost name asking no resolver,
+ * and through no proxy (spec 13.4); a page's WebSocket connects as its browser does.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -370,6 +481,21 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   }
 
   assertAuthentication({ password, passwordProvider, tls });
+
+  // * its host read once, as the URL Standard reads a special scheme's host, whatever its scheme:
+  // judged, dialed, written in its CONNECT and sent as its TLS name; one it fails on refused here
+  const read = urlHostOf(url);
+
+  if (read === undefined) {
+    throw new ProgrammerError(`${new URL(url).hostname} is no host a URL can name`);
+  }
+
+  const hostname = read;
+  // * in Node, a host on the loopback is connected by Bead, a localhost name to the loopback itself
+  // asking no resolver, and no host through a proxy (spec 13.4); a page's WebSocket connects as its
+  // browser does
+  const isOnTheLoopback = isNode() && isLoopbackUrl(url);
+  const isStreamOwned = isOnTheLoopback && (protocol === 'mqtt:' || protocol === 'mqtts:');
 
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
@@ -770,7 +896,44 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       throw new GenericError(`the link of ${id} stopped as it started`);
     }
 
-    const left = Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+    const leftOf = (): number => {
+      return Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+    };
+    // * what gives a localhost name's race up: its start's signal, and its stop
+    const giveUp = signal === undefined ? ask.signal : AbortSignal.any([ask.signal, signal]);
+    // * a localhost name over `mqtt` or `mqtts` raced on the loopback before its client is built,
+    // within its start's connectTimeout
+    let raced: IStream | undefined;
+
+    if (isStreamOwned && isLocalhostName(hostname)) {
+      try {
+        raced = await raceLoopback(mqttPortOf(url), { signal: giveUp, timeout: leftOf() });
+      } catch (reason) {
+        if (signal?.aborted === true) {
+          throw toCancelError(signal);
+        }
+
+        if (ask.signal.aborted) {
+          throw toError(ask.signal.reason);
+        }
+
+        // * no socket opened: its every attempt failed, or its connectTimeout passed
+        const said = isConnectFailure(reason) ? `; ${loopbackSentenceOf(hostname) ?? ''}` : '';
+
+        throw new GenericError(
+          `the link of ${id} ended before its CONNACK: ${toError(reason).message}${said}`,
+          { cause: reason }
+        );
+      }
+
+      if (asked !== starts) {
+        raced.destroy();
+
+        throw new GenericError(`the link of ${id} stopped as it started`);
+      }
+    }
+
+    const left = leftOf();
 
     // the incarnation its hook hands messages on in, once its client is built
     const hooked: { incarnation?: IIncarnation | undefined } = {};
@@ -784,7 +947,20 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       // its stream sends with a callback, which the sliced send would drop; there `ws` reassembles a
       // message whole, bounded by its Maximum Packet Size at least, no permessage-deflate offered
       ...(isNode()
-        ? { wsOptions: mqttWebSocketOptions(maximumPacketSize) }
+        ? {
+            wsOptions: {
+              ...mqttWebSocketOptions(maximumPacketSize),
+              ...(isLocalhostName(hostname)
+                ? {
+                    // ! `http`'s callback form, which `ws` hands its request, and its types leave out
+                    createConnection: loopbackCreateConnection(hostname, {
+                      signal: giveUp,
+                      timeout: Math.max(1, left),
+                    }) as never,
+                  }
+                : {}),
+            },
+          }
         : {
             createWebsocket: (webSocketUrl: string, protocols: string[]) => {
               return withSlicedSends(new WebSocket(webSocketUrl, protocols));
@@ -835,7 +1011,16 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
             },
           }),
     };
-    const client = mqtt.connect(url, clientOptions);
+    // ! MQTT.js reads its URL again by Node's legacy parser, which keeps `127.1` as given: over
+    // `mqtt` and `mqtts`, it is handed the host read once, which its streams dial and name
+    const client = isStreamOwned
+      ? loopbackLinkOf(url, { clientOptions, raced })
+      : mqtt.connect(
+          url,
+          protocol === 'mqtt:' || protocol === 'mqtts:'
+            ? { ...clientOptions, host: bareOf(hostname), hostname: bareOf(hostname) }
+            : clientOptions
+        );
     const held: IIncarnation = {
       client,
       drained: undefined,
@@ -961,9 +1146,16 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           lastError = error;
         });
         client.once('close', () => {
+          // where its stream took a localhost name to the loopback itself, and its every
+          // attempt failed: no socket opened (spec 13.4)
+          const said =
+            isOnTheLoopback && isConnectFailure(lastError)
+              ? loopbackSentenceOf(hostname)
+              : undefined;
+
           fail(
             new GenericError(
-              `the link of ${id} ended before its CONNACK${lastError === undefined ? '' : `: ${lastError.message}`}`,
+              `the link of ${id} ended before its CONNACK${lastError === undefined ? '' : `: ${lastError.message}`}${said === undefined ? '' : `; ${said}`}`,
               { cause: lastError }
             )
           );

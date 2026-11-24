@@ -9,7 +9,7 @@ use ::http::uri::Uri;
 
 use crate::judgement::hosts::{
     Authority, HOST_REFUSAL, HostRequest, ORIGIN_REFUSAL, RequestTarget, authority_of,
-    is_authority, is_transfer_encoding_framed, request_target_of,
+    is_authority, is_counted_length, is_transfer_encoding_framed, request_target_of,
 };
 use crate::judgement::items::{BareItem, parse_item};
 
@@ -276,8 +276,20 @@ impl Request<'_> {
             .is_none()
     }
 
+    /// Whether every line of its `Content-Length` is a length spec 15.12 counts: digits alone,
+    /// whose number is 2⁶³ − 1 at most, read by value.
+    pub(crate) fn has_counted_length(&self) -> bool {
+        // ! hyper counts to 2⁶⁴ − 3 over HTTP/1.1 and hands on what lies between 2⁶³ and that;
+        // h2 hands on what 19 digits hold over HTTP/2
+        self.headers.get_all("content-length").iter().all(|value| {
+            value
+                .to_str()
+                .is_ok_and(|line| is_counted_length(line.trim_matches([' ', '\t'])))
+        })
+    }
+
     /// Whether its `Transfer-Encoding`, across its lines, frames its body as spec 15.12 takes it:
-    /// none, or one that ends in one `chunked`, over HTTP/1.1.
+    /// none, or one whose one coding is `chunked`, over HTTP/1.1.
     pub(crate) fn is_transfer_encoding_framed(&self) -> bool {
         let version = match (self.is_http1, self.is_http11) {
             (true, true) => "1.1",
@@ -286,7 +298,8 @@ impl Request<'_> {
         };
 
         // ! hyper refuses one over HTTP/1.0 itself, and `chunked,` with it, before the transport
-        // reads the request; it hands on another `chunked` after the first, its body read by the last
+        // reads the request; it hands on another `chunked` after the first, its body read by the
+        // last, and a coding before `chunked`, its body still coded
         is_transfer_encoding_framed(version, &self.lines_of("transfer-encoding"))
     }
 

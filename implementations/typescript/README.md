@@ -61,12 +61,31 @@ session's timers count what the peer says, not that it answers. Bead has no ping
 a connection is alive is its transport's to know.
 
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
-its `maxPayload` says otherwise, and fails a connection that sends a larger one with 1009; over the
-global `WebSocket`, its platform's bound applies. Each end drains it until the peer's close or its
-`closeTimeout`, its close unclean whatever the peer answers, and reports it on `error`, naming
-`maximumMessageBytes` and its value, as it reports a protocol error, before its close; a client over
-the global `WebSocket`, whose `error` cannot be told from a drop, tells its close alone (spec 15.1,
-15.3). The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
+its `maxPayload` says otherwise, in 16,384 frames at most, `MAXIMUM_MESSAGE_FRAMES`, unless its
+`maximumMessageFrames` says otherwise. It fails at its head a frame whose announced length takes its
+message past `maxPayload`, with 1009, and a head RFC 6455 forbids, with 1002, but a 64-bit length
+with its top bit set, which the client fails with 1009, as `ws` reads any length past 2⁵³ − 1; a
+frame past `maximumMessageFrames`, with 1008, at its head on the server, once its payload came on
+the client, as `ws` counts it; over the global `WebSocket`, its platform's bounds apply. Each end then sends its
+close, and drains the connection, unread, until the peer's end or its `closeTimeout`, its close
+unclean whatever the peer answers, and reports it on `error`, naming the bound and its value, as it
+reports a protocol error, before its close; a client over the global `WebSocket`, whose `error`
+cannot be told from a drop, tells its close alone (spec 15.1, 15.3). The server judges each frame
+by a frame meter of its own, which reads each read of the upgrade's raw socket before `ws` does, and
+ends its writing once its close is written; the client leaves its frames to `ws`.
+
+A server holds each message partway, from the first byte of its first frame's head to the last byte
+of its last frame, to a budget and a rate (spec 15.12). Every byte it reads of one is charged to
+`messageBytesBudget`, 268,435,456 bytes across its connections, as it comes, the control frames
+between its frames among it, and each frame's head once whole, its bytes and 128 more; never what a
+head announces. A charge decides byte by byte: the byte that would pass the budget casts off with
+1013 the connection whose message holds the most, its own sum counting that byte, then, among equal
+sums, the one whose message began first, its own only when it comes first. A message that brings its payload slower than
+`minimumBodyBytesPerSecond`, 240 bytes a second, once `bodyGracePeriod`, 5 seconds, passed since its
+first byte fails with 1008, on the server's clock, the time its router holds the connection paused
+not counted. Each is reported on `error`, naming its bound, and its gauge is `messageBytes`. The
+budget and the rate hold where the `WebSocketServer` given hands the transport the raw socket of
+each upgrade, as `ws` on Node's own upgrade does. The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
 `ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A
 WebSocket server judges a request at its address in the order of spec 15.2: 400 as HTTP answers it
 to a field holding a control character but a tab or an octet past ASCII, to a target holding an
@@ -114,10 +133,12 @@ it listens on alone: a container, or any server another machine reaches, says `0
 and names its hosts. Any other name — `LOCALHOST`,
 `localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
 loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
-clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
-tries first, Node's and the browsers' racing them (RFC 8305); a server given one loopback,
-`127.0.0.1` or `::1`, leaves the other's port to any process that listens there, which then answers
-a client that tries that family first. A server meant for other machines and given no address is
+clear, it says `secure: false`. A client that connects by `localhost` over a dialer of its own
+reaches `127.0.0.1` first, then `::1` (see below); a browser, and Node's global `fetch` and
+`WebSocket`, reach it whichever family they try first, racing them (RFC 8305). A server given `::1`
+alone leaves `127.0.0.1`'s port to any process that listens there, which then answers every such
+connect by `localhost`; one given `127.0.0.1` alone leaves `::1`'s to a process that answers a
+client that tries the IPv6 loopback first. A server meant for other machines and given no address is
 refused there by the network, its connection reset or refused, never by a Bead refusal: no socket
 opens, so nothing is told.
 
@@ -184,6 +205,24 @@ under TLS — unless its application tells it what stands in front of it, `secur
 terminated before it, which makes each connection secure, `false` for a proxy that serves the
 network in the clear, which leaves each in the clear; a worker always, since it never leaves the
 machine.
+
+A client connects a host it judges on the loopback to the loopback itself, through no proxy (spec
+13.4, decision 0054). It connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to
+`::1` 250 ms later or as soon as the first fails, as RFC 8305 §5 races its attempts, each kept until
+one connects, a connect given up ending them all, and asks no resolver. It reads a host once, as the
+WHATWG URL Standard reads a special scheme's host whatever its URL's scheme: `127.0.0.1.` and `127.1`
+connect to `127.0.0.1`, and a host the parser fails on, `foo.123` say, is refused before any socket
+opens. Its request names the host as its URL serializes it, in its `Host` and in its TLS server name. A
+connect that fails says where it went: "…; api.localhost names the loopback: connected to 127.0.0.1
+and ::1, no resolver asked". In Node, a `ws` given, the MQTT 5 adapter and the AMQP 1.0 adapter
+connect so; the MQTT 5 adapter then goes through no SOCKS proxy that `MQTTJS_SOCKS_PROXY` names.
+With undici installed, a client's default WebSocket and `fetch`, and a gateway's caller's, connect
+so too, through undici's own `WebSocket` and `fetch` and an `Agent` of the client's. Without it,
+Node's global `fetch` and `WebSocket` resolve a localhost name as the platform does, and, under
+`NODE_USE_ENV_PROXY`, go through the environment's proxy. A `fetch` or a WebSocket constructor given, and a page's,
+connect as their platform does. Over these dialers, which Bead does not own, a resolver that sends a
+name under `.localhost` on to its DNS server, or a proxy, takes a credential judged secure wherever
+it answers, in the clear.
 
 A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
 string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
@@ -1035,12 +1074,14 @@ answer's `redirected`, and is caught there: the connect fails, "the server drew 
 redirect followed", and a send or a listen loses its connection, nothing of the answer read.
 
 In Node, the HTTP client takes the same `tls`. It goes through undici's own `fetch` and an `Agent` of
-the client's, on each exchange under `https`; under `http`, the global `fetch` goes and `tls` is
-held unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
-loaded on the first connect under `https`, and never enters a page's bundle. The agent closes as the
-client drops its connection, and a new one is drawn at the next. The client is refused as it is
-built as the WebSocket client is, and also beside a `fetch` given or where undici does not resolve.
-A handshake the server refuses fails the connect, never a connection drawn and then lost.
+the client's, on each exchange under `https`, and on each to a host on the loopback, which that
+agent connects as above; under `http` to any other host, the global `fetch` goes and `tls` is held
+unused. undici is an optional peer dependency, `undici@^8`, which the application adds. It is
+loaded on the first exchange that needs it, and never enters a page's bundle. The agent closes as
+the client drops its connection, and a new one is drawn at the next. The client is refused as it is
+built as the WebSocket client is, and also beside a `fetch` given or, with `tls`, where undici does
+not resolve. A handshake the server refuses fails the connect, never a connection drawn and then
+lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1077,10 +1118,15 @@ past its deadline is an exchange lost, its connection dropped at both ends, repo
 its connection closes, naming its bounds and their values.
 Over HTTP/1, the transport and the gateway serve a socket's requests in their order, each once
 the answers before it ended, and none behind an answer that closes its connection (RFC 9112 §9.3,
-§9.6). Behind an answer under way or one that closes its connection, a socket holds at most 32
-requests unserved, `MAXIMUM_UNSERVED_REQUESTS`. At the 33rd it is destroyed
+§9.6). Behind an answer under way or one that closes its connection, a socket holds 32 requests
+unserved, `MAXIMUM_UNSERVED_REQUESTS`, plus the rest of the read that brought the 33rd; past it the
+socket is no longer read until 16 are left, and it is kept. A head Node parsed in part behind them
+is still timed by `headersTimeout`, so a socket whose answer ahead is held that long is reset.
+Across sockets, 65,536 requests unserved at most, `UNSERVED_REQUESTS_BUDGET`; the socket whose
+request would pass it is destroyed
 ([`docs/support.md`](../../docs/support.md#differences),
-`Requests pipelined behind an answer under way, over HTTP/1.1`). A request carrying a
+`What a server reads of an HTTP/1.1 socket behind the answer under way, and when it sees its client leave`).
+A request carrying a
 `Content-Length` beside a `Transfer-Encoding` is refused 400 unmarked by Node's parser. On a server
 built with `insecureHTTPParser`, or in a process run with `--insecure-http-parser`, Node's parser
 hands it on. The transport and the gateway then refuse it themselves, 400 unmarked, and close its
@@ -1615,8 +1661,9 @@ reports the bound on `error`, releases the exchange's place and socket, and canc
 Each exchange draws one Bead connection, its client of the router `limits` the gateway is given,
 closed as its response ends: a connection's session, a subscription, a bound of the calls it
 answers, are one caller's, never every caller's. Its `authorization` is presented whole as
-`ELSEWHERE`, or under `authorization: 'bearer-jwt'` its `Bearer` token as a `JWT`; a command its
-server sends is answered `SERVICE_UNKNOWN`, and a connection's session ends with its exchange. It
+`ELSEWHERE`, or under `authorization: 'bearer-jwt'` its `Bearer` token as a `JWT`, another
+auth-scheme or `Bearer` alone presenting none; a command its server sends is answered
+`SERVICE_UNKNOWN`, and a connection's session ends with its exchange. It
 judges a request in the order of `transcoding.md` 10.1 by the HTTP transport's own gates — hosts,
 origins and CORS, Fetch Metadata (a request of no origin from another site taken only as a `GET`
 navigation no `object` or `embed` makes, web.dev's resource isolation policy), its bounds, calls and

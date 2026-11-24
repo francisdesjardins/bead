@@ -21,7 +21,7 @@ namespace Bead.Transport.WebSockets.Tests;
 /// <see cref="WebSocketTransportServer"/>, on Kestrel, against a <see cref="ClientWebSocket"/>:
 /// what it delivers, what it sends, how it starts and stops, and how its connections close.
 /// </summary>
-public sealed class WebSocketTransportServerTests : IAsyncLifetime
+public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 {
     // constants
 
@@ -2531,11 +2531,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.Empty(gauges.Anomalies);
             Assert.Equal(
-                new Dictionary<string, long> { ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestUnsentBytes"] = 184_551_424 },
+                new Dictionary<string, long> { ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestUnsentBytes"] = 184_551_424, ["messageBytes"] = 268_435_456 },
                 gauges.Ceilings);
             Assert.Equal(new HashSet<string> { firstHandle, secondHandle }, new HashSet<string>(gauges.ConnectionHandles));
             Assert.Equal(
-                new Dictionary<string, long> { ["connections"] = 2, ["largestAddressConnections"] = 2, ["largestUnsentBytes"] = 0, ["unsentBytes"] = 0 },
+                new Dictionary<string, long> { ["connections"] = 2, ["largestAddressConnections"] = 2, ["largestUnsentBytes"] = 0, ["messageBytes"] = 0, ["unsentBytes"] = 0 },
                 gauges.Counts);
         }
     }
@@ -3112,7 +3112,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
                 Assert.Equal((wasClean, olderHandle), await Next(_closes));
                 Assert.Equal(
-                    (wasClean, "connections=1; largestAddressConnections=1; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, "connections=1; largestAddressConnections=1; largestUnsentBytes=0; messageBytes=0; unsentBytes=0"),
                     (wasClean, await CountsOnceHeldBy(1)));
 
                 // the newer stands, and is sent to
@@ -3126,7 +3126,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 Assert.Equal((wasClean, newerHandle), await Next(_closes));
                 Assert.Empty(_server.ConnectionHandles);
                 Assert.Equal(
-                    (wasClean, "connections=0; largestAddressConnections=0; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, "connections=0; largestAddressConnections=0; largestUnsentBytes=0; messageBytes=0; unsentBytes=0"),
                     (wasClean, await CountsOnceHeldBy(0)));
                 Assert.True(_closes.Reader.Count == 0);
             }
@@ -4291,30 +4291,134 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.2, 15.12; RFC 9110 §8.6
     [Fact]
-    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    public async Task Answers_400_unmarked_a_Content_Length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
     {
         await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
 
-        var answers = new List<(int Status, string? Refusal)>();
+        var answers = new List<(string Length, int Status, string? Refusal, string Path, string Body)>();
 
-        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade, each read to its socket's close
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        // 2⁶³ − 1, its close asked; then 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1,
+        // 2⁶⁴ and 23 nines; each on an upgrade from a host it does not take, read to its socket's close
+        string[] lengths =
+        [
+            "9223372036854775807",
+            "9223372036854775808",
+            "00009223372036854775808",
+            "9999999999999999999",
+            "18446744073709551614",
+            "18446744073709551615",
+            "18446744073709551616",
+            "99999999999999999999999",
+        ];
+
+        foreach (var length in lengths)
         {
-            var (status, fields, _) = await AnswerOf(Latin1HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"));
+            var close = length == lengths[0] ? "Connection: close" : "Connection: Upgrade";
+            var (status, fields, body) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", close, $"Content-Length: {length}"));
 
-            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
-        }
-
-        // and 2⁶³ and 2⁶⁴ under a host it does not take
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551616" })
-        {
-            var (status, fields, _) = await AnswerOf(HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", $"Content-Length: {length}"));
-
-            answers.Add((status, fields.GetValueOrDefault("bead-refusal")));
+            answers.Add((length, status, fields.GetValueOrDefault("bead-refusal"), string.Join(" ", PathFields.Where(fields.ContainsKey)), body));
         }
 
         // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before anything is judged
-        Assert.Equal([(400, null), (400, null), (400, null), (400, null), (400, null), (400, null)], answers);
+        Assert.Equal(lengths.Select((length) =>
+        {
+            return length == lengths[0] ? (length, 403, WebSocketRefusals.Host, "cache-control x-content-type-options", "") : (length, 400, (string?)null, "", "");
+        }), answers);
+    }
+
+    // spec 15.2, 15.12: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Takes_an_upgrade_under_a_signed_Content_Length_plus_0_or_minus_0_as_Kestrel_does_the_judgement_reading_the_0_Kestrel_wrote()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // ! Kestrel reads a sign before the digits as the number, where RFC 9110 §8.6 holds a length
+        // to digits alone, and hands the judgement the 0 it wrote in its place
+        foreach (var length in (string[])["+0", "-0"])
+        {
+            using var tcp = await OpenTcp();
+
+            await tcp.GetStream().WriteAsync(HandshakeOf("GET / HTTP/1.1", $"Content-Length: {length}"), Cancelled);
+            await ReadHead(tcp.GetStream());
+        }
+
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.2, 15.12; RFC 9112 §9.6: the row "A request's head held to `headersTimeout`, and an
+    // answer's close in stages, as each platform does them" of docs/support.md
+    [Fact]
+    public async Task Closes_in_stages_a_refusal_of_an_upgrade_whose_body_is_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // an upgrade that lists a coding before its chunked, refused 400 unmarked, its head alone,
+        // a chunk of its body sent every 200 ms as the refusal is read
+        using var tcp = await OpenTcp();
+        var socket = tcp.Client;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var chunk = Encoding.ASCII.GetBytes($"40\r\n{new string('a', 64)}\r\n");
+
+        await socket.SendAsync(HandshakeOf("GET / HTTP/1.1", "Transfer-Encoding: gzip, chunked"), Cancelled);
+
+        var sending = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        await socket.SendAsync(chunk, stop.Token);
+                        await Task.Delay(TimeSpan.FromMilliseconds(200), TimeProvider.System, stop.Token);
+                    }
+                }
+                catch (Exception reason) when (reason is SocketException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // its socket closed, or the test done
+                }
+            },
+            Cancelled);
+
+        try
+        {
+            var came = new StringBuilder();
+            var buffer = new byte[65_536];
+
+            while (!came.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+            {
+                var read = await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                Assert.NotEqual(0, read);
+                came.Append(Encoding.ASCII.GetString(buffer, 0, read));
+            }
+
+            var answered = TimeProvider.System.GetTimestamp();
+
+            try
+            {
+                while (await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled) > 0)
+                {
+                    // what follows its answer: nothing
+                }
+            }
+            catch (SocketException)
+            {
+                // ! Kestrel's close, a reset once its client sends on: its write side ends with it
+            }
+
+            var closedWithin = TimeProvider.System.GetElapsedTime(answered);
+
+            // the refusal whole, which closes its connection, then its close within the linger's 2 s
+            Assert.StartsWith("HTTP/1.1 400 ", came.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\r\nConnection: close\r\n", came.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("bead-refusal", came.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.True(closedWithin < TimeSpan.FromSeconds(3), $"closed past 3 s: {closedWithin}");
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await sending;
+        }
     }
 
     [Fact]

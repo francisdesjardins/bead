@@ -4,11 +4,13 @@ This guide builds one Bead service from an empty folder to a running C# (.NET 10
 TypeScript client, in Node and in a browser page. Every file below is a file of a project built
 and run this way outside the repository; every output quoted is what that project printed.
 
-> **No package is published yet.** No Bead package is on npm, NuGet or crates.io, and beadc's
-> image is on no registry. A team clones Bead at a commit it pins, builds beadc's image from that
-> clone, and takes the runtimes from the same clone by path, so the generator and the runtimes are
-> one commit. Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may
-> break. [The support matrix](../support.md) says what each side plays today and what is ahead.
+> **beadc's image is published; the packages are not.** beadc's image is on GitHub's container
+> registry at each release, `ghcr.io/francisdesjardins/beadc:<version>`, attested and signed. No
+> Bead package is on npm, NuGet or crates.io. A team verifies the image, pins it by its digest, and
+> takes the runtimes from a clone of Bead at the same release's tag, by path, so the generator and
+> the runtimes are one release. The packages' publication is ahead. Bead has not run in production,
+> and before 1.0.0 a minor may break. [The support matrix](../support.md) says what each side plays
+> today and what is ahead.
 
 ## What you build
 
@@ -28,7 +30,9 @@ The server is C#, over WebSocket. The client is TypeScript, run in Node and in a
 ## What you need
 
 - Git, and Docker (or Podman) to run beadc's image.
-- The .NET SDK 10.0.404 or later, for the server.
+- GitHub's CLI, signed in (`gh auth login`, or a token in `GH_TOKEN`), and cosign 3, to verify the
+  image.
+- The .NET SDK 10.0.404, the one Bead's C# side pins, for the server.
 - Node 24.9 or later and npm, for the client.
 - bash 3.2 or later, or PowerShell 7.6 or later (`pwsh`, not Windows PowerShell), for beadc's
   wrappers.
@@ -37,7 +41,7 @@ The layout this guide builds, Bead's clone beside your project:
 
 ```text
 work/
-├── bead-pinned/        Bead, cloned at the commit you pin
+├── bead-pinned/        Bead, cloned at the release you pin
 └── station/            your project
     ├── beadc.sh, beadc.ps1, beadc.yaml, buf.yaml
     ├── proto/station/v1/station.proto
@@ -46,32 +50,114 @@ work/
     └── typescript/     the TypeScript client; typescript/gen/ is beadc's
 ```
 
-## 1. Pin Bead and build beadc's image
+## 1. Pin Bead and beadc's image
 
-Clone Bead and check out the commit you pin, then build beadc's image from that clone. The image
-holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your machine needs no
-protobuf toolchain of its own ([the image](../../builder/README.md#the-image-and-its-wrappers)).
+Clone Bead at the tag of the release you pin, then verify beadc's image of that release and pin it
+by its digest. The image holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your
+machine needs no protobuf toolchain of its own
+([the image](../../builder/README.md#the-image-and-its-wrappers)). For 0.16.0, from `work/`:
+
+<!-- verify-image -->
 
 ```sh
-git clone https://github.com/francisdesjardins/bead bead-pinned
-git -C bead-pinned checkout <commit>
+v=0.16.0
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+commit="$(git -C bead-pinned rev-parse HEAD)"
+digest="$(docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}')"
+image="ghcr.io/francisdesjardins/beadc@$digest"
+[ -n "$digest" ] && [ -n "$commit" ] &&
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+  gh attestation verify "oci://$image" --repo francisdesjardins/bead \
+    --signer-workflow francisdesjardins/bead/.github/workflows/image.yml \
+    --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+  cosign verify "$image" \
+    --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
+  [ "$(docker buildx imagetools inspect "$image" --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}')" = "$commit" ] &&
+  export BEADC_IMAGE="$image"
+```
 
-cd bead-pinned
-docker build -f builder/Dockerfile -t beadc:local .
-cd ..
+```powershell
+# in PowerShell 7.6 (pwsh)
+$v = '0.16.0'
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+$commit = git -C bead-pinned rev-parse HEAD
+$digest = docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}'
+$image = "ghcr.io/francisdesjardins/beadc@$digest"
+$revision = docker buildx imagetools inspect $image --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}'
+if ($digest -and $commit -and $revision -eq $commit) {
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+    gh attestation verify "oci://$image" --repo francisdesjardins/bead `
+      --signer-workflow francisdesjardins/bead/.github/workflows/image.yml `
+      --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+    cosign verify $image `
+      --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop `
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+      --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
+    Set-Item Env:BEADC_IMAGE $image
+}
+```
+
+The block reads the digest of the image's index once, the one name that cannot move, and checks
+the image by it. `gh attestation verify` checks the build provenance GitHub attested for it, and
+`cosign verify` its signature, made keylessly. Each passes only for this repository's
+`.github/workflows/image.yml`, run on GitHub's runners on the release's tag and its commit, and the
+`merge-base` line holds that commit to `main`. 0.16.0 is the one exception: its image was built by
+a run from `develop`, at develop's commit `576bf111`, which built the tag `v0.16.0`. Its provenance
+and its certificate name that branch and that commit, which the block names in their place, and the
+block also holds the index's `org.opencontainers.image.revision` to the tag's commit, the one the
+clone holds. `BEADC_IMAGE` is set
+only once every check passes; a check that fails says why and leaves it unset. For 0.16.0 it names
+`ghcr.io/francisdesjardins/beadc@sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff`.
+
+Pull the image by it:
+
+```sh
+docker pull "$BEADC_IMAGE"
+docker run --rm "$BEADC_IMAGE" version
+```
+
+```powershell
+# in PowerShell 7.6 (pwsh)
+docker pull $env:BEADC_IMAGE
+```
+
+`version` names beadc and every tool the image holds at its pin, and the protocol it writes for:
+
+```text
+beadc 0.16.0
+buf 1.75.0
+protobuf-es 2.17.0
+protoplugin 2.17.0
+protoc-gen-es 2.17.0
+protoc 36.2
+protoc-gen-buffa 0.9.2
+format bead-blueprint/1
+spec 0.17.0
+options 58500
+```
+
+A later release's image is built from its own tag: its block is
+[the image's general one](../../builder/README.md#the-image-and-its-wrappers), set to its version.
+
+Or build the image from the clone, and name it instead:
+
+```sh
+docker build -f bead-pinned/builder/Dockerfile -t beadc:local bead-pinned
+export BEADC_IMAGE=beadc:local
 ```
 
 ## 2. Start the project
 
 beadc runs through two wrappers, `beadc.sh` and `beadc.ps1`, which the image prints. A project
-commits both. Each runs the image `BEADC_IMAGE` names, here the one you just built.
+commits both. Each runs the image `BEADC_IMAGE` names, here the one you pinned.
 
 ```sh
 mkdir station && cd station
-docker run --rm beadc:local wrapper beadc.sh > beadc.sh
-docker run --rm beadc:local wrapper beadc.ps1 > beadc.ps1
+docker run --rm "$BEADC_IMAGE" wrapper beadc.sh > beadc.sh
+docker run --rm "$BEADC_IMAGE" wrapper beadc.ps1 > beadc.ps1
 chmod +x beadc.sh
-export BEADC_IMAGE=beadc:local
 
 bash beadc.sh init station --language csharp --language typescript
 ```
@@ -79,8 +165,7 @@ bash beadc.sh init station --language csharp --language typescript
 ```powershell
 # in PowerShell 7.6 (pwsh); init writes beadc.sh beside it
 mkdir station; cd station
-docker run --rm beadc:local wrapper beadc.ps1 > beadc.ps1
-$env:BEADC_IMAGE = 'beadc:local'
+docker run --rm $env:BEADC_IMAGE wrapper beadc.ps1 > beadc.ps1
 
 ./beadc.ps1 init station --language csharp --language typescript
 ```
@@ -93,10 +178,11 @@ output for every language beadc targets, Rust's included; name the two you use. 
 the project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since git on Windows
 records no mode.
 
-To run the image with no `BEADC_IMAGE`, tag it with the name the wrappers carry, `docker tag
-beadc:local ghcr.io/francisdesjardins/beadc:<version>`; `./beadc.sh version` prints the version.
-Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass
--File ./beadc.ps1 generate` runs it.
+Without `BEADC_IMAGE`, the wrappers pull the image by the version they name,
+`ghcr.io/francisdesjardins/beadc:0.16.0` for 0.16.0. A tag can be moved to another image and a
+digest cannot, so `BEADC_IMAGE` names the digest. `./beadc.sh version` prints what the wrapper
+runs. Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass -File
+./beadc.ps1 generate` runs it.
 
 ## 3. Write the contract
 
@@ -297,7 +383,7 @@ its floor.
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- ! no package is published yet: the runtime comes from a clone of Bead at a pinned commit,
+    <!-- ! no package is published: the runtime comes from a clone of Bead at a pinned release,
          beside this project, by path -->
     <ProjectReference Include="../../bead-pinned/implementations/dotnet/src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <!-- the check a generated proto codec runs, and the validators of the .proto's rules -->
@@ -446,10 +532,10 @@ A request its rules refuse never reaches these resolvers: the server answers it
 ### The host
 
 The WebSocket transport is a Kestrel application of its own, started on its own port; it is not
-mapped into an ASP.NET Core pipeline. A page's upgrade is refused 403 unless its `Origin` is listed
-in `Origins`, exactly; a client outside a browser sends none. Bead opens no port for its metrics,
-so the host serves the registry's text on `/metrics`, from a small ASP.NET Core application on a
-port apart.
+mapped into an ASP.NET Core pipeline. A page's upgrade is refused 403 unless its `Origin` is the
+server's own or one `Origins` lists, exactly; a client outside a browser sends none. Bead opens no
+port for its metrics, so the host serves the registry's text on `/metrics`, from a small ASP.NET
+Core application on a port apart.
 
 `dotnet/Program.cs`:
 
@@ -529,7 +615,7 @@ dotnet run -c Release -- 8080
 Its first line says its two ports, the metrics port chosen free:
 
 ```text
-{"port":8080,"metrics":53364}
+{"port":8080,"metrics":54268}
 ```
 
 It serves until its standard input closes.
@@ -597,7 +683,8 @@ sources, so the project compiles them under its own options and bundles them wit
 The client registers its answer to `promptOperator` before it connects, since the server may ask
 as soon as a call is under way. A call stays curried, `station.getStationStatus(payload)()`: the
 second call sends it, with its options when it has any. The window of 1 credits the next sample
-only once the callback before it has settled, the promise it returns included.
+only once the callback before it has settled, the promise it returns included. It connects by
+`127.0.0.1`, the address the server listens on.
 
 `typescript/src/main.ts`:
 
@@ -736,7 +823,7 @@ client: promptOperator asked "Read ST-001's status?"
 client: getStationStatus ST-001 answered online=true operatorAnswer="acknowledged: checked by Node" (prompts so far: 1)
 client: getStationStatus "station one" refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"pattern\":\"^ST-[0-9]{3}$\"},\"fieldPath\":\"station_id\",\"message\":\"does not match regex pattern `^ST-[0-9]{3}$`\",\"ruleId\":\"string.pattern\"}\n{\"more\":0}" (prompts so far: 1)
 client: getStationStatus ST-999 failed UNKNOWN_STATION, detail: no station ST-999 (prompts so far: 1)
-client: watchTelemetry ST-001 received sequences 1 6 10 14 18 20 of 20 sent, at most 1 callback at a time
+client: watchTelemetry ST-001 received sequences 1 5 9 13 17 20 of 20 sent, at most 1 callback at a time
 client: watchTelemetry samples=50 refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"gte\":1,\"lte\":20},\"fieldPath\":\"samples\",\"message\":\"must be greater than or equal to 1 and less than or equal to 20\",\"ruleId\":\"int32.gte_lte\"}\n{\"more\":0}"
 ```
 
@@ -878,6 +965,26 @@ watchTelemetry: last #20: 22.0 °C
 
 A page on the public network that reaches a server on the loopback or a private address needs its
 user's permission first (Local Network Access); see [the support matrix](../support.md).
+
+### When the operator is slow
+
+Two timeouts meet in `getStationStatus`: the client's for its call, 5 seconds unless the call
+gives one, and the server's for its command, 30 seconds here. Run against this server, an operator
+who takes 6 seconds and one silent past 30 seconds give:
+
+- **A call left at its 5 seconds** rejects with `TimeoutError`, from
+  `@francisdesjardins/bead/client`, its message `no answer came in 5000 milliseconds`, while the
+  operator is still answering. The server's command still takes the late answer, and the
+  resolver's answer to the call that gave up raises no error.
+- **The same call given `{ timeout: 60_000 }`** gets its answer once the operator has.
+- **An operator silent past 30 seconds** fails the server's command with `TimeoutException`,
+  `no answer came in 30000 milliseconds`. The resolver catches it and answers `no answer`, which
+  the call waiting 60 seconds receives. The connection stays open: a command
+  that times out closes its connection only when `ServerOptions.CloseOnCommandTimeout` or the
+  command's `CommandOptions.CloseOnTimeout` says so. The operator's late answer is dropped, with no
+  error on either side.
+
+So the page gives `getStationStatus` 60 seconds, longer than the server's 30 for its command.
 
 ## 7. Read the metrics
 

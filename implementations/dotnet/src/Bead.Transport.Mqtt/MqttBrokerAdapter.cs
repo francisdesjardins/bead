@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using MQTTnet;
@@ -43,6 +44,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private readonly bool _isSecure;
     // what its TLS holds, its key among it, read once and let go of at its dispose
     private readonly TlsCredentials? _tls;
+    // what sends a WebSocket's upgrade, under its TLS, let go of at its dispose
+    private readonly HttpMessageInvoker _upgrading;
     private readonly Lock _gate = new();
     private Link? _link;
 
@@ -101,15 +104,33 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException(refusal, nameof(options));
         }
 
+        // * its host read once, as the URL Standard reads a special scheme's (spec 13.4): judged,
+        // dialed and named as read, one that parser fails on refused as it is built
+        var host = TransportSecurity.DialedHost(options.Uri.Host);
+
         _options = options with
         {
+            Uri = new UriBuilder(options.Uri) { Host = host }.Uri,
             Tls = tls,
             // ! never without end: a broker never counts a link of Keep Alive 0 lost, and its will never goes
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
-        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
+        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
+
+        // * a handler of its own: no cookie, no redirect followed, a host on the loopback connected to
+        // the loopback itself through no proxy, and under wss its TLS, which judges its broker's name
+        // and its authorities as over TCP (spec 13.4, 15.39)
+        _upgrading = new HttpMessageInvoker(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            ConnectCallback = HappyEyeballs.ConnectCallback,
+            PooledConnectionLifetime = TimeSpan.Zero,
+            Proxy = LoopbackBypassProxy.Instance,
+            UseCookies = false,
+            SslOptions = _tls?.SslOptions() ?? new SslClientAuthenticationOptions(),
+        });
     }
 
     /// <inheritdoc/>
@@ -241,9 +262,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Start(BrokerStart? start = null)
     {
         Link? guarded = null;
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var made = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
         {
             MaximumPacketSize = _options.MaximumPacketSize,
+            Connected = returned.Task,
             PastMaximum = (size) =>
             {
                 // ! its link set before its CONNECT goes, so before any packet is read
@@ -259,7 +282,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     ReadsEnded(guarded);
                 }
             },
-        }));
+        }, _upgrading));
         var client = _options.ClientOf?.Invoke(made) ?? made;
         var link = guarded = new Link(client);
 
@@ -321,7 +344,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             try
             {
-                connected = await client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
+                var connecting = client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
+
+                // * its receive loop reads past its CONNACK once its connect returned, whatever
+                // context this continuation resumes on
+                _ = connecting.ContinueWith((_) =>
+                {
+                    returned.TrySetResult();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                connected = await connecting;
             }
             // * a packet its client cannot read, read before its CONNACK or as it: past its own Maximum
             // Packet Size, its CONNACK among them, or an acknowledgement its table does not name
@@ -823,6 +854,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
             finally
             {
+                _upgrading.Dispose();
                 _tls?.Dispose();
             }
         }
@@ -1017,8 +1049,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 // ! each message one binary frame (spec 15.25): MQTTnet sends a payload as a
                 // continuation by default, and Mosquitto 2.1.2 frames what it writes amid one as one
                 .WithoutPacketFragmentation()
-            : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port);
+            : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port)
+                // * its broker's name raced, a localhost name connected to the loopback (spec 13.4)
+                .WithStreamProvider(RacingStreamProvider.Instance);
 
+        // * what its channel over TCP reads; over a WebSocket, the adapter's handler speaks its TLS
         if (isTls)
         {
             builder = builder.WithTlsOptions((tls) =>
@@ -1033,8 +1068,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     tls.WithClientCertificates(certificates);
                 }
 
-                // ! a handler, never a trust chain, which MQTTnet's WebSocket channel does not read:
-                // its broker's name, then a chain to its authorities alone, as the AMQP adapter judges
+                // ! a handler, never a trust chain: its broker's name, then a chain to its authorities
+                // alone, as the AMQP adapter judges
                 if (_tls is { Authorities: not null } trusting)
                 {
                     tls.WithCertificateValidationHandler((presented) =>

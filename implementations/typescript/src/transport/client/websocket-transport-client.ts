@@ -10,10 +10,14 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   WS_ERROR_CODE_PREFIX,
   WS_TOO_BIG_CODE,
+  WS_LARGEST_COUNT,
+  WS_TOO_MANY_FRAMES_CODE,
+  WS_TOO_MANY_FRAMES_MESSAGE,
 } from '../shared/constants';
 import { assertHeld, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
+  closedWithOf,
   ConnectError,
   ProgrammerError,
   notOpenOf,
@@ -26,7 +30,16 @@ import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '..
 import { bytesOf, createSendQueue, type ISendQueue } from '../shared/send-queue';
 import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
-import { isSecureUrl } from '../shared/secure';
+import {
+  createUndiciDialer,
+  isConnectFailure,
+  isLocalhostName,
+  type IUndiciDrawn,
+  loopbackCreateConnection,
+  loopbackSentenceOf,
+  watchedOf,
+} from '../shared/loopback';
+import { isLoopbackUrl, isSecureUrl, urlHostOf } from '../shared/secure';
 import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
 import {
   getReadyState,
@@ -37,6 +50,7 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import type { Data, ITlsOptions, ITransportMessage } from '../shared/types';
+import { assertCount, MAXIMUM_MESSAGE_FRAMES } from '../server/server-bounds';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -57,6 +71,7 @@ import type {
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export type { ITlsOptions } from '../shared/types';
+export { MAXIMUM_MESSAGE_FRAMES } from '../server/server-bounds';
 export type {
   ICloseEventLike,
   IMessageEventLike,
@@ -225,12 +240,16 @@ export const createWebSocketTransportClient = (
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
+    maximumMessageFrames = MAXIMUM_MESSAGE_FRAMES,
     WebSocket = globalThis.WebSocket,
   } = {
     ...DEFAULTS(),
     ...options,
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
+
+  // ! never without end: `ws` reads a `maxFragments` of 0 as none
+  assertCount('maximumMessageFrames', { value: maximumMessageFrames });
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
   const tls = tlsOf(options?.tls);
 
@@ -240,6 +259,10 @@ export const createWebSocketTransportClient = (
 
   // * given to `ws` under `wss` alone: in the clear, `tls` is held unused
   const nodeTls = nodeTlsOf(tls);
+  // * in Node, no WebSocket given: a host on the loopback through undici's own WebSocket and the
+  // client's agent (spec 13.4), or the global one where undici does not resolve
+  const isDefault = options?.WebSocket === undefined;
+  const dialer = createUndiciDialer({});
 
   return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
     (client, { report, tell }) => {
@@ -365,7 +388,10 @@ export const createWebSocketTransportClient = (
             );
           }
 
-          if (!isSecureUrl(urlOf({ ...CONNECT_DEFAULTS, ...connectOptions }))) {
+          const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
+
+          // * a host no URL can name is its connect's to refuse, before any socket opens
+          if (urlHostOf(url) !== undefined && !isSecureUrl(url)) {
             throw new ProgrammerError(
               'a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback'
             );
@@ -387,11 +413,16 @@ export const createWebSocketTransportClient = (
           const {
             credential,
             credentialProvider,
+            host,
             protocols,
             signal,
             timeout = CONNECT_DEFAULTS.timeout,
           } = { ...CONNECT_DEFAULTS, ...connectOptions };
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
+          const isThroughUndici = isDefault && isNode() && isLoopbackUrl(url);
+          // * what bounds a localhost name's race below `ws`, which hands it no signal and no
+          // timeout: this connect's deadline, and its signal or the attempt's end, whichever first
+          const deadline = client.clock.performance.now() + timeout;
           // what the attempt's credential provider is told to give up by, the attempt settled; whether
           // a dispose ended it; whether its socket closed before its connect ended, and the end its
           // connect still tells then, a reconnection's attempt telling none as it closes
@@ -429,15 +460,24 @@ export const createWebSocketTransportClient = (
                   reject(reason);
                 };
 
+                // * read once as the URL Standard reads it: a host it fails on opens no socket
+                if (urlHostOf(url) === undefined) {
+                  reject(new ConnectError(`${host} is no host a URL can name`));
+
+                  return undefined;
+                }
+
                 // ! no `followRedirects`: a 3xx answered to the upgrade fails it, its status named,
                 // since a redirect would carry it where its credential and its security were not
                 // judged (spec 15.6); an empty credential is none, as the server reads an empty field
-                const open = (given: string | undefined): void => {
+                const open = (given: string | undefined, drawn?: IUndiciDrawn): void => {
                   if (ended || signal?.aborted === true) {
                     return;
                   }
 
                   const written = given === '' ? undefined : given;
+                  // what undici's own connect failed with, which its `error` event does not carry
+                  const watched = drawn === undefined ? undefined : watchedOf(drawn.agent);
                   let socket: IWebSocketLike;
 
                   // ! `closeTimeout`, `ws`'s own close timer, which it arms on every close, its
@@ -448,17 +488,42 @@ export const createWebSocketTransportClient = (
                     socket =
                       opened =
                       client.socket =
-                        // ! `?? []`: Chromium offers "undefined" for an `undefined` beside the
-                        // options, a subprotocol no server selects (spec 15.2)
-                        new WebSocket(url, protocols ?? [], {
-                          closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
-                          maxPayload,
-                          // ! no permessage-deflate offer, as the C# client offers none: a third-party
-                          // server must not negotiate compression on this side alone (RFC 7692)
-                          perMessageDeflate: false,
-                          ...(url.startsWith('wss:') ? nodeTls : {}),
-                          ...(written === undefined ? {} : { headers: { authorization: written } }),
-                        });
+                        drawn === undefined
+                          ? // ! `?? []`: Chromium offers "undefined" for an `undefined` beside the
+                            // options, a subprotocol no server selects (spec 15.2)
+                            new WebSocket(url, protocols ?? [], {
+                              closeTimeout:
+                                closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
+                              // ! never without end: `ws` truncates a count to 32 bits
+                              maxFragments: Math.min(maximumMessageFrames, WS_LARGEST_COUNT),
+                              maxPayload,
+                              // ! no permessage-deflate offer, as the C# client offers none: a
+                              // third-party server must not negotiate compression on this side
+                              // alone (RFC 7692)
+                              perMessageDeflate: false,
+                              ...(url.startsWith('wss:') ? nodeTls : {}),
+                              ...(isWsShaped(WebSocket) && isLocalhostName(host)
+                                ? {
+                                    createConnection: loopbackCreateConnection(host, {
+                                      signal: AbortSignal.any([
+                                        attempt.controller.signal,
+                                        ...(signal === undefined ? [] : [signal]),
+                                      ]),
+                                      timeout: Math.max(
+                                        1,
+                                        deadline - client.clock.performance.now()
+                                      ),
+                                    }),
+                                  }
+                                : {}),
+                              ...(written === undefined
+                                ? {}
+                                : { headers: { authorization: written } }),
+                            })
+                          : (new drawn.undici.WebSocket(url, {
+                              dispatcher: watched?.dispatcher ?? drawn.agent,
+                              protocols: protocols ?? [],
+                            }) as IWebSocketLike);
                   } catch (reason) {
                     return (reject(wrapReason(ConnectError, reason)), undefined);
                   }
@@ -500,8 +565,19 @@ export const createWebSocketTransportClient = (
                     const closed = closeEvent.reason
                       ? `${closeEvent.reason} (${String(closeEvent.code)})`
                       : String(closeEvent.code);
+                    // where its dialer took a localhost name to the loopback itself, and its
+                    // every attempt failed: no socket opened (spec 13.4)
+                    const said =
+                      (drawn !== undefined || isWsShaped(WebSocket)) &&
+                      isConnectFailure(watched?.failures[0] ?? lastError)
+                        ? loopbackSentenceOf(host)
+                        : undefined;
                     const message =
-                      refused === undefined ? closed : `the server refused the upgrade: ${refused}`;
+                      refused === undefined
+                        ? said === undefined
+                          ? closed
+                          : `${closed}; ${said}`
+                        : `the server refused the upgrade: ${refused}`;
 
                     reject(
                       new ConnectError(
@@ -549,7 +625,14 @@ export const createWebSocketTransportClient = (
                                 cause: error,
                                 maximumMessageBytes: maxPayload,
                               })
-                            : error;
+                            : error.code === WS_TOO_MANY_FRAMES_CODE &&
+                                error.message === WS_TOO_MANY_FRAMES_MESSAGE
+                              ? closedWithOf('the connection', {
+                                  cause: error,
+                                  code: 1008,
+                                  why: `a message past its maximumMessageFrames, ${String(maximumMessageFrames)} frames`,
+                                })
+                              : error;
                       }
                     };
                     socket.onmessage = ({ data }) => {
@@ -628,7 +711,22 @@ export const createWebSocketTransportClient = (
                 };
 
                 if (credentialProvider === undefined) {
-                  return (open(credential), undefined);
+                  if (!isThroughUndici) {
+                    return (open(credential), undefined);
+                  }
+
+                  // * undici loaded before its socket opens, which `open` then judges as it judges
+                  // a provider's answer: a dispose or a timeout meanwhile ends the attempt
+                  void dialer.draw().then(
+                    (drawn) => {
+                      open(credential, drawn);
+                    },
+                    (reason: unknown) => {
+                      reject(wrapReason(ConnectError, reason));
+                    }
+                  );
+
+                  return undefined;
                 }
 
                 const credentialWaiter = {
@@ -894,6 +992,9 @@ export const createWebSocketTransportClient = (
           resolveDisconnect?.(true);
           stopBeating();
           hold.drop();
+          // its agent closed, drawn again at its next connect: a socket it upgraded is the
+          // WebSocket's own, which the agent no longer holds
+          dialer.close(Promise.resolve());
 
           if (socket === null) {
             return;

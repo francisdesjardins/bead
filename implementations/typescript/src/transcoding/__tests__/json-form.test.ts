@@ -519,6 +519,11 @@ test('refuses a value its field’s type holds none of, each by its reason', () 
     ],
     [
       EdgesSchema,
+      '{"any":{"@type":"type.googleapis.com/.google.protobuf.Any"}}',
+      'an Any of a type its definitions do not hold',
+    ],
+    [
+      EdgesSchema,
       '{"any":{"@type":"type.googleapis.com/google.protobuf.Duration","seconds":1}}',
       'an Any of a well-known type whose members are not its value alone',
     ],

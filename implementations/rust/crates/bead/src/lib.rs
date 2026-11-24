@@ -184,6 +184,8 @@ pub use mqtt::adapter::{
 pub use mqtt::packets::MAXIMUM_PACKET_SIZE;
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
+#[cfg(feature = "websocket")]
+pub use net::bounds::{MAXIMUM_MESSAGE_FRAMES, MESSAGE_BYTES_BUDGET};
 #[cfg(any(feature = "websocket", feature = "mqtt"))]
 pub use net::credential::{CredentialProvider, CredentialProviderError};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
@@ -229,7 +231,7 @@ pub use transcoding::form::{
     BindingOptions, JsonFormError, MessageForm, MessageFormError, RequestPlace,
 };
 #[cfg(feature = "transcoding")]
-pub use transcoding::problems::{OwnFailure, OwnProblemOptions};
+pub use transcoding::problems::OwnFailure;
 #[cfg(feature = "transcoding")]
 pub use transcoding::routes::{
     HttpMethod, HttpPayload, HttpRoute, HttpRouteInit, HttpRouteTemplate, route_of,

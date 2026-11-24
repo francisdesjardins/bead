@@ -5,18 +5,12 @@ use std::net::Ipv6Addr;
 use super::*;
 use crate::http::server::HttpTransportServer;
 use crate::router::types::ConnectionHandle;
+use crate::testing::closed_port::closed_port;
 use crate::transport::ServerTransport;
 
 // whether this machine has the IPv6 loopback
 async fn has_ipv6_loopback() -> bool {
     TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).await.is_ok()
-}
-
-// a port nothing listens on
-async fn closed_port() -> u16 {
-    let listener = TcpListener::bind((HOST, 0)).await.unwrap();
-
-    listener.local_addr().unwrap().port()
 }
 
 // a server listener that takes each credential and answers each message with a result carrying
@@ -134,7 +128,8 @@ fn is_refused_with(outcome: &Result<(), RouterError>, message: &str) -> bool {
 #[tokio::test]
 async fn carries_a_credential_beside_an_envelope_in_its_post_s_authorization_and_is_secure_under_https_or_to_a_loopback_host_judged_by_the_url_it_was_given()
  {
-    let port = closed_port().await;
+    let closed = closed_port().unwrap();
+    let port = closed.port();
     let never = client_of(&HttpTransportClientOptions::default());
 
     // judged from what it connects with, before its first connect from nothing
@@ -1146,7 +1141,8 @@ async fn refuses_to_connect_where_no_connection_is_drawn_and_lets_go_of_one_draw
     assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
 
     let unreachable = client_of(&not_listening());
-    let failed = settled(unreachable.connect(&to(closed_port().await))).await;
+    let closed = closed_port().unwrap();
+    let failed = settled(unreachable.connect(&to(closed.port()))).await;
 
     assert!(
         matches!(&failed, Err(TransportError::Connect(_))),
@@ -1304,10 +1300,21 @@ async fn reconnects_to_a_connection_drawn_anew() {
 #[tokio::test]
 async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone() {
     let server = started(&HttpTransportServerOptions::default()).await;
-    let client = client_of(&not_listening());
+    let client = client_of(&HttpTransportClientOptions::default());
+    let told = recorded(&client);
 
     settled(client.connect(&to(server.port))).await.unwrap();
+    until(|| server.server.gauges().unwrap().counts.get("listens") == Some(&1)).await;
     server.stop().await;
+    told.closed(1).await;
+
+    let refused = closed_port().unwrap();
+
+    // * the failed connect keeps a held destination for every reconnection attempt
+    assert!(matches!(
+        settled(client.connect(&to(refused.port()))).await,
+        Err(TransportError::Connect(_))
+    ));
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
     let failed = within(

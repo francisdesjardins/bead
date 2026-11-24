@@ -64,11 +64,28 @@ export const toError = (reason: unknown): Error => {
  */
 export const tooBigOf = (
   subject: string,
-  { cause, maximumMessageBytes }: { cause: unknown; maximumMessageBytes: number }
+  { cause, maximumMessageBytes }: { cause?: unknown; maximumMessageBytes: number }
+): GenericError => {
+  return closedWithOf(subject, {
+    cause,
+    code: 1009,
+    why: `a message past its maximumMessageBytes, ${byteCountOf(maximumMessageBytes)}`,
+  });
+};
+
+/**
+ * A connection a side failed with `code`, as its transport reports it on `error` (spec 15.1, 15.3,
+ * 15.12): `subject`, a server's handle or a client's connection, then `why`, which names the bound
+ * in the spec's spelling and its value, or the rule broken; the platform's own error, where it gave
+ * one, kept as `cause`.
+ */
+export const closedWithOf = (
+  subject: string,
+  { cause, code, why }: { cause?: unknown; code: number; why: string }
 ): GenericError => {
   return new GenericError(
-    `${subject} is closed with 1009: a message past its maximumMessageBytes, ${byteCountOf(maximumMessageBytes)}`,
-    { cause }
+    `${subject} is closed with ${String(code)}: ${why}`,
+    cause === undefined ? undefined : { cause }
   );
 };
 

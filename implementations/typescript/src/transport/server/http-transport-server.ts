@@ -75,6 +75,8 @@ import {
   type IExchangeIn,
   inTurn,
   isBeadBody,
+  isContentLengthCounted,
+  isTeTaken,
   isTransferEncodingTaken,
   joinedOf,
   linesOf,
@@ -1031,8 +1033,12 @@ export const createHTTPTransportServer = (
           !hasVisibleFields(request.rawHeaders) ||
           !isVisibleTarget(request.url) ||
           // and a Transfer-Encoding section 15.12 refuses, which Node hands on over HTTP/1.0, or one
-          // beside a Content-Length, which it hands on under `insecureHTTPParser`
-          !isTransferEncodingTaken(request)
+          // beside a Content-Length, which it hands on under `insecureHTTPParser`, and a
+          // Content-Length past 2⁶³ − 1, which Node's parser hands on to 2⁶⁴ − 1
+          !isTransferEncodingTaken(request) ||
+          !isContentLengthCounted(request) ||
+          // and over HTTP/2 a te other than trailers in lower case, which nghttp2 hands on
+          !isTeTaken(request)
         ) {
           return (refuseMalformed(exchange), undefined);
         }
@@ -1131,7 +1137,8 @@ export const createHTTPTransportServer = (
         return (receive(exchange, connection), undefined);
       };
 
-      // ! over HTTP/1, an exchange in its socket's turn, and none behind an answer that closes
+      // ! over HTTP/1, an exchange in its socket's turn, none behind an answer that closes, and its
+      // socket read no further than its bound
       const onExchange: HTTPRequestListener = (request, response) => {
         inTurn({ request, response }, () => {
           serveExchange(request, response);

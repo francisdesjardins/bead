@@ -1,4 +1,4 @@
-//! A gateway's bodies (spec/transcoding.md 6, 7.6.27, 10.1's step 10): the one it answers with,
+//! A gateway's bodies (spec/transcoding.md 6, 7.6.26, 10.1's step 10): the one it answers with,
 //! [`HttpGatewayBody`], its frames its outlet's slices; and the one it is handed, read as it comes
 //! under its bounds and its rate, and, where it is mounted, judged before its first byte by
 //! hyper's hints and at its end by its count, so a body the server it is mounted on read before it
@@ -163,7 +163,7 @@ impl Body for OwnBody {
 
 // ── The body it is handed ─────────────────────────────────────────────────────────────────────
 
-/// What a request's head says of its body, which a mounted gateway judges it by (7.6.27).
+/// What a request's head says of its body, which a mounted gateway judges it by (7.6.26).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BodyHead {
     /// Its `content-length`, where it gives one.

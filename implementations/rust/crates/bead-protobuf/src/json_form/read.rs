@@ -20,7 +20,7 @@ use super::text::{Integer, Node, integer_of_digits, is_integer_text, is_number_t
 use super::wellknown::{Instant, read_duration, read_field_mask, read_timestamp};
 use super::{
     At, MAXIMUM_DEPTH, Refusal, article_of, field_at, field_named, given_at, is_in_oneof,
-    is_own_form, is_wrapper, item_at, nested_past, short_name,
+    is_own_form, is_wrapper, item_at, message_named, nested_past, short_name,
 };
 use crate::records::ProtoSchema;
 use crate::required::unset_of;
@@ -616,7 +616,7 @@ fn read_any(
     let Some((_, type_name)) = type_url.rsplit_once('/') else {
         return Err(Refusal::new("an Any whose @type is no URL").at(at));
     };
-    let Some(held) = pool.message_index(type_name) else {
+    let Some(held) = message_named(pool, type_name) else {
         return Err(Refusal::new("an Any of a type its definitions do not hold").at(at));
     };
     let rest: Vec<(String, Node)> = members

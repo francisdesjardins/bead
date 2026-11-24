@@ -7,6 +7,170 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-24
+
+### Added
+
+- beadc's image is published on GitHub's container registry at each release,
+  `ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and linux/arm64, by
+  `.github/workflows/image.yml`: each platform built natively and tested, its index attested by
+  GitHub and signed keylessly by cosign. Each image is built, attested and signed on its release's
+  tag, its provenance naming the tag and its commit, and the release's run verifies it as the README
+  tells a reader to; 0.16.0's alone was dispatched from develop, which built its tag. A team
+  verifies it with `gh attestation verify` and `cosign verify` and pins it by its digest in
+  `BEADC_IMAGE`; the wrappers pull it by version. The packages stay unpublished, and the options
+  keep 58500 (decision 0055).
+
+### Changed
+
+- The spec moves to 0.18.0 (`spec-v0.18.0`), and the transcoding's companion, `spec/transcoding.md`,
+  to 0.8.0 (`transcoding-v0.8.0`); `spec/debugging.md` stays 0.11.1.
+
+- The workflow that implements a settled design is `bead-implement-every-side`, and it runs the
+  Rust side by default, beside the spec, TypeScript and C#.
+
+- The documents are brought to 0.17.0: the records, the matrix and the READMEs state the client's
+  loopback, the read-ahead and `Content-Length` bounds and the WebSocket message's budget and rate
+  as what holds, and a step over HTTP/2 in the conformance files as ahead.
+
+- The guides for teams take beadc's published image: getting started verifies 0.16.0's with `gh
+  attestation verify` and `cosign verify`, pins it by its digest and builds its scenario with it,
+  and shows the two timeouts of a call whose resolver waits on a person.
+- The C# side's MQTT 5 and AMQP 1.0 adapters race a name's address families, as its WebSocket and
+  HTTP clients do, through Bead's own connect: a connect by `localhost` to a server on `127.0.0.1`
+  alone no longer waits out Windows' two-second refusal of `::1`.
+- In Node, the TypeScript side's default WebSocket client, HTTP client and caller reach a host on
+  the loopback through undici's own `WebSocket` and `fetch`, with an `Agent` of the client's, where
+  the optional peer undici resolves. Where it does not, they keep Node's global `WebSocket` and
+  `fetch`, which a client does not own: it judges a localhost name by its name, as over a dialer its
+  application gives, and the support matrix's row `A host on the loopback connected directly, a
+  localhost name asking no resolver` says so, of kind platform for the WebSocket client; for the
+  HTTP client and caller, which `node:http` could carry, it is the open row `A localhost name over
+  the TypeScript HTTP client and caller in Node without undici`.
+- The support matrix gains an open row, `The platform's proxy, for a host off the machine`: the C#
+  side's handlers read `HttpClient.DefaultProxy`, Node's global dialers the environment's proxy
+  under `NODE_USE_ENV_PROXY`, MQTT.js the SOCKS proxy `MQTTJS_SOCKS_PROXY` names, and the Rust side
+  none. `UNTESTED_OPEN` is 42.
+- Spec 15.12: over HTTP/1, a server holds no more of a socket than a bound of its own of what it
+  read behind the answer under way, and past it reads nothing more of that socket until the answers
+  ahead end, keeping it. Each request pipelined is answered in its turn, however many come in one
+  write. A server that reads nothing more of a socket learns its client went by a write that fails.
+  The TypeScript side stops reading a socket past 32 requests unserved and resumes it at 16, and
+  across its sockets holds 65,536 at most; a head Node parsed in part behind them is still timed by
+  `headersTimeout`, which resets a socket whose answer ahead is held that long. Transcoding 10.2 inherits the rule, 8.6 says how a stream
+  learns its client went, and 8.7 that a stream whose heartbeat is without end outlives a client
+  gone unseen.
+- `spec/transports.json` and `spec/transcoding.json` take a step, `behind`, which writes requests on
+  an exchange's socket in one write, never awaited, 65,536 octets at most. An `expect` of a status
+  reads the next response on its socket, and an `expect` of `end` reads that nothing came past the
+  responses read. A case in each pipelines requests behind an answer held and has each answered in
+  its turn, the socket kept, and `responses` gains several responses on one socket. The support
+  matrix's open row on requests pipelined becomes a platform row: what each platform reads ahead,
+  and when each side sees its client leave.
+- Spec 15.12 and 15.2's step 1: a `Content-Length` is counted to 2⁶³ − 1, the largest signed 64-bit
+  count, by its number, its leading zeros counting for nothing. One past it is answered as HTTP's
+  own refusal, before anything else of the request is judged: 400 unmarked over HTTP/1.1 and at a
+  WebSocket's address, its connection closed, and its stream reset `PROTOCOL_ERROR` over HTTP/2.
+  The TypeScript and Rust HTTP transports, gateways and WebSocket judgements answered such a
+  request after its host, 403 `host-refused`, or when the host was taken, 400 `malformed`, 413
+  or 415. The Rust judgement counted no length at any value. RFC 9110 §17.5's 413 is a row of the
+  support matrix's "Leveled down". The platform rows keep hyper's 431 at 2⁶⁴ − 2 and 2⁶⁴ − 1,
+  Kestrel's `GOAWAY` and h2's reset of more than 19 digits over HTTP/2. Two cases of
+  `spec/transports.json` and an exchange of `spec/transcoding.json` play it.
+- Transcoding 2.4, 7.6, 7.7 and 10.1: under `bearer-jwt`, a gateway reads an `authorization`'s
+  auth-scheme as RFC 9110 §11.1 reads one, its longest run of `tchar`. Another auth-scheme, or
+  `Bearer` alone, presents no credential, as RFC 6750 §3.1 reads a request that attempted no
+  `Bearer` credential: a procedure that needs no session runs, and one that needs one answers 401
+  with the challenge alone. `Bearer` followed by neither a space nor the field's end, a tab among
+  it, is refused 400 `malformed` before its body is read, with `error="invalid_request"` beside
+  the challenge, as two `authorization` fields are under `bearer-jwt`. What follows `Bearer`'s
+  spaces is its token as it stands, which its server judges. Every gateway answered each of these
+  401 `invalid_request`, `an auth-scheme but Bearer`, once its body was read. A 401
+  `SESSION_REQUIRED` carries `error="invalid_token"` only where a credential of the challenge's
+  auth-scheme came, under `elsewhere` too. A generated client raises `PAYLOAD_UNDECODABLE` for
+  the 400, as for any `malformed`. Transcoding's rows 7.6.27 and 7.6.28 become 7.6.26 and 7.6.27.
+
+### Removed
+
+- The gateway's own failure `scheme` and the options of a problem of the gateway's own, on every
+  side: TypeScript's `OwnFailure` `'scheme'` and `IOwnProblemOptions`, C#'s `OwnFailure.Scheme`
+  and `OwnProblemOptions`, the Rust side's `OwnFailure::Scheme` and `OwnProblemOptions`. A
+  problem of the gateway's own takes its failure and its detail. `spec/transcoding.json`'s `own`
+  loses `scheme`.
+
+### Fixed
+
+- The C# side's MQTT 5 adapter tells its link lost when the packet that ends it comes in the same
+  read as its CONNACK. MQTTnet 5.2 could read that packet before it held the task of its own
+  receive loop, and then never said the link disconnected, so the adapter kept a dead link up and
+  told no down. A read past the CONNACK now waits until the connect returned.
+- The C# and TypeScript sides' WebSocket servers close their own refusal of an upgrade whose body
+  is still coming in stages, its socket closed once 2 seconds pass, as their HTTP transports and
+  gateways do. The C# side left that socket to Kestrel, which reset it about 6 seconds later; the
+  TypeScript side left it to Node, which reset a client still sending as soon as the refusal was
+  written, before the client could read it.
+- The C# side answered `200 content-length: 0` to a chunk size of 2³¹ or more, on its HTTP
+  transport and its gateway. It now answers 400 unmarked and closes (spec 15.7, 15.12; RFC 9112
+  §7.1). A case of each conformance file plays a size past 2⁶⁴ − 1, and `spec/transcoding.json`'s
+  exchanges can expect a socket's end.
+- The Rust side's JSON form read an `Any` whose type URL names its type with a leading dot,
+  `…/.google.protobuf.Any`, which the TypeScript and C# sides refuse, and wrote it back otherwise.
+  It now names a type by its whole name alone, on reading and writing, and refuses that `Any` as an
+  `Any` of a type its definitions do not hold.
+
+### Security
+
+- A client connects `localhost` and a name under `.localhost` to the loopback itself, `127.0.0.1`
+  then `::1`, raced as RFC 8305 races its attempts, each kept until one connects, a connect given
+  up ending them all, asking no resolver, and every host it judges on the loopback through no proxy,
+  on every dialer it owns (spec 13.4, decision 0054). A host is read once, by the URL Standard's
+  host parser, an `mqtt:` or `amqp:` host among them, so `127.0.0.1.` is connected to `127.0.0.1`
+  and asks no resolver. A host that parser fails on, such as `foo.123`, is refused before any socket
+  opens, which the C# side, through .NET's `Uri`, dialed until now. A credential judged secure no
+  longer crosses where a resolver or a proxy sends such a name. Over a dialer the client does not
+  own, one its application gives, a page's, or its platform's own, Node's global ones where undici
+  does not resolve, it judges the name by its name, and spec 13.4 states that residual.
+- A `.localhost` name that a hosts file or a container's `extra_hosts` maps elsewhere reaches the
+  loopback, and a connect whose every attempt failed there says that it went to the loopback and
+  asked no resolver; no option points such a name elsewhere.
+- Spec 15.12 and 15.2's step 1: a request whose `Transfer-Encoding` lists a coding before its
+  `chunked`, `gzip, chunked` among them, is refused as HTTP's own: 400 unmarked over HTTP/1.1 and
+  at a WebSocket's address, before its host is judged, its connection closed. Every side's HTTP
+  transport and gateway took such a request and handed on its body still coded; a WebSocket's
+  address refused it 400 `malformed`, marked, at step 6. RFC 9112 §6.1's 501 is a row of the
+  support matrix's "Leveled down". Two cases of `spec/transports.json` and an exchange of
+  `spec/transcoding.json` play it.
+- Spec 15.12: over HTTP/2, a request carrying any field RFC 9113 §8.2.2 makes malformed
+  (`connection`, `proxy-connection`, `keep-alive`, `transfer-encoding`, `upgrade`, or a `te` but
+  `trailers`) has its stream reset `PROTOCOL_ERROR`, where the spec named only `transfer-encoding`.
+  A `te` is taken as `trailers` in lower case alone. The TypeScript side took `Trailers`, and now
+  resets it as h2 and Kestrel refuse it, a row of the support matrix's "Leveled down". Kestrel ends
+  the session of a `connection` or such a `te`, a row of its "Differences". `spec/transports.json`
+  plays a final coding other than `chunked` with no `Content-Length` beside it, and every framing
+  refusal at a WebSocket's address, to the socket's end. Both conformance files play a signed
+  `Content-Length`, which Kestrel reads as its number, the C# side excused by the row "A signed
+  `Content-Length`".
+- Spec 15.3 and 15.12: a WebSocket server holds each message partway to `messageBytesBudget` and
+  to `minimumBodyBytesPerSecond` past `bodyGracePeriod`. Every byte its frames bring is charged,
+  and 128 a frame. A charge that would pass the budget casts off connections with 1013, byte by
+  byte, a frame's head once whole, the largest first, as Redis casts off its clients; for a
+  connection that reads, a write's cut never chooses whom, and a paused connection is charged what
+  its read before the pause brought. A message too slow fails with 1008. Every side reads frame
+  heads itself: 1009 at the head that takes a message past `maximumMessageBytes`, 1008 past
+  `maximumMessageFrames` (16,384), and 1002 at a head RFC 6455 forbids. A verdict behind a message
+  its router paused on fails at once. From a failure on, nothing more is read: the side sends its
+  close, ends its writing where its platform lets it and drops what comes until its peer ends or
+  its close timeout passes. A peer could hold a message's memory without end through one-byte
+  fragments, or on the TypeScript side pin a read's whole bytes for each fragment. The Rust side
+  reserved a frame's announced length at its head, and the Rust and C# sides kept their largest
+  message's buffer. Ten cases of `spec/transports.json`, which take a frame's `length` and the
+  gauge `messageBytes`, and the place `webSocketTransportServer.bodyGracePeriod` of
+  `spec/durations.json` play it; the support matrix gains its feature, three platform rows and the
+  open row `The frame a WebSocket client fails at its head`, and its open row on a frame's head
+  becomes the platform row `What a WebSocket message's frame costs a side beyond its bytes`. Every
+  side fuzzes a tenth target, `websocket-frames`, its meter against its platform's reader (decision
+  0056).
+
 ## [0.16.0] - 2026-11-18
 
 ### Changed
@@ -3479,7 +3643,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.16.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.17.0...develop
+[0.17.0]: https://github.com/francisdesjardins/bead/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/francisdesjardins/bead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0

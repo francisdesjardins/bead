@@ -1,10 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { once } from 'node:events';
-import {
-  type AddressInfo,
-  connect as createNetConnection,
-  createServer as createNetServer,
-} from 'node:net';
+import { connect as createNetConnection } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createWebSocketClient } from '../../client/websocket-client';
 import { createRouterServer } from '../../router/server/router-server';
@@ -1142,15 +1138,8 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
   // a server on every address, each socket bound to one address and port of the loopback
   const server = createWebSocketServer({ transport: { WebSocketServer } });
   const { port } = await server.transport.start({ address: '0.0.0.0', findOpenPort: true });
-  // a port the system gave a listener and took back, so no socket of another test holds it
-  const free = createNetServer().listen(0, '127.0.0.1');
-
-  await once(free, 'listening');
-
-  const { port: localPort } = free.address() as AddressInfo;
-
-  free.close();
-  await once(free, 'close');
+  // * the first connection draws its local port and holds it across the second connect
+  let localPort: number | undefined;
   const closes: number[] = [];
   // ws's socket, its connection opened from that address and port, its close's code kept
   const BoundWebSocket = new Proxy(WebSocket, {
@@ -1196,6 +1185,8 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
     });
 
     await alice.connect({ host: '127.0.0.1', port });
+    localPort = server.transport.clients[0]?.port;
+    expect(localPort).toBeGreaterThan(0);
     await alice.services.getRequest(openSession, { serializer: text })('alice')();
     await other.connect({ host: '127.0.0.2', port });
 

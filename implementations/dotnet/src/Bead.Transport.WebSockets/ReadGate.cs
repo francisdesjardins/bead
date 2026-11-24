@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -10,10 +11,16 @@ namespace Bead.Transport.WebSockets;
 /// which reads on to its peer's Close (RFC 6455 §7.1.1). Each read of its socket's stream waits at
 /// it, a server's and a client's, so a read already pending as the pause comes reads nothing more
 /// of its peer, and its socket's end lets every wait go, so a paused connection ends at once. It
-/// takes its own lock alone, never held as it settles a wait.
+/// takes its own lock alone, never held as it settles a wait. Each read of its socket's stream fills
+/// a buffer of its own, up to <see cref="ServerBounds.GateReadBytes"/>, which goes through its meter
+/// (decision 0056) at once, all that read brought, before .NET's reader is served from it. Once its
+/// socket ended while its router paused it, its meter ends, and what it reads goes unmetered.
 /// </summary>
 internal sealed class ReadGate
 {
+    // what a read of its socket's stream drains into once its meter's verdict was drawn
+    private const int DrainBytes = 4_096;
+
     private readonly Lock _lock = new();
     private bool _isPaused;
     private bool _isReadingOn;
@@ -21,6 +28,12 @@ internal sealed class ReadGate
     private bool _isEnded;
     private TaskCompletionSource? _resumed;
     private TaskCompletionSource? _readable;
+
+    /// <summary>
+    /// The meter its socket's stream is read through, which judges each frame at its head; none
+    /// meters nothing.
+    /// </summary>
+    public FrameMeter? Meter { get; init; }
 
     /// <summary>Whether it opened for good, its connection closing.</summary>
     public bool IsReadingOn
@@ -52,12 +65,21 @@ internal sealed class ReadGate
     /// <summary>Shuts it, its router behind; nothing once it opened for good. Idempotent.</summary>
     public void Pause()
     {
+        bool isDropped;
+
         lock (_lock)
         {
             if (!_isReadingOn)
             {
                 _isPaused = true;
             }
+
+            isDropped = _isEnded && _isPaused;
+        }
+
+        if (isDropped)
+        {
+            Unmetered();
         }
     }
 
@@ -110,18 +132,33 @@ internal sealed class ReadGate
     {
         TaskCompletionSource? resumed;
         TaskCompletionSource? readable;
+        bool isDropped;
 
         lock (_lock)
         {
             _isEnded = true;
+            isDropped = _isPaused;
             resumed = _resumed;
             readable = _readable;
             _resumed = null;
             _readable = null;
         }
 
+        if (isDropped)
+        {
+            Unmetered();
+        }
+
         resumed?.TrySetResult();
         readable?.TrySetResult();
+    }
+
+    // ! its socket ended while its router paused it: what it held goes with its connection, its
+    // charge released, and what it reads after is dropped unmetered, as the other sides drop it,
+    // charging no other connection's cast-off
+    private void Unmetered()
+    {
+        Meter?.End();
     }
 
     /// <summary>
@@ -163,12 +200,14 @@ internal sealed class ReadGate
     }
 
     /// <summary>
-    /// Gives an upgrade a gate of its own, ahead of ASP.NET Core's WebSocket middleware: its
-    /// upgrade's stream read through the gate, the gate its <c>HttpContext</c>'s feature, and
-    /// its socket's end told it once its request is aborted.
+    /// Gives an upgrade a gate of its own, ahead of ASP.NET Core's WebSocket middleware, with the
+    /// meter <c>MeterOf</c> makes: its upgrade's stream read through the gate, the gate its
+    /// <c>HttpContext</c>'s feature, its socket's end told it once its request is aborted, and its
+    /// meter ended once its request is.
     /// </summary>
-    public static async Task Gating(HttpContext context, RequestDelegate next)
+    public static async Task Gating(HttpContext context, (RequestDelegate Next, Func<FrameMeter> MeterOf) call)
     {
+        var (next, meterOf) = call;
         var features = context.Features;
         var upgrade = features.Get<IHttpUpgradeFeature>();
         var connect = features.Get<IHttpExtendedConnectFeature>();
@@ -180,7 +219,7 @@ internal sealed class ReadGate
             return;
         }
 
-        var gate = new ReadGate();
+        var gate = new ReadGate { Meter = meterOf() };
 
         features.Set(gate);
 
@@ -201,7 +240,15 @@ internal sealed class ReadGate
             gate.End();
         });
 
-        await next(context);
+        try
+        {
+            await next(context);
+        }
+        finally
+        {
+            // * whatever way its upgrade went, what its meter charged is released
+            gate.Meter?.End();
+        }
     }
 
     /// <summary>
@@ -364,6 +411,14 @@ internal sealed class ReadGate
         private readonly Stream _inner;
         private readonly ReadGate _gate;
 
+        // what its last read of its socket brought and its meter handed on, rented until served: from
+        // _at to _end; and whether a verdict cut that read, what came before it served first. Its
+        // reader's alone: .NET reads one read at a time
+        private byte[]? _held;
+        private int _at;
+        private int _end;
+        private bool _isCut;
+
         public GatedStream(Stream inner, ReadGate gate)
         {
             _inner = inner;
@@ -427,9 +482,7 @@ internal sealed class ReadGate
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            _gate.Readable().GetAwaiter().GetResult();
-
-            return _inner.Read(buffer, offset, count);
+            return ReadAsync(buffer.AsMemory(offset, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
         }
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
@@ -437,11 +490,145 @@ internal sealed class ReadGate
             return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
         }
 
+        // * each read waits at its gate, then is served from what its last read of its socket
+        // brought, or reads its socket again into a buffer of its own, which goes through its meter
+        // whole: what came before a verdict is served, and the verdict told once it is; from a
+        // verdict on, nothing is
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            await _gate.Readable().WaitAsync(cancellationToken);
+            var meter = _gate.Meter;
 
-            return await _inner.ReadAsync(buffer, cancellationToken);
+            if (meter?.Verdict is not null && !(_isCut && _at < _end))
+            {
+                Let();
+                meter.Tell();
+
+                return await Drain(cancellationToken);
+            }
+
+            var readable = _gate.Readable();
+
+            // ! the rate's clock stops while its router holds the read (spec 15.12)
+            if (!readable.IsCompleted)
+            {
+                meter?.Hold();
+
+                try
+                {
+                    await readable.WaitAsync(cancellationToken);
+                }
+                finally
+                {
+                    meter?.Unhold();
+                }
+            }
+
+            if (meter is null)
+            {
+                return await _inner.ReadAsync(buffer, cancellationToken);
+            }
+
+            if (_at == _end)
+            {
+                if (buffer.IsEmpty)
+                {
+                    return await _inner.ReadAsync(buffer, cancellationToken);
+                }
+
+                if (await Fill(meter, cancellationToken) == 0)
+                {
+                    return 0;
+                }
+
+                // a verdict at the read's first byte: nothing of it served
+                if (_at == _end)
+                {
+                    meter.Tell();
+
+                    return await Drain(cancellationToken);
+                }
+            }
+
+            var count = Math.Min(buffer.Length, _end - _at);
+
+            _held.AsSpan(_at, count).CopyTo(buffer.Span);
+            _at += count;
+
+            if (_at == _end)
+            {
+                Let();
+            }
+
+            return count;
+        }
+
+        // * its socket read once into a buffer rented once bytes are there, so a connection waiting
+        // on its peer holds none, and all that read brought metered at once: how many bytes it
+        // brought, what its meter handed on held from its start
+        private async Task<int> Fill(FrameMeter meter, CancellationToken cancellationToken)
+        {
+            _ = await _inner.ReadAsync(Memory<byte>.Empty, cancellationToken);
+
+            _held = ArrayPool<byte>.Shared.Rent(ServerBounds.GateReadBytes);
+
+            int read;
+
+            try
+            {
+                read = await _inner.ReadAsync(_held.AsMemory(0, ServerBounds.GateReadBytes), cancellationToken);
+            }
+            catch
+            {
+                Let();
+
+                throw;
+            }
+
+            if (read == 0)
+            {
+                Let();
+
+                return 0;
+            }
+
+            _at = 0;
+            _end = meter.Read(_held.AsSpan(0, read));
+            _isCut = meter.Verdict is not null;
+
+            if (_end == 0)
+            {
+                Let();
+            }
+
+            return read;
+        }
+
+        // its buffer returned, once what it held was served or dropped
+        private void Let()
+        {
+            if (_held is not null)
+            {
+                ArrayPool<byte>.Shared.Return(_held);
+                _held = null;
+            }
+
+            _at = 0;
+            _end = 0;
+        }
+
+        // ! once a verdict failed its connection, what comes is read and dropped, parsed by none,
+        // the peer's close among it, until the peer ends, or its close timeout aborts the socket (RFC
+        // 6455 §7.1.7): .NET's reader meets that end, never a frame
+        private async Task<int> Drain(CancellationToken cancellationToken)
+        {
+            var dropped = new byte[DrainBytes];
+
+            while (await _inner.ReadAsync(dropped, cancellationToken) > 0)
+            {
+                // dropped
+            }
+
+            return 0;
         }
 
         public override void Write(byte[] buffer, int offset, int count)

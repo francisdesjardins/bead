@@ -98,7 +98,9 @@ node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/
 features are additive:
 
 - `websocket`: the WebSocket transport, server and client (RFC 6455), on tungstenite, its server
-  reading its own head; `WebSocketServer` and `WebSocketClient` over them;
+  reading its own head, either end reading each frame's head below tungstenite and handing it a
+  data frame past 64 KiB in frames of 64 KiB at most (decision 0056); `WebSocketServer` and
+  `WebSocketClient` over them;
 - `http`: the HTTP transport, server and client (RFC 9110, 9112), on hyper, HTTP/2 beside HTTP/1.1
   under TLS on the server (RFC 9113); `HttpServer` and `HttpClient` over them;
 - `mqtt`: MQTT 5 over a broker (decision 0041), a client of Bead's own over TCP, TLS or a WebSocket
@@ -183,6 +185,16 @@ container's loopback is its own, which a published port never reaches. An addres
 `ProgrammerError`. On the loopback it is secure (spec 13.4); behind a proxy on the same machine
 that serves the network in the clear, its options say `secure: Some(false)`
 ([decision 0024](../../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)).
+
+A client connects `localhost`, or a name that ends in `.localhost`, to the loopback itself and
+asks no resolver: `127.0.0.1` first, then `::1` 250 ms later or once the first fails, whatever its
+scheme. It reads a host once, as the URL Standard's host parser reads a special scheme's host:
+`127.0.0.1.` and `127.1` connect to `127.0.0.1` and are named so. A host the parser fails on,
+`foo.123` say, is refused before any socket opens: by the MQTT 5 adapter and the caller as they are
+built, by a transport client at its connect (spec 13.4). Its request names the host it read, in its
+`Host` and in its TLS server name. It reads no proxy, for any host. A connect that fails says the
+name went to the loopback
+([decision 0054](../../docs/decisions/0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 Behind a proxy, a server over HTTP or WebSocket believes `X-Forwarded-For` from the proxies
 `trusted_proxies` names, each an IP address or a network in CIDR, `10.0.0.0/8` say, or the compose
@@ -368,7 +380,7 @@ players are in `crates/bead/tests/`, one file a conformance file, a trial per en
 entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.json` are played in
 `crates/bead-protobuf/tests/codecs.rs`, the same way, through both codecs, and
 `spec/transcoding.json` in `crates/bead-protobuf/tests/transcoding.rs`, its exchanges through a
-gateway on its own listener over a real socket, but the one its `differs` excuses the side from.
+gateway on its own listener over a real socket, but those their `differs` excuse the side from.
 The gateway's and the caller's twins are `crates/bead/tests/gateway.rs` and `tests/caller.rs`.
 `crates/bead/tests/allocations.rs`, a binary of its own whose global allocator is `stats_alloc`'s
 counting one, holds a counted call to allocating not a byte more than an uncounted one (debugging
@@ -409,22 +421,25 @@ crate's list of its public items anew, its diff the change's to review.
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|json-form|mqtt-packets|mqtt-websocket-frames`,
-fuzzes the side's eleven targets with cargo-fuzz on the nightly the tool pins by its date, on Linux
-or WSL: the nine every side shares, `json-form` among them, protobuf's JSON through `JsonForm`,
-`mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and `mqtt-websocket-frames`, its
-reader of an MQTT 5 WebSocket's frames, the Rust side's alone, since the other sides read a
-broker's bytes through MQTT.js and MQTTnet.
-[`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the eleven every week, each ten minutes, its
+envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|json-form|websocket-frames|mqtt-packets|mqtt-websocket-frames`,
+fuzzes the side's twelve targets with cargo-fuzz on the nightly the tool pins by its date, on Linux
+or WSL: the ten every side shares, `json-form` among them, protobuf's JSON through `JsonForm`, and
+`websocket-frames`, the WebSocket transport's frame meter against tungstenite reading the same
+bytes; `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
+`mqtt-websocket-frames`, its reader of an MQTT 5 WebSocket's frames, the Rust side's alone, since
+the other sides read a broker's bytes through MQTT.js and MQTTnet.
+[`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the twelve every week, each ten minutes, its
 corpus kept between runs ([the root README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
 generator every side shares; `mqtt_packets_fuzz.rs` feeds the MQTT 5 packets' reader seeded
 mutations of its own packets, and `mqtt_websocket_frames_fuzz.rs` the WebSocket's frame reader
-seeded mutations of its own frames. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
-processes, from its release build: the envelope's codec, a request written and read back, calls on
-one in-memory connection kept, exchanges, each a client and its connection drawn, called once and
-closed, and protobuf's JSON read and written by Bead's mapping beside Buffa's own;
+seeded mutations of its own frames; `websocket_frames_fuzz.rs` holds the frame meter to the
+`websocket-frames` target's properties over seeded mutations of a client's frames.
+`node ../../tools/bench-release.mjs rust` runs bead-bench in fresh processes, from its release
+build: the envelope's codec, a request written and read back, calls on one in-memory connection
+kept, exchanges, each a client and its connection drawn, called once and closed, and protobuf's
+JSON read and written by Bead's mapping beside Buffa's own;
 [`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on every push
 to a release or hotfix branch. `cargo run --release --locked --manifest-path benches/Cargo.toml --
 --scale` measures instead a message's cost through a router alone and through a `Server`, each

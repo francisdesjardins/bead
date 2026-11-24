@@ -130,14 +130,19 @@ interface IExchangeEntry extends IEntry {
   options?: Record<string, unknown>;
   realTime?: true;
   steps: {
+    /** Requests written in one write on the socket of the exchange named, behind what it carried. */
+    behind?: { body?: string; head: string }[];
     close?: string;
-    expect?: {
-      body?: string;
-      bodyBytes?: string;
-      fields: Record<string, ExpectedField>;
-      status: number;
-      stream?: string;
-    };
+    /** A response, or the end of the exchange's socket, nothing more on it, `{ end: true }`. */
+    expect?:
+      | {
+          body?: string;
+          bodyBytes?: string;
+          fields: Record<string, ExpectedField>;
+          status: number;
+          stream?: string;
+        }
+      | { end: true };
     on?: string;
     send?: { body?: string; head: string };
     until?: Record<string, number>;
@@ -345,6 +350,17 @@ interface IRead {
 
 // how long an exchange waits for what it expects, on the real clock
 const PATIENCE = 5_000;
+
+// ! every key of an exchange's step this harness reads, and the one that names its exchange rather
+// than act: a key it does not know fails the step, rather than pass it unplayed
+const EXCHANGE_STEP_KEYS: ReadonlySet<string> = new Set([
+  'behind',
+  'close',
+  'expect',
+  'on',
+  'send',
+  'until',
+]);
 
 const HEAD_END = Buffer.from('\r\n\r\n');
 
@@ -753,9 +769,7 @@ test.describe('plays transcoding.json', () => {
                 route,
               }
             )
-          : problemOfOwn(failure.own, failure.detail ?? '', {
-              challenge: failure.challenge ?? FILE.defaults.challenge,
-            });
+          : problemOfOwn(failure.own, failure.detail ?? '');
 
       expect(problem.status).toBe(entry.status);
       expect(problem.fields).toEqual(entry.fields);
@@ -817,20 +831,91 @@ test.describe('plays transcoding.json', () => {
       const captured = new Map<string, string>();
       const etag = `"${createHash('sha256').update(OPENAPI_DOCUMENT).digest('hex')}"`;
 
+      // a head as written, its host and each value captured put in
+      const headOf = (head: string): string => {
+        let filled = head.replaceAll('{host}', `127.0.0.1:${String(fixture.port)}`);
+
+        for (const [name, value] of captured) {
+          filled = filled.replaceAll(`{${name}}`, value);
+        }
+
+        return filled;
+      };
+
       try {
-        for (const step of entry.steps) {
+        for (const [index, step] of entry.steps.entries()) {
+          const keys = Object.keys(step);
+
+          expect(
+            keys.filter((key) => {
+              return !EXCHANGE_STEP_KEYS.has(key);
+            }),
+            `step ${String(index + 1)}: the keys this harness does not read`
+          ).toEqual([]);
+          // a step is one act, on the exchange it may name
+          expect(
+            keys.filter((key) => {
+              return key !== 'on';
+            }),
+            `step ${String(index + 1)}: the acts it holds`
+          ).toHaveLength(1);
+
           if (step.send !== undefined && step.on !== undefined) {
-            let head = step.send.head.replaceAll('{host}', `127.0.0.1:${String(fixture.port)}`);
-
-            for (const [name, value] of captured) {
-              head = head.replaceAll(`{${name}}`, value);
-            }
-
             peers.set(
               step.on,
-              openPeer(fixture.port, { body: fromHexadecimal(step.send.body ?? ''), head })
+              openPeer(fixture.port, {
+                body: fromHexadecimal(step.send.body ?? ''),
+                head: headOf(step.send.head),
+              })
             );
-          } else if (step.expect !== undefined && step.on !== undefined) {
+          } else if (step.behind !== undefined && step.on !== undefined) {
+            const peer = peers.get(step.on);
+
+            if (peer === undefined) {
+              throw new Error(`no exchange ${step.on}`);
+            }
+
+            // * never awaited, and a write refused, on a socket its gateway ended, fails nothing
+            if (peer.socket.writable) {
+              peer.socket.write(
+                Buffer.concat(
+                  step.behind.map(({ body = '', head }) => {
+                    return Buffer.concat([
+                      Buffer.from(headOf(head), 'latin1'),
+                      fromHexadecimal(body),
+                    ]);
+                  })
+                )
+              );
+            }
+          } else if (step.expect !== undefined && 'end' in step.expect && step.on !== undefined) {
+            const peer = peers.get(step.on);
+
+            if (peer === undefined) {
+              throw new Error(`no exchange ${step.on}`);
+            }
+
+            // * its socket read to its end, as the transports player reads one: nothing past the
+            // responses read
+            const deadline = performance.now() + PATIENCE;
+
+            while (!peer.isEnded) {
+              if (performance.now() > deadline) {
+                throw new Error(`${step.on}: its socket did not end within ${String(PATIENCE)} ms`);
+              }
+
+              await Promise.race([peer.next(), sleep(50)]);
+            }
+
+            expect(
+              Buffer.concat(peer.received).length - peer.taken,
+              `${step.on}: the octets past the responses`
+            ).toBe(0);
+          } else if (
+            step.expect !== undefined &&
+            !('end' in step.expect) &&
+            step.on !== undefined
+          ) {
             const peer = peers.get(step.on);
 
             if (peer === undefined) {

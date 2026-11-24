@@ -81,17 +81,20 @@ jobs:
     timeout-minutes: 2
     outputs:
       version: ${{ steps.version.outputs.version }}
+      site: ${{ steps.version.outputs.site }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: implementations/typescript/package.json
+          sparse-checkout: |
+            implementations/typescript/package.json
+            site/package.json
           sparse-checkout-cone-mode: false
       # ! an exact version alone names an image: a range names none
       - id: version
         run: >-
-          node -e "const v = require('./implementations/typescript/package.json').devDependencies['@playwright/test'];
-          if (!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(v)) { throw new Error('@playwright/test is ' + v + ', no exact version'); }
-          console.log('version=' + v)" >> "$GITHUB_OUTPUT"
+          node -e "const exact = (v, name) => { if (!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(v)) { throw new Error(name + ' is ' + v + ', no exact version'); } return v; };
+          console.log('version=' + exact(require('./implementations/typescript/package.json').devDependencies['@playwright/test'], '@playwright/test'));
+          console.log('site=' + exact(require('./site/package.json').devDependencies['playwright-core'], 'playwright-core'))" >> "$GITHUB_OUTPUT"
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
@@ -318,7 +321,7 @@ jobs:
       # cargo-deny's and cargo-llvm-cov's prebuilt releases, each checked by its SHA-256 against
       # the action's manifest
       - if: matrix.os == 'ubuntu-26.04'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.1
       - if: matrix.os == 'ubuntu-26.04'
@@ -1258,15 +1261,15 @@ jobs:
   # The page beadproto.dev serves and its not-found page, as committed, laid out in Chromium by
   # site/layout.mjs: the top bar on one line at every width, in both languages and both themes, no
   # page wider than a phone, a finger's targets, the code's size, the menu and the theme. The image
-  # of the Playwright the TypeScript side pins holds the Chromium the site's own `playwright-core`,
-  # the same version, drives.
+  # of the site's own `playwright-core` holds the Chromium it drives, so a pull request that moves
+  # one folder's Playwright alone still finds its browser.
   site:
     name: Site
     needs: playwright
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     container:
-      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.site }}-resolute
       options: --ipc=host
     defaults:
       run:

@@ -38,8 +38,8 @@ use bead::testing::{
 };
 use bead::{
     BindingOptions, FailureScope, GatewayAuthorization, HttpGatewayOptions, HttpMethod, HttpRoute,
-    HttpRouteTemplate, JsonFormError, MessageForm, MessageFormError, OwnFailure, OwnProblemOptions,
-    RequestPlace, SharedClock,
+    HttpRouteTemplate, JsonFormError, MessageForm, MessageFormError, OwnFailure, RequestPlace,
+    SharedClock,
 };
 use bead_interop::transcoding::generated::bead_http::{HttpRoutes, OPENAPI_DOCUMENT};
 use bead_interop::transcoding::generated::messages::bead::transcoding::v1::Everything;
@@ -628,7 +628,6 @@ fn own_of(name: &str) -> Result<OwnFailure, Failed> {
         "closed" => Ok(OwnFailure::Closed),
         "failed" => Ok(OwnFailure::Failed),
         "jwt" => Ok(OwnFailure::Jwt),
-        "scheme" => Ok(OwnFailure::Scheme),
         "timeout" => Ok(OwnFailure::Timeout),
         "unwritable" => Ok(OwnFailure::Unwritable),
         other => Err(Failed::from(format!(
@@ -694,14 +693,7 @@ fn answer_failure(defaults: &Defaults, entry: &Failing) -> Result<(), Failed> {
         .clone()
         .unwrap_or_else(|| defaults.challenge.clone());
     let problem = if let Some(own) = &failure.own {
-        let mut options = OwnProblemOptions::default();
-
-        options.challenge = Some(challenge);
-        problem_of_own(
-            own_of(own)?,
-            failure.detail.as_deref().unwrap_or(""),
-            &options,
-        )
+        problem_of_own(own_of(own)?, failure.detail.as_deref().unwrap_or(""))
     } else {
         let routes = HttpRoutes::get().map_err(|error| Failed::from(error.to_string()))?;
         let catalogue = routes
@@ -929,12 +921,27 @@ enum ExpectedField {
 /// What a response is expected to be.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Expected {
+struct ExpectedResponse {
     status: u16,
     fields: BTreeMap<String, Option<ExpectedField>>,
     body: Option<String>,
     body_bytes: Option<String>,
     stream: Option<String>,
+}
+
+/// A socket's end, which nothing more comes before: `{"end": true}`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExpectedEnd {
+    end: bool,
+}
+
+/// What a step expects on its socket: a response, or the socket's end.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Expected {
+    Response(ExpectedResponse),
+    End(ExpectedEnd),
 }
 
 /// A request's head, in exact octets, and its body in hexadecimal.
@@ -945,12 +952,14 @@ struct Sent {
     body: Option<String>,
 }
 
-/// A step of an exchange: a request sent, a response read, a socket closed, or a wait on counts.
+/// A step of an exchange: a request sent, requests written behind it, a response read, a socket
+/// closed, or a wait on counts.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExchangeStep {
     on: Option<String>,
     send: Option<Sent>,
+    behind: Option<Vec<Sent>>,
     expect: Option<Expected>,
     close: Option<String>,
     until: Option<BTreeMap<String, u64>>,
@@ -1074,13 +1083,15 @@ struct Heard {
     is_ended: bool,
 }
 
-/// A socket of an exchange, and what came on it so far.
+/// A socket of an exchange, and what came on it so far; what a step writes behind its request
+/// written by a task of its own, which hands its writer on to the next.
 struct Peer {
     method: String,
     heard: Arc<Mutex<Heard>>,
     woken: Arc<Notify>,
     taken: usize,
     writer: Option<OwnedWriteHalf>,
+    writing: Option<JoinHandle<Option<OwnedWriteHalf>>>,
     reader: Option<JoinHandle<()>>,
 }
 
@@ -1136,6 +1147,7 @@ impl Peer {
             woken,
             taken: 0,
             writer: Some(writer),
+            writing: None,
             reader: Some(reader),
         })
     }
@@ -1151,13 +1163,42 @@ impl Peer {
             woken: Arc::new(Notify::new()),
             taken: 0,
             writer: None,
+            writing: None,
             reader: None,
         }
+    }
+
+    // `bytes` written behind what its socket carried, in their order, never awaited: a socket its
+    // gateway reads no further does not hold the step; a write refused is no failure, since its
+    // gateway may have ended its side
+    fn behind(&mut self, bytes: Vec<u8>) {
+        let writer = self.writer.take();
+        let before = self.writing.take();
+
+        self.writing = Some(spawn(async move {
+            let mut writer = match before {
+                Some(before) => before.await.ok().flatten(),
+                None => writer,
+            };
+
+            if let Some(writing) = writer.as_mut()
+                && writing.write_all(&bytes).await.is_err()
+            {
+                return None;
+            }
+
+            writer
+        }));
     }
 
     fn close(&mut self) {
         if let Some(reader) = self.reader.take() {
             reader.abort();
+        }
+
+        // * the writer a write behind holds goes with its task
+        if let Some(writing) = self.writing.take() {
+            writing.abort();
         }
 
         self.writer = None;
@@ -1375,9 +1416,40 @@ async fn read_on(peer: &mut Peer, stream: Option<&str>) -> Result<Read, Failed> 
     .map_err(|_elapsed| Failed::from(format!("no whole response within {PATIENCE:?}")))?
 }
 
+/// `peer`'s socket read to its end: nothing more came on it past the responses taken.
+async fn ended_on(peer: &Peer) -> Result<(), Failed> {
+    let woken = Arc::clone(&peer.woken);
+
+    patience(PATIENCE, async {
+        loop {
+            // * what came, read once its socket ended: its bytes past the responses taken
+            let more = {
+                let came = locked(&peer.heard);
+
+                came.is_ended
+                    .then(|| came.bytes.len().saturating_sub(peer.taken))
+            };
+
+            match more {
+                Some(0) => return Ok(()),
+                Some(more) => {
+                    return Err(Failed::from(format!(
+                        "{more} bytes more came before its end"
+                    )));
+                }
+                None => {}
+            }
+
+            drop(patience(LOOK, woken.notified()).await);
+        }
+    })
+    .await
+    .map_err(|_elapsed| Failed::from(format!("its socket not ended within {PATIENCE:?}")))?
+}
+
 fn held_to(
     read: &Read,
-    (expected, captured): (&Expected, &mut BTreeMap<String, String>),
+    (expected, captured): (&ExpectedResponse, &mut BTreeMap<String, String>),
 ) -> Result<(), Failed> {
     if read.status != expected.status {
         return Err(Failed::from(format!(
@@ -1459,31 +1531,61 @@ async fn until_counted(
     Ok(())
 }
 
+// a request's octets: its head, {host} the gateway's and each name captured its value, then its body
+fn request_of(
+    sent: &Sent,
+    (port, captured): (u16, &BTreeMap<String, String>),
+) -> Result<Vec<u8>, Failed> {
+    let mut head = sent.head.replace("{host}", &format!("127.0.0.1:{port}"));
+
+    for (name, value) in captured {
+        head = head.replace(&format!("{{{name}}}"), value);
+    }
+
+    let mut request = latin1_of(&head).ok_or_else(|| Failed::from("a head of latin-1"))?;
+
+    request.extend(bytes_of(sent.body.as_deref().unwrap_or(""))?);
+
+    Ok(request)
+}
+
 async fn steps_of(fixture: &TranscodingFixture, entry: &Exchange) -> Result<(), Failed> {
     let mut peers = BTreeMap::<String, Peer>::new();
     let mut captured = BTreeMap::<String, String>::new();
 
     for step in &entry.steps {
         if let (Some(sent), Some(on)) = (&step.send, &step.on) {
-            let mut head = sent
-                .head
-                .replace("{host}", &format!("127.0.0.1:{}", fixture.port));
+            let request = request_of(sent, (fixture.port, &captured))?;
 
-            for (name, value) in &captured {
-                head = head.replace(&format!("{{{name}}}"), value);
+            peers.insert(on.clone(), Peer::open(fixture.port, &request).await?);
+        } else if let (Some(behind), Some(on)) = (&step.behind, &step.on) {
+            let mut written = Vec::new();
+
+            for sent in behind {
+                written.extend(request_of(sent, (fixture.port, &captured))?);
             }
 
-            let mut request = latin1_of(&head).ok_or_else(|| Failed::from("a head of latin-1"))?;
-
-            request.extend(bytes_of(sent.body.as_deref().unwrap_or(""))?);
-            peers.insert(on.clone(), Peer::open(fixture.port, &request).await?);
+            peers
+                .get_mut(on)
+                .ok_or_else(|| Failed::from(format!("no exchange {on} was sent")))?
+                .behind(written);
         } else if let (Some(expected), Some(on)) = (&step.expect, &step.on) {
             let peer = peers
                 .get_mut(on)
                 .ok_or_else(|| Failed::from(format!("no exchange {on}")))?;
-            let read = read_on(peer, expected.stream.as_deref()).await?;
+            let held = match expected {
+                Expected::Response(expected) => {
+                    let read = read_on(peer, expected.stream.as_deref()).await?;
 
-            held_to(&read, (expected, &mut captured)).map_err(|failed| {
+                    held_to(&read, (expected, &mut captured))
+                }
+                Expected::End(ExpectedEnd { end: true }) => ended_on(peer).await,
+                Expected::End(ExpectedEnd { end: false }) => {
+                    Err(Failed::from("an end expected is true"))
+                }
+            };
+
+            held.map_err(|failed| {
                 Failed::from(format!("{on}: {}", failed.message().unwrap_or_default()))
             })?;
         } else if let Some(on) = &step.close {

@@ -9,10 +9,12 @@ import {
 import {
   connect as connectHTTP2,
   constants as http2Constants,
+  createSecureServer,
   createServer as createHTTP2Server,
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { gzipSync } from 'node:zlib';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
@@ -31,7 +33,17 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
-import { closingAnswerOf } from '../../transport/server/__tests__/http-transport-server-fixtures';
+import {
+  closingAnswerOf,
+  MOST_TAKEN,
+  rawAnswerOf,
+  rawSocketOn,
+  settled,
+  statusesOf,
+  takenUntilStalled,
+} from '../../transport/server/__tests__/http-transport-server-fixtures';
+import { rawResetOverHTTP2 } from '../../transport/server/__tests__/raw-http2';
+import { TLS_FIXTURE } from '../../transport/server/__tests__/tls-fixture';
 import {
   GOOD_CREDENTIAL,
   type ITranscodingFixture,
@@ -72,6 +84,20 @@ interface IOwnCase {
 
 /** The origin of another site the gateways here name. */
 const ORIGIN = 'https://app.example';
+
+/** The problem of a call that presented no credential to a procedure that needs a session. */
+const NO_CREDENTIAL =
+  '{"code":32,"scope":"protocol","status":401,"title":"SESSION_REQUIRED","type":"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED"}';
+
+// the requests pipelined behind a call in one write: past one read of Node's, so that its socket's
+// read stops and resumes
+const PIPELINED = 6_000;
+
+// where a raw request over HTTP/2 goes: a route of the gateway's, and the body it reads
+const ECHO_OVER_HTTP2 = Object.freeze({
+  contentType: 'application/json',
+  path: '/api/Transcoding/echo',
+});
 
 // helpers
 
@@ -134,8 +160,11 @@ const octetsOf = (port: number, { body = '', lines }: Pick<IOwnCase, 'body' | 'l
   ].join('\r\n');
 };
 
-/** Opens a socket of the test's own to the gateway on `port` and writes `octets` on it. */
-const opened = (port: number, octets: string): Socket => {
+/**
+ * Opens a socket of the test's own to the gateway on `port` and writes `octets` on it, a string as
+ * its UTF-8.
+ */
+const opened = (port: number, octets: string | Uint8Array): Socket => {
   const socket = connect(port, '127.0.0.1');
 
   socket.on('error', () => {});
@@ -270,6 +299,46 @@ const until = async (condition: () => boolean, within = 2_000): Promise<void> =>
     }
 
     await sleep(5);
+  }
+};
+
+/** A gateway under TLS, HTTP/2 and HTTP/1.1 on one port, over the transcoding service. */
+const startSecureTranscoding = (): Promise<ITranscodingFixture> => {
+  return startTranscoding({
+    createServer: (listener) => {
+      return createSecureServer({ ...TLS_FIXTURE, allowHTTP1: true }, (request, response) => {
+        listener(request, response);
+      });
+    },
+  });
+};
+
+/** The status a gateway under TLS on `port` answers a book's `GET` over HTTP/2 of `headers` with. */
+const bookOverHTTP2 = async (
+  port: number,
+  headers: Record<string, string> = {}
+): Promise<number | undefined> => {
+  const session = connectHTTP2(`https://127.0.0.1:${String(port)}`, { ca: TLS_FIXTURE.cert });
+
+  session.on('error', () => {});
+
+  try {
+    return await new Promise((resolve) => {
+      const stream = session.request({ ':method': 'GET', ':path': '/v1/books/2', ...headers });
+      let status: number | undefined;
+
+      stream.once('response', (response) => {
+        status = response[':status'];
+      });
+      stream.on('data', () => {});
+      stream.on('error', () => {});
+      stream.once('close', () => {
+        resolve(status);
+      });
+      stream.end();
+    });
+  } finally {
+    session.close();
   }
 };
 
@@ -528,10 +597,12 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   expect(JSON.parse(presented.body)).toMatchObject({ code: 36, title: 'CREDENTIAL_UNSUPPORTED' });
   expect(reported).toHaveLength(1);
   expect(reported[0]).toMatch(/^the server takes none of the scheme this gateway presents: /u);
+  // another auth-scheme presents none, as an empty field does
   expect(
     await send(jwt.port, { ...whoAmI, headers: { authorization: 'Basic YTpi' } })
   ).toMatchObject({
-    headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+    body: NO_CREDENTIAL,
+    headers: { 'www-authenticate': 'Bearer' },
     status: 401,
   });
   // a token its request's block holds, 1,004 bytes, and one past it
@@ -545,25 +616,136 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   ).toBe(431);
 });
 
-// RFC 6750 §2.1: `"Bearer" 1*SP b64token`
-test('answers 401 to a tab after Bearer, its separator one or more spaces', async () => {
+// transcoding 2.4.2; transcoding 10.1.9; RFC 9110 §11.4: `Bearer`, `1*SP`, then its credentials,
+// `token68` or not its server's to judge; RFC 6750 §3.1
+test('refuses 400 Bearer followed by neither a space nor its end under bearer-jwt, before its body, with invalid_request', async () => {
   await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  await using elsewhere = await startTranscoding();
+  await using realm = await startTranscoding({
+    authorization: 'bearer-jwt',
+    challenge: 'Bearer realm="bead"',
+  });
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+  const words = "Bearer followed by neither a space nor the field's end";
 
-  // right after Bearer, or after its spaces
-  for (const authorization of ['Bearer\ta.b.c', 'Bearer \ta.b.c']) {
+  for (const authorization of ['Bearer\ta.b.c', 'Bearer/abc', 'Bearer,abc']) {
+    const answered = await send(jwt.port, { ...whoAmI, headers: { authorization } });
+
+    expect(answered, authorization).toMatchObject({
+      headers: {
+        'bead-refusal': 'malformed',
+        'www-authenticate': 'Bearer error="invalid_request"',
+      },
+      status: 400,
+    });
+    expect(JSON.parse(answered.body), authorization).toMatchObject({ detail: words });
+  }
+
+  // * before its body: one byte of the 100,000 it declares, answered at once
+  const own = `127.0.0.1:${String(jwt.port)}`;
+  const early = await exchanged(
+    jwt.port,
+    `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+      'authorization: Bearer\ta.b.c\r\ncontent-length: 100000\r\n\r\n{',
+    { within: 1_000 }
+  );
+
+  expect(early).toMatchObject({
+    headers: { 'bead-refusal': 'malformed', 'www-authenticate': 'Bearer error="invalid_request"' },
+    status: 400,
+  });
+
+  // two authorization fields, with its challenge under bearer-jwt alone
+  const twice = { ...whoAmI, headers: { authorization: ['Bearer good', 'Bearer good'] } };
+  const twiceJwt = await send(jwt.port, twice);
+  const twiceElsewhere = await send(elsewhere.port, twice);
+
+  expect(twiceJwt).toMatchObject({
+    headers: {
+      'bead-refusal': 'malformed',
+      'www-authenticate': 'Bearer error="invalid_request"',
+    },
+    status: 400,
+  });
+  expect(twiceElsewhere).toMatchObject({ headers: { 'bead-refusal': 'malformed' }, status: 400 });
+  expect(twiceElsewhere.headers['www-authenticate']).toBeUndefined();
+
+  // its challenge's parameters, then its error
+  expect(
+    await send(realm.port, { ...whoAmI, headers: { authorization: 'Bearer\ta.b.c' } })
+  ).toMatchObject({
+    headers: { 'www-authenticate': 'Bearer realm="bead", error="invalid_request"' },
+    status: 400,
+  });
+
+  // a tab after its spaces, and two spaces, present the token, which a server with no JWT verifier
+  // refuses
+  for (const authorization of ['Bearer \ta.b.c', 'Bearer  a.b.c']) {
+    const presented = await send(jwt.port, { ...whoAmI, headers: { authorization } });
+
+    expect(presented.status, authorization).toBe(500);
+    expect(JSON.parse(presented.body), authorization).toMatchObject({
+      code: 36,
+      title: 'CREDENTIAL_UNSUPPORTED',
+    });
+  }
+});
+
+// transcoding 2.4.2; RFC 9110 §11.1: an auth-scheme is its field's first token; RFC 6750 §3.1
+test('presents no credential under bearer-jwt for another auth-scheme or Bearer alone, so a procedure that needs none runs', async () => {
+  await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+
+  for (const authorization of [
+    'Basic YTpi',
+    'Basic\tYTpi',
+    'Bearerabc',
+    'Bearer.abc',
+    '=abc',
+    'Bearer',
+    'Bearer   ',
+  ]) {
     expect(
-      await send(jwt.port, { ...whoAmI, headers: { authorization } }),
+      await send(jwt.port, {
+        body: '{"anInt32":1}',
+        headers: { authorization },
+        path: '/api/Transcoding/echo',
+      }),
+      authorization
+    ).toMatchObject({ body: '{"anInt32":1}', status: 200 });
+    expect(
+      await send(jwt.port, {
+        body: '{}',
+        headers: { authorization },
+        path: '/api/Transcoding/whoAmI',
+      }),
       authorization
     ).toMatchObject({
-      headers: { 'www-authenticate': 'Bearer error="invalid_request"' },
+      body: NO_CREDENTIAL,
+      headers: { 'www-authenticate': 'Bearer' },
       status: 401,
     });
   }
-  // two spaces present the token, which a server with no JWT verifier refuses
-  expect(
-    (await send(jwt.port, { ...whoAmI, headers: { authorization: 'Bearer  a.b.c' } })).status
-  ).toBe(500);
+});
+
+// transcoding 7.6.8; RFC 6750 §3.1
+test('tells invalid_token only to a credential of the auth-scheme its challenge names', async () => {
+  await using elsewhere = await startTranscoding();
+  await using realm = await startTranscoding({ challenge: 'Bearer realm="bead"' });
+  const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };
+
+  for (const [fixture, authorization, challenge] of [
+    [elsewhere, 'Bearer bad', 'Bearer error="invalid_token"'],
+    [elsewhere, 'bearer bad', 'Bearer error="invalid_token"'],
+    [elsewhere, 'Basic YTpi', 'Bearer'],
+    [elsewhere, 'Bearerabc', 'Bearer'],
+    [realm, 'Basic YTpi', 'Bearer realm="bead"'],
+    [realm, 'Bearer bad', 'Bearer realm="bead", error="invalid_token"'],
+  ] as const) {
+    expect(
+      await send(fixture.port, { ...whoAmI, headers: { authorization } }),
+      authorization
+    ).toMatchObject({ headers: { 'www-authenticate': challenge }, status: 401 });
+  }
 });
 
 test('refuses a request with no Origin from a page of another site, and a navigation to an unmarked get rule', async () => {
@@ -1046,7 +1228,7 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   expect(reported[0]).toMatch(/, not open$/u);
 });
 
-// transcoding 7.6.27
+// transcoding 7.6.26
 test('refuses 500 a body read before it by the server it is mounted on, reported, its call never made', async () => {
   await using fixture = await mountedBehindReader();
   const reported = reportedBy(fixture.gateway);
@@ -1153,7 +1335,7 @@ test('reads a body that came empty as empty, whatever read it before', async () 
   expect(reported).toEqual([]);
 });
 
-// transcoding 7.6.28
+// transcoding 7.6.27
 test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
   // * a clock that breaks as a body is read, past every gate
   const broken: IClock = {
@@ -1531,10 +1713,11 @@ test('words each refusal of its gates exactly, none of them what its request car
   const cases: Record<'jwt' | 'plain' | 'small', IOwnCase[]> = {
     jwt: [
       {
-        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Basic YTpi'],
+        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Bearer\ta.b.c'],
         body: '{}',
-        status: 401,
-        words: 'an auth-scheme but Bearer',
+        reason: 'malformed',
+        status: 400,
+        words: "Bearer followed by neither a space nor the field's end",
       },
       {
         lines: [
@@ -1545,12 +1728,6 @@ test('words each refusal of its gates exactly, none of them what its request car
         body: '{}',
         status: 431,
         words: 'a token past 1004 bytes',
-      },
-      {
-        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Bearer'],
-        body: '{}',
-        status: 401,
-        words: 'an auth-scheme but Bearer',
       },
     ],
     plain: [
@@ -2102,10 +2279,16 @@ test('refuses 400 unmarked a Content-Length beside a Transfer-Encoding on a serv
 });
 
 // what a gateway answers each request, written on a socket of its own with a GET pipelined behind
-// its chunked body: everything that came, to the socket's close, and the Bead connections drawn
+// its chunked body, `{}` in one chunk unless it gives its own, each character an octet: everything
+// that came, to the socket's close, and the Bead connections drawn
 const pipelinedOn = async (
   fixture: ITranscodingFixture,
-  requests: readonly (readonly [version: string, authority: string, codings: string])[]
+  requests: readonly (readonly [
+    version: string,
+    authority: string,
+    codings: string,
+    body?: string,
+  ])[]
 ): Promise<{ answers: string[]; drawn: number }> => {
   const { port } = fixture;
   const answers: string[] = [];
@@ -2115,12 +2298,15 @@ const pipelinedOn = async (
     drawn += 1;
   });
 
-  for (const [version, authority, codings] of requests) {
+  for (const [version, authority, codings, body = '2\r\n{}\r\n0\r\n\r\n'] of requests) {
     const socket = opened(
       port,
-      `POST /api/Transcoding/echo ${version}\r\nhost: ${authority}\r\ncontent-type: application/json\r\n` +
-        `connection: keep-alive\r\n${codings}\r\n\r\n2\r\n{}\r\n0\r\n\r\n` +
-        `GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`
+      Buffer.from(
+        `POST /api/Transcoding/echo ${version}\r\nhost: ${authority}\r\ncontent-type: application/json\r\n` +
+          `connection: keep-alive\r\n${codings}\r\n\r\n${body}` +
+          `GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(port)}\r\n\r\n`,
+        'latin1'
+      )
     );
     const chunks: Buffer[] = [];
 
@@ -2179,6 +2365,87 @@ test('refuses 400 unmarked a request whose Transfer-Encoding lists anything afte
     expect(came.toLowerCase()).not.toContain('bead-refusal');
   }
 
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9112 §6.1
+test('refuses 400 unmarked a request whose Transfer-Encoding lists a coding before its chunked, in one line or two, before its host is judged, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const body = gzipSync('{}');
+  // * a body still gzip-coded once its chunks are read, which no side decodes
+  const gzipped = `${body.length.toString(16)}\r\n${body.toString('latin1')}\r\n0\r\n\r\n`;
+
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip, chunked', gzipped],
+    ['HTTP/1.1', own, 'transfer-encoding: x-unknown, chunked'],
+    ['HTTP/1.1', own, 'transfer-encoding: gzip\r\ntransfer-encoding: chunked', gzipped],
+    ['HTTP/1.1', 'elsewhere.test', 'transfer-encoding: gzip, chunked', gzipped],
+  ]);
+
+  // one answer each, unmarked, with none of the fields every response on the path carries, its
+  // connection closed behind it, and no route served
+  for (const came of answers) {
+    const head = (came.split('\r\n\r\n')[0] ?? '').toLowerCase();
+
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(head).toContain('connection: close');
+    expect(head).not.toContain('bead-refusal');
+    expect(head).not.toMatch(/\r\n(?:cache-control|vary):/u);
+  }
+
+  expect(answers).toHaveLength(4);
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9112 §6.3
+test('refuses 400 unmarked a Transfer-Encoding whose final coding is not chunked, gzip or identity, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding();
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // ! Node's parser refuses each before the gateway reads the request; this pins it, so that a
+  // Node that hands one on shows here
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip'],
+    ['HTTP/1.1', own, 'transfer-encoding: identity'],
+  ]);
+
+  // one answer each, unmarked, its connection closed behind it, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(answers).toHaveLength(2);
+  expect(drawn).toBe(0);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9112 §6.3
+test('refuses 400 unmarked a Transfer-Encoding whose final coding is not chunked on a server whose parser is insecureHTTPParser’s, gzip or identity, and closes its connection before a request pipelined behind it is read', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer({ insecureHTTPParser: true }, listener);
+    },
+  });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  // * Node's parser hands each on under `insecureHTTPParser`, its body unframed: the gateway
+  // refuses it itself
+  const { answers, drawn } = await pipelinedOn(fixture, [
+    ['HTTP/1.1', own, 'transfer-encoding: gzip'],
+    ['HTTP/1.1', own, 'transfer-encoding: identity'],
+  ]);
+
+  // one answer each, unmarked, which closes its connection, and no route served
+  for (const came of answers) {
+    expect(came).toMatch(/^HTTP\/1\.1 400 /u);
+    expect(came.split('HTTP/1.1 ')).toHaveLength(2);
+    expect(came.toLowerCase()).toContain('connection: close');
+    expect(came.toLowerCase()).not.toContain('bead-refusal');
+  }
+
+  expect(answers).toHaveLength(2);
   expect(drawn).toBe(0);
 });
 
@@ -2254,61 +2521,67 @@ test('serves a request pipelined behind an answer that keeps its connection, in 
 });
 
 // spec 15.12; transcoding 10.1; RFC 9110 §8.6
-test('answers a Content-Length too large to count as its platform does, and closes its connection', async () => {
+test('answers 400 unmarked a Content-Length past 2⁶³ − 1, before its host is judged, and closes its connection', async () => {
   await using fixture = await startTranscoding();
-  const own = `127.0.0.1:${String(fixture.port)}`;
+  const echoOf = (length: string, fields = ''): string => {
+    return (
+      `POST /api/Transcoding/echo HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/json\r\n` +
+      `${fields}content-length: ${length}\r\n\r\n`
+    );
+  };
+
+  // 2⁶³ − 1 is a length: the host is judged
+  expect(
+    (await rawAnswerOf(fixture.port, echoOf('9223372036854775807', 'connection: close\r\n'))).answer
+  ).toEqual([403, 'host-refused']);
+
+  // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴ − 2 and 2⁶⁴ − 1, which Node's parser hands on; and
+  // 2⁶⁴ and 23 nines, which it answers itself
   const answers: unknown[] = [];
 
-  // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a route
   for (const length of [
     '9223372036854775808',
+    '00009223372036854775808',
+    '9'.repeat(19),
     '18446744073709551614',
     '18446744073709551615',
     '18446744073709551616',
+    '9'.repeat(23),
   ]) {
-    answers.push(
-      await closingAnswerOf(
-        fixture.port,
-        `POST /api/Transcoding/echo HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
-          `content-length: ${length}\r\n\r\n`
-      )
-    );
+    answers.push(await closingAnswerOf(fixture.port, echoOf(length)));
   }
 
-  // Node's parser counts to 2⁶⁴ − 1: a body past maximumBodyBytes, and past it Node answers its own 400
-  expect(answers).toEqual([
-    [413, 'too-large'],
-    [413, 'too-large'],
-    [413, 'too-large'],
-    [400, null],
-  ]);
+  expect(answers).toEqual(
+    Array.from({ length: 7 }, () => {
+      return [400, null];
+    })
+  );
 });
 
-// RFC 9112 §9.3
-test('bounds what it reads of requests pipelined behind a stream', async () => {
+// spec 15.12; RFC 9112 §9.3
+test('stops reading requests pipelined behind a stream, and keeps its socket', async () => {
   await using fixture = await startTranscoding();
   const own = `127.0.0.1:${String(fixture.port)}`;
-  // * a stream that never ends, then a thousand requests pipelined behind it, in one write
-  const socket = opened(
-    fixture.port,
-    `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n` +
-      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
+  const { read, socket } = await rawSocketOn(fixture.port);
+
+  // * a stream that never ends, then a thousand requests pipelined behind it at a time, until a
+  // write is not taken
+  socket.write(`GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n`);
+
+  const taken = await takenUntilStalled(
+    socket,
+    `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`.repeat(1_000)
   );
-  const chunks: Buffer[] = [];
-  let isClosed = false;
 
-  socket.on('data', (chunk: Buffer) => {
-    chunks.push(chunk);
-  });
-  socket.on('close', () => {
-    isClosed = true;
-  });
-  await until(() => {
-    return isClosed;
-  }, 5_000);
+  const stalledAt = taken.octets;
 
-  // its socket closed, none of them answered, and the gateway still serves
-  expect(Buffer.concat(chunks).toString('latin1')).not.toContain('A tale');
+  expect(stalledAt).toBeLessThan(MOST_TAKEN);
+
+  // its socket neither ended nor reset, nothing more taken of it, and the gateway still serves
+  await sleep(1_000);
+  await settled();
+
+  expect([read.isClosed, taken.octets]).toEqual([false, stalledAt]);
   expect(
     (
       await exchanged(
@@ -2317,6 +2590,142 @@ test('bounds what it reads of requests pipelined behind a stream', async () => {
       )
     ).status
   ).toBe(200);
+  socket.destroy();
+});
+
+// spec 15.12; transcoding 10.2; RFC 9112 §9.3
+test('answers every request pipelined behind a call in its turn once its timeout ends it, and keeps its socket', async () => {
+  await using fixture = await startTranscoding({ timeout: 500 });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const { read, socket } = await rawSocketOn(fixture.port);
+  const book = `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`;
+
+  // * a call that hangs, then 6,000 requests behind it in one write: past one read of Node's
+  socket.write(
+    `POST /api/Transcoding/hang HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+      `content-length: 2\r\n\r\n{}${book.repeat(PIPELINED)}`
+  );
+  await expect
+    .poll(
+      () => {
+        return statusesOf(read.text).length;
+      },
+      { timeout: 8_000 }
+    )
+    .toBe(PIPELINED + 1);
+
+  // the socket kept: one more answered on it
+  socket.write(book);
+  await expect
+    .poll(() => {
+      return statusesOf(read.text).length;
+    })
+    .toBe(PIPELINED + 2);
+
+  expect(statusesOf(read.text)).toEqual([
+    '504',
+    ...Array.from({ length: PIPELINED + 1 }, () => {
+      return '200';
+    }),
+  ]);
+  expect(read.isClosed).toBe(false);
+  socket.destroy();
+});
+
+// spec 15.12; transcoding 8.6, 8.7
+test('frees the place of a stream within two heartbeats once its client leaves with a request pipelined behind it', async () => {
+  await using fixture = await startTranscoding({ heartbeat: 250, maximumConnectionsPerAddress: 1 });
+  const own = `127.0.0.1:${String(fixture.port)}`;
+  const watch = `GET /v1/watch HTTP/1.1\r\nhost: ${own}\r\naccept: text/event-stream\r\n\r\n`;
+  // the status a stream from the same address is answered, once its head came
+  const streamStatus = async (): Promise<string | undefined> => {
+    const socket = opened(fixture.port, watch);
+
+    try {
+      return statusesOf(await readUntil(socket, '\r\n\r\n'))[0];
+    } finally {
+      socket.destroy();
+    }
+  };
+
+  // * a stream, then a request pipelined behind it in the same write, then its client gone
+  const stream = opened(fixture.port, `${watch}GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n`);
+
+  await readUntil(stream, '\r\n\r\n');
+  stream.destroy();
+
+  const closedAt = performance.now();
+  const within = 2 * 250 + 1_000;
+  let status = await streamStatus();
+
+  // its place freed as its exchange ends, which no event of this side tells: asked again until a
+  // stream is taken, never decided by a delay
+  while (status !== '200' && performance.now() - closedAt < within) {
+    status = await streamStatus();
+  }
+
+  expect(status).toBe('200');
+  expect(performance.now() - closedAt).toBeLessThan(within);
+});
+
+// spec 15.12; RFC 9112 §9.3
+test('answers every request pipelined behind a call on a mounted gateway in its turn, the application’s own among them', async () => {
+  await using fixture = await startTranscoding();
+  await using mounted = createHTTPGateway({
+    routes: HTTP_ROUTES,
+    timeout: 500,
+    transport: fixture.memory,
+  });
+  // * the application answers its own path 202, so that its answers and the gateway's alternate
+  const application = createNodeServer((request, response) => {
+    if (!mounted.listener(request, response)) {
+      response.writeHead(202, { 'content-length': '0' });
+      response.end();
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    application.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = application.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const own = `127.0.0.1:${String(port)}`;
+    const { read, socket } = await rawSocketOn(port);
+    const pair =
+      `GET /v1/books/2 HTTP/1.1\r\nhost: ${own}\r\n\r\n` +
+      `GET /own HTTP/1.1\r\nhost: ${own}\r\n\r\n`;
+
+    // a call that hangs, then 6,000 requests behind it in one write, the gateway's and the
+    // application's in turn
+    socket.write(
+      `POST /api/Transcoding/hang HTTP/1.1\r\nhost: ${own}\r\ncontent-type: application/json\r\n` +
+        `content-length: 2\r\n\r\n{}${pair.repeat(PIPELINED / 2)}`
+    );
+    await expect
+      .poll(
+        () => {
+          return statusesOf(read.text).length;
+        },
+        { timeout: 8_000 }
+      )
+      .toBe(PIPELINED + 1);
+
+    expect(statusesOf(read.text)).toEqual([
+      '504',
+      ...Array.from({ length: PIPELINED }, (_, index) => {
+        return index % 2 === 0 ? '200' : '202';
+      }),
+    ]);
+    expect(read.isClosed).toBe(false);
+    socket.destroy();
+  } finally {
+    application.closeAllConnections();
+    await new Promise((resolve) => {
+      application.close(resolve);
+    });
+  }
 });
 
 // spec 15.12; transcoding 10.2; RFC 9112 §9.5
@@ -2581,6 +2990,81 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
   } finally {
     session.close();
   }
+});
+
+// spec 15.12
+test('resets over HTTP/2 the stream of a request carrying a connection-specific field, a transfer-encoding with a content-length beside it or none, a keep-alive, a proxy-connection or an upgrade', async () => {
+  await using fixture = await startSecureTranscoding();
+  const { port } = fixture;
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+
+  // ! nghttp2 resets each before the gateway reads the request (RFC 9113 §8.2.2)
+  expect(
+    await Promise.all(
+      [
+        [['transfer-encoding', 'chunked']],
+        [
+          ['transfer-encoding', 'chunked'],
+          ['content-length', '0'],
+        ],
+        [
+          ['content-length', '0'],
+          ['transfer-encoding', 'chunked'],
+        ],
+        [['transfer-encoding', 'identity']],
+        [['keep-alive', 'timeout=5']],
+        [['proxy-connection', 'keep-alive']],
+        [['upgrade', 'websocket']],
+      ].map((fields) => {
+        return rawResetOverHTTP2(port, fields as [string, string][], ECHO_OVER_HTTP2);
+      })
+    )
+  ).toEqual(
+    Array.from({ length: 7 }, () => {
+      return http2Constants.NGHTTP2_PROTOCOL_ERROR;
+    })
+  );
+  expect(drawn).toEqual([]);
+  // none of them, a route answered
+  expect(await bookOverHTTP2(port)).toBe(200);
+});
+
+// spec 15.12
+test('resets over HTTP/2 the stream of a request carrying a connection, or a te other than trailers in lower case, and serves one whose te is trailers', async () => {
+  await using fixture = await startSecureTranscoding();
+  const { port } = fixture;
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+
+  // ! nghttp2 resets a connection and a te other than trailers before the gateway reads the
+  // request, but hands trailers on in any case: the gateway resets Trailers (RFC 9113 §8.2.2)
+  expect(
+    await Promise.all(
+      [
+        ['connection', 'keep-alive'],
+        ['connection', 'close'],
+        ['te', 'gzip'],
+        ['te', 'trailers, gzip'],
+        ['te', 'Trailers'],
+      ].map((field) => {
+        return rawResetOverHTTP2(port, [field as [string, string]], ECHO_OVER_HTTP2);
+      })
+    )
+  ).toEqual(
+    Array.from({ length: 5 }, () => {
+      return http2Constants.NGHTTP2_PROTOCOL_ERROR;
+    })
+  );
+  expect(drawn).toEqual([]);
+  // trailers in lower case, a route answered
+  expect(await bookOverHTTP2(port, { te: 'trailers' })).toBe(200);
 });
 
 test('refuses a route off its template’s grammar, and listens once', async () => {

@@ -503,9 +503,23 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
   to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
   dropped, its close unclean, and reported through `Error` as its connection ends, naming the bound
-  and its value. A message past `MaximumMessageBytes` fails its connection with 1009, drained until
-  the peer's close or `CloseTimeout`, its close unclean whatever the peer answers, and reported
-  through `Error` the same way (spec 15.3).
+  and its value. Each read of a connection's upgraded stream goes through its frame meter before
+  .NET's reader sees it (spec 15.3, decision 0056). The meter judges each frame at its head: a
+  length that takes its message past `MaximumMessageBytes` fails the connection with 1009, the
+  frame past `MaximumMessageFrames`, 16,384, with 1008, and a head RFC 6455 forbids with 1002.
+  What a read brought before that frame is handed on; nothing from it on is. The bytes of messages
+  partway are charged to `MessageBytesBudget`, 256 MiB across the connections, as they come, each
+  head 128 more, gauged `messageBytes`. A charge decides byte by byte. The byte that would pass the
+  budget casts off the connection whose message holds the most, the asking one's sum counting that
+  byte, then, among equal sums, the one whose message began first. The asking one goes only when it
+  comes first. Each fails with 1013. A message slower than `MinimumBodyBytesPerSecond`, 240, once
+  `BodyGracePeriod`, 5 s, passed fails with 1008, on the server's clock. Its clock runs while a
+  paused connection reads its message on. Each verdict sends its close, then drops what comes,
+  unparsed, until the peer ends or `CloseTimeout` passes.
+  The close is unclean whatever the peer answers, and is reported through `Error` the same way.
+  Kestrel's upgraded stream has no half-close, so the server's writing ends with its socket. The
+  client meters its frames alike, held to `MaximumMessageBytes` and `MaximumMessageFrames`, with no
+  budget and no rate.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
@@ -531,10 +545,27 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
   client or a WebSocket client given a `Handler` keeps the handler's behaviour, the WebSocket
-  client's held in an invoker of its own and never disposed by it. Neither follows a redirect: one
-  answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
-  listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
-  `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
+  client's held in an invoker of its own and never disposed by it. A client connects a host it
+  judges on the loopback to the loopback itself, through no proxy (spec 13.4, decision 0054): it
+  connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to `::1` 250 ms later or as
+  soon as the first fails, and asks no resolver. It reads a host once, as the URL Standard's host
+  parser reads a special scheme's host, whatever its URL's scheme: `127.0.0.1.` and `127.1` connect
+  to `127.0.0.1`. A host the parser fails on, `foo.123` say, is refused before any socket opens: by
+  a broker adapter or a gateway's `HttpCaller` as it is built, by a transport client at its
+  connect. The broker adapters' and the `HttpCaller`'s URLs are .NET's `Uri`, which refuses a
+  percent-escaped host as it parses it. A transport client's host is a string, and a
+  percent-escaped one is read decoded. Its
+  request names the host it read, in its `Host` and in its TLS server name. A connect that fails
+  says where it went: "…; api.localhost names the loopback: connected to 127.0.0.1 and ::1, no
+  resolver asked". Both clients' own handlers, a gateway's `HttpCaller`'s, the MQTT 5 adapter over
+  TCP and over a WebSocket, and the AMQP 1.0
+  adapter connect so; the handlers take a host off the machine through the platform's proxy,
+  `HttpClient.DefaultProxy`. A `Handler` given connects as it does: over it, a resolver that sends
+  a name under `.localhost` on to its DNS server, or a proxy, takes a credential judged secure
+  wherever it answers, in the clear. Neither follows a redirect: one answered to a connect or an
+  upgrade fails it, its status named, and one answered to a send or a listen is lost, its
+  `bead-refusal` unread (spec 15.6), each client's own handler built with `AllowAutoRedirect =
+  false`. A `Handler` given follows none either: an `HttpClientHandler` or a
   `SocketsHttpHandler`, innermost of the `DelegatingHandler`s given, whose `AllowAutoRedirect` is
   true is an `ArgumentException` naming it as the client is built, where the TypeScript side,
   which cannot read a `fetch` before it answers, catches one at its first answer; a handler of
@@ -706,13 +737,15 @@ hands on with the `Content-Length` removed and its value kept in an `X-Content-L
 transports and the gateway read that field back beside a `Transfer-Encoding`, a client's own among
 it, and refuse the request with `connection: close`, so its connection closes on every 10.0 patch
 (RFC 9112 §6.1). So is one whose `Transfer-Encoding` lists anything after its first `chunked`, in
-one line or across its lines: Kestrel hands it on and reads it by its final `chunked`. So is an
-HTTP/1.0 request that carries a `Transfer-Encoding`: Kestrel reads its body as chunked, and keeps
-its connection open under `Connection: keep-alive`. `RequestFields.IsTransferEncodingFramed` refuses
-both at the HTTP transport, at the gateway and in the WebSocket judgement, 400 unmarked with
-`connection: close`, so no request pipelined behind either is read (RFC 9112 §6.1). Over HTTP/2, a
-`transfer-encoding`, a `keep-alive`, a `proxy-connection` or an `upgrade`, which RFC 9113 §8.2.2
-calls malformed and Kestrel hands on, has its stream reset by the transport and the gateway.
+one line or across its lines: Kestrel hands it on and reads it by its final `chunked`. So is one
+whose `Transfer-Encoding` lists a coding before its `chunked`, which Kestrel hands on with its body
+still coded. So is an HTTP/1.0 request that carries a `Transfer-Encoding`: Kestrel reads its body as
+chunked, and keeps its connection open under `Connection: keep-alive`.
+`RequestFields.IsTransferEncodingFramed` refuses each at the HTTP transport, at the gateway and in
+the WebSocket judgement, 400 unmarked with `connection: close`, so no request pipelined behind any
+of them is read (RFC 9112 §6.1). Over HTTP/2, a `transfer-encoding`, a `keep-alive`, a
+`proxy-connection` or an `upgrade`, which RFC 9113 §8.2.2 calls malformed and Kestrel hands on, has
+its stream reset by the transport and the gateway.
 
 A request names its authority by its target when the target is in absolute-form, its `Host` judged
 as one field line alone, which an HTTP/1.0 request may leave out (RFC 9112 §3.2.2), for which both

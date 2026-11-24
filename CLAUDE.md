@@ -88,7 +88,7 @@ opinions: as many as the change needs, plus the one that dissents.
 The round's size follows the change. One behaviour, a few files on each side, no new record: one
 dissenting agent at **xhigh** against the proposal as written, its objections answered in the
 record's table, then the change made directly. A change that adds a record, touches the wire's
-identity or spans many files: the `bead-tenth-man-round` workflow, then `bead-implement-both-sides`,
+identity or spans many files: the `bead-tenth-man-round` workflow, then `bead-implement-every-side`,
 its whole suites run locally or left to CI on the pushed feature branch (`suites: 'ci'`).
 
 ## Design

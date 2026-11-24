@@ -296,13 +296,14 @@ pub fn is_visible_target(target: Option<&str>) -> bool {
 }
 
 /// Whether a request's `Transfer-Encoding`, its field lines as they came, frames its body as spec
-/// 15.12 takes it: none at all; or, over HTTP/1.1, a list whose final coding is `chunked`, in any
-/// ASCII case (RFC 9112 §6.3 item 4), and whose first `chunked` is that last element.
+/// 15.12 takes it: none at all; or, over HTTP/1.1, a list whose one coding is `chunked`, in any
+/// ASCII case, its last element (RFC 9112 §6.3 item 4).
 ///
-/// An empty element before it is ignored (RFC 9110 §5.6.1.2); anything after it, another `chunked`
-/// or an empty element among it, is not. One an HTTP/1.0 request carries is none either, its
-/// framing faulty (RFC 9112 §6.1). A request whose `Transfer-Encoding` is not taken is answered 400
-/// unmarked and its connection closed, before anything else of it is judged.
+/// An empty element before it is ignored (RFC 9110 §5.6.1.2). A coding before it is one no side
+/// decodes (RFC 9112 §6.1), and anything after it, another `chunked` or an empty element among it,
+/// is not taken. One an HTTP/1.0 request carries is none either, its framing faulty (RFC 9112
+/// §6.1). A request whose `Transfer-Encoding` is not taken is answered 400 unmarked and its
+/// connection closed, before anything else of it is judged.
 pub(crate) fn is_transfer_encoding_framed(http_version: &str, lines: &[&str]) -> bool {
     if lines.is_empty() {
         return true;
@@ -312,11 +313,28 @@ pub(crate) fn is_transfer_encoding_framed(http_version: &str, lines: &[&str]) ->
         .iter()
         .flat_map(|line| line.split(',').map(trimmed))
         .collect::<Vec<_>>();
-    let first = elements
-        .iter()
-        .position(|element| element.eq_ignore_ascii_case("chunked"));
+    let Some((last, before)) = elements.split_last() else {
+        return false;
+    };
 
-    http_version != "1.0" && first == elements.len().checked_sub(1)
+    http_version != "1.0"
+        && last.eq_ignore_ascii_case("chunked")
+        && before.iter().all(|element| element.is_empty())
+}
+
+/// Whether `value`, one `Content-Length` field line's value as the parser handed it on, is a count
+/// spec 15.12 takes: one or more ASCII digits and nothing else, whose number is 2⁶³ − 1 at most,
+/// read by value, so its leading zeros count for nothing (RFC 9110 §8.6).
+///
+/// A request whose `Content-Length` is not counted is answered 400 unmarked, or over HTTP/2 its
+/// stream reset, before anything else of it is judged. hyper answers one of 2⁶⁴ − 2 or more
+/// itself over HTTP/1.1, and hands on one between 2⁶³ and 2⁶⁴ − 3; h2 resets the stream of one of
+/// more than 19 digits, and hands on one between 2⁶³ and what 19 digits hold.
+pub(crate) fn is_counted_length(value: &str) -> bool {
+    // ! the digits first: i64's parse takes a leading + or -
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<i64>().is_ok()
 }
 
 /// A request's `Origin` as a refusal tells it (spec 15.1): its field lines as they came, joined by

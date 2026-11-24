@@ -8,6 +8,7 @@
 
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { type AddressInfo, createServer } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -36,6 +37,13 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
+import {
+  closedPort,
+  PROBE,
+  replaceResolver,
+  startDropping,
+  watchResolver,
+} from './loopback-fixtures';
 import { PKI } from './tls-front';
 
 // constants
@@ -732,6 +740,24 @@ test.describe('createAmqpBrokerAdapter', () => {
     await inboxUp({ adapter, script });
     expect(adapter.isLinked).toBe(true);
     await adapter.stop();
+
+    // * stopped as it races a localhost name on the loopback: no socket of it left open (spec 13.4)
+    await using dropping = await startDropping();
+    const raced = createAmqpBrokerAdapter({
+      id: ID,
+      password: PASSWORD,
+      url: `amqp://${PROBE}:${String(dropping.port)}`,
+    });
+    const racing = settledOf(raced.start());
+
+    await raced.stop();
+    expect(await racing).toEqual(new GenericError('the link of ada stopped as it started'));
+    await sleep(50);
+    await expect
+      .poll(() => {
+        return dropping.open;
+      })
+      .toBe(0);
   });
 
   test('fails an inbox declaration left unanswered within connectTimeout and closes its connection without telling a loss', async () => {
@@ -2347,6 +2373,31 @@ test.describe('createAmqpBrokerAdapter', () => {
     asking.resolve(PASSWORD);
     await expect(askedStart).rejects.toThrow('the link of ada stopped as it started');
 
+    // * a localhost name's race of the loopback given up by its signal, or by a signal aborted
+    // already: no socket of it left open (spec 13.4)
+    {
+      await using dropping = await startDropping();
+      const raced = createAmqpBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        url: `amqp://${PROBE}:${String(dropping.port)}`,
+      });
+      const racing = new AbortController();
+      const racingStart = settledOf(raced.start({ signal: racing.signal }));
+
+      racing.abort();
+      expect(await racingStart).toBeInstanceOf(CancelError);
+      expect(await settledOf(raced.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+        CancelError
+      );
+      await sleep(50);
+      await expect
+        .poll(() => {
+          return dropping.open;
+        })
+        .toBe(0);
+    }
+
     // * a name's subscription, its ATTACH held: its session ended, its link kept
     script.policy.attach = ({ address }) => {
       return address === NAME_QUEUE ? 'hold' : 'take';
@@ -2720,8 +2771,12 @@ test.describe('createAmqpBrokerAdapter', () => {
         'amqp://localhost',
         'amqp://[::1]:5672',
         'amqp://broker.example:5672',
+        // * its host read once, as a special scheme's host whatever its scheme (spec 13.4)
+        'amqp://LOCALHOST',
+        'amqp://127.1:5672',
+        'amqp://loc%61lhost',
       ].map(secureOf)
-    ).toEqual([true, true, true, true, false]);
+    ).toEqual([true, true, true, true, false, true, true, true]);
 
     // what is none of its two is refused as it is built, and so is an id that is none
     for (const refused of [
@@ -3265,5 +3320,115 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
       await serving[Symbol.asyncDispose]();
       await relay[Symbol.asyncDispose]();
     }
+  });
+});
+
+// spec 13.4: a connection to a localhost name, connected by Bead to the loopback itself
+test.describe('createAmqpBrokerAdapter, on the loopback', () => {
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    const headers: Buffer[] = [];
+    const listener = createServer((socket) => {
+      socket.once('data', (data) => {
+        headers.push(data.subarray(0, 8));
+        socket.destroy();
+      });
+    });
+
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+
+    using resolver = replaceResolver();
+    const adapter = createAmqpBrokerAdapter({
+      connectTimeout: 2_000,
+      id: ID,
+      password: PASSWORD,
+      url: `amqp://${PROBE}:${String((listener.address() as AddressInfo).port)}`,
+    });
+
+    try {
+      // * its protocol header read where the name was connected, the link refused there
+      expect(await settledOf(adapter.start())).toBeInstanceOf(GenericError);
+      expect(resolver.asked).toEqual([]);
+      // the SASL protocol header (AMQP 1.0 §5.3.1)
+      expect(
+        headers.map((header) => {
+          return [...header];
+        })
+      ).toEqual([[0x41, 0x4d, 0x51, 0x50, 3, 1, 0, 0]]);
+    } finally {
+      listener.close();
+    }
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    // * over TLS, its broker's certificate naming 127.0.0.1 alone: the host it read is the one its
+    // handshake checked
+    await using secured = await createAmqpScript({
+      tls: { ca: TLS_FIXTURE.cert, cert: PKI.addressedServer, key: PKI.addressedServerKey },
+    });
+    const { port } = new URL(secured.url);
+    const tls = { ...CERTIFIED, authorities: PKI.root };
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      const adapter = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${written}:${port}` });
+
+      await linkUp({ adapter, script: secured });
+      expect([written, adapter.isSecure]).toEqual([written, true]);
+      await adapter.stop();
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', () => {
+    using resolver = watchResolver();
+
+    for (const host of ['foo.123', 'x%20.localhost']) {
+      for (const scheme of ['amqp', 'amqps']) {
+        expect(() => {
+          return createAmqpBrokerAdapter({
+            id: ID,
+            password: PASSWORD,
+            url: `${scheme}://${host}:5672`,
+          });
+        }).toThrow(new ProgrammerError(`${host} is no host a URL can name`));
+      }
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
+    // and closed unanswered
+    await using closed = await closedPort();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const messages: string[] = [];
+
+    for (const port of [closed.port, dropping.port]) {
+      const adapter = createAmqpBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: `amqp://${PROBE}:${String(port)}`,
+      });
+      const failure = await settledOf(adapter.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      messages.push((failure as GenericError).message);
+    }
+
+    expect(
+      messages.map((message) => {
+        return message.includes(
+          `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+        );
+      })
+    ).toEqual([true, false]);
+    expect(resolver.asked).toEqual([]);
   });
 });

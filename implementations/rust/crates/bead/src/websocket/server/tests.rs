@@ -1639,6 +1639,7 @@ async fn closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_it
                 ("connections", 1),
                 ("largestAddressConnections", 1),
                 ("largestUnsentBytes", 0),
+                ("messageBytes", 0),
                 ("unsentBytes", 0),
             ]
             .into()
@@ -1662,6 +1663,7 @@ async fn closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_it
                 ("connections", 0),
                 ("largestAddressConnections", 0),
                 ("largestUnsentBytes", 0),
+                ("messageBytes", 0),
                 ("unsentBytes", 0),
             ]
             .into()
@@ -4686,60 +4688,138 @@ async fn waits_for_a_head_not_whole() {
 
 // spec 15.2, 15.12; RFC 9110 §8.6
 #[tokio::test]
-async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
  {
     let (server, _, port) = started(&judging(&["bead.test"], &[])).await;
-    let mut answers = Vec::new();
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on an upgrade; then 2⁶³ and 2⁶⁴ under a host it does not take
-    let requests = [
-        ("bead.test", "9223372036854775808"),
-        ("bead.test", "18446744073709551614"),
-        ("bead.test", "18446744073709551615"),
-        ("bead.test", "18446744073709551616"),
-        ("elsewhere.test", "9223372036854775808"),
-        ("elsewhere.test", "18446744073709551616"),
-    ];
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    // an upgrade from a host it does not take
+    let answered = |length: String, close: bool| async move {
+        let mut fields = vec!["Host: elsewhere.test".to_owned()];
 
-    for (host, length) in requests {
-        let (answer, closed) = answer_of(
-            port,
-            &request_of(
-                "GET / HTTP/1.1",
-                &[
-                    &format!("Host: {host}"),
-                    &format!("Content-Length: {length}"),
-                ],
-            ),
-        )
-        .await;
+        if close {
+            fields.push("Connection: close".to_owned());
+        }
+
+        fields.push(format!("Content-Length: {length}"));
+
+        let lines = fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let (answer, closed) = answer_of(port, &request_of("GET / HTTP/1.1", &lines)).await;
         let refusal = answer
             .split("\r\n")
             .find_map(|line| line.strip_prefix("bead-refusal: "))
             .map(str::to_owned);
 
-        answers.push((
+        (
             answer.get(9..12).unwrap_or_default().to_owned(),
             refusal,
             closed,
-        ));
-    }
+        )
+    };
 
-    // the judgement reads the head itself and counts no length: content declared, malformed, after
-    // its host
-    let malformed = ("400".to_owned(), Some("malformed".to_owned()), true);
-    let host_refused = ("403".to_owned(), Some("host-refused".to_owned()), true);
+    // 2⁶³ − 1 is a length: its host is judged
+    let (status, refusal, _) = answered("9223372036854775807".to_owned(), true).await;
 
     assert_eq!(
-        answers,
-        [
-            malformed.clone(),
-            malformed.clone(),
-            malformed.clone(),
-            malformed,
-            host_refused.clone(),
-            host_refused,
-        ]
+        (status, refusal),
+        ("403".to_owned(), Some("host-refused".to_owned())),
+        "2⁶³ − 1"
     );
+
+    // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ and 23 nines: the judgement reads
+    // its own head, and counts each
+    for length in [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551614",
+        "18446744073709551615",
+        "18446744073709551616",
+        twenty_three.as_str(),
+    ] {
+        assert_eq!(
+            answered(length.to_owned(), false).await,
+            ("400".to_owned(), None, true),
+            "{length}"
+        );
+    }
+
+    stopped(&server).await;
+}
+
+// spec 15.2, 15.12
+#[tokio::test]
+async fn closes_in_stages_a_refusal_of_an_upgrade_whose_body_is_still_coming_its_client_reading_the_refusal_as_it_goes_on_sending()
+ {
+    let (server, _, port) = started(&judging(&["bead.test"], &[])).await;
+    // an upgrade at its own host whose body comes in chunks, its head sent first
+    let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (mut reading, mut writing) = socket.into_split();
+
+    writing
+        .write_all(request_of("GET / HTTP/1.1", &["Transfer-Encoding: gzip, chunked"]).as_bytes())
+        .await
+        .unwrap();
+
+    // * its client sends a chunk each 200 ms as it reads, past the end of the server's write side,
+    // until a write fails once the server closed its socket: when it failed
+    let sending = crate::testing::spawn(async move {
+        while writing.write_all(b"1\r\na\r\n").await.is_ok() {
+            rest(Duration::from_millis(200)).await;
+        }
+
+        Instant::now()
+    });
+
+    // its refusal read whole, before any reset
+    let mut head = Vec::new();
+    let mut byte = [0_u8; 1];
+
+    patience(PATIENCE, async {
+        while !head.ends_with(b"\r\n\r\n") {
+            assert_eq!(
+                reading.read(&mut byte).await.expect("no reset before it"),
+                1,
+                "its socket ended before its refusal"
+            );
+            head.push(byte[0]);
+        }
+    })
+    .await
+    .unwrap();
+
+    let answered = Instant::now();
+    let head = latin1(&head).to_ascii_lowercase();
+
+    assert!(head.starts_with("http/1.1 400 "), "{head}");
+    assert!(head.contains("\r\nconnection: close\r\n"), "{head}");
+    assert!(!head.contains("bead-refusal"), "{head}");
+
+    // nothing after it, its write side ended
+    let mut after = [0_u8; 64];
+
+    assert_eq!(
+        patience(PATIENCE, reading.read(&mut after))
+            .await
+            .unwrap()
+            .unwrap_or_default(),
+        0,
+        "nothing after its refusal"
+    );
+
+    // what still came read on and dropped, its socket closed once the linger's 2 s passed
+    let closed = patience(PATIENCE, sending).await.unwrap().unwrap();
+    let lingered = closed.duration_since(answered);
+
+    assert!(
+        lingered > Duration::from_secs(1),
+        "closed at once: {lingered:?}"
+    );
+    assert!(
+        lingered < Duration::from_secs(3),
+        "closed past 3 s: {lingered:?}"
+    );
+    assert!(server.clients().is_empty(), "no connection");
     stopped(&server).await;
 }
 
@@ -4799,4 +4879,778 @@ async fn reads_a_head_whole_its_method_its_target_and_its_fields_as_they_came_an
 async fn shutdown_stops_it_as_stop_does() {
     // the C# side's Shutdown is the stop of its transport's interface, the trait's stop here
     compares_stopping_connections(false).await;
+}
+
+// ── Its messages partway (decision 0056) ─────────────────────────────────────────────────────
+
+// a frame a client sends, masked, of any length: its opcode, its payload, and whether it is final
+fn masked_of(opcode: u8, (payload, fin): (&[u8], bool)) -> Vec<u8> {
+    crate::testing::wire::Frame {
+        fin,
+        opcode,
+        payload: payload.to_vec(),
+        length: None,
+    }
+    .masked()
+}
+
+// a head a client sends, masked, announcing `length`, its payload never sent
+fn masked_head(opcode: u8, (fin, length): (bool, u64)) -> Vec<u8> {
+    crate::testing::wire::Frame {
+        fin,
+        opcode,
+        payload: Vec::new(),
+        length: Some(length),
+    }
+    .masked()
+}
+
+fn message_bytes(server: &WebSocketTransportServer) -> u64 {
+    server.gauges().unwrap().counts["messageBytes"]
+}
+
+// waits until what its messages partway hold is `bytes`
+async fn until_message_bytes(server: &WebSocketTransportServer, bytes: u64) {
+    let held = patience(PATIENCE, async {
+        while message_bytes(server) != bytes {
+            rest(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+
+    assert!(
+        held.is_ok(),
+        "messageBytes {bytes}, not {}",
+        message_bytes(server)
+    );
+}
+
+// waits until the one timer armed on `clock` is due in `due`
+async fn until_due(clock: &SteppingClock, due: Duration) {
+    let armed = patience(PATIENCE, async {
+        while clock.dues() != [due] {
+            rest(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+
+    assert!(armed.is_ok(), "due in {due:?}, not {:?}", clock.dues());
+}
+
+// the options of a server on `clock` that pings nobody
+fn holding_on(clock: &Arc<SteppingClock>) -> WebSocketTransportServerOptions {
+    WebSocketTransportServerOptions {
+        clock: Some(Arc::<SteppingClock>::clone(clock)),
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    }
+}
+
+const fn heard_close(code: u16) -> crate::testing::wire::Heard {
+    crate::testing::wire::Heard::Close(code)
+}
+
+// spec 15.12.15 and 15.12.16
+#[tokio::test]
+async fn fails_with_1008_a_message_slower_than_minimum_body_bytes_per_second_once_body_grace_period_passed_since_its_first_byte_its_payload_alone_counting()
+ {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&holding_on(&stepping)).await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+    let mut written = masked_of(0x2, (&[0x78; 12], false));
+
+    // * 1,500 bytes of heads and a pong between its frames, 6,250 ms were they payload
+    written.extend(masked_of(0xA, (b"beat", true)));
+
+    for _ in 0..250 {
+        written.extend(masked_of(0x0, (&[], false)));
+    }
+
+    peer.socket.write_all(&written).await.unwrap();
+    // 146, a pong's 138, and 134 for each of 250 empty frames
+    until_message_bytes(&server, 33_784).await;
+    until_due(&stepping, Duration::from_secs(5)).await;
+
+    stepping.advance(Duration::from_millis(4_999)).await;
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_millis(100)).await,
+        None,
+        "within its grace"
+    );
+
+    stepping.advance(Duration::from_millis(1)).await;
+    assert_eq!(
+        heard_on(&mut peer, PATIENCE).await,
+        Some(heard_close(1008)),
+        "1008 once its grace passed"
+    );
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!(
+                "{handle} is closed with 1008: a message came slower than minimumBodyBytesPerSecond, 240 bytes a second, past bodyGracePeriod, 5000 ms"
+            ),
+            Some(handle)
+        )],
+        "reported, naming its bounds"
+    );
+
+    // its payload alone moves its deadline: 1,440 bytes are owed by 6 seconds
+    let mut peer = peer_of(port).await;
+
+    recorder.connections(2).await;
+    peer.socket
+        .write_all(&masked_of(0x2, (&[0x78; 1_440], false)))
+        .await
+        .unwrap();
+    until_due(&stepping, Duration::from_secs(6)).await;
+    stopped(&server).await;
+}
+
+// spec 15.12
+#[tokio::test]
+async fn counts_the_time_of_a_message_partway_only_while_it_reads_its_connection() {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&holding_on(&stepping)).await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    peer.socket
+        .write_all(&masked_of(0x2, (&[0x78; 12], false)))
+        .await
+        .unwrap();
+    until_message_bytes(&server, 146).await;
+
+    // * paused as its router pauses it: it reads none of it, its time not counted
+    server.pause(&handle);
+    stepping.advance(Duration::from_secs(10)).await;
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_millis(100)).await,
+        None,
+        "paused"
+    );
+
+    server.resume(&handle);
+    until_due(&stepping, Duration::from_secs(5)).await;
+    stepping.advance(Duration::from_millis(4_999)).await;
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_millis(100)).await,
+        None,
+        "within its grace, counted from its resume"
+    );
+
+    stepping.advance(Duration::from_millis(1)).await;
+    assert_eq!(
+        heard_on(&mut peer, PATIENCE).await,
+        Some(heard_close(1008)),
+        "1008 once its grace passed while it read"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.12.19
+#[tokio::test]
+async fn charges_a_message_partway_every_byte_its_frames_bring_and_128_a_frame_pongs_between_them_among_it_never_what_a_head_announces()
+ {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&holding_on(&stepping)).await;
+    let mut peer = peer_of(port).await;
+    let frame = masked_of(0x2, (&[7; 100], false));
+
+    recorder.connections(1).await;
+
+    // its head of 6 bytes and 10 of its payload: never the 100 its head announces
+    peer.socket.write_all(&frame[..16]).await.unwrap();
+    until_message_bytes(&server, 144).await;
+
+    peer.socket.write_all(&frame[16..]).await.unwrap();
+    until_message_bytes(&server, 234).await;
+
+    // a pong between its frames: its 10 bytes and 128
+    peer.socket
+        .write_all(&masked_of(0xA, (b"beat", true)))
+        .await
+        .unwrap();
+    until_message_bytes(&server, 372).await;
+
+    peer.socket
+        .write_all(&masked_of(0x0, (&[], true)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        recorder.messages(1).await[0].0.data,
+        Bytes::from(vec![7; 100]),
+        "the message whole"
+    );
+    until_message_bytes(&server, 0).await;
+    assert_eq!(
+        server.gauges().unwrap().ceilings.get("messageBytes"),
+        Some(&268_435_456),
+        "under messageBytesBudget"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.12.19
+#[tokio::test]
+async fn casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_message_bytes_budget_its_own_only_when_it_comes_first()
+ {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        message_bytes_budget: Some(500),
+        ..holding_on(&stepping)
+    })
+    .await;
+    let mut ada = peer_of(port).await;
+    let mut bob = peer_of(port).await;
+    let mut carol = peer_of(port).await;
+    let mut dave = peer_of(port).await;
+    let handles = recorder.connections(4).await;
+
+    ada.socket
+        .write_all(&masked_of(0x2, (&[0x78; 60], false)))
+        .await
+        .unwrap();
+    until_message_bytes(&server, 194).await;
+
+    // a head that announces 1,000 bytes, and 10 of them
+    bob.socket
+        .write_all(&masked_of(0x2, (&[0x78; 1_000], false))[..18])
+        .await
+        .unwrap();
+    until_message_bytes(&server, 340).await;
+
+    // 174 more would pass 500: ada, who holds the most, cast off
+    carol
+        .socket
+        .write_all(&masked_of(0x2, (&[0x78; 40], false)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut ada, PATIENCE).await,
+        Some(heard_close(1013)),
+        "ada"
+    );
+    until_message_bytes(&server, 320).await;
+
+    // 234 more would pass it: dave, who would hold the most, cast off himself
+    dave.socket
+        .write_all(&masked_of(0x2, (&[0x78; 100], false)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut dave, PATIENCE).await,
+        Some(heard_close(1013)),
+        "dave"
+    );
+    until_message_bytes(&server, 320).await;
+
+    // carol's message whole, its charge released
+    carol
+        .socket
+        .write_all(&masked_of(0x0, (&[0x78; 40], true)))
+        .await
+        .unwrap();
+    assert_eq!(
+        recorder.messages(1).await[0].0.data,
+        Bytes::from(vec![0x78; 80]),
+        "carol's message"
+    );
+    until_message_bytes(&server, 146).await;
+    assert_eq!(
+        heard_on(&mut bob, Duration::from_millis(100)).await,
+        None,
+        "bob kept"
+    );
+
+    let mut errors = recorder.errors(2).await;
+
+    errors.sort();
+    assert_eq!(
+        errors,
+        [&handles[0], &handles[3]]
+            .map(|handle| (
+                format!(
+                    "{handle} is closed with 1013: the messages partway would pass messageBytesBudget, 500 bytes"
+                ),
+                Some(Arc::clone(handle))
+            ))
+            .to_vec(),
+        "each reported, naming its bound"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.12.19: a paused connection's charge is what its read before the pause brought
+#[tokio::test]
+async fn charges_what_a_paused_connection_s_read_brought_as_an_unpaused_one_s() {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        message_bytes_budget: Some(1_050),
+        ..holding_on(&stepping)
+    })
+    .await;
+    let pausing = Arc::new(PausingAtOnce {
+        server: Mutex::new(Some(server.clone())),
+    });
+
+    server.listen(Arc::<PausingAtOnce>::clone(&pausing));
+
+    let mut v = peer_of(port).await;
+    let mut h = peer_of(port).await;
+    let handles = recorder.connections(2).await;
+
+    // * one write: a whole message, which its router pauses on, then a frame of 400 its read
+    // brought with it, charged as it came: its head's 8 bytes, 128 and its 400
+    let mut written = masked_of(0x2, (b"abc", true));
+
+    written.extend(masked_of(0x2, (&[0x78; 400], false)));
+    v.socket.write_all(&written).await.unwrap();
+    until_message_bytes(&server, 536).await;
+    assert_eq!(recorder.messages(1).await.len(), 1, "the whole one");
+
+    // * h's 600 passes 1,050 at its 515th unit: v, who then holds the most, cast off
+    h.socket
+        .write_all(&masked_of(0x2, (&[0x78; 464], true)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut v, PATIENCE).await,
+        Some(heard_close(1013)),
+        "v, paused"
+    );
+    let (message, from) = recorder.messages(2).await.remove(1);
+
+    assert_eq!(
+        (message.data, from),
+        (Bytes::from(vec![0x78; 464]), Arc::clone(&handles[1])),
+        "h's whole"
+    );
+    until_message_bytes(&server, 0).await;
+    pausing.server.lock().unwrap().take();
+    stopped(&server).await;
+}
+
+// spec 15.3 and 15.12; RFC 6455 §7.1.7
+#[tokio::test]
+async fn closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+    let pausing = Arc::new(PausingAtOnce {
+        server: Mutex::new(Some(server.clone())),
+    });
+
+    server.listen(Arc::<PausingAtOnce>::clone(&pausing));
+
+    // * a head RFC 6455 forbids right behind the message paused on, or behind a second one past
+    // 125 bytes, in one write: never resumed, it fails at once, the second never handed
+    let plays = [Vec::new(), masked_of(0x2, (&[0x78; 200], true))];
+
+    for (index, between) in plays.into_iter().enumerate() {
+        let mut peer = peer_of(port).await;
+        let handle = recorder.connections(index + 1).await.remove(index);
+        let mut written = masked_of(0x2, (&[1], true));
+
+        written.extend(between);
+        written.extend_from_slice(&[0x83, 0x80, 1, 2, 3, 4]);
+        peer.socket.write_all(&written).await.unwrap();
+
+        assert_eq!(
+            heard_on(&mut peer, PATIENCE).await,
+            Some(heard_close(1002)),
+            "play {index}: 1002"
+        );
+        assert_eq!(
+            recorder.errors(index + 1).await.remove(index),
+            (
+                format!(
+                    "{handle} is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3"
+                ),
+                Some(Arc::clone(&handle))
+            ),
+            "play {index}: reported"
+        );
+        drop(peer);
+        assert_eq!(
+            recorder.closes(index + 1).await.remove(index),
+            (false, handle),
+            "play {index}: told closed, unclean, while still paused"
+        );
+    }
+
+    rest(Duration::from_millis(100)).await;
+    assert_eq!(
+        recorder.count(|told| told.messages.len()),
+        2,
+        "the messages paused on alone"
+    );
+    pausing.server.lock().unwrap().take();
+    stopped(&server).await;
+}
+
+// spec 15.12.19
+#[tokio::test]
+async fn releases_a_charge_at_its_connection_s_verdict_and_charges_nothing_that_comes_after_it() {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        close_timeout: Some(Duration::from_secs(1)),
+        ..holding_on(&stepping)
+    })
+    .await;
+    let mut ada = peer_of(port).await;
+    let mut bob = peer_of(port).await;
+
+    recorder.connections(2).await;
+
+    for peer in [&mut ada, &mut bob] {
+        peer.socket
+            .write_all(&masked_of(0x2, (&[0x78; 12], false)))
+            .await
+            .unwrap();
+    }
+
+    until_message_bytes(&server, 292).await;
+
+    // a text frame while a message is under way: ada's verdict, her charge released
+    ada.socket
+        .write_all(&masked_of(0x1, (b"x", true)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut ada, PATIENCE).await,
+        Some(heard_close(1002)),
+        "1002"
+    );
+    until_message_bytes(&server, 146).await;
+
+    // what she sends after it is charged nothing
+    ada.socket
+        .write_all(&masked_of(0x0, (&[0x78; 100], false)))
+        .await
+        .unwrap();
+    rest(Duration::from_millis(100)).await;
+    assert_eq!(message_bytes(&server), 146, "nothing charged after");
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1009_at_its_head_without_waiting_for_its_payload_a_frame_that_would_take_its_message_past_maximum_message_bytes_a_continuation_among_them()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_message_bytes: Some(64),
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+    let mut first = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    // its head alone, its payload never sent
+    first
+        .socket
+        .write_all(&masked_head(0x2, (true, 100)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut first, PATIENCE).await,
+        Some(heard_close(1009)),
+        "1009"
+    );
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!(
+                "{handle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes"
+            ),
+            Some(handle)
+        )],
+        "reported, naming its bound"
+    );
+
+    // a continuation whose head takes its message past
+    let mut second = peer_of(port).await;
+    let mut written = masked_of(0x2, (&[0; 40], false));
+
+    recorder.connections(2).await;
+    written.extend(masked_head(0x0, (true, 25)));
+    second.socket.write_all(&written).await.unwrap();
+    assert_eq!(
+        heard_on(&mut second, PATIENCE).await,
+        Some(heard_close(1009)),
+        "1009"
+    );
+    assert_eq!(
+        recorder.count(|told| told.messages.len()),
+        0,
+        "nothing handed"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn hands_on_a_message_whole_ahead_of_a_frame_that_draws_a_verdict_in_the_same_read_and_nothing_from_that_frame_on()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_message_bytes: Some(64),
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+
+    for (verdict, code) in [
+        (masked_head(0x2, (true, 100)), 1009),
+        (vec![0x83, 0x80, 1, 2, 3, 4], 1002),
+    ] {
+        let mut peer = peer_of(port).await;
+        let mut written = masked_of(0x2, (&[1, 2, 3], true));
+
+        written.extend(verdict);
+        written.extend(masked_of(0x2, (&[4], true)));
+        peer.socket.write_all(&written).await.unwrap();
+
+        assert_eq!(
+            heard_on(&mut peer, PATIENCE).await,
+            Some(heard_close(code)),
+            "{code}"
+        );
+    }
+
+    assert_eq!(
+        recorder
+            .messages(2)
+            .await
+            .into_iter()
+            .map(|(message, _)| message.data)
+            .collect::<Vec<_>>(),
+        [
+            Bytes::from_static(&[1, 2, 3]),
+            Bytes::from_static(&[1, 2, 3])
+        ],
+        "each message whole ahead of it, nothing from it on"
+    );
+    rest(Duration::from_millis(100)).await;
+    assert_eq!(recorder.count(|told| told.messages.len()), 2, "no more");
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1008_the_frame_past_maximum_message_frames_at_its_head_an_empty_frame_counting()
+{
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_message_frames: Some(3),
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+    let mut whole = peer_of(port).await;
+    let mut written = masked_of(0x2, (&[1], false));
+
+    // three frames, a ping between them counting for none, are one message
+    written.extend(masked_of(0x0, (&[], false)));
+    written.extend(masked_of(0x9, (b"beat", true)));
+    written.extend(masked_of(0x0, (&[2], true)));
+    whole.socket.write_all(&written).await.unwrap();
+
+    assert_eq!(
+        recorder.messages(1).await[0].0.data,
+        Bytes::from_static(&[1, 2]),
+        "one message of three frames"
+    );
+
+    let mut past = peer_of(port).await;
+    let handle = recorder.connections(2).await.remove(1);
+    let mut written = masked_of(0x2, (&[1], false));
+
+    written.extend(masked_of(0x0, (&[], false)));
+    written.extend(masked_of(0x0, (&[], false)));
+    written.extend(masked_head(0x0, (true, 10)));
+    past.socket.write_all(&written).await.unwrap();
+
+    assert_eq!(
+        heard_on(&mut past, PATIENCE).await,
+        Some(heard_close(1008)),
+        "1008"
+    );
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!(
+                "{handle} is closed with 1008: a message past its maximumMessageFrames, 3 frames"
+            ),
+            Some(handle)
+        )],
+        "reported, naming its bound"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1002_a_frame_head_rfc_6455_forbids_before_its_platform_reads_it() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(NEVER),
+        ..briefly_closing()
+    })
+    .await;
+    let heads: [(Vec<u8>, &str); 9] = [
+        (vec![0xC2, 0x80, 1, 2, 3, 4], "a reserved bit set"),
+        (vec![0x83, 0x80, 1, 2, 3, 4], "a reserved opcode, 3"),
+        (vec![0x8B, 0x80, 1, 2, 3, 4], "a reserved opcode, 11"),
+        (vec![0x09, 0x80, 1, 2, 3, 4], "a control frame not final"),
+        // its length's 16-bit form, whatever value follows
+        (
+            vec![0x89, 0xFE, 0x00, 0x05, 1, 2, 3, 4],
+            "a control frame longer than 125 bytes",
+        ),
+        (
+            vec![0x80, 0x80, 1, 2, 3, 4],
+            "a continuation with no message under way",
+        ),
+        (
+            vec![0x02, 0x80, 1, 2, 3, 4, 0x82, 0x80, 1, 2, 3, 4],
+            "a data frame that is not a continuation while a message is under way",
+        ),
+        (
+            vec![0x82, 0xFF, 0x80, 0, 0, 0, 0, 0, 0, 0],
+            "a 64-bit length with its top bit set",
+        ),
+        (vec![0x82, 0x01, 0x78], "an unmasked frame"),
+    ];
+
+    for (count, (head, why)) in (1..).zip(heads) {
+        let mut peer = peer_of(port).await;
+        let handle = recorder.connections(count).await.remove(count - 1);
+
+        peer.socket.write_all(&head).await.unwrap();
+
+        assert_eq!(
+            heard_on(&mut peer, PATIENCE).await,
+            Some(heard_close(1002)),
+            "{why}"
+        );
+        assert_eq!(
+            recorder.errors(count).await[count - 1],
+            (
+                format!("{handle} is closed with 1002: a frame head RFC 6455 forbids, {why}"),
+                Some(handle)
+            ),
+            "reported"
+        );
+    }
+
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn sends_its_close_ends_its_writing_and_drops_what_still_comes_unparsed_until_its_peer_ends_or_its_close_timeout_passed_once_a_verdict_failed_it()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        close_timeout: Some(Duration::from_millis(500)),
+        heartbeat: Some(NEVER),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    peer.socket
+        .write_all(&masked_head(0x2, (true, 1 << 30)))
+        .await
+        .unwrap();
+
+    // * its close, then its writing's end, its socket still read
+    assert_eq!(
+        heard_on(&mut peer, PATIENCE).await,
+        Some(heard_close(1009)),
+        "1009"
+    );
+    assert_eq!(
+        heard_on(&mut peer, PATIENCE).await,
+        Some(crate::testing::wire::Heard::End),
+        "its writing ended"
+    );
+
+    // what comes is dropped unparsed, its close among it, no error told of it
+    peer.socket
+        .write_all(&[0xFF, 0xFF, 0x88, 0x82, 1, 2, 3, 4, 0x02, 0xEA])
+        .await
+        .unwrap();
+    rest(Duration::from_millis(100)).await;
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "read on");
+
+    // its peer ends: its close told, unclean
+    peer.socket.shutdown().await.unwrap();
+    assert_eq!(
+        recorder.closes(1).await,
+        vec![(false, Arc::clone(&handle))],
+        "unclean"
+    );
+    assert_eq!(recorder.count(|told| told.errors.len()), 1, "one error");
+
+    // a peer that never ends: dropped once its close timeout passed
+    let mut silent = peer_of(port).await;
+    let began = Instant::now();
+
+    recorder.connections(2).await;
+    silent
+        .socket
+        .write_all(&masked_head(0x2, (true, 1 << 30)))
+        .await
+        .unwrap();
+    assert_eq!(
+        heard_on(&mut silent, PATIENCE).await,
+        Some(heard_close(1009)),
+        "1009"
+    );
+    assert!(!recorder.closes(2).await[1].0, "unclean");
+    assert!(
+        began.elapsed() >= Duration::from_millis(400),
+        "its close timeout"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.3
+#[tokio::test]
+async fn reads_a_single_frame_trickled_within_each_heartbeat_as_its_platform_counts_its_reads() {
+    let stepping = SteppingClock::new(dated_at());
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(300)),
+        ..holding_on(&stepping)
+    })
+    .await;
+    let mut peer = peer_of(port).await;
+    let frame = masked_of(0x2, (&[5; 20], true));
+
+    peer.socket.set_nodelay(true).unwrap();
+    recorder.connections(1).await;
+
+    // * a byte every 100 ms, three to a heartbeat: each read counts
+    for byte in frame {
+        peer.socket.write_all(&[byte]).await.unwrap();
+        rest(Duration::from_millis(100)).await;
+    }
+
+    assert_eq!(
+        recorder.messages(1).await[0].0.data,
+        Bytes::from(vec![5; 20]),
+        "the frame whole"
+    );
+    assert_eq!(
+        heard_on(&mut peer, Duration::from_millis(50)).await,
+        None,
+        "never pinged"
+    );
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "kept");
+    stopped(&server).await;
 }

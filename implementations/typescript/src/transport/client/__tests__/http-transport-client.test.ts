@@ -1,5 +1,6 @@
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, request as requestHTTP, type Server } from 'node:http';
+import { createSecureServer } from 'node:http2';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import {
@@ -54,6 +55,17 @@ import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, type IFakeCall, responseOf } from './fake-fetch';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
+import {
+  closedPort,
+  PROBE,
+  replaceResolver,
+  settledOf,
+  startDropping,
+  startHeard,
+  startPlatformProxy,
+  watchResolver,
+  withoutUndici,
+} from '../../shared/__tests__/loopback-fixtures';
 
 // helpers
 
@@ -1397,10 +1409,24 @@ test.describe('createHTTPTransportClient', () => {
   test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
     await using started = await startServer();
     const { port, server } = started;
-    const client = createHTTPTransportClient({ isListening: false });
+    const client = createHTTPTransportClient();
+    const closed = new Promise<void>((resolve) => {
+      client.once('close', () => {
+        resolve();
+      });
+    });
+
+    await using refused = await closedPort();
 
     await client.connect({ host, port });
+    await expect
+      .poll(() => {
+        return server.gauges().counts['listens'];
+      })
+      .toBe(1);
     await server.stop();
+    await closed;
+    await expect(client.connect({ host, port: refused.port })).rejects.toBeInstanceOf(ConnectError);
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
     const reason = await client.reconnect({ maximumAttempts: 1 }).catch((error: unknown) => {
@@ -3529,5 +3555,224 @@ test.describe('createHTTPTransportClient, a client certificate', () => {
     } finally {
       process.getBuiltinModule = getBuiltinModule;
     }
+  });
+});
+
+// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+test.describe('createHTTPTransportClient, on the loopback', () => {
+  /** A server on 127.0.0.1 that draws a connection on a POST, answers an exchange on it with 204, and notes each. */
+  const startDrawing = () => {
+    return startHeard((request) => {
+      return request.headers[CONNECTION_TOKEN_HEADER] === undefined
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 };
+    });
+  };
+
+  /** Connects a client of the default fetch to `target`, sends one envelope with a credential, and disconnects. */
+  const exchangeWith = async (target: { host: string; port: number }) => {
+    await using client = createHTTPTransportClient({ isListening: false });
+
+    await client.connect(target);
+    await client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+    await client.disconnect({ isQuick: true });
+  };
+
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    await using server = await startDrawing();
+    using resolver = replaceResolver();
+
+    await exchangeWith({ host: PROBE, port: server.port });
+
+    expect(resolver.asked).toEqual([]);
+    expect(
+      server.heard.slice(0, 2).map(({ authorization, host: named, line }) => {
+        return [line.split(' ')[0], named, authorization];
+      })
+    ).toEqual([
+      ['POST', `${PROBE}:${String(server.port)}`, undefined],
+      ['POST', `${PROBE}:${String(server.port)}`, BEARER],
+    ]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    await using server = await startDrawing();
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      await exchangeWith({ host: written, port: server.port });
+    }
+
+    expect(resolver.asked).toEqual([]);
+    expect(
+      new Set(
+        server.heard.map(({ host: named }) => {
+          return named;
+        })
+      )
+    ).toEqual(new Set([`127.0.0.1:${String(server.port)}`]));
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', async () => {
+    using resolver = watchResolver();
+
+    for (const written of ['foo.123', 'x%20.localhost']) {
+      await using client = createHTTPTransportClient({ isListening: false });
+      const refused = await settledOf(() => {
+        return client.connect({ host: written, port: 1 });
+      });
+
+      expect([refused instanceof ConnectError, (refused as Error).message]).toEqual([
+        true,
+        `${written} is no host a URL can name`,
+      ]);
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; RFC 7301
+  test('negotiates the HTTP version with a localhost name that it negotiates with 127.0.0.1', async () => {
+    // * a server that offers h2 and http/1.1 by ALPN, its certificate naming both
+    const versions: string[] = [];
+    const server = createSecureServer(
+      { allowHTTP1: true, cert: PKI.server, key: PKI.serverKey },
+      (request, response) => {
+        const isConnect = request.headers[CONNECTION_TOKEN_HEADER] === undefined;
+
+        versions.push(`${request.method} ${request.httpVersion}`);
+        request.resume();
+        response.writeHead(
+          isConnect && request.method === 'POST' ? 201 : 204,
+          isConnect ? { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } : {}
+        );
+        response.end();
+      }
+    );
+
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    try {
+      for (const named of ['127.0.0.1', 'localhost']) {
+        await using client = createHTTPTransportClient({
+          isListening: false,
+          tls: { authorities: PKI.root },
+        });
+
+        await client.connect({
+          host: named,
+          port: (server.address() as AddressInfo).port,
+          secured: true,
+        });
+        await client.disconnect({ isQuick: true });
+      }
+
+      expect(versions.slice(0, 1)).toEqual(['POST 2.0']);
+      expect(new Set(versions)).toEqual(new Set(['POST 2.0', 'DELETE 2.0']));
+    } finally {
+      server.close();
+    }
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using server = await startDrawing();
+    await using proxy = await startPlatformProxy();
+
+    for (const named of [PROBE, host]) {
+      await exchangeWith({ host: named, port: server.port });
+    }
+
+    // * the proxy stands for every request of the platform's, one off the machine among them, in the
+    // clear so that it reads its line
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
+    expect((await fetch('http://bead.invalid/')).status).toBe(502);
+    expect(proxy.received).toEqual(['GET http://bead.invalid/ HTTP/1.1']);
+    expect(
+      server.heard.filter(({ authorization }) => {
+        return authorization === BEARER;
+      }).length
+    ).toBe(2);
+  });
+
+  test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
+    await using closed = await closedPort();
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({ isListening: false });
+    const refused = await settledOf(() => {
+      return client.connect({ host: PROBE, port: closed.port });
+    });
+
+    expect(refused).toBeInstanceOf(ConnectError);
+    expect((refused as ConnectError).message).toContain(
+      `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+    );
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * its socket closed unanswered
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({ isListening: false });
+    const failed = await settledOf(() => {
+      return client.connect({ host: PROBE, port: dropping.port });
+    });
+
+    expect(failed).toBeInstanceOf(ConnectError);
+    expect((failed as ConnectError).message).not.toContain('no resolver asked');
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4, 15.39
+  test('keeps a localhost name in its Host and its TLS server name while it connects the loopback', async () => {
+    await using server = await startDrawing();
+    await using front = await createTlsFront(server.port, { serves: 'named' });
+    using resolver = replaceResolver();
+    await using client = createHTTPTransportClient({
+      isListening: false,
+      tls: { authorities: PKI.root },
+    });
+
+    // * the front's certificate names localhost alone, which the handshake checked
+    await client.connect({ host: 'localhost', port: front.port, secured: true });
+    await client.disconnect({ isQuick: true });
+
+    expect([resolver.asked, server.heard[0]?.host]).toEqual([
+      [],
+      `localhost:${String(front.port)}`,
+    ]);
+  });
+
+  test('reaches a host on the loopback through undici’s own dialer where undici resolves, and through Node’s global one where it does not', async () => {
+    await using server = await startDrawing();
+    // * a resolver that answers the loopback, so that the global fetch connects all the same
+    using resolver = replaceResolver('127.0.0.1');
+
+    await exchangeWith({ host: PROBE, port: server.port });
+    expect(resolver.asked).toEqual([]);
+
+    {
+      using _absent = withoutUndici();
+
+      await exchangeWith({ host: PROBE, port: server.port });
+    }
+
+    // * asked by the global fetch, once for each connection it opened
+    expect([...new Set(resolver.asked)]).toEqual([PROBE]);
+    expect(
+      server.heard.filter(({ authorization }) => {
+        return authorization === BEARER;
+      }).length
+    ).toBe(2);
   });
 });

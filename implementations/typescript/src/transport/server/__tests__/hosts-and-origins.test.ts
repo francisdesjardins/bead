@@ -7,11 +7,13 @@ import {
   credentialOf,
   hasVisibleFields,
   HOST_REFUSAL,
+  isCountedLength,
   isIPAddress,
   isIPv4Address,
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  isTransferEncodingFramed,
   isVisibleField,
   isVisibleTarget,
   isWellFormedHost,
@@ -808,6 +810,73 @@ test.describe('hosts and origins', () => {
       'null',
       'https://a.test, null',
     ]);
+  });
+
+  // spec 15.12; RFC 9110 §8.6
+  test('isCountedLength takes digits alone whose number is 2⁶³ − 1 at most, leading zeros read by value, and refuses any other', () => {
+    // 0, at any width; 1 led by 39 zeros; 2⁶³ − 1, in 19 digits and in 23
+    expect(
+      [
+        '0',
+        '0'.repeat(40),
+        `${'0'.repeat(39)}1`,
+        '9223372036854775807',
+        '00009223372036854775807',
+      ].filter((value) => {
+        return !isCountedLength(value);
+      })
+    ).toEqual([]);
+    // 2⁶³, in 19 digits and in 23; 19 nines; 2⁶⁴; 23 nines; and what is no digits alone
+    expect(
+      [
+        '9223372036854775808',
+        '00009223372036854775808',
+        '9'.repeat(19),
+        '18446744073709551616',
+        '9'.repeat(23),
+        '',
+        '+1',
+        '-0',
+        'abc',
+        '1 2',
+      ].filter((value) => {
+        return isCountedLength(value);
+      })
+    ).toEqual([]);
+  });
+
+  test('isTransferEncodingFramed takes chunked as its one coding, in any case, over HTTP/1.1, an empty element before it ignored, and refuses a coding before it, anything after it and one an HTTP/1.0 request carries', () => {
+    // none at all, over either version
+    expect(isTransferEncodingFramed('1.1', [])).toBe(true);
+    expect(isTransferEncodingFramed('1.0', [])).toBe(true);
+    // chunked as the one coding, in any case, an empty element before it in one line or two
+    expect(
+      [['chunked'], ['Chunked'], [', chunked'], [',  , chunked'], ['', 'chunked']].filter(
+        (lines) => {
+          return !isTransferEncodingFramed('1.1', lines);
+        }
+      )
+    ).toEqual([]);
+    // a coding before chunked, in one line or two; a final coding other than chunked; anything
+    // after the first chunked; and chunked with a parameter
+    expect(
+      [
+        ['gzip, chunked'],
+        ['x-unknown, chunked'],
+        ['identity, chunked'],
+        ['gzip, , chunked'],
+        ['gzip', 'chunked'],
+        ['gzip'],
+        ['chunked, gzip'],
+        ['chunked,'],
+        ['chunked, chunked'],
+        ['chunked;q=1'],
+      ].filter((lines) => {
+        return isTransferEncodingFramed('1.1', lines);
+      })
+    ).toEqual([]);
+    // chunked alone, over HTTP/1.0
+    expect(isTransferEncodingFramed('1.0', ['chunked'])).toBe(false);
   });
 
   test('folds ASCII alone: a host that differs past ASCII is another', () => {

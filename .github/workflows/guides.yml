@@ -1,0 +1,56 @@
+name: Guides
+
+# The getting-started guide's verify block, run as a reader runs it, in POSIX shell and in
+# PowerShell, against the image it pins (decision 0055): on every push that changes the block, the
+# image's general block in builder/README.md or the tool that runs both. Not a ci.yml job: it asks
+# GitHub's container registry and Sigstore, which a push of anything else leaves alone.
+on:
+  push:
+    # ! the branches named, so a tag's push starts no run: GitHub reads no path filter on a tag's
+    branches: ['**']
+    paths:
+      - docs/guides/getting-started.md
+      - builder/README.md
+      - tools/verify-image.mjs
+      - .github/workflows/guides.yml
+  workflow_dispatch:
+
+concurrency:
+  group: guides-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # CI's Node, by its line
+  NODE_VERSION: '26'
+
+jobs:
+  verify:
+    name: The guide's verify block
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # the cosign image.yml signs with
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      # its output is what the guide quotes of `cosign verify`
+      - name: The guide's block, in both shells
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/verify-image.mjs --from docs/guides/getting-started.md

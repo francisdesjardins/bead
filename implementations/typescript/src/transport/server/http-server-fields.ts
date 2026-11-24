@@ -14,6 +14,7 @@ import {
   HOST_REFUSAL,
   ORIGIN_REFUSAL,
   isAuthority,
+  isCountedLength,
   isTransferEncodingFramed,
   requestTargetOf,
   type IAuthority,
@@ -35,6 +36,26 @@ export interface IEnd {
   /** The reason a refusal of the transport's own is marked with; none for a 201 or a 204. */
   reason?: string | undefined;
   status: number;
+}
+
+// the part of an HTTP/1 socket its read's bound touches: Node's `net.Socket` has each, a test's fake
+// may lack any, and is then held to the counts alone
+interface IPausableSocketLike {
+  destroy?(): unknown;
+  on?(event: 'resume', listener: () => void): unknown;
+  once?(event: 'close', listener: () => void): unknown;
+  pause?(): unknown;
+  removeListener?(event: string, listener: () => void): unknown;
+  resume?(): unknown;
+}
+
+// what one HTTP/1 socket holds unserved: its count, whether the count goes toward the process's
+// total, which a socket that tells its close alone releases, and, while Bead holds it paused, the
+// listener that pauses it again
+interface IUnserved {
+  count: number;
+  readonly isTotalled: boolean;
+  repause: (() => void) | undefined;
 }
 
 // constants
@@ -92,13 +113,20 @@ const PREFLIGHT_MAX_AGE = '7200';
 const PROTOCOL_ERROR = 0x1;
 
 /**
- * The requests one HTTP/1 socket may hold unserved, pipelined behind an answer under way or behind
- * one that closes its connection. Past it, the socket is destroyed. Node's parser reads on while the
- * answers ahead write nothing, so behind a held listen or a stream one socket would queue requests
- * without end. 32 is far above what a client that pipelines sends, and 32 heads at Node's 16 KB
- * bound stay under the megabyte Kestrel buffers of a connection (`MaxRequestBufferSize`).
+ * The requests one HTTP/1 socket holds unserved, pipelined behind an answer under way or behind one
+ * that closes its connection, before its read stops (spec 15.12). Node's parser hands on every
+ * request a read holds, so the socket holds these and the rest of the read that brought the one past
+ * them. Its read resumes once half are left, and the socket is kept: its client is paced by its TCP
+ * window meanwhile.
  */
 export const MAXIMUM_UNSERVED_REQUESTS = 32;
+
+/**
+ * The requests held unserved across the process's HTTP/1 sockets. Past it, the socket whose request
+ * would pass it is destroyed. Node's parser holds about 2 KB of heap for a request it parsed, so the
+ * budget is about 128 MiB, half of `bodyBytesBudget`'s default.
+ */
+export const UNSERVED_REQUESTS_BUDGET = 65_536;
 
 // the 404 that tells a client its connection is gone
 export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
@@ -159,6 +187,25 @@ export const isTransferEncodingTaken = (request: IHTTPRequestLike): boolean => {
     (linesOf(request, 'content-length').length === 0 &&
       isTransferEncodingFramed(request.httpVersion, codings))
   );
+};
+
+// whether a request's `te` is one spec 15.12 takes: any over HTTP/1; over HTTP/2, `trailers` in
+// lower case in each line (RFC 9113 §8.2.2), compared byte for byte as h2 and Kestrel compare it
+// ! nghttp2 resets every other value itself, but hands `trailers` on in any case
+export const isTeTaken = (request: IHTTPRequestLike): boolean => {
+  return (
+    request.httpVersionMajor === 1 ||
+    linesOf(request, 'te').every((value) => {
+      return value === 'trailers';
+    })
+  );
+};
+
+// whether every line of a request's `Content-Length` is one spec 15.12 counts: digits alone whose
+// number is 2⁶³ − 1 at most, read by value (RFC 9110 §8.6)
+// ! Node's parser counts to 2⁶⁴ − 1 and hands on what lies between 2⁶³ and that
+export const isContentLengthCounted = (request: IHTTPRequestLike): boolean => {
+  return linesOf(request, 'content-length').every(isCountedLength);
 };
 
 // a field's lines joined in their order by `, ` (RFC 9110 §5.3, spec 15.12); none without a line
@@ -366,22 +413,96 @@ export const refuseMalformed = ({ request, response }: IExchangeIn): void => {
 };
 
 // the requests each HTTP/1 socket holds unserved, by its socket
-const unserved = new WeakMap<object, number>();
+const unserved = new WeakMap<object, IUnserved>();
 
-// whether `socket` may hold one more request unserved, which it counts; past
-// MAXIMUM_UNSERVED_REQUESTS, it is destroyed instead
-const isHeld = (socket: IHTTPRequestLike['socket']): boolean => {
-  const count = (unserved.get(socket) ?? 0) + 1;
+// the requests held unserved across the process's sockets
+let unservedTotal = 0;
 
-  unserved.set(socket, count);
+// the record of `socket`, made as its first request is held; a socket that tells its close has its
+// whole count taken off the total then
+const unservedOf = (socket: IPausableSocketLike): IUnserved => {
+  const held = unserved.get(socket);
 
-  if (count > MAXIMUM_UNSERVED_REQUESTS) {
+  if (held !== undefined) {
+    return held;
+  }
+
+  const record: IUnserved = {
+    count: 0,
+    isTotalled: typeof socket.once === 'function',
+    repause: undefined,
+  };
+
+  unserved.set(socket, record);
+  socket.once?.('close', () => {
+    if (record.isTotalled) {
+      unservedTotal -= record.count;
+    }
+
+    record.count = 0;
+    unserved.delete(socket);
+  });
+
+  return record;
+};
+
+// whether `socket` holds one more request unserved, which it counts; past
+// MAXIMUM_UNSERVED_REQUESTS, its read stops; past UNSERVED_REQUESTS_BUDGET across sockets, it is
+// destroyed instead
+const isHeld = (socket: IPausableSocketLike): boolean => {
+  const record = unservedOf(socket);
+
+  if (record.isTotalled && unservedTotal + 1 > UNSERVED_REQUESTS_BUDGET) {
     socket.destroy?.();
 
     return false;
   }
 
+  record.count += 1;
+  unservedTotal += record.isTotalled ? 1 : 0;
+
+  if (
+    record.count > MAXIMUM_UNSERVED_REQUESTS &&
+    record.repause === undefined &&
+    typeof socket.pause === 'function' &&
+    typeof socket.on === 'function'
+  ) {
+    // ! Node resumes a socket as it hands on each request it parsed (`readStart`), and holds its own
+    // pause with a listener like this one (`onSocketResume`): a single pause would not hold. Node's
+    // `_paused` and `socket.parser` are its own, never set or read here
+    const repause = (): void => {
+      if (record.repause === repause) {
+        socket.pause?.();
+      }
+    };
+
+    record.repause = repause;
+    socket.pause();
+    socket.on('resume', repause);
+  }
+
   return true;
+};
+
+// one request of `socket` served: counted off, and its read resumed once half are left
+const isServed = (socket: IPausableSocketLike): void => {
+  const record = unserved.get(socket);
+
+  if (record === undefined || record.count === 0) {
+    return;
+  }
+
+  record.count -= 1;
+  unservedTotal -= record.isTotalled ? 1 : 0;
+
+  const { repause } = record;
+
+  if (repause !== undefined && record.count <= MAXIMUM_UNSERVED_REQUESTS / 2) {
+    record.repause = undefined;
+    socket.removeListener?.('resume', repause);
+    // * Node's own `onSocketResume` pauses again a socket Node holds for its outgoing data
+    socket.resume?.();
+  }
 };
 
 /**
@@ -390,8 +511,9 @@ const isHeld = (socket: IHTTPRequestLike['socket']): boolean => {
  * until the answers before it ended; behind one that closes its connection, it never does. So a
  * request is served once its answer holds its socket, and none is served behind an answer that
  * closes, whatever closed it (RFC 9112 §9.3, §9.6). A socket that holds more than
- * {@link MAXIMUM_UNSERVED_REQUESTS} unserved is destroyed. Over HTTP/2, or for a fake of a test's,
- * at once.
+ * {@link MAXIMUM_UNSERVED_REQUESTS} unserved stops being read until half are left; across sockets,
+ * past {@link UNSERVED_REQUESTS_BUDGET}, the socket whose request would pass it is destroyed (spec
+ * 15.12). Over HTTP/2, or for a fake of a test's, at once.
  */
 export const inTurn = ({ request, response }: IExchangeIn, serve: () => void): void => {
   if (request.httpVersionMajor !== 1) {
@@ -414,7 +536,7 @@ export const inTurn = ({ request, response }: IExchangeIn, serve: () => void): v
   if (response.socket === null && response.once !== undefined) {
     if (isHeld(socket)) {
       response.once('socket', () => {
-        unserved.set(socket, (unserved.get(socket) ?? 1) - 1);
+        isServed(socket);
         serve();
       });
     }

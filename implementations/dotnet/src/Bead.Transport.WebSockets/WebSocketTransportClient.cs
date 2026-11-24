@@ -10,11 +10,21 @@ namespace Bead.Transport.WebSockets;
 public sealed record WebSocketTransportClientOptions
 {
     /// <summary>
-    /// The largest message it reads, in bytes: one larger closes its connection with 1009. A
-    /// router's envelope limit at least; an envelope's limit by default, as the TypeScript side's
+    /// The largest message it reads, in bytes: the head of a frame that announces a length taking
+    /// its message past it fails its connection with 1009, at its head (spec 15.3). A router's
+    /// envelope limit at least; an envelope's limit by default, as the TypeScript side's
     /// <c>maxPayload</c> is.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
+
+    /// <summary>
+    /// The frames a message takes at most, the spec's <c>maximumMessageFrames</c>: 16,384 by
+    /// default, and never without end (spec 15.3). The head of the frame past them, an empty one
+    /// counting, fails its connection with 1008, as the TypeScript side's <c>maxFragments</c> does.
+    /// A whole number above 0; any other is an <see cref="ArgumentOutOfRangeException"/> as the
+    /// client is built.
+    /// </summary>
+    public int MaximumMessageFrames { get; init; } = FrameMeter.MaximumMessageFrames;
 
     /// <summary>
     /// How long the connection may stay silent before it is pinged, and how long its pong may take:
@@ -42,8 +52,11 @@ public sealed record WebSocketTransportClientOptions
 
     /// <summary>
     /// What sends its opening handshakes, one of its own when none, which races the address families
-    /// of a name (RFC 8305) and follows no redirect. One given keeps its own behaviour, held by the
-    /// client and never disposed by it, and follows no redirect: an <see cref="HttpClientHandler"/>
+    /// of a name (RFC 8305), connects a host on the loopback to the loopback itself, through no
+    /// proxy, a localhost name asking no resolver (spec 13.4), and follows no redirect. One given
+    /// keeps its own behaviour, its connect and its proxy among it, so a localhost name is judged by
+    /// the name alone, wherever its resolver sends it; it is held by the client and never disposed by
+    /// it, and follows no redirect: an <see cref="HttpClientHandler"/>
     /// or a <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s
     /// given, whose <c>AllowAutoRedirect</c> is true is refused as the client is built, an
     /// <see cref="ArgumentException"/>. The tests' way to open a socket from an address and a port
@@ -150,12 +163,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 {
     // constants
 
-    // what sends the opening handshake of every client given neither a handler nor a TLS: the
-    // platform's handler for a socket with no proxy, cookie, credential or certificate of its own,
-    // as a ClientWebSocket builds it, but for its connect, which races the address families of a
-    // name, as RFC 8305 asks, where the platform's tries each address in turn and waits out a
-    // family's refusal, two seconds on Windows. A client under its own TLS sends its handshakes
-    // through a handler of these settings, and of its TLS.
+    // what sends the opening handshake of every client given neither a handler nor a TLS: a
+    // handler with no cookie, credential or certificate of its own, as a ClientWebSocket builds it,
+    // which follows the platform's proxy for a host off the machine and none for one on the
+    // loopback, and races a name's families, as RFC 8305 asks, where the platform's tries each
+    // address in turn and waits out a family's refusal, two seconds on Windows, connecting a
+    // localhost name to the loopback itself (spec 13.4). A client under its own TLS sends its
+    // handshakes through a handler of these settings, and of its TLS.
     // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
     // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
     // credential and its security were never judged
@@ -164,6 +178,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         AllowAutoRedirect = false,
         ConnectCallback = HappyEyeballs.ConnectCallback,
         PooledConnectionLifetime = TimeSpan.Zero,
+        Proxy = LoopbackBypassProxy.Instance,
         UseCookies = false,
     });
 
@@ -211,6 +226,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         var given = options ?? new WebSocketTransportClientOptions();
 
         HttpRedirects.AssertHandler(given.Handler, nameof(options));
+        ServerBounds.AssertCount((nameof(WebSocketTransportClientOptions.MaximumMessageFrames), given.MaximumMessageFrames));
 
         if (given.Handler is not null && Bead.Tls.IsGiven(given.Tls))
         {
@@ -245,9 +261,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <summary>
     /// What this side failed its open connection for of its own, once, as it ends, before its
     /// unclean close (spec 15.1): a protocol error, the <see cref="WebSocketException"/> its socket
-    /// threw, or a message past <see cref="WebSocketTransportClientOptions.MaximumMessageBytes"/>, an
+    /// threw, or one of its meter's, a frame head RFC 6455 forbids, 1002, a
+    /// <see cref="WebSocketException"/> too; or a message past
+    /// <see cref="WebSocketTransportClientOptions.MaximumMessageBytes"/>, an
     /// <see cref="InvalidDataException"/>, "the connection is closed with 1009: a message past its
-    /// maximumMessageBytes, N bytes"; a listener that throws keeps the close told. A server gone
+    /// maximumMessageBytes, N bytes", or past
+    /// <see cref="WebSocketTransportClientOptions.MaximumMessageFrames"/>, 1008, likewise; a listener that throws keeps the close told. A server gone
     /// without its closing handshake, the heartbeat's drop and this side's own abort past its close
     /// timeout tell their close alone. And what a listener of its messages, its close or its
     /// reconnection threw, the client going on as if it returned.
@@ -333,8 +352,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="ArgumentOutOfRangeException"/> for a timeout
     /// <see cref="WebSocketTransportClientConnectOptions.Timeout"/> does not take, zero among them, and with an
     /// <see cref="ArgumentException"/> for a credential <see cref="WebSocketTransportClientConnectOptions.Credential"/>
-    /// does not take, each of which leaves the state, and the target a reconnection replays, as they
-    /// were; with an <see cref="InvalidOperationException"/> unless
+    /// does not take, and with a <see cref="ConnectException"/> for a host the URL Standard's host
+    /// parser fails on, before any socket opens, each of which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
@@ -701,6 +721,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                     AllowAutoRedirect = false,
                     ConnectCallback = HappyEyeballs.ConnectCallback,
                     PooledConnectionLifetime = TimeSpan.Zero,
+                    Proxy = LoopbackBypassProxy.Instance,
                     SslOptions = _ownTls.SslOptions(),
                     UseCookies = false,
                 });
@@ -710,11 +731,24 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
-    // ws://host:port/pathname, or wss://; an IPv6 literal bracketed, or its colons would read as the
-    // port's
+    // the host a connect dials, read once as the URL Standard reads it, an IPv6 literal bracketed
+    // (spec 13.4): one that parser fails on is a ConnectException, before anything moves
+    private static string DialedHostOf(WebSocketTransportClientConnectOptions options)
+    {
+        try
+        {
+            return TransportSecurity.DialedHost(options.Host);
+        }
+        catch (ArgumentException reason)
+        {
+            throw new ConnectException(reason.Message, reason);
+        }
+    }
+
+    // ws://host:port/pathname, or wss://, its host the one it dials
     private static Uri UriOf(WebSocketTransportClientConnectOptions options)
     {
-        var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
+        var host = DialedHostOf(options);
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "wss" : "ws")}://{host}:{options.Port}{path}");
@@ -914,6 +948,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     {
         ArgumentNullException.ThrowIfNull(given);
         AssertCredential(given);
+        _ = DialedHostOf(given);
 
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
@@ -952,8 +987,17 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         WebSocketConnection connection;
         var attempt = new CancellationTokenSource();
 
-        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12)
-        var gate = new ReadGate();
+        // * its connection's read gate, which its upgrade's stream is read through (spec 15.12), and
+        // its meter, which judges each frame at its head (spec 15.3): no budget, no rate
+        var gate = new ReadGate
+        {
+            Meter = new FrameMeter(new FrameMeter.MeterOptions
+            {
+                MaximumMessageBytes = MaximumMessageBytes,
+                MaximumMessageFrames = _options.MaximumMessageFrames,
+                IsServer = false,
+            }),
+        };
 
         try
         {
@@ -1011,6 +1055,12 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 // (spec 15.6), as the platform's message, "The server returned status code…", never
                 // names the mark
                 throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
+            }
+            catch (WebSocketException reason) when (_handed is null && TransportSecurity.IsLocalhostName(options.Host) && reason.InnerException is HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError } cause)
+            {
+                // * a localhost name's connect that failed says where it went, as its cause says it
+                // (spec 13.4): the platform's own message names no cause
+                throw new WebSocketException(reason.WebSocketErrorCode, $"{reason.Message}: {cause.Message}", reason);
             }
 
             // ! ClientWebSocket opens on a 101 that names an extension it never offered: the client
@@ -1174,7 +1224,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             // ! a protocol error alone, which .NET 10 raises as Faulted: a server gone without its
             // closing handshake, its TCP connection ended or reset, is ConnectionClosedPrematurely; its
             // heartbeat's drop an OperationCanceledException around the KeepAliveTimeout's; and once
-            // this side ended it of its own, failed with 1009 or aborted past its close timeout, what
+            // this side ended it of its own, failed by a verdict or aborted past its close timeout, what
             // its socket meets says nothing more (spec 15.1)
             if (!connection.IsEndedHere && reason is WebSocketException { WebSocketErrorCode: WebSocketError.Faulted })
             {
@@ -1215,7 +1265,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         // * its end: its one error, a message past its bound named by it and its value, then its
         // close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
-        failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : connection.AbortFailure;
+        failure ??= connection.FailureOf("the connection") ?? connection.AbortFailure;
 
         if (failure is not null)
         {

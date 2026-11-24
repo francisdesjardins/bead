@@ -56,7 +56,7 @@ const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
 // stage that brings it: its AMQP 1.0 binding
-const PLACES: [&str; 33] = [
+const PLACES: [&str; 34] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -82,6 +82,7 @@ const PLACES: [&str; 33] = [
     "webSocketTransportServer.headersTimeout",
     "webSocketTransport.heartbeat",
     "webSocketTransportServer.sendGracePeriod",
+    "webSocketTransportServer.bodyGracePeriod",
     "httpTransport.exchangeTimeout",
     "httpTransport.inactivityTimeout",
     "httpTransportClient.wait",
@@ -106,6 +107,7 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "brokerParticipant.bodyGracePeriod"
         | "webSocketTransportServer.headersTimeout"
         | "webSocketTransportServer.sendGracePeriod"
+        | "webSocketTransportServer.bodyGracePeriod"
         | "httpTransportServer.maximumWait"
         | "httpTransportClient.wait"
         | "httpTransportClient.pause"
@@ -1953,6 +1955,75 @@ fn http_server_way(member: &str, given: Option<Duration>) -> Played {
     Ok(HttpTransportServer::new(&options).map_or_else(Observed::Refused, |_| Observed::Taken))
 }
 
+// a WebSocket transport server's message's grace as `given`, upgraded to: the due of the rate a
+// message is held to, armed at the first byte of its first frame, a binary frame of no payload, not
+// final, so its grace alone is due; refused, as it is built
+async fn web_socket_body_grace_period_by_options(given: Option<Duration>) -> Played {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let clock = SteppingClock::new(epoch());
+    let mut options = WebSocketTransportServerOptions::default();
+
+    options.clock = Some(shared_of(&clock));
+    options.body_grace_period = given;
+
+    let server = match WebSocketTransportServer::new(&options) {
+        Ok(server) => server,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let mut start = TransportServerStartOptions::default();
+
+    start.address = Some("127.0.0.1".to_owned());
+    start.find_open_port = Some(true);
+
+    let port = server
+        .start(&start)
+        .await
+        .map_err(|error| error.to_string())?
+        .port;
+    let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|error| error.to_string())?;
+
+    socket
+        .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let mut answer = Vec::new();
+
+    while !answer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let mut chunk = [0_u8; 1_024];
+        let read = socket
+            .read(&mut chunk)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        hold(read > 0, || "the upgrade's answer cut".to_owned())?;
+        answer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+    }
+
+    socket
+        .write_all(&[0x02, 0x80, 0x37, 0xFA, 0x21, 0x3D])
+        .await
+        .map_err(|error| error.to_string())?;
+
+    for _ in 0..200 {
+        if !clock.dues().is_empty() {
+            break;
+        }
+
+        bead::testing::rest(Duration::from_millis(5)).await;
+    }
+
+    let due = due_of(&clock.dues());
+
+    drop(socket);
+    server.stop().await.map_err(|error| error.to_string())?;
+
+    Ok(Observed::Held(due?))
+}
+
 // a WebSocket transport server built with `member` given, where its refusal alone is observed, as
 // the other sides observe it
 fn web_socket_server_way(member: &str, given: Option<Duration>) -> Played {
@@ -2552,6 +2623,9 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         ("webSocketTransport.heartbeat", "client") => web_socket_client_way("heartbeat", given),
         ("webSocketTransportServer.sendGracePeriod", "options") => {
             web_socket_server_way("sendGracePeriod", given)
+        }
+        ("webSocketTransportServer.bodyGracePeriod", "options") => {
+            web_socket_body_grace_period_by_options(given).await
         }
         _ => Err(format!("{place} has no way {way} here")),
     }

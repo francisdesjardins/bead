@@ -7,8 +7,8 @@
 
 use crate::judgement::hosts::{
     Authority, HOST_REFUSAL, HostRequest, ORIGIN_REFUSAL, TakenOrigins, authority_of,
-    has_visible_fields, is_taken_host, is_taken_origin, is_transfer_encoding_framed,
-    is_visible_target, origin_of, own_authority_of, request_target_of,
+    has_visible_fields, is_counted_length, is_taken_host, is_taken_origin,
+    is_transfer_encoding_framed, is_visible_target, origin_of, own_authority_of, request_target_of,
 };
 
 #[cfg(test)]
@@ -240,8 +240,8 @@ fn is_protocol_list(lines: &[&str]) -> bool {
 }
 
 // whether a request frames its body as HTTP frames it (RFC 9112 §6.3; spec 15.12): a
-// `Transfer-Encoding` alone that ends in one `chunked`, over HTTP/1.1, or a `Content-Length` of one
-// line of digits alone (RFC 9110 §8.6), or neither
+// `Transfer-Encoding` alone whose one coding is `chunked`, over HTTP/1.1, or a `Content-Length` of
+// one line of digits alone whose number is 2⁶³ − 1 at most (RFC 9110 §8.6), or neither
 fn is_framed(request: &HandshakeRequest<'_>) -> bool {
     let codings = lines_of(request, "transfer-encoding");
     let lengths = lines_of(request, "content-length");
@@ -254,7 +254,7 @@ fn is_framed(request: &HandshakeRequest<'_>) -> bool {
 
     match lengths.as_slice() {
         [] => true,
-        [length] => !length.is_empty() && length.bytes().all(|byte| byte.is_ascii_digit()),
+        [length] => is_counted_length(length),
         [_, _, ..] => false,
     }
 }
@@ -310,10 +310,10 @@ pub fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold {
 /// 1. what HTTP refuses of its own, a field value holding a control character but a tab or an
 ///    octet past ASCII (RFC 9110 §5.5), a target refused by spec 15.12's rule, a `Host` missing,
 ///    repeated or no host, a target in absolute-form that names none or another scheme (RFC 9112
-///    §3.2, §3.2.2), a `Content-Length` other than one line of digits alone, one beside a
-///    `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked` or that lists
-///    anything after its first `chunked`, or one an HTTP/1.0 request carries (RFC 9112 §6.1, §6.3;
-///    spec 15.12), 400 unmarked;
+///    §3.2, §3.2.2), a `Content-Length` other than one line of digits alone, one whose number passes
+///    2⁶³ − 1, one beside a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not
+///    `chunked`, that lists a coding before its `chunked` or anything after its first, or one an
+///    HTTP/1.0 request carries (RFC 9112 §6.1, §6.3; spec 15.12), 400 unmarked;
 /// 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
 ///    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
 /// 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;

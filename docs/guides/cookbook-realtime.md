@@ -4,8 +4,9 @@ Recipes for the questions a team meets once [the getting-started project](gettin
 runs: who may call, what happens when a connection drops, how to watch the server, and how to see
 a page's calls. Each builds on `StationService` and its C# server over WebSocket.
 
-> **No package is published yet.** The runtimes come from a clone of Bead at a pinned commit, and
-> beadc's image is built from it, as [the getting-started guide](getting-started.md) shows.
+> **beadc's image is published; the packages are not.** beadc's image of a release comes from
+> ghcr.io, verified and pinned by its digest, and the runtimes from a clone of Bead at that
+> release's tag, as [the getting-started guide](getting-started.md) shows.
 
 ## Authenticate calls with a JWT and admission hooks
 
@@ -101,7 +102,7 @@ A call a hook refuses is answered `ACCESS_DENIED`, with the hook's `Detail`.
 **The client presents.** A TypeScript client gives its default credential as it is built, and
 renews it when a call is refused `SESSION_REQUIRED`: the router withdraws it, and every call that
 would present it fails before it goes until the application gives it another. From the
-[TypeScript side's README](../../implementations/typescript/README.md#the-service-layer):
+[TypeScript side's README](../../implementations/typescript/README.md#the-bead-envelope):
 
 ```ts
 const client = createWebSocketClient({ credential: { scheme: CredentialScheme.JWT, token } });
@@ -300,9 +301,11 @@ ASP.NET Core comes with `Bead.Transport.WebSockets`, which references its framew
 `Exposition()` gives the text in Prometheus's text format 0.0.4 with its content type,
 `text/plain; version=0.0.4; charset=utf-8`, which a Prometheus 3 scrape requires. The walkthrough's
 host binds `http://127.0.0.1:0`, a free port on the loopback drawn at each start, which its first
-line reports; a deployment gives `UseUrls` the fixed address its Prometheus scrapes. The families,
-each labelled by `service` (its id in decimal) and `procedure`, a call's by `type` (`request` or
-`command`), an ended one's by `outcome` and a failure's by `code`:
+line reports; a deployment gives `UseUrls` the fixed address its Prometheus scrapes.
+
+Every series is labelled by `service`, its id in decimal, and `procedure`. A call's series adds
+`type`, `request` or `command`; an ended call's adds `outcome`, and a failure's adds `code`. The
+families:
 
 | Family                              | Counts                                                       |
 | ----------------------------------- | ------------------------------------------------------------ |

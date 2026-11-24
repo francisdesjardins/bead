@@ -14,15 +14,6 @@ const AROUND_A_HOST = /[\t\n\r/?#\\@]/u;
 
 // helpers
 
-/** The host of `url` as a URL parses it, in ASCII lower case, an IPv6 one bracketed; none when it does not parse. */
-const hostOf = (url: string): string | undefined => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
-};
-
 /** Whether a parsed host is on the loopback: `localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`. */
 const isLoopback = (host: string | undefined): boolean => {
   if (host === undefined) {
@@ -40,6 +31,23 @@ const isLoopback = (host: string | undefined): boolean => {
 // definition
 
 /**
+ * The host `url` names, read once as the WHATWG URL Standard's host parser reads a special scheme's
+ * host, whatever its URL's scheme (spec 13.4): an IPv4 address through its IPv4 parser, `127.1` and
+ * `127.0.0.1.` as `127.0.0.1`, a name percent-decoded and in ASCII lower case, an IPv6 address
+ * bracketed. None where either parse fails: a URL that does not parse, or a host the parser fails
+ * on, `foo.123` or `x%20.localhost`. An `mqtt:` or `amqp:` URL, whose scheme is not special, keeps
+ * its host opaque, as given, which this reads as `http:` reads it.
+ */
+export const urlHostOf = (url: string): string | undefined => {
+  try {
+    // ! a path after it, so that the URL parser trims nothing off the host's end
+    return new URL(`http://${new URL(url).host}/`).hostname;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Whether the address a server listens on is on the loopback (spec 13.4), as the W3C's Secure
  * Contexts judges an origin potentially trustworthy, by what it is given, never by what a name
  * resolves to: in 127.0.0.0/8, or `::1`, bare or bracketed. Read as the WHATWG URL Standard's host
@@ -55,19 +63,25 @@ export const isLoopbackHost = (host: string): boolean => {
   }
 
   // ! a path after it, so that the URL parser trims nothing off the host's end
-  return isLoopback(hostOf(`http://${bracketed}/`));
+  return isLoopback(urlHostOf(`http://${bracketed}/`));
 };
 
 /**
  * Whether a transport that reaches `url` is secure for a bearer credential (spec 13.4, RFC 6750
- * §5.3): under TLS, its scheme `wss` or `https`; or on the loopback, its host as
- * {@link isLoopbackHost} judges it. Any other leaves the machine in the clear, and so does a URL
- * that does not parse.
+ * §5.3): under TLS, its scheme `wss` or `https`; or on the loopback, its host read by
+ * {@link urlHostOf}, whatever its scheme. Any other leaves the machine in the clear, and so does a
+ * URL that does not parse or a host the parser fails on.
  */
 export const isSecureUrl = (url: string): boolean => {
-  try {
-    return SECURE_SCHEMES.has(new URL(url).protocol) || isLoopback(hostOf(url));
-  } catch {
-    return false;
-  }
+  const host = urlHostOf(url);
+
+  return host !== undefined && (SECURE_SCHEMES.has(new URL(url).protocol) || isLoopback(host));
+};
+
+/**
+ * Whether the host `url` names is on the loopback, read by {@link urlHostOf} whatever its scheme, as
+ * {@link isSecureUrl} judges it: what a client's dialer connects to the loopback itself (spec 13.4).
+ */
+export const isLoopbackUrl = (url: string): boolean => {
+  return isLoopback(urlHostOf(url));
 };

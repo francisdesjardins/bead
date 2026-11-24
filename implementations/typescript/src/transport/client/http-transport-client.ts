@@ -30,17 +30,15 @@ import {
 } from '../shared/errors';
 import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
-import { isSecureUrl } from '../shared/secure';
-import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
 import {
-  assertTls,
-  builtinOf,
-  type INodeTlsOptions,
-  isNode,
-  NO_TLS_IN_A_PAGE,
-  nodeTlsOf,
-  tlsOf,
-} from '../shared/tls';
+  createUndiciDialer,
+  type IUndiciDrawn,
+  loopbackFailureOf,
+  resolvesUndici,
+} from '../shared/loopback';
+import { isLoopbackUrl, isSecureUrl, urlHostOf } from '../shared/secure';
+import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
+import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
 import {
   getReadyState,
   ReadyState,
@@ -100,19 +98,6 @@ interface IDrawn {
   readonly url: string;
 }
 
-// the part of undici a client of `tls` reaches: its own `fetch`, and an `Agent` of the client's
-interface IUndici {
-  Agent: new (options: { connect: INodeTlsOptions }) => IUndiciAgent;
-  fetch: (
-    url: string,
-    init: IFetchInit & { dispatcher: IUndiciAgent }
-  ) => Promise<IFetchResponseLike>;
-}
-
-interface IUndiciAgent {
-  close(): Promise<void>;
-}
-
 /** A batch as a listen reads it: the length being read, then the envelope it announced, filling. */
 interface IReading {
   envelope: Uint8Array<ArrayBuffer> | undefined;
@@ -129,9 +114,6 @@ export const CONNECT_DEFAULTS = Object.freeze({
   secured: false,
   timeout: 30_000,
 } satisfies Omit<IHTTPTransportClientConnectOptions, 'host' | 'port'>);
-
-// ! a specifier no bundler reads, so that no page's bundle carries undici, which a page never loads
-const UNDICI = 'undici';
 
 /** How long a disconnect waits on the server before it lets the connection go all the same. */
 export const DISCONNECT_TIMEOUT = 5_000;
@@ -315,28 +297,16 @@ export const retryAfterOf = (value: string | null, now: number): number => {
   return Number.isNaN(date) ? RETRY_AFTER_DEFAULT : Math.max(0, date - now);
 };
 
-// whether the package undici resolves from here, as Node's `import` of it would
-const resolvesUndici = (): boolean => {
+/** `url` fetched through undici's own `fetch` and its client's agent, its failure worded where it went. */
+const fetchThrough = async (
+  { agent, undici }: IUndiciDrawn,
+  { init, url }: { init: IFetchInit; url: string }
+): Promise<IFetchResponseLike> => {
   try {
-    const nodeModule = builtinOf('node:module') as {
-      createRequire(from: string): { resolve(id: string): string };
-    };
-
-    nodeModule.createRequire(import.meta.url).resolve(UNDICI);
-
-    return true;
-  } catch {
-    return false;
+    return (await undici.fetch(url, { ...init, dispatcher: agent })) as IFetchResponseLike;
+  } catch (reason) {
+    throw loopbackFailureOf(reason, { host: new URL(url).hostname, signal: init.signal });
   }
-};
-
-// undici's own module: CommonJS, its exports the namespace's default
-const undiciOf = async (): Promise<IUndici> => {
-  const namespace = (await import(/* @vite-ignore */ UNDICI)) as IUndici & {
-    default?: IUndici | undefined;
-  };
-
-  return namespace.default ?? namespace;
 };
 
 /**
@@ -460,40 +430,31 @@ export const createHTTPTransportClient = (
   }
 
   const platformFetch = givenFetch ?? (globalThis.fetch as FetchLike);
-  // undici, once a connect under `https` loaded it, and the client's agent, drawn again after a
+  // undici, once an exchange that needs it loaded it, and the client's agent, drawn again after a
   // dispose closed it
-  let undici: IUndici | undefined;
-  let agent: IUndiciAgent | undefined;
+  const dialer = createUndiciDialer(nodeTlsOf(tls));
 
-  // * `tls` on an exchange under `https` alone, through undici's own fetch: Node's global one
-  // takes no dispatcher of another undici's
+  // * in Node, no fetch given: a host on the loopback (spec 13.4), and `tls` under `https`, through
+  // undici's own fetch and the client's agent, which Node's global fetch takes no dispatcher of;
+  // where undici does not resolve, the global fetch
   const fetchImpl: FetchLike =
-    tls === undefined
+    givenFetch !== undefined || !isNode()
       ? platformFetch
-      : async (url, init) => {
-          if (!url.startsWith('https:')) {
+      : (url, init) => {
+          if (!isLoopbackUrl(url) && (tls === undefined || !url.startsWith('https:'))) {
             return platformFetch(url, init);
           }
 
-          undici ??= await undiciOf();
-          agent ??= new undici.Agent({ connect: nodeTlsOf(tls) });
-
-          return undici.fetch(url, { ...init, dispatcher: agent });
+          return dialer.draw().then((drawn) => {
+            return drawn === undefined
+              ? platformFetch(url, init)
+              : fetchThrough(drawn, { init, url });
+          });
         };
 
   // its agent closed once what it carries settled, the DELETE a dispose sends among it
   const closeAgent = (after: Promise<void>): void => {
-    const closing = agent;
-
-    agent = undefined;
-
-    if (closing !== undefined) {
-      void after
-        .then(() => {
-          return closing.close();
-        })
-        .catch(noop);
-    }
+    dialer.close(after);
   };
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
@@ -904,6 +865,13 @@ export const createHTTPTransportClient = (
                   attempt.isDisposed = true;
                   reject(reason);
                 };
+
+                // * read once as the URL Standard reads it: a host it fails on opens no socket
+                if (urlHostOf(url) === undefined) {
+                  reject(new ConnectError(`${host} is no host a URL can name`));
+
+                  return undefined;
+                }
 
                 fetchImpl(url, {
                   headers: {

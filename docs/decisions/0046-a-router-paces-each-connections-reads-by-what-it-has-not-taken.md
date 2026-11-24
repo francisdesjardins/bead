@@ -10,7 +10,10 @@
   bridge's count, the transports' required `pause` and `resume` and their hold, a broker
   participant's held queue, and the HTTP client's resend. What a side holds of a peer otherwise —
   the calls it answers, a request's bytes, what waits for a socket — is
-  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s; the one queue of a router's turns and
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s; a WebSocket message held partway, its
+  budget, its rate and the close after a verdict,
+  [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md)'s;
+  the one queue of a router's turns and
   what an application makes within a telling
   [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)'s;
   the Rust side's owner, its jobs and its panic
@@ -235,7 +238,11 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
   gate and reads to its peer's Close, dropping what comes
   ([RFC 6455 §7.1.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.1),
   [§7.1.2](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.2)); what it held is dropped with
-  the connection. TCP's window then paces the peer.
+  the connection. TCP's window then paces the peer. A connection that fails, by a verdict of
+  [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md)'s,
+  ends its writing where its platform lets it, and drops what comes unparsed until its peer ends or
+  its close timeout passes. A verdict behind a message the router paused on takes effect once that
+  message is read, and what the pause holds is dropped (spec 15.3).
 - **HTTP's server** awaits its connection's gate before it tells an exchange's envelope, outside
   `connection.Telling`. The exchange is under way meanwhile, counted under twice
   `maximumWaitingExchanges`, past which an exchange is refused 429 `busy`, with a `Retry-After` of
@@ -299,7 +306,8 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
    alone, assembled under `maximumMessageBytes`, `maximumBodyBytes` and
    `maximumEnvelopePartsBytes`, and the bound pauses after the envelope that reached it, never
    before.
-3. **No close waits behind a pause.** A connection that closes reads on to its peer's Close.
+3. **No close waits behind a pause.** A connection that closes reads on to its peer's Close, and
+   one that fails, until its peer ends or its close timeout passes.
 
 A multiplexed link, which is never paused, and a router stalled for good, a bug the bound does not
 create whose connections its peers' own bounds end, are no deadlock of the bound's.
@@ -378,6 +386,13 @@ every side:
 - **The TypeScript side holds one socket read** of a paused `ws` connection beyond the count, 64
   KiB, and pays 0.4–1.4 % of throughput on a flood of small envelopes: the platform's row of the
   matrix, with its test.
+- **A paused WebSocket server's message partway** keeps its charge to `messageBytesBudget`: what
+  its read before the pause brought, and nothing it has not read. Its rate's clock stops while the
+  pause holds its reads (spec 15.12). The C# side reads a message partway on to its end while
+  paused, so its clock runs then. Below its pause, a C# connection holds 128 KiB at most: its
+  gate's read of 64 KiB, charged, and 64 KiB more that Kestrel's socket transport reads below the
+  gate, its `MaxReadBufferSize`, uncharged. That is the matrix's row
+  `What a paused WebSocket connection's platform reads below its pause`.
 
 **Its gates**: the twins above, on every side, which name the units 15.12.17, 15.12.18 and 15.23.5,
 held by `spec/check.py`.

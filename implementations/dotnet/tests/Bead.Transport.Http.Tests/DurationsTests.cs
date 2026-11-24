@@ -151,6 +151,10 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(WebSocketTransportServerOptions.SendGracePeriod), SendGracePeriodByWebSocketOptions),
         }),
+        ["webSocketTransportServer.bodyGracePeriod"] = (nameof(WebSocketTransportServerOptions.BodyGracePeriod), new()
+        {
+            ["options"] = new(nameof(WebSocketTransportServerOptions.BodyGracePeriod), BodyGracePeriodByWebSocketOptions),
+        }),
         ["webSocketTransportServer.headersTimeout"] = (nameof(WebSocketTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(WebSocketTransportServerOptions.HeadersTimeout), HeadersTimeoutByWebSocketOptions),

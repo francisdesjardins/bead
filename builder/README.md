@@ -277,9 +277,12 @@ the container's `/tmp`, which leaves with the container.
 ## The image and its wrappers
 
 beadc builds into an image, which its wrappers run by the name
-`ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and linux/arm64, by [`Dockerfile`](Dockerfile) from the repository's root,
-since beadc's tests read `spec/` and the files of each side they hold the generated code to; the
-context's ignore file, [`Dockerfile.dockerignore`](Dockerfile.dockerignore), is beside it:
+`ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and linux/arm64. At each release,
+[`image.yml`](../.github/workflows/image.yml) publishes it on GitHub's container registry under
+beadc's version, attested and signed ([decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). [`Dockerfile`](Dockerfile) builds it from the
+repository's root, since beadc's tests read `spec/` and the files of each side they hold the
+generated code to; the context's ignore file, [`Dockerfile.dockerignore`](Dockerfile.dockerignore),
+is beside it:
 
 ```sh
 docker build -f builder/Dockerfile --target test .   # beadc's tests, on the image itself, protoc required
@@ -297,8 +300,8 @@ build. It has no SDK; its own user, 65532, is not root.
 
 A project runs it through two wrappers, `beadc.sh` for bash 3.2 or later and `beadc.ps1` for
 PowerShell 7.6 or later, which `beadc wrapper` prints and `beadc init` writes, filled with beadc's
-version; a project commits both. The first run asks nothing but the engine, which finds the image
-where it is built or pulled:
+version; a project commits both. The first run asks nothing but the engine, which pulls the image
+from the registry, or finds the one built here under that name or `BEADC_IMAGE`'s:
 
 ```sh
 docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.sh > beadc.sh
@@ -313,6 +316,61 @@ docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.ps1 > be
 ./beadc.ps1 init hello
 ./beadc.ps1 generate
 ```
+
+A team verifies the image a version names, its provenance by GitHub's CLI and its signature by
+cosign 3, then pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
+Bead at the version's tag, reads the digest of the image's index once, and checks the image by it:
+each check passes only for this repository's `image.yml`, run on GitHub's runners from the tag
+`v<version>` at the commit the clone holds, a commit on `main`. It sets `BEADC_IMAGE` only once
+every check passes, and leaves the shell open when one fails. The release's run of `image.yml`
+runs it, in both shells, against the image it just signed:
+
+<!-- verify-image -->
+
+```sh
+v=<version>
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+commit="$(git -C bead-pinned rev-parse HEAD)"
+digest="$(docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}')"
+image="ghcr.io/francisdesjardins/beadc@$digest"
+[ -n "$digest" ] && [ -n "$commit" ] &&
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+  gh attestation verify "oci://$image" --repo francisdesjardins/bead \
+    --signer-workflow francisdesjardins/bead/.github/workflows/image.yml \
+    --source-ref "refs/tags/v$v" --source-digest "$commit" --deny-self-hosted-runners &&
+  cosign verify "$image" \
+    --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-github-workflow-sha "$commit" &&
+  export BEADC_IMAGE="$image"
+```
+
+```powershell
+# in PowerShell 7.6 (pwsh), not Windows PowerShell
+$v = '<version>'
+git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
+$commit = git -C bead-pinned rev-parse HEAD
+$digest = docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}'
+$image = "ghcr.io/francisdesjardins/beadc@$digest"
+if ($digest -and $commit) {
+  git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
+    gh attestation verify "oci://$image" --repo francisdesjardins/bead `
+      --signer-workflow francisdesjardins/bead/.github/workflows/image.yml `
+      --source-ref "refs/tags/v$v" --source-digest $commit --deny-self-hosted-runners &&
+    cosign verify $image `
+      --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" `
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+      --certificate-github-workflow-sha $commit &&
+    Set-Item Env:BEADC_IMAGE $image
+}
+```
+
+0.16.0's image alone is `develop`'s, built from its tag, and passes the
+[getting-started guide's block](../docs/guides/getting-started.md#1-pin-bead-and-beadcs-image)
+instead.
+
+The wrappers name the version, not the digest: the digest exists once the release's tag is built,
+after the commit that names the version, and an image cannot print its own digest ([decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
 
 The two wrappers are one contract, which
 [`src/__tests__/wrappers.test.ts`](src/__tests__/wrappers.test.ts) holds them to, each case run by
@@ -371,9 +429,9 @@ in [`wrappers/`](wrappers/), their image's tag a token that `wrapper` and `init`
 [`proto/bead/options.proto`](proto/bead/options.proto) is the builder's contract: package `bead`,
 C# namespace `Bead.Protobuf`, one extension on each of `FileOptions`, `ServiceOptions` and
 `MethodOptions`, at **58500**, of the range `descriptor.proto` leaves to one organization or to
-experimental options, while the options are unpublished; from their first publication, they take a
-number of protobuf's global registry
-([decision 0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+experimental options, which the published image carries; a number of protobuf's global registry is
+ahead ([decision 0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md),
+[decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
 `OPTIONS_NUMBER` in `src/version.ts` holds the three to it.
 
 | Option                                                    | What it means                                                                                                                                              |

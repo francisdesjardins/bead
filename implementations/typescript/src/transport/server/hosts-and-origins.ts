@@ -50,6 +50,13 @@ const IPV4_ADDRESS = new RegExp(`^${DEC_OCTET}(?:\\.${DEC_OCTET}){3}$`, 'u');
 // a port of one digit at least
 const PORT = /^\d+$/u;
 
+// a `Content-Length` of one or more ASCII digits and nothing else (RFC 9110 §8.6)
+const LENGTH = /^\d+$/u;
+
+// the largest number a `Content-Length` may name: 2⁶³ − 1, the largest signed 64-bit count
+// ! a bigint: a double reads 2⁶³ − 1 and 2⁶³ as one number
+const MAXIMUM_LENGTH = 2n ** 63n - 1n;
+
 // a field value of visible ASCII, spaces and tabs alone, none at either end (RFC 9110 §5.5, RFC 9113
 // §8.2.1)
 const VISIBLE_FIELD = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
@@ -274,12 +281,13 @@ export const isVisibleTarget = (target: string | undefined): boolean => {
 
 /**
  * Whether a request's `Transfer-Encoding`, its field lines as they came, frames its body as spec
- * 15.12 takes it: none at all; or, over HTTP/1.1, a list whose final coding is `chunked`, in any
- * ASCII case (RFC 9112 §6.3 item 4), and whose first `chunked` is that last element. An empty
- * element before it is ignored (RFC 9110 §5.6.1.2); anything after it, another `chunked` or an
- * empty element among it, is not. One an HTTP/1.0 request carries is none either, its framing
- * faulty (RFC 9112 §6.1). A request whose `Transfer-Encoding` is not taken is answered 400 unmarked
- * and its connection closed, before anything else of it is judged.
+ * 15.12 takes it: none at all; or, over HTTP/1.1, a list whose one coding is `chunked`, in any
+ * ASCII case, its last element (RFC 9112 §6.3 item 4). An empty element before it is ignored
+ * (RFC 9110 §5.6.1.2). A coding before it is one no side decodes (RFC 9112 §6.1), and anything
+ * after it, another `chunked` or an empty element among it, is not taken. One an HTTP/1.0 request
+ * carries is none either, its framing faulty (RFC 9112 §6.1). A request whose `Transfer-Encoding`
+ * is not taken is answered 400 unmarked and its connection closed, before anything else of it is
+ * judged.
  */
 export const isTransferEncodingFramed = (
   httpVersion: string,
@@ -292,11 +300,26 @@ export const isTransferEncodingFramed = (
   const elements = lines.flatMap((line) => {
     return line.split(',').map(trimmed);
   });
-  const first = elements.findIndex((element) => {
-    return asciiLowerCase(element) === 'chunked';
-  });
+  const last = elements.length - 1;
 
-  return httpVersion !== '1.0' && first === elements.length - 1;
+  return (
+    httpVersion !== '1.0' &&
+    elements.every((element, index) => {
+      return index === last ? asciiLowerCase(element) === 'chunked' : element === '';
+    })
+  );
+};
+
+/**
+ * Whether `value`, one `Content-Length` field line's value as the parser handed it on, is a count
+ * spec 15.12 takes: one or more ASCII digits and nothing else, whose number is 2⁶³ − 1 at most,
+ * read by value, so its leading zeros count for nothing (RFC 9110 §8.6). A request whose
+ * `Content-Length` is not counted is answered 400 unmarked, or over HTTP/2 its stream reset, before
+ * anything else of it is judged. Node's parser answers one past 2⁶⁴ − 1 itself, and hands on one
+ * between 2⁶³ and 2⁶⁴ − 1; nghttp2 resets the stream of one past 2⁶³ − 1.
+ */
+export const isCountedLength = (value: string): boolean => {
+  return LENGTH.test(value) && BigInt(value) <= MAXIMUM_LENGTH;
 };
 
 /**

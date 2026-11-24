@@ -1235,6 +1235,66 @@ async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_anything_a
     started.stop().await;
 }
 
+// spec 15.12: hyper hands each on, the body read by its final chunked, a Content-Length after it
+// dropped (`proto/h1/role.rs`, 285-287, 297-299), which the transport refuses
+#[tokio::test]
+async fn refuses_400_unmarked_a_request_whose_transfer_encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let cancel = envelope_of(CANCEL, (5, 0));
+    let own = format!("{HOST}:{port}");
+    let mut body = format!("{:x}\r\n", cancel.len()).into_bytes();
+
+    body.extend_from_slice(&cancel);
+    body.extend_from_slice(b"\r\n0\r\n\r\n");
+    body.extend_from_slice(
+        head_of(("POST", "/bead"), (port, &[&bead, "Content-Length: 0"])).as_bytes(),
+    );
+
+    for (authority, codings) in [
+        (own.as_str(), "Transfer-Encoding: gzip, chunked"),
+        (own.as_str(), "Transfer-Encoding: x-unknown, chunked"),
+        (
+            own.as_str(),
+            "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
+        ),
+        (
+            own.as_str(),
+            "Transfer-Encoding: gzip, chunked\r\nContent-Length: 5",
+        ),
+        ("elsewhere.test", "Transfer-Encoding: gzip, chunked"),
+    ] {
+        let mut request = format!(
+            "POST /bead HTTP/1.1\r\nHost: {authority}\r\n{bead}\r\n{CONNECTION_TOKEN_HEADER}: {token}\r\n{codings}\r\n\r\n"
+        )
+        .into_bytes();
+
+        request.extend_from_slice(&body);
+
+        let answer = read_to_end_of(port, &request).await;
+        let lowered = answer.to_ascii_lowercase();
+
+        // one answer, unmarked, with none of the fields every response on the path carries, its
+        // socket closed behind it
+        assert!(answer.starts_with("HTTP/1.1 400 "), "{codings}: {answer}");
+        assert_eq!(
+            answer.matches("HTTP/1.1 ").count(),
+            1,
+            "one answer: {answer}"
+        );
+        assert!(!lowered.contains(REFUSAL_HEADER), "{answer}");
+        assert!(!lowered.contains("cache-control"), "{answer}");
+        assert!(!lowered.contains("vary"), "{answer}");
+    }
+
+    assert_eq!(started.server.clients().len(), 1, "no connect pipelined");
+    assert!(started.recorder.told().refusals.is_empty(), "none told");
+    started.stop().await;
+}
+
 // spec 15.12; RFC 9112 §9.6: hyper reads no request behind an answer that closes
 #[tokio::test]
 async fn serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
@@ -1364,49 +1424,102 @@ async fn serves_a_request_pipelined_behind_an_answer_that_keeps_its_connection_i
 
 // spec 15.12; RFC 9110 §8.6
 #[tokio::test]
-async fn answers_a_content_length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+async fn answers_400_unmarked_a_content_length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+    // a connect from a host it does not take
+    let asked = |length: &str, close: bool| {
+        let close = if close { "Connection: close\r\n" } else { "" };
+
+        format!(
+            "POST /bead HTTP/1.1\r\nHost: elsewhere.test\r\nContent-Type: {BEAD_MEDIA_TYPE}\r\n{close}Content-Length: {length}\r\n\r\n"
+        )
+    };
+
+    // 2⁶³ − 1 is a length: its host is judged
+    let mut socket = RawSocket::on(port).await;
+
+    socket
+        .write(asked("9223372036854775807", true).as_bytes())
+        .await
+        .unwrap();
+
+    let head = socket.head(PATIENCE).await.expect("its answer");
+
+    assert_eq!(
+        refusal_of(&head),
+        (403, Some(HTTP_REFUSALS.host.to_owned())),
+        "2⁶³ − 1"
+    );
+
+    // 2⁶³ in 19 digits and in 23 and 19 nines, which hyper hands on, then 2⁶⁴ and 23 nines, which
+    // it answers 400 itself, each on a socket of its own; hyper answers 2⁶⁴ − 2 and 2⁶⁴ − 1 431
+    // itself, the next test's
+    for length in [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551616",
+        twenty_three.as_str(),
+    ] {
+        let mut socket = RawSocket::on(port).await;
+
+        socket.write(asked(length, false).as_bytes()).await.unwrap();
+
+        let head = socket.head(PATIENCE).await.expect("its answer");
+
+        assert_eq!(
+            (refusal_of(&head), socket.ended(PATIENCE).await),
+            ((400, None), true),
+            "{length}"
+        );
+    }
+
+    started.stop().await;
+}
+
+// RFC 9112 §11.2; docs/support.md
+#[tokio::test]
+async fn answers_431_unmarked_a_content_length_of_2_64_2_or_2_64_1_by_its_number_as_hyper_does_and_closes_its_connection()
  {
     let started = started(&HttpTransportServerOptions::default()).await;
     let port = started.port;
     let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
-    let mut answers = Vec::new();
 
-    // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-    for length in [
-        "9223372036854775808",
-        "18446744073709551614",
-        "18446744073709551615",
-        "18446744073709551616",
+    // * hyper counts to 2⁶⁴ − 3 and answers the two values past it 431, by their number, before
+    // the transport reads the request: 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴ − 2 led by a zero, and 2⁶⁴ − 2 before
+    // a Transfer-Encoding
+    for fields in [
+        &["Content-Length: 18446744073709551614"][..],
+        &["Content-Length: 18446744073709551615"],
+        &["Content-Length: 018446744073709551614"],
+        &[
+            "Content-Length: 18446744073709551614",
+            "Transfer-Encoding: chunked",
+        ],
     ] {
         let mut socket = RawSocket::on(port).await;
+        let mut lines = vec![bead.as_str()];
 
+        lines.extend_from_slice(fields);
         socket
-            .write(
-                head_of(
-                    ("POST", "/bead"),
-                    (port, &[&bead, &format!("Content-Length: {length}")]),
-                )
-                .as_bytes(),
-            )
+            .write(head_of(("POST", "/bead"), (port, &lines)).as_bytes())
             .await
             .unwrap();
 
         let head = socket.head(PATIENCE).await.expect("its answer");
 
-        answers.push((refusal_of(&head), socket.ended(PATIENCE).await));
+        assert_eq!(
+            (refusal_of(&head), socket.ended(PATIENCE).await),
+            ((431, None), true),
+            "{fields:?}"
+        );
     }
 
-    // hyper counts to 2⁶⁴ − 3: a connect that declares a body is malformed; 2⁶⁴ − 2 and 2⁶⁴ − 1
-    // hyper refuses 431, and past them 400
-    assert_eq!(
-        answers,
-        [
-            ((400, Some(HTTP_REFUSALS.malformed.to_owned())), true),
-            ((431, None), true),
-            ((431, None), true),
-            ((400, None), true),
-        ]
-    );
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
     started.stop().await;
 }
 
@@ -1431,9 +1544,29 @@ async fn taken(socket: &mut TcpStream, batch: &[u8]) -> usize {
     taken
 }
 
-// RFC 9112 §9.3
+// whether `socket` is neither ended nor reset a second on, whatever comes on it
+async fn is_kept(socket: &mut TcpStream) -> bool {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut buffer = [0_u8; 4_096];
+
+    patience(Duration::from_secs(1), async {
+        loop {
+            if matches!(socket.read(&mut buffer).await, Ok(0) | Err(_)) {
+                return false;
+            }
+        }
+    })
+    .await
+    .unwrap_or(true)
+}
+
+// the requests pipelined behind an answer held, past one read of any platform's
+const PIPELINED: usize = 6_000;
+
+// spec 15.12; RFC 9112 §9.3
 #[tokio::test]
-async fn bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen() {
+async fn stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_socket() {
     use tokio::io::AsyncWriteExt as _;
 
     let started = started(&HttpTransportServerOptions::default()).await;
@@ -1472,9 +1605,74 @@ async fn bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen() {
         core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), 1_000).collect::<String>();
     let octets = taken(&mut socket, batch.as_bytes()).await;
 
-    // what it took bounded, and the transport still serves
+    // what it took bounded, its socket neither ended nor reset, and the transport still serves
     assert!(octets < MOST_TAKEN, "{octets} octets taken");
+    assert!(is_kept(&mut socket).await, "its socket kept");
     connect(&started).await;
+    started.stop().await;
+}
+
+// spec 15.12; RFC 9112 §9.3
+#[tokio::test]
+async fn answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
+ {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = &drawn.head.fields[CONNECTION_TOKEN_HEADER];
+    let listen = exchange_of(
+        port,
+        head_of(
+            ("GET", "/bead"),
+            (
+                port,
+                &[
+                    &format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+                    &format!("{AFTER_HEADER}: 0"),
+                    &format!("{WAIT_HEADER}: 1000"),
+                ],
+            ),
+        )
+        .as_bytes(),
+    )
+    .await;
+
+    // * a listen held 1 s, then requests pipelined behind it in one write, written by a task of
+    // their own while the test reads
+    listen.write_behind(
+        core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), PIPELINED)
+            .collect::<String>()
+            .into_bytes(),
+    );
+
+    let mut statuses = Vec::with_capacity(PIPELINED.saturating_add(1));
+
+    for _ in 0..=PIPELINED {
+        statuses.push(listen.response(PATIENCE).await.unwrap().head.status);
+        listen.pass();
+    }
+
+    // the listen's 204 once it ends, then each request's 404 in its turn
+    let wrong: Vec<(usize, u16)> = statuses
+        .iter()
+        .enumerate()
+        .filter(|(index, status)| **status != if *index == 0 { 204 } else { 404 })
+        .map(|(index, status)| (index, *status))
+        .take(8)
+        .collect();
+
+    assert_eq!(wrong, [], "answered out of turn");
+
+    // * one more on the same socket, answered: the socket kept
+    listen.write_behind(head_of(("GET", "/other"), (port, &["Connection: close"])).into_bytes());
+    assert_eq!(listen.response(PATIENCE).await.unwrap().head.status, 404);
     started.stop().await;
 }
 

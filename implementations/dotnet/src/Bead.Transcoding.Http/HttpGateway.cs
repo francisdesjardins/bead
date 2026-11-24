@@ -294,9 +294,9 @@ public sealed class HttpGateway : IAsyncDisposable
 
         // 1. what HTTP refuses of its own, unmarked (spec 15.12): a field or a target past visible
         // ASCII, which Kestrel takes, a Content-Length beside a Transfer-Encoding, or a
-        // Transfer-Encoding that lists anything after its first chunked or that an HTTP/1.0 request
-        // carries, its connection closed behind it over HTTP/1.x, and a connection-specific field
-        // over HTTP/2, which Kestrel hands on; over HTTP/2 its stream reset
+        // Transfer-Encoding that lists a coding before its chunked or anything after its first, or
+        // that an HTTP/1.0 request carries, its connection closed behind it over HTTP/1.x, and a
+        // connection-specific field over HTTP/2, which Kestrel hands on; over HTTP/2 its stream reset
         if (!HasVisibleFields(request)
             || !IsVisibleTarget(context)
             || !IsTakenTarget(context)
@@ -426,10 +426,26 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
-        // 9. two authorization fields, a length past its bound, its bounds, a stream's reconnection
+        // 9. two authorization fields, a Bearer followed by neither a space nor its end, a length past
+        // its bound, its bounds, a stream's reconnection
+        var isBearerJwt = _options.Authorization == GatewayAuthorization.BearerJwt;
+
+        // under bearer-jwt, each 400 of its authorization field carries its challenge with
+        // error="invalid_request" after it (RFC 6750 §3.1)
+        var challenged = isBearerJwt
+            ? new Dictionary<string, string> { ["www-authenticate"] = HttpProblems.ChallengeOf(_options.Challenge, "invalid_request") }
+            : null;
+
         if (request.Headers.Authorization.Count > 1)
         {
-            await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "two authorization fields"));
+            await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "two authorization fields"), challenged);
+
+            return;
+        }
+
+        if (isBearerJwt && BearerOf(HostsAndOrigins.CredentialOf(request.Headers.Authorization)).IsMalformed)
+        {
+            await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "Bearer followed by neither a space nor the field's end"), challenged);
 
             return;
         }
@@ -848,6 +864,13 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             return (null, new Refused(reason.StatusCode, "", "") { IsHttp = true });
         }
+        catch (IOException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! a framing Kestrel fails as an I/O fault with its client still there, a chunk size past
+            // what it holds, an int's: refused 400 as HTTP refuses it (RFC 9112 §7.1), never the 200
+            // Kestrel writes of a request left unanswered (spec 15.12)
+            return (null, new Refused(StatusCodes.Status400BadRequest, "", "") { IsHttp = true });
+        }
         finally
         {
             rate?.Dispose();
@@ -898,20 +921,8 @@ public sealed class HttpGateway : IAsyncDisposable
             {
                 credential = Credential.Elsewhere(given);
             }
-            else
+            else if (BearerOf(given).Token is { } token)
             {
-                // RFC 6750 §2.1: "Bearer" 1*SP b64token, spaces alone between the two, so a tab after
-                // them is no separator; the token as it stands after them
-                var space = given.IndexOf(' ', StringComparison.Ordinal);
-                var token = space < 0 ? "" : given[(space + 1)..].TrimStart(' ');
-
-                if (space < 0 || !given[..space].Equals("Bearer", StringComparison.OrdinalIgnoreCase) || token.Length == 0 || token[0] == '\t')
-                {
-                    await Answer(context, HttpProblems.Own(OwnFailure.Scheme, "an auth-scheme but Bearer", new OwnProblemOptions { Challenge = _options.Challenge }));
-
-                    return;
-                }
-
                 if (Encoding.ASCII.GetByteCount(token) > JwtBytes)
                 {
                     await Answer(context, HttpProblems.Own(OwnFailure.Jwt, $"a token past {JwtBytes} bytes"));
@@ -923,7 +934,13 @@ public sealed class HttpGateway : IAsyncDisposable
             }
         }
 
-        problems = problems with { Credential = credential is not null };
+        // * invalid_token only to a credential of the auth-scheme its challenge names (7.6.8)
+        var scheme = credential is null || given is null ? "" : HttpProblems.AuthSchemeOf(given);
+
+        problems = problems with
+        {
+            Credential = scheme.Length > 0 && scheme.Equals(HttpProblems.AuthSchemeOf(_options.Challenge), StringComparison.OrdinalIgnoreCase),
+        };
 
         // its request's payload: a proto request bound and read by Bead's mapping, any other as it came
         ReadOnlyMemory<byte> payload;
@@ -1696,6 +1713,27 @@ public sealed class HttpGateway : IAsyncDisposable
         return FieldLines.JoinedOf(request.Headers[name]);
     }
 
+    // an authorization field, its OWS removed, as bearer-jwt reads it (2.4): its auth-scheme its
+    // first token (RFC 9110 §11.1), and after Bearer, 1*SP alone (RFC 9110 §11.4), then its token as
+    // it stands, a tab first among it, which its server alone judges a token68 or not; Bearer
+    // alone, or another auth-scheme, presents none
+    private static BearerReading BearerOf(string? given)
+    {
+        var scheme = given is null ? "" : HttpProblems.AuthSchemeOf(given);
+
+        if (given is null || scheme.Length == given.Length || !scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase))
+        {
+            return new BearerReading(null, false);
+        }
+
+        if (given[scheme.Length] != ' ')
+        {
+            return new BearerReading(null, true);
+        }
+
+        return new BearerReading(given[scheme.Length..].TrimStart(' '), false);
+    }
+
     // whether the server it is mounted on read a body before it, wholly or in part (transcoding
     // 10.1, step 10): a seekable one it buffered is read from its start, and one its server tells
     // begun is taken; a host that tells nothing reads as untouched
@@ -1910,6 +1948,10 @@ public sealed class HttpGateway : IAsyncDisposable
     }
 
     private sealed record Served(HttpRoute Route, HttpRouteTemplate Rule, HttpTemplate Template);
+
+    // an authorization field under bearer-jwt: the token it presents, or none; and whether Bearer is
+    // followed by neither a space nor its end, which step 9 refuses
+    private sealed record BearerReading(string? Token, bool IsMalformed);
 
     // a refusal of the gateway's own: its status, its mark and its words; or what HTTP refuses of its
     // own, its status alone

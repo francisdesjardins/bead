@@ -14,7 +14,9 @@ document's — a clause, an item of its numbered list, a row of its table — an
 spec/debugging-units.txt and spec/transcoding-units.txt list every unit of each, its front matter and each
 section's lead among them, cited or the reason none cites it, each reason held by its rule, with the
 sha256 of its text, which moves only where --write-units names the unit; an advance follows a timer
-armed, and in the transports' cases ends on its due at the latest; a debug filter keeps fixtures the
+armed, and in the transports' cases ends on its due at the latest; an exchange reads no response past
+the requests written on it, and a behind writes on one a send opened, 65,536 octets at most, none of
+that exchange's expects orLost or told null, its end read once each was answered; a debug filter keeps fixtures the
 file has; an exit counts after a step its server takes; a PROCEDURE_FAILED of the protocol's that a
 conversation, a transports' case or an exit expects gives the empty detail (9.0);
 each exposition the metrics pin reads as 0.0.4, its families in the order of their names under the
@@ -72,6 +74,7 @@ from decimal import Decimal
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
+from generators.conformance import BEHIND_BOUND, PUT_IN, octets_written
 from generators.spec_version import debugging_version, spec_version, transcoding_version
 
 SPEC = os.path.dirname(os.path.abspath(__file__))
@@ -700,8 +703,8 @@ for place in places:
             problems.append(f'durations: {place["id"]} reads its default by the way {way}, which cannot leave its '
                             'duration out')
 
-# an advance follows a timer armed on the side's clock, since the last send, expect or advance, so the
-# timer it steps to is armed before the clock moves (0011)
+# an advance follows a timer armed on the side's clock, since the last send, behind, expect or advance,
+# so the timer it steps to is armed before the clock moves (0011)
 # ! over a socket, an advance goes no further than the due its until named: what a timer fired leads
 # to, on the platform's threads, reads the clock, which must not have run past it
 for group in ('conversations', 'transports', 'exits'):
@@ -711,15 +714,55 @@ for group in ('conversations', 'transports', 'exits'):
         for number, step in enumerate(entry['steps'], 1):
             if 'advance' in step and armed is None:
                 problems.append(f'{group}: {entry["name"]!r}, step {number}, advances with no timer armed since its '
-                                'last send, expect or advance: an until timer comes first')
+                                'last send, behind, expect or advance: an until timer comes first')
             elif 'advance' in step and group == 'transports' and step['advance'] > armed:
                 problems.append(f'{group}: {entry["name"]!r}, step {number}, advances {step["advance"]} ms, past the '
                                 f'timer its until named, due in {armed}: an advance ends on that due at the latest')
 
             if 'until' in step and 'timer' in step['until']:
                 armed = step['until']['timer']
-            elif {'send', 'expect', 'advance', 'publish', 'connect', 'transportSend'} & set(step):
+            elif {'send', 'behind', 'expect', 'advance', 'publish', 'connect', 'transportSend'} & set(step):
                 armed = None
+
+# each expect of a status reads the next response on its exchange's socket, so none reads past the
+# requests written on it; a behind writes on the socket of an exchange a send opened before it,
+# BEHIND_BOUND octets at most, each value put in counted as PUT_IN, within what a host's socket takes;
+# and on an exchange it wrote on, no expect is orLost or told null, which no response could be matched
+# to, and an end comes once each request was answered
+for group, entries in (('transports', named['transports']), ('transcoding: exchanges', named['transcoding/exchanges'])):
+    for entry in entries:
+        steps = entry['steps']
+        behind = {step['on'] for step in steps if 'behind' in step}
+        written, read = {}, {}
+
+        for number, step in enumerate(steps, 1):
+            on, where = step.get('on'), f'{group}: {entry["name"]!r}, step {number},'
+            expectation = step.get('expect') if isinstance(step.get('expect'), dict) else {}
+
+            if isinstance(step.get('send'), dict) and 'head' in step['send']:
+                written[on] = written.get(on, 0) + 1
+            elif 'behind' in step:
+                octets = octets_written(step['behind'], put_in=PUT_IN)
+
+                if not written.get(on):
+                    problems.append(f'{where} writes behind {on!r}, which no send opened before it')
+                if octets > BEHIND_BOUND:
+                    problems.append(f'{where} writes {octets} octets behind {on!r}, each value put in counted as '
+                                    f'{PUT_IN}, past {BEHIND_BOUND}')
+
+                written[on] = written.get(on, 0) + len(step['behind'])
+            elif 'status' in expectation:
+                read[on] = read.get(on, 0) + 1
+
+                if read[on] > written.get(on, 0):
+                    problems.append(f'{where} reads a response on {on!r} past the {written.get(on, 0)} requests '
+                                    'written on it')
+                if on in behind and (expectation.get('orLost') or ('told' in expectation and expectation['told'] is None)):
+                    problems.append(f'{where} expects on {on!r}, which a behind writes on, a response orLost or told '
+                                    'null, which no response could be matched to')
+            elif expectation.get('end') and on in behind and read.get(on, 0) != written.get(on, 0):
+                problems.append(f'{where} reads the end of {on!r} once {read.get(on, 0)} of the '
+                                f'{written.get(on, 0)} requests written on it were answered')
 
 # a conversation that opens its connections names one, opened already, on every other step but those
 # that move the server's clock, which are no connection's; one that opens none plays the one connection

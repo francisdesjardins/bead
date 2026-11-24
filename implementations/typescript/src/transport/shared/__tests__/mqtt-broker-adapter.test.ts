@@ -30,6 +30,14 @@ import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
 import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
+import {
+  closedPort,
+  PROBE,
+  replaceResolver,
+  startDropping,
+  startHeard,
+  watchResolver,
+} from './loopback-fixtures';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 import { PKI } from './tls-front';
 
@@ -528,18 +536,9 @@ test.describe('createMqttBrokerAdapter', () => {
   });
 
   test('fails its start where its broker cannot be reached, over TCP, TLS or a WebSocket, naming why', async () => {
-    // a port no one listens on any more
-    const listener = createServer();
-
-    await new Promise<void>((resolve) => {
-      listener.listen(0, '127.0.0.1', resolve);
-    });
-
-    const { port } = listener.address() as AddressInfo;
-
-    await new Promise((resolve) => {
-      listener.close(resolve);
-    });
+    // a port no one listens on
+    await using closed = await closedPort();
+    const { port } = closed;
 
     // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
     for (const url of [
@@ -2677,6 +2676,36 @@ test.describe('createMqttBrokerAdapter', () => {
     asking.resolve(PASSWORD);
     await expect(askedStart).rejects.toThrow('the link of ada stopped as it started');
 
+    // * a localhost name's race of the loopback given up by its signal, by its stop, or by a signal
+    // aborted already: no socket of it left open (spec 13.4)
+    {
+      await using dropping = await startDropping();
+      const raced = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        url: `mqtt://${PROBE}:${String(dropping.port)}`,
+      });
+      const racing = new AbortController();
+      const racingStart = failureOf(raced.start({ signal: racing.signal }));
+
+      racing.abort();
+      expect(await racingStart).toBeInstanceOf(CancelError);
+
+      const stoppedRace = failureOf(raced.start());
+
+      await raced.stop();
+      expect(await stoppedRace).toEqual(new GenericError('the link of ada stopped as it started'));
+      expect(await failureOf(raced.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+        CancelError
+      );
+      await sleep(50);
+      await expect
+        .poll(() => {
+          return dropping.open;
+        })
+        .toBe(0);
+    }
+
     const link = await linkUp({ adapter, script }, { properties: { receiveMaximum: 1 } });
     const first = adapter.publish({ payload: Uint8Array.of(1), topic: INBOX });
     const leaving = new AbortController();
@@ -3134,8 +3163,13 @@ test.describe('createMqttBrokerAdapter', () => {
         'mqtt://[::1]:1883',
         'mqtt://broker.example:1883',
         'ws://broker.example/mqtt',
+        // * its host read once, as a special scheme's host whatever its scheme (spec 13.4)
+        'mqtt://LOCALHOST:1883',
+        'mqtt://127.1:1883',
+        'mqtt://loc%61lhost:1883',
+        'ws://127.1/mqtt',
       ].map(secureOf)
-    ).toEqual([true, true, true, true, true, false, false]);
+    ).toEqual([true, true, true, true, true, false, false, true, true, true, true]);
     // what is none of its four is refused as it is built, and so is an IPv6 address followed by
     // anything but its port (RFC 3986 §3.2.2), and an id that is none
     for (const refused of [
@@ -3589,6 +3623,170 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(unwholeOf(relay.frames)).toEqual([]);
     } finally {
       await adapter.stop();
+    }
+  });
+});
+
+// spec 13.4: a link to a host on the loopback, connected by Bead to the loopback itself
+test.describe('createMqttBrokerAdapter, on the loopback', () => {
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over TCP', async () => {
+    await using script = await createMqttScript();
+    using resolver = replaceResolver();
+    const adapter = createMqttBrokerAdapter({
+      id: ID,
+      password: PASSWORD,
+      url: script.url.replace('127.0.0.1', PROBE),
+    });
+    const { connect } = await linkUp({ adapter, script });
+
+    expect([connect.cmd, resolver.asked]).toEqual(['connect', []]);
+    await adapter.stop();
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over a WebSocket', async () => {
+    await using server = await startHeard();
+    using resolver = replaceResolver();
+    const adapter = createMqttBrokerAdapter({
+      connectTimeout: 2_000,
+      id: ID,
+      password: PASSWORD,
+      url: `ws://${PROBE}:${String(server.port)}/mqtt`,
+    });
+
+    // * its upgrade refused, which reached the loopback by its name, and says nothing of it
+    const refused = await failureOf(adapter.start());
+
+    expect(refused).toBeInstanceOf(GenericError);
+    expect((refused as GenericError).message).not.toContain('no resolver asked');
+    expect([
+      resolver.asked,
+      server.heard.map(({ host }) => {
+        return host;
+      }),
+    ]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * a port nothing listens on, its connect refused at both addresses, then a socket that opened
+    // and closed unanswered
+    await using closed = await closedPort();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const messages: string[] = [];
+
+    for (const port of [closed.port, dropping.port]) {
+      const adapter = createMqttBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: `mqtt://${PROBE}:${String(port)}`,
+      });
+      const failure = await failureOf(adapter.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      messages.push((failure as GenericError).message);
+    }
+
+    expect(
+      messages.map((message) => {
+        return message.includes(
+          `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+        );
+      })
+    ).toEqual([true, false]);
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    // * over TLS, its broker's certificate naming 127.0.0.1 alone: the host it read is the one its
+    // handshake checked
+    await using script = await createMqttScript({
+      tls: { cert: PKI.addressedServer, key: PKI.addressedServerKey },
+    });
+    const { port } = new URL(script.url);
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      const adapter = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        tls: { authorities: PKI.root },
+        url: `mqtts://${written}:${port}`,
+      });
+      const { connect } = await linkUp({ adapter, script });
+
+      expect([written, connect.cmd, adapter.isSecure]).toEqual([written, 'connect', true]);
+      await adapter.stop();
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', () => {
+    using resolver = watchResolver();
+
+    for (const host of ['foo.123', 'x%20.localhost']) {
+      for (const scheme of ['mqtt', 'mqtts']) {
+        expect(() => {
+          return createMqttBrokerAdapter({ id: ID, url: `${scheme}://${host}:1883` });
+        }).toThrow(new ProgrammerError(`${host} is no host a URL can name`));
+      }
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using script = await createMqttScript();
+    const proxied: number[] = [];
+    const proxy = createServer((socket) => {
+      proxied.push(socket.remotePort ?? 0);
+      socket.destroy();
+    });
+
+    proxy.listen(0, '127.0.0.1');
+    await once(proxy, 'listening');
+
+    const { MQTTJS_SOCKS_PROXY: previous } = process.env;
+
+    // * the proxy MQTT.js reads from its environment, for every link it connects itself
+    process.env['MQTTJS_SOCKS_PROXY'] =
+      `socks5h://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`;
+
+    try {
+      for (const named of ['127.0.0.1', PROBE]) {
+        const adapter = createMqttBrokerAdapter({
+          id: ID,
+          password: PASSWORD,
+          url: script.url.replace('127.0.0.1', named),
+        });
+
+        await linkUp({ adapter, script });
+        await adapter.stop();
+      }
+
+      expect(proxied).toEqual([]);
+
+      // a host off the machine goes through it
+      const away = createMqttBrokerAdapter({
+        connectTimeout: 2_000,
+        id: ID,
+        password: PASSWORD,
+        url: 'mqtt://bead.invalid:1883',
+      });
+
+      expect(await failureOf(away.start())).toBeInstanceOf(GenericError);
+      expect(proxied.length).toBe(1);
+    } finally {
+      if (previous === undefined) {
+        delete process.env['MQTTJS_SOCKS_PROXY'];
+      } else {
+        process.env['MQTTJS_SOCKS_PROXY'] = previous;
+      }
+
+      proxy.close();
     }
   });
 });

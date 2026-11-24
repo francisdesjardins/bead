@@ -3,11 +3,13 @@ using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -49,6 +51,23 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         "access-control-allow-methods",
         "access-control-allow-headers",
         "access-control-max-age",
+    ];
+
+    // 2⁶³ − 1, the largest Content-Length spec 15.12 counts
+    private const string CountedLength = "9223372036854775807";
+
+    // 2⁶³ − 1, then what passes it: 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1, 2⁶⁴
+    // and 23 nines
+    private static readonly string[] PastCountedLengths =
+    [
+        CountedLength,
+        "9223372036854775808",
+        "00009223372036854775808",
+        "9999999999999999999",
+        "18446744073709551614",
+        "18446744073709551615",
+        "18446744073709551616",
+        "99999999999999999999999",
     ];
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -459,6 +478,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         return [.. Encoding.ASCII.GetBytes($"{bytes.Length:x}\r\n"), .. bytes, .. "\r\n"u8];
     }
 
+    // the bytes given, gzip-coded (RFC 1952)
+    private static byte[] GzipOf(byte[] bytes)
+    {
+        using var coded = new MemoryStream();
+
+        using (var gzip = new GZipStream(coded, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            gzip.Write(bytes);
+        }
+
+        return coded.ToArray();
+    }
+
     private long Count(string name)
     {
         return _server.Gauges().Counts[name];
@@ -678,6 +710,78 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             }
 
             return taken;
+        }
+
+        // whether its server keeps it a second more: neither its end nor its reset came, nor
+        // anything else
+        public async Task<bool> IsKept()
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), Cancelled);
+
+            return !_tcp.Client.Poll(TimeSpan.Zero, SelectMode.SelectRead);
+        }
+
+        // the statuses of so many answers, one after another, each head and its body by its length
+        // read off it in bulk
+        // ! what comes past the last of them is dropped: no read of it follows before more is asked
+        public async Task<List<int>> Statuses(int count)
+        {
+            var statuses = new List<int>();
+            var came = new List<byte>();
+            var buffer = new byte[65_536];
+            var at = 0;
+
+            while (statuses.Count < count)
+            {
+                var end = CollectionsMarshal.AsSpan(came)[at..].IndexOf("\r\n\r\n"u8);
+
+                if (end < 0)
+                {
+                    var read = await _stream.ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                    if (read == 0)
+                    {
+                        throw new IOException($"the socket ended after {statuses.Count} answers");
+                    }
+
+                    came.RemoveRange(0, at);
+                    came.AddRange(buffer.AsSpan(0, read));
+                    at = 0;
+
+                    continue;
+                }
+
+                var head = Encoding.ASCII.GetString(CollectionsMarshal.AsSpan(came).Slice(at, end));
+                var lines = head.Split("\r\n");
+                var length = lines.Skip(1).Select((line) =>
+                {
+                    return line.Split(':', 2);
+                }).Where((field) =>
+                {
+                    return field[0].Trim().Equals("content-length", StringComparison.OrdinalIgnoreCase);
+                }).Select((field) =>
+                {
+                    return int.Parse(field[1].Trim(), CultureInfo.InvariantCulture);
+                }).FirstOrDefault();
+
+                // its body by its length, as it comes
+                while (came.Count < at + end + 4 + length)
+                {
+                    var read = await _stream.ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+                    if (read == 0)
+                    {
+                        throw new IOException($"the socket ended within answer {statuses.Count + 1}");
+                    }
+
+                    came.AddRange(buffer.AsSpan(0, read));
+                }
+
+                statuses.Add(int.Parse(lines[0].Split(' ')[1], CultureInfo.InvariantCulture));
+                at += end + 4 + length;
+            }
+
+            return statuses;
         }
 
         // dropped with a reset, as a client gone does
@@ -1711,9 +1815,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         });
     }
 
-    // spec 15.4: the row "A signed `Content-Length`" of docs/support.md
+    // spec 15.4, 15.12: the row "A signed `Content-Length`" of docs/support.md
     [Fact]
-    public async Task Reads_a_signed_Content_Length_as_its_number_as_Kestrel_does_a_connect_drawn_under_plus_0_or_minus_0_and_an_exchange_read_by_plus_its_length()
+    public async Task Reads_a_signed_Content_Length_as_its_number_as_Kestrel_does_a_connect_drawn_under_plus_0_or_minus_0_one_under_plus_5_refused_malformed_as_a_connect_with_a_body_and_an_exchange_read_by_plus_its_length()
     {
         await Start();
 
@@ -1724,6 +1828,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
             await connect.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n\r\n");
             Assert.Equal(201, (await connect.ReadHead()).Status);
+        }
+
+        // five octets under +5, a body, which the transport refuses of a connect as it refuses any
+        using (var five = await Wire.Open(_port))
+        {
+            await five.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: +5\r\n\r\n0\r\n\r\n");
+
+            var head = await five.ReadHead();
+
+            Assert.Equal((400, HttpRefusals.Malformed), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
         }
 
         var (connectionToken, _) = await Connect();
@@ -1849,6 +1963,79 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_refusals);
     }
 
+    // spec 15.7, 15.12; RFC 9112 §7.1; docs/support.md, a chunk size past 2³¹ − 1 over HTTP/1.1
+    [Fact]
+    public async Task Answers_400_unmarked_and_closes_a_chunk_size_past_what_Kestrel_holds()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+
+        // * 2³¹, past the int Kestrel holds a chunk size in, on an exchange of a connection drawn,
+        // never the 200 Kestrel writes of a request left unanswered
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nTransfer-Encoding: chunked\r\n\r\n80000000\r\n"), .. new byte[12]]);
+
+        var (head, answered) = await wire.Read();
+
+        Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+        Assert.Empty(answered);
+        Assert.True(await wire.IsClosed());
+
+        // nothing handed on, the connection drawn lost with its exchange, as a framing Kestrel fails
+        // loses it, and nothing told
+        Assert.Empty(_messages);
+        Assert.Empty(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
+    // spec 15.12; RFC 9112 §6.1
+    [Fact]
+    public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, 5);
+        var pipelined = Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+        // * a body still gzip-coded once its chunks are read, which no side decodes
+        byte[] gzipped = [.. ChunkOf(GzipOf(cancel)), .. "0\r\n\r\n"u8];
+        byte[] plain = [.. ChunkOf(cancel), .. "0\r\n\r\n"u8];
+
+        // ! Kestrel hands each on, the body read by its final chunked and still coded, which the
+        // transport refuses
+        (string Authority, string Codings, byte[] Chunks)[] requests =
+        [
+            (Host, "Transfer-Encoding: gzip, chunked", gzipped),
+            (Host, "Transfer-Encoding: x-unknown, chunked", plain),
+            (Host, "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked", gzipped),
+            ("elsewhere.test", "Transfer-Encoding: gzip, chunked", gzipped),
+        ];
+
+        foreach (var (authority, codings, chunks) in requests)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {authority}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{codings}\r\n\r\n"), .. chunks, .. pipelined]);
+
+            var (head, answered) = await wire.Read();
+
+            // one answer, unmarked, with none of the fields every response on the path carries, which
+            // closes its connection
+            Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+            Assert.Equal((false, false), (head.Headers.ContainsKey("cache-control"), head.Headers.ContainsKey("vary")));
+            Assert.Empty(answered);
+            Assert.True(await wire.IsClosed());
+        }
+
+        // neither the cancel handed on, nor the pipelined connect drawn, nor anything told
+        Assert.Empty(_messages);
+        Assert.Single(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
     // spec 15.12; RFC 9112 §9.6: Kestrel reads no request behind an answer that closes
     [Fact]
     public async Task Serves_no_request_pipelined_behind_an_answer_that_closes_its_connection_whatever_closes_it_and_closes_that_connection()
@@ -1933,32 +2120,45 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12; RFC 9110 §8.6
     [Fact]
-    public async Task Answers_a_Content_Length_too_large_to_count_as_its_platform_does_and_closes_its_connection()
+    public async Task Answers_400_unmarked_a_Content_Length_past_2_63_1_before_its_host_is_judged_and_closes_its_connection()
     {
         await Start();
 
-        var answers = new List<(int Status, string? Refusal)>();
+        var answers = new List<(string Length, int Status, string? Refusal)>();
 
-        // 2⁶³, 2⁶⁴ − 2, 2⁶⁴ − 1 and 2⁶⁴, on a connect
-        foreach (var length in new[] { "9223372036854775808", "18446744073709551614", "18446744073709551615", "18446744073709551616" })
+        // 2⁶³ − 1, its close asked; then 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴ − 2, 2⁶⁴ − 1,
+        // 2⁶⁴ and 23 nines; each on a connect from a host the transport does not take
+        foreach (var length in PastCountedLengths)
         {
             using var wire = await Wire.Open(_port);
+            var isCounted = length == CountedLength;
 
-            await wire.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n\r\n");
+            await wire.Write($"POST /bead HTTP/1.1\r\nHost: elsewhere.test\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: {length}\r\n{(isCounted ? "Connection: close\r\n" : "")}\r\n");
 
-            var (head, _) = await wire.Read();
+            var (head, body) = await wire.Read();
 
-            Assert.True(await wire.IsClosed());
-            answers.Add((head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+            answers.Add((length, head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+
+            // ! Kestrel keeps the connection of a length it counts to read the body it declares,
+            // whatever close the request asks: no close is asserted there
+            if (!isCounted)
+            {
+                Assert.Equal((length, 0, ""), (length, body.Length, StampedOf(head.Headers)));
+                Assert.True(await wire.IsClosed(), length);
+            }
         }
 
-        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it
-        Assert.Equal([(400, null), (400, null), (400, null), (400, null)], answers);
+        // Kestrel counts to 2⁶³ − 1, and answers its own 400 past it before the transport reads the request
+        Assert.Equal(PastCountedLengths.Select((length) =>
+        {
+            return length == CountedLength ? (length, 403, HttpRefusals.Host) : (length, 400, (string?)null);
+        }), answers);
+        Assert.Single(_refusals);
     }
 
-    // RFC 9112 §9.3
+    // spec 15.12; RFC 9112 §9.3
     [Fact]
-    public async Task Bounds_what_it_reads_of_requests_pipelined_behind_a_held_listen()
+    public async Task Stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_socket()
     {
         await Start();
 
@@ -1970,9 +2170,49 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         var taken = await wire.Taken(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat($"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n", 1_000))));
 
-        // what it took bounded, and the transport still serves
+        // what it took bounded, its socket kept, and the transport still serves
         Assert.True(taken < MostTaken, $"{taken} octets taken");
+        Assert.True(await wire.IsKept(), "its socket ended or reset");
         await Connect();
+    }
+
+    // spec 15.12; RFC 9112 §9.3
+    [Fact]
+    public async Task Answers_every_request_pipelined_behind_a_held_listen_in_its_turn_once_the_listen_ends_and_keeps_its_socket()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect(isListening: true);
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 1000\r\n\r\n");
+        await Until(() =>
+        {
+            return Count("listens") == 1;
+        });
+
+        // * 6,000 requests pipelined behind the listen in one write, from a task of their own, read
+        // all the while: a write the server does not take never holds the reads up
+        var other = $"GET /other HTTP/1.1\r\nHost: {Host}\r\n\r\n";
+        var writing = Task.Run(
+            () =>
+            {
+                return wire.Write(string.Concat(Enumerable.Repeat(other, 6_000)));
+            },
+            Cancelled);
+        var reading = wire.Statuses(6_001);
+
+        // the listen ends at its wait, once the requests went or a second passed
+        await Task.WhenAny(writing, Task.Delay(TimeSpan.FromSeconds(1), Cancelled));
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        // its 204, then each request's 404, in turn
+        Assert.Equal([204, .. Enumerable.Repeat(404, 6_000)], await reading);
+        await writing;
+
+        // one more, on the same socket
+        await wire.Write(other);
+        Assert.Equal([404], await wire.Statuses(1));
     }
 
     // spec 15.12; RFC 9110 §8.6; RFC 9112 §9.3
@@ -2541,19 +2781,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // the TypeScript side's fake server alone reports no address, errs late and keeps sessions:
         // Kestrel always reports its port, has no error after listening to raise, and shows no
         // HTTP/2 session, which the gauges here do not count
-        int port;
-
-        using (var probe = new TcpListener(IPAddress.Loopback, 0))
-        {
-            probe.Start();
-            port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-        }
-
         await using var server = new HttpTransportServer();
 
         Assert.Equal(ReadyState.Uninitialized, server.ReadyState);
-        Assert.Equal(new TransportServerAddress(Host, port), await server.Start(new TransportServerStartOptions { Address = Host, Port = port, CancellationToken = Cancelled }));
+
+        var bound = await server.Start(new TransportServerStartOptions { Address = Host, Port = 0, CancellationToken = Cancelled });
+
+        Assert.Equal(Host, bound.Address);
+        Assert.InRange(bound.Port, 1, ushort.MaxValue);
+
+        using var reached = new TcpClient();
+
+        await reached.ConnectAsync(Host, bound.Port, Cancelled);
+        Assert.Equal(bound.Port, ((IPEndPoint)reached.Client.RemoteEndPoint!).Port);
         Assert.Equal(ReadyState.Open, server.ReadyState);
         Assert.DoesNotContain("http2Sessions", server.Gauges().Counts.Keys);
     }
@@ -3162,6 +3402,48 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("content-length", "0")));
     }
 
+    // spec 15.12: the row "A `Content-Length` HTTP refuses, over HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_passes_2_63_1_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // ! Kestrel counts to 2⁶³ − 1 and refuses past it of its own, ending the session where the
+        // spec resets the stream (RFC 9113 §5.4.1 lets it): 2⁶³, in 19 digits and in 23, 19 nines
+        // and 2⁶⁴ − 1, each on a connect whose body never comes
+        foreach (var length in (string[])["9223372036854775808", "00009223372036854775808", "9999999999999999999", "18446744073709551615"])
+        {
+            Assert.Equal((length, new TlsAnswer(null, null, null, 0x1)), (length, await OpenHttp2Of(length)));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+    }
+
+    // spec 15.12; RFC 9110 §8.6: the row "A `Content-Length` of more than nineteen digits, over
+    // HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Judges_over_HTTP_2_a_Content_Length_of_more_than_nineteen_digits_by_its_number()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // 2⁶³ − 1, in 19 digits and in 23, on a connect whose body never comes: a length, so the
+        // transport answers the connect that declares a body as its own
+        foreach (var length in (string[])[CountedLength, $"0000{CountedLength}"])
+        {
+            Assert.Equal((length, new TlsAnswer(400, HttpRefusals.Malformed, null)), (length, await OpenHttp2Of(length)));
+        }
+    }
+
+    // a connect over HTTP/2 of the Content-Length given, on a socket of its own, its stream left
+    // open after its head: its answer, or its reset, or its session's end
+    private async Task<TlsAnswer> OpenHttp2Of(string length)
+    {
+        await using var wire = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+        return await wire.AskOpen([(":authority", $"{Host}:{_port}"), ("content-type", HttpTransport.MediaType), ("content-length", length)]);
+    }
+
     // spec 15.12
     [Fact]
     public async Task Resets_over_HTTP_2_the_stream_of_a_request_carrying_a_connection_specific_field_a_transfer_encoding_with_a_content_length_beside_it_or_none_a_keep_alive_a_proxy_connection_or_an_upgrade()
@@ -3193,6 +3475,51 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // none of them, a connect drawn
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead));
+    }
+
+    // spec 15.12: the row "A `connection` or a `te` other than `trailers`, over HTTP/2" of
+    // docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does_and_serves_one_whose_te_is_trailers()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // ! Kestrel refuses each of its own, a te compared with trailers byte for byte, ending the
+        // session where the spec resets the stream (RFC 9113 §5.4.1 lets it)
+        (string, string)[] carried =
+        [
+            ("connection", "keep-alive"),
+            ("connection", "close"),
+            ("te", "gzip"),
+            ("te", "trailers, gzip"),
+            ("te", "Trailers"),
+        ];
+
+        foreach (var field in carried)
+        {
+            Assert.Equal((field, new TlsAnswer(null, null, null, 0x1)), (field, await Http2Of(own, bead, field)));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+
+        // a te of trailers, a connect drawn
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("te", "trailers")));
+    }
+
+    // spec 15.12: the row "A signed `Content-Length`" of docs/support.md
+    [Fact]
+    public async Task Serves_over_HTTP_2_a_connect_drawn_under_a_signed_Content_Length_plus_0_as_Kestrel_does()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        // ! Kestrel reads a sign before the digits as the number, where RFC 9110 §8.6 holds a length
+        // to digits alone, and the transport reads the 0 it wrote
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":authority", $"{Host}:{_port}"), ("content-type", HttpTransport.MediaType), ("content-length", "+0")));
+        Assert.Single(_connections);
     }
 
     [Fact]

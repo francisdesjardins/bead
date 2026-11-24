@@ -187,6 +187,29 @@ public sealed class WebSocketConnectionTests
         Assert.False(connection.IsEndedHere);
     }
 
+    // decision 0056: what a message held is let go of with it
+    [Fact]
+    public async Task Replaces_a_writer_grown_past_its_read_buffer_once_its_message_is_whole()
+    {
+        using var socket = new HeldWebSocket();
+        var connection = new WebSocketConnection(socket, (1_048_576, Timeout.InfiniteTimeSpan));
+        var messages = new List<TransportMessage>();
+
+        // * a message of three reads of 16 KiB, then one of an octet
+        socket.Incoming.Enqueue((new byte[16 * 1024], false));
+        socket.Incoming.Enqueue((new byte[16 * 1024], false));
+        socket.Incoming.Enqueue((new byte[16 * 1024], true));
+        socket.Incoming.Enqueue(([1], true));
+
+        await connection.Read(messages.Add).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Equal([48 * 1024, 1], messages.Select((message) =>
+        {
+            return message.Bytes.Length;
+        }));
+        Assert.True(connection.HeldCapacity < 16 * 1024, $"its writer holds room for {connection.HeldCapacity} bytes");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

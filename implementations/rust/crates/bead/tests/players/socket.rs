@@ -12,7 +12,8 @@ use std::time::{Instant, SystemTime};
 
 use bead::internal::whole_envelope_limits_of;
 use bead::testing::wire::{
-    BINARY, Exchange, ExchangeOptions, Frame, Heard, ResponseHead, ResponseReader, TEXT, latin1_of,
+    BINARY, Exchange, ExchangeOptions, Frame, Heard, Response, ResponseHead, ResponsesReader, TEXT,
+    latin1_of,
 };
 use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
@@ -38,15 +39,20 @@ const HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
 // ! every key of a step and of an option this player reads over a socket: one it does not know
 // fails the case, rather than pass it unplayed
-const STEP_KEYS: [&str; 10] = [
-    "advance", "after", "expect", "on", "report", "send", "stop", "until", "wait", "within",
+const STEP_KEYS: [&str; 11] = [
+    "advance", "after", "behind", "expect", "on", "report", "send", "stop", "until", "wait",
+    "within",
 ];
 
 // the keys that time a step or name its exchange rather than make an act
 const MODIFIERS: [&str; 3] = ["after", "on", "within"];
 
-const WEBSOCKET_OPTION_KEYS: [&str; 12] = [
+const WEBSOCKET_OPTION_KEYS: [&str; 16] = [
     "maximumMessageBytes",
+    "maximumMessageFrames",
+    "messageBytesBudget",
+    "minimumBodyBytesPerSecond",
+    "bodyGracePeriod",
     "heartbeat",
     "hosts",
     "origins",
@@ -216,28 +222,9 @@ fn is_shaped(value: &str, shape: &str) -> bool {
 
 // ── The responses ────────────────────────────────────────────────────────────────────────────
 
-/// Plays a response of the file's `responses`: its pieces fed one read each, read whole by its
-/// length or de-chunked, its status, its fields and its body as it says.
-pub(crate) fn read_response(response: &Value) -> Result<(), String> {
-    let mut reader = ResponseReader::new();
-
-    for piece in response
-        .get("pieces")
-        .and_then(Value::as_array)
-        .ok_or("a response holds its pieces")?
-    {
-        let bytes = piece
-            .as_str()
-            .and_then(hexadecimal::bytes_of)
-            .ok_or("a piece is hexadecimal")?;
-
-        reader.feed(&bytes);
-    }
-
-    let read = reader
-        .response()
-        .ok_or_else(|| format!("no response read whole: {:?}", reader.failed()))?;
-    let expected_fields = response
+// a response read, in the terms of `expected`: its status, the fields it names, and its body
+fn read_of(read: &Response, expected: &Value) -> Result<(Value, Value), String> {
+    let expected_fields = expected
         .get("fields")
         .and_then(Value::as_object)
         .ok_or("a response names its fields")?;
@@ -251,12 +238,62 @@ pub(crate) fn read_response(response: &Value) -> Result<(), String> {
         "body": hexadecimal::text_of(&read.body),
     });
     let wanted = json!({
-        "status": response.get("status"),
+        "status": expected.get("status"),
         "fields": expected_fields,
-        "body": canonical_of(response.get("body").and_then(Value::as_str).unwrap_or_default())?,
+        "body": canonical_of(expected.get("body").and_then(Value::as_str).unwrap_or_default())?,
     });
 
-    hold(seen == wanted, || format!("read {seen}, not {wanted}"))
+    Ok((seen, wanted))
+}
+
+/// Plays a response of the file's `responses`: its pieces fed one read each, each response whole
+/// taken as it comes, by its length or de-chunked; its status, its fields and its body as it says,
+/// or, where it holds several on one socket, each in its order, nothing past the last.
+pub(crate) fn read_response(response: &Value) -> Result<(), String> {
+    let mut reader = ResponsesReader::new();
+    let mut read = Vec::new();
+
+    for piece in response
+        .get("pieces")
+        .and_then(Value::as_array)
+        .ok_or("a response holds its pieces")?
+    {
+        let bytes = piece
+            .as_str()
+            .and_then(hexadecimal::bytes_of)
+            .ok_or("a piece is hexadecimal")?;
+
+        reader.feed(&bytes);
+        read.extend(core::iter::from_fn(|| reader.take()));
+    }
+
+    let several = response.get("responses").and_then(Value::as_array);
+    let expected: Vec<&Value> = several.map_or_else(|| vec![response], |all| all.iter().collect());
+
+    hold(read.len() == expected.len(), || {
+        format!(
+            "{} responses read whole, not {}: {:?}",
+            read.len(),
+            expected.len(),
+            reader.reading().failed()
+        )
+    })?;
+    hold(!reader.is_amid(), || {
+        "octets past the last response".to_owned()
+    })?;
+
+    for (index, (each, wanted)) in read.iter().zip(expected).enumerate() {
+        let (seen, wanted) = read_of(each, wanted)?;
+
+        hold(seen == wanted, || {
+            format!(
+                "response {}: read {seen}, not {wanted}",
+                index.saturating_add(1)
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 // ── The server under test ────────────────────────────────────────────────────────────────────
@@ -389,6 +426,10 @@ fn websocket_server_of(case: &Value, clock: &SharedClock) -> Result<UnderTest, S
     transport.trusted_proxies = strings_of(&options, "trustedProxies");
     transport.unnamed_proxies = count("unnamedProxies");
     transport.maximum_message_bytes = count("maximumMessageBytes");
+    transport.maximum_message_frames = count("maximumMessageFrames");
+    transport.message_bytes_budget = count("messageBytesBudget");
+    transport.minimum_body_bytes_per_second = count("minimumBodyBytesPerSecond");
+    transport.body_grace_period = duration_of(&options, "bodyGracePeriod");
     transport.maximum_connections = count("maximumConnections");
     transport.maximum_connections_per_address = count("maximumConnectionsPerAddress");
     transport.maximum_unsent_bytes = count("maximumUnsentBytes");
@@ -572,6 +613,34 @@ impl Played {
             .ok_or_else(|| format!("{at}: the exchange {on} names no connection the server holds"))
     }
 
+    // the requests of a behind, written in their order and in one write on the socket of the
+    // exchange `on`, which a send opened, never awaited
+    fn behind(&self, requests: &[Value], (on, at): (&str, &str)) -> Result<(), String> {
+        let mut written = Vec::new();
+
+        for request in requests {
+            let head = request
+                .get("head")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{at}: a request behind holds its head"))?;
+            let filled = filled_of(head, (&self.values, None))?;
+
+            written
+                .extend(latin1_of(&filled).ok_or_else(|| format!("{at}: a head past ISO-8859-1"))?);
+
+            if let Some(body) = request.get("body").and_then(Value::as_str) {
+                written.extend(
+                    hexadecimal::bytes_of(body)
+                        .ok_or_else(|| format!("{at}: a body that is no hexadecimal"))?,
+                );
+            }
+        }
+
+        self.exchange((on, at))?.write_behind(written);
+
+        Ok(())
+    }
+
     async fn send(
         &mut self,
         send: &Map<String, Value>,
@@ -653,11 +722,17 @@ fn frames_of(send: &Map<String, Value>) -> Result<Vec<Frame>, String> {
                 .and_then(Value::as_str)
                 .and_then(hexadecimal::bytes_of)
                 .ok_or("a frame's payload is hexadecimal")?;
+            // * the length its head announces, past the payload given, which alone follows it
+            let length = match frame.get("length") {
+                None => None,
+                Some(length) => Some(length.as_u64().ok_or("a frame's length is a count")?),
+            };
 
             Ok(Frame {
                 fin,
                 opcode,
                 payload,
+                length,
             })
         })
         .collect()
@@ -776,6 +851,8 @@ async fn expect_response(
         // a cut that overtook the head, where the case allows it; a head that did not come in
         // time, or came unreadable, is no loss
         Err(_) if expected.get("orLost") == Some(&Value::Bool(true)) && exchange.is_lost() => {
+            exchange.pass();
+
             return Ok(());
         }
         Err(error) => return Err(format!("{at}: the response's head: {error}")),
@@ -827,7 +904,11 @@ async fn expect_response(
         }
     }
 
-    let local_port = played.exchange((on, at))?.local_port();
+    let exchange = played.exchange((on, at))?;
+    let local_port = exchange.local_port();
+
+    // * the next expect on this exchange reads the next response its socket carries
+    exchange.pass();
 
     // ! a refusal is told once written, so none told by now is none at all
     match expected.get("told") {
@@ -937,7 +1018,13 @@ async fn expect_heard(
 
     let wanted = Value::Object(wanted);
 
-    hold(seen == wanted, || format!("{at}: {seen}, not {wanted}"))
+    hold(seen == wanted, || format!("{at}: {seen}, not {wanted}"))?;
+
+    // over HTTP, the socket's end, with nothing past the responses read
+    match exchange.came_past() {
+        Some(past) if heard == Heard::End => Err(format!("{at}: {past}, then its end")),
+        _ => Ok(()),
+    }
 }
 
 #[expect(
@@ -982,6 +1069,14 @@ async fn play_steps(played: &mut Played, steps: &[Value]) -> Result<(), String> 
             let send = send.as_object().ok_or("a send is an object")?;
 
             played.send(send, (on, &at)).await?;
+        }
+
+        if let Some(behind) = step.get("behind") {
+            played.nothing_reported(&format!("before {at}"))?;
+
+            let requests = behind.as_array().ok_or("a behind is an array")?;
+
+            played.behind(requests, (on, &at))?;
         }
 
         if let Some(expected) = step.get("expect") {

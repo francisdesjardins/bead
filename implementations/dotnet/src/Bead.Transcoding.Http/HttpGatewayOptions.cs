@@ -6,7 +6,10 @@ public enum GatewayAuthorization
     /// <summary><c>ELSEWHERE</c>, the field's value carried beside the request, as <c>POST /bead</c> carries one.</summary>
     Elsewhere,
 
-    /// <summary>A <c>JWT</c>, the token of a <c>Bearer</c> field, in the request's <c>CREDENTIAL</c> block.</summary>
+    /// <summary>
+    /// A <c>JWT</c>, the token of a <c>Bearer</c> field, in the request's <c>CREDENTIAL</c> block; another
+    /// auth-scheme or <c>Bearer</c> alone presenting none.
+    /// </summary>
     BearerJwt,
 }
 

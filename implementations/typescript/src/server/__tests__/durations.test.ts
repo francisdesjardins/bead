@@ -80,7 +80,10 @@ import type {
 } from '../../transport/server/types';
 import { createWebSocketTransportServer } from '../../transport/server/websocket-transport-server';
 import { createFakeHTTPServer } from '../../transport/server/__tests__/fake-http-server';
-import { createFakeWebSocketServer } from '../../transport/server/__tests__/fake-websocket-server';
+import {
+  createFakeSocket,
+  createFakeWebSocketServer,
+} from '../../transport/server/__tests__/fake-websocket-server';
 import { LONGEST_TIMER } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import {
@@ -1254,6 +1257,60 @@ const ofWebSocketServer = (
   };
 };
 
+// a WebSocket server's message partway: its first frame's head alone, announcing 100 bytes, read on
+// a raw socket of its upgrade, which its frame meter reads below `ws`; its rate, armed at that head
+const bodyGraceOfWebSocketServer: Way = async (given) => {
+  const clock = createTestClock();
+  const fake = createFakeWebSocketServer();
+  const building = attempt(() => {
+    return createWebSocketTransportServer({
+      clock,
+      heartbeat: Infinity,
+      WebSocketServer: fake.FakeWebSocketServer,
+      ...optionOf('bodyGracePeriod', given),
+    });
+  });
+
+  if ('refusal' in building) {
+    return {
+      moved: movedOf({ 'a WebSocket server made': fake.instances.length > 0 }),
+      refusal: building.refusal,
+    };
+  }
+
+  const server = building.built;
+  const starting = server.start({ address: '127.0.0.1', port: 4_321 });
+
+  fake.instances[0]?.emit('listening');
+  await starting;
+
+  // its raw socket, read by `ws`'s own listener, which the meter takes the place of
+  const raw = Object.assign(new EventEmitter(), {
+    end: noop,
+    remoteAddress: '10.0.0.1',
+    remotePort: 40_000,
+    resume: noop,
+    writableLength: 0,
+  });
+
+  raw.on('data', noop);
+  fake.instances[0]?.emit('connection', createFakeSocket(), {
+    headers: {},
+    httpVersion: '1.1',
+    rawHeaders: [],
+    socket: raw,
+  });
+
+  try {
+    // a binary frame's head, masked, announcing 100 bytes, none of them come
+    raw.emit('data', Uint8Array.of(0x82, 0x80 | 100, 0, 0, 0, 0));
+
+    return { held: dueOf(delaysOn(clock)) };
+  } finally {
+    await server.stop();
+  }
+};
+
 /**
  * A connect `connect` starts on `client`, timed on `clock`: connecting until its due, ended at it by
  * a `TimeoutError` telling it, then closed; never, connecting until aborted. Refused, nothing
@@ -2083,6 +2140,10 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
     ways: { options: ofWebSocketServer('sendGracePeriod') },
+  },
+  'webSocketTransportServer.bodyGracePeriod': {
+    phrase: 'bodyGracePeriod',
+    ways: { options: bodyGraceOfWebSocketServer },
   },
   'webSocketTransportServer.headersTimeout': {
     phrase: 'headersTimeout',

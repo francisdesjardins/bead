@@ -78,9 +78,11 @@ import type {
 } from '../types';
 import { ACCEPT_TIMEOUT } from '../broker-transport-server';
 import {
+  BODY_GRACE_PERIOD as WEBSOCKET_BODY_GRACE_PERIOD,
   createWebSocketTransportServer,
   HEARTBEAT,
   MAXIMUM_UNSENT_BYTES,
+  MINIMUM_BODY_BYTES_PER_SECOND as WEBSOCKET_MINIMUM_BODY_BYTES_PER_SECOND,
 } from '../websocket-transport-server';
 import {
   createBrokerPeers,
@@ -161,7 +163,7 @@ interface IRequest {
 interface IMessage {
   binary?: string;
   close?: number;
-  frames?: { fin: boolean; opcode: number; payload: string }[];
+  frames?: { fin: boolean; length?: number; opcode: number; payload: string }[];
   text?: string;
 }
 
@@ -169,6 +171,8 @@ interface IMessage {
 interface IStep {
   advance?: number;
   after?: number;
+  /** Requests written in one write on the socket of the exchange named, behind what it carried. */
+  behind?: IRequest[];
   close?: true;
   expect?: IExpectation | IHeardExpectation;
   on?: string;
@@ -204,8 +208,10 @@ interface ICase {
     heldBytesBudget?: number;
     maximumEnvelopePartsBytes?: number;
     maximumMessageBytes?: number;
+    maximumMessageFrames?: number;
     maximumQueuedMessages?: number;
     maximumUnsentBytes?: number;
+    messageBytesBudget?: number;
     names?: string[];
     timeout?: number;
     twin?: string;
@@ -266,13 +272,18 @@ interface IBrokerWorld {
 }
 
 /** A response cut across reads, as every side's reader reads it. */
-interface IResponseCase {
+/** A response a reader reads: its status, its fields, and its body. */
+interface IResponseRead {
   body: string;
   fields: Record<string, string>;
-  name: string;
-  pieces: string[];
   status: number;
 }
+
+/** Responses in pieces, whatever reads they come in: one, or several on one socket, in order. */
+type IResponseCase = { name: string; pieces: string[] } & (
+  | IResponseRead
+  | { responses: IResponseRead[] }
+);
 
 /** What the server reported to its application, and the connection it came with. */
 interface IReport {
@@ -380,6 +391,7 @@ const BROKER_MODIFIERS: ReadonlySet<string> = new Set([
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
   'after',
+  'behind',
   'close',
   'expect',
   'on',
@@ -484,6 +496,10 @@ const OPTION_KEYS: Readonly<
     'sendGracePeriod',
     'maximumUnsentBytes',
     'headersTimeout',
+    'messageBytesBudget',
+    'maximumMessageFrames',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
   ]),
 });
 const LIMIT_KEYS: ReadonlySet<string> = new Set([
@@ -588,8 +604,8 @@ const framesOf = ({ binary, close, frames = [], text }: IMessage): IFrame[] => {
     return [closeFrameOf(close)];
   }
 
-  return frames.map(({ fin, opcode, payload }) => {
-    return { fin, opcode, payload: fromHexadecimal(payload) };
+  return frames.map(({ fin, length, opcode, payload }) => {
+    return { fin, length, opcode, payload: fromHexadecimal(payload) };
   });
 };
 
@@ -747,7 +763,7 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
  * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
  * connection timeout. Over WebSocket, its transport takes the `hosts`, `origins`, `trustedProxies`
- * and `unnamedProxies` alike.
+ * and `unnamedProxies` alike, and a message partway's budget and rate.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -769,7 +785,9 @@ const serverOf = (
     connectionInactivityTimeout,
     heartbeat,
     maximumMessageBytes,
+    maximumMessageFrames,
     maximumUnsentBytes,
+    messageBytesBudget,
     ...bounds
   } = options;
 
@@ -778,6 +796,7 @@ const serverOf = (
       credentials: interopCredentialsOf(clock, limits),
       limits,
       transport: {
+        bodyGracePeriod: bounds.bodyGracePeriod,
         clock,
         headersTimeout: bounds.headersTimeout,
         heartbeat,
@@ -785,7 +804,10 @@ const serverOf = (
         maxPayload: maximumMessageBytes,
         maximumConnections: bounds.maximumConnections,
         maximumConnectionsPerAddress: bounds.maximumConnectionsPerAddress,
+        maximumMessageFrames,
         maximumUnsentBytes,
+        messageBytesBudget,
+        minimumBodyBytesPerSecond: bounds.minimumBodyBytesPerSecond,
         minimumSendBytesPerSecond: bounds.minimumSendBytesPerSecond,
         origins: bounds.origins,
         sendGracePeriod: bounds.sendGracePeriod,
@@ -887,13 +909,15 @@ const expectResponse = async (
   const { orLost, told, ...expected } = expectation;
   const hasBody =
     expected.body !== undefined || expected.envelope !== undefined || expected.batch !== undefined;
-  const head = await cameOf(exchange.reader.head, {
+  // * the next response on its socket, in the order of the requests written on it
+  const reading = exchange.reader.next();
+  const head = await cameOf(reading.head, {
     timing,
     what: `${at}: the response's head`,
   }).catch((reason: unknown) => {
     // a cut that overtook the head, where the case allows it; a head that did not come in time, or
     // came unreadable, is no loss
-    if (orLost === true && exchange.reader.isLost) {
+    if (orLost === true && reading.isLost) {
       return undefined;
     }
 
@@ -905,7 +929,7 @@ const expectResponse = async (
   }
 
   const response = hasBody
-    ? await within(exchange.reader.response, {
+    ? await within(reading.response, {
         milliseconds: Math.max(0, (timing.within ?? PATIENCE) - sinceOf(timing.startedAt)),
         what: `${at}: the response`,
       })
@@ -1885,7 +1909,9 @@ test.describe('the transports', () => {
     fake.instances[0]?.emit('listening');
     await starting;
 
-    const built = fake.instances[0]?.options as { maxPayload?: number } | undefined;
+    const built = fake.instances[0]?.options as
+      | { maxFragments?: number; maxPayload?: number }
+      | undefined;
     // and the unsent bytes it holds a socket to, read from its ceiling
     const { ceilings } = wsTransport.gauges();
 
@@ -1903,6 +1929,7 @@ test.describe('the transports', () => {
       maximumConnections: MAXIMUM_CONNECTIONS,
       maximumConnectionsPerAddress: MAXIMUM_CONNECTIONS_PER_ADDRESS,
       maximumMessageBytes: built?.maxPayload,
+      maximumMessageFrames: built?.maxFragments,
       maximumOutboxBytes: MAXIMUM_OUTBOX_BYTES,
       maximumUnsentBytes: ceilings['largestUnsentBytes'],
       maximumWait: MAXIMUM_WAIT,
@@ -1913,32 +1940,52 @@ test.describe('the transports', () => {
       acceptTimeout: ACCEPT_TIMEOUT,
       maximumEnvelopePartsBytes: MAXIMUM_ENVELOPE_PARTS_BYTES,
       heldBytesBudget: HELD_BYTES_BUDGET,
+      messageBytesBudget: ceilings['messageBytes'],
     }).toEqual(TRANSPORTS.defaults);
     expect(MAXIMUM_UNSENT_BYTES).toBe(TRANSPORTS.defaults['maximumUnsentBytes']);
+    // a WebSocket message's rate, as an HTTP body's (spec 15.12)
+    expect([WEBSOCKET_BODY_GRACE_PERIOD, WEBSOCKET_MINIMUM_BODY_BYTES_PER_SECOND]).toEqual([
+      TRANSPORTS.defaults['bodyGracePeriod'],
+      TRANSPORTS.defaults['minimumBodyBytesPerSecond'],
+    ]);
   });
 
-  for (const { body, fields, name, pieces, status } of TRANSPORTS.responses) {
+  for (const entry of TRANSPORTS.responses) {
+    const { name, pieces } = entry;
+    // * one response, or several on one socket, each read whole after the one before
+    const expected = 'responses' in entry ? entry.responses : [entry];
+
     test(`reads ${name}, by its length or de-chunked, whatever reads it comes in`, async () => {
       const reader = createResponseReader();
+      const read: unknown[] = [];
 
       for (const piece of pieces) {
         reader.feed(fromHexadecimal(piece));
       }
 
-      const response = await within(reader.response, {
-        milliseconds: PATIENCE,
-        what: 'the response',
-      });
+      for (const { fields } of expected) {
+        const response = await within(reader.next().response, {
+          milliseconds: PATIENCE,
+          what: `response ${String(read.length + 1)}`,
+        });
 
-      expect({
-        body: hexadecimalOf(response.body),
-        fields: Object.fromEntries(
-          Object.keys(fields).map((field) => {
-            return [field, response.fields.get(field) ?? null];
-          })
-        ),
-        status: response.status,
-      }).toEqual({ body: canonicalOf(body), fields, status });
+        read.push({
+          body: hexadecimalOf(response.body),
+          fields: Object.fromEntries(
+            Object.keys(fields).map((field) => {
+              return [field, response.fields.get(field) ?? null];
+            })
+          ),
+          status: response.status,
+        });
+      }
+
+      expect(read).toEqual(
+        expected.map(({ body, fields, status }) => {
+          return { body: canonicalOf(body), fields, status };
+        })
+      );
+      expect(reader.unread, 'the octets past the responses').toBe(0);
     });
   }
 
@@ -2034,8 +2081,19 @@ test.describe('the transports', () => {
             `${at}: the acts it holds`
           ).toHaveLength(1);
 
-          if (step.send !== undefined || step.close === true) {
+          if (step.send !== undefined || step.behind !== undefined || step.close === true) {
             expectNothingReported(`before ${at}`);
+          }
+
+          // * never awaited: the next step starts as it is written, whatever its socket took
+          if (step.behind !== undefined) {
+            exchangeOf(step.on, at).write(
+              Buffer.concat(
+                step.behind.map((request) => {
+                  return requestOf(request, values);
+                })
+              )
+            );
           }
 
           if (step.send !== undefined && 'head' in step.send) {
@@ -2059,6 +2117,14 @@ test.describe('the transports', () => {
             );
           } else if (step.expect !== undefined) {
             await expectHeard({ at, exchange: exchangeOf(step.on, at), timing }, step.expect);
+
+            // an end over HTTP reads that nothing came past the responses read
+            if ('end' in step.expect) {
+              expect(
+                exchangeOf(step.on, at).reader.unread,
+                `${at}: the octets past the responses`
+              ).toBe(0);
+            }
           }
 
           if (step.until !== undefined && 'timer' in step.until) {

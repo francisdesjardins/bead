@@ -63,11 +63,6 @@ document, `examples/hello`'s Rust half serves a gateway, and the interop runs bo
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **the rules a security pass brings to every side**: a `localhost` name reached on the loopback
-  without a resolver, as RFC 6761 §6.3 gives it ([0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)); a bound on what a server reads of
-  a connection ahead of the request it serves, and on a `Content-Length`; a transfer coding other
-  than `chunked` refused, as RFC 9112 §6.1 asks; and a malformed `Bearer` answered as RFC 6750 §3.1
-  gives it;
 - **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, under a record of its own
@@ -104,6 +99,10 @@ that meets the Tenth Man:
   cases have one, with the outcomes the spec names for a client's call
   ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
   ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+- **a step over HTTP/2 in the conformance files**, by a round of its own, where each side's own
+  test holds its answer to a request HTTP/2 refuses
+  ([0004](0004-one-behaviour-in-every-language.md),
+  [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md));
 - **a relay across languages in the interop**, one side's relay in front of the other's
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
@@ -150,13 +149,17 @@ that meets the Tenth Man:
   bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
   `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
   what waits for every socket together, as `bodyBytesBudget` is for bodies;
+- what
+  [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md)
+  keeps ahead: the HTTP transport's `bodyBytesBudget` and a broker's `heldBytesBudget`, which refuse
+  the newcomer, brought to its cast-off, the most first;
 - what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a share of the
   budget per connection or per address, with
   [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the nine every side shares
+  the parsers the sides fuzz, the ten every side shares
   ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
   beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
   judges alone; and the `envelope` target's writer held to the refusals it documents, as
@@ -164,11 +167,6 @@ that meets the Tenth Man:
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
-- what
-  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)
-  keeps ahead of a client's `localhost`: such a name, and one under `.localhost`, connected to the
-  loopback with no resolver asked, on every dialer Bead owns
-  ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3));
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
   ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));
@@ -207,13 +205,19 @@ that meets the Tenth Man:
   presenting `spec/pki`'s certificate to the others' servers through a TLS front; and a gateway
   caller's `tls`, on every side at once;
 - what
+  [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)
+  keeps ahead of a client's connect: one behaviour on every side for the platform's proxy, for a
+  host off the machine, by a decision of its own; and a dialer of the TypeScript side's own over
+  `node:http` and `node:https`, so that its HTTP client and caller connect the loopback themselves
+  without undici, by a round of its own;
+- what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
   problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`;
-- **publication**: the packages on npm, NuGet and crates.io, beadc's image on a registry, and the
-  options' number of protobuf's global registry
-  ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+- **publication**: the packages on npm, NuGet and crates.io, and the options' number of protobuf's
+  global registry ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md),
+  [0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -266,6 +270,7 @@ table.
 | [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                                    | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
 | [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)                 | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
 | [0053](0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md) | A client presents the TLS certificate and trusts the authorities its application names, in one shape on every side                                                 | accepted |
+| [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)                     | A client connects the loopback's names to the loopback itself, through no resolver and no proxy                                                                    | accepted |
 
 ### Over a broker
 
@@ -281,14 +286,15 @@ table.
 
 ### A server's edge
 
-| #                                                                                         | Decision                                                                                                                                                                               | Status   |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority                                                | accepted |
-| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII                                                            | accepted |
-| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                                                                   | accepted |
-| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)    | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                                                                    | accepted |
-| [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)                                     | A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles | accepted |
-| [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)                | A server tells each access it refuses, never the credential                                                                                                                            | accepted |
+| #                                                                                                                                | Decision                                                                                                                                                                               | Status   |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)                                          | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority                                                | accepted |
+| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)                                        | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII                                                            | accepted |
+| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)                                              | An HTTP server answers CORS to the origins it names, and to no other                                                                                                                   | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)                                           | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                                                                    | accepted |
+| [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)                                                                            | A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles | accepted |
+| [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)                                                       | A server tells each access it refuses, never the credential                                                                                                                            | accepted |
+| [0056](0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md) | A WebSocket server holds a message partway to a budget and a rate, and every side reads its frames at their heads                                                                      | accepted |
 
 ### Time
 
@@ -318,14 +324,15 @@ table.
 
 ### How the repository decides
 
-| #                                                               | Decision                                                                                                                     | Status   |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0006](0006-a-rule-has-its-gate.md)                             | A rule has its gate, or it is a preference                                                                                   | accepted |
-| [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md) | The repository follows Conventional Commits, git-flow and Keep a Changelog, and what the languages share meets the Tenth Man | accepted |
+| #                                                                                               | Decision                                                                                                                     | Status   |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0006](0006-a-rule-has-its-gate.md)                                                             | A rule has its gate, or it is a preference                                                                                   | accepted |
+| [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)                                 | The repository follows Conventional Commits, git-flow and Keep a Changelog, and what the languages share meets the Tenth Man | accepted |
+| [0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md) | beadc's image is published on GitHub's container registry at each release, under beadc's version, attested and signed        | accepted |
 
 ## Writing one
 
-The next decision is 0054. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0057. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

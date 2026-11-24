@@ -26,15 +26,25 @@ internal sealed record MqttPacketGuardOptions
     /// connection's end or its failure; none tells nothing.
     /// </summary>
     public Action? ReadsEnded { get; init; }
+
+    /// <summary>
+    /// Settled once its client's connect returned, whatever its outcome: a read after its CONNACK
+    /// waits for it; none waits for nothing.
+    /// </summary>
+    public Task? Connected { get; init; }
 }
 
 /// <summary>
 /// The adapters of a client of MQTTnet, each over its channel under a <see cref="MqttPacketGuard"/>:
-/// what MQTTnet's own factory builds, the guard between its channel and its reader.
+/// what MQTTnet's own factory builds, the guard between its channel and its reader, a WebSocket's
+/// upgrade sent through <paramref name="upgrading"/>.
 /// </summary>
-internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IMqttClientAdapterFactory
+internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded, HttpMessageInvoker upgrading) : IMqttClientAdapterFactory
 {
-    /// <summary>A channel over TCP or a WebSocket, as its options say, guarded, under MQTTnet's own reader.</summary>
+    /// <summary>
+    /// A channel over TCP or a WebSocket, as its options say, guarded, under MQTTnet's own reader: a
+    /// WebSocket's a channel of Bead's, which connects through the adapter's handler.
+    /// </summary>
     public IMqttChannelAdapter CreateClientAdapter(MqttClientOptions options, MqttPacketInspector packetInspector, IMqttNetLogger logger)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -43,7 +53,7 @@ internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IM
         IMqttChannel channel = options.ChannelOptions switch
         {
             MqttClientTcpOptions => new MqttTcpChannel(options),
-            MqttClientWebSocketOptions webSocket => new MqttWebSocketChannel(webSocket),
+            MqttClientWebSocketOptions webSocket => new RacingWebSocketChannel(webSocket, upgrading),
             _ => throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture, $"MQTTnet carries no channel of {options.ChannelOptions?.GetType().Name}")),
         };
         var formatter = new MqttPacketFormatterAdapter(options.ProtocolVersion, new MqttBufferWriter(options.WriterBufferSize, options.WriterBufferSizeMax));
@@ -54,17 +64,21 @@ internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IM
             PacketInspector = packetInspector,
         };
 
-        return guarded.ReadsEnded is { } ended ? new ReadEndingAdapter(adapter, ended) : adapter;
+        return guarded.ReadsEnded is null && guarded.Connected is null ? adapter : new ReceivingAdapter(adapter, guarded);
     }
 }
 
 /// <summary>
-/// MQTTnet's adapter of a channel, which tells its reads' end before MQTTnet hears it: MQTTnet fails
-/// what awaits its link on that end, and says that link disconnected only after (spec 15.29), so
-/// what reads its end then knows its link lost, its client still saying it connected.
+/// MQTTnet's adapter of a channel, which holds its receive loop until its connect returned, and
+/// tells its reads' end before MQTTnet hears it: MQTTnet fails what awaits its link on that end, and
+/// says that link disconnected only after (spec 15.29), so what reads its end then knows its link
+/// lost, its client still saying it connected.
 /// </summary>
-internal sealed class ReadEndingAdapter(IMqttChannelAdapter inner, Action ended) : IMqttChannelAdapter
+internal sealed class ReceivingAdapter(IMqttChannelAdapter inner, MqttPacketGuardOptions guarded) : IMqttChannelAdapter
 {
+    // whether its connect read its CONNACK: every read after it is its receive loop's
+    private bool _isConnAckRead;
+
     /// <inheritdoc/>
     public long BytesReceived
     {
@@ -140,25 +154,40 @@ internal sealed class ReadEndingAdapter(IMqttChannelAdapter inner, Action ended)
         return inner.DisconnectAsync(cancellationToken);
     }
 
-    /// <summary>The next packet, or none at its connection's end, its end told first.</summary>
+    /// <summary>
+    /// The next packet, or none at its connection's end, its end told first; one after its CONNACK
+    /// read once its connect returned.
+    /// </summary>
     public async Task<MqttPacket> ReceivePacketAsync(CancellationToken cancellationToken)
     {
         MqttPacket? packet;
 
         try
         {
+            // ! MQTTnet 5.2 starts its receive loop before it stores that loop's task: a loop whose
+            // first packet ends its link hands its disconnect no task to skip, so that disconnect
+            // awaits the loop itself and never says the link disconnected
+            if (_isConnAckRead && guarded.Connected is { IsCompleted: false } connected)
+            {
+                await connected.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             packet = await inner.ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            ended();
+            guarded.ReadsEnded?.Invoke();
 
             throw;
         }
 
         if (packet is null)
         {
-            ended();
+            guarded.ReadsEnded?.Invoke();
+        }
+        else if (packet is MqttConnAckPacket)
+        {
+            _isConnAckRead = true;
         }
 
         // ! MQTTnet's own none at its connection's end, which its interface does not say

@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
 import { createServer as createTlsServer } from 'node:https';
 import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
@@ -33,7 +34,6 @@ import {
 } from '../../shared/__tests__/durations';
 import {
   allClosed,
-  closedPort,
   createTestClock,
   delaysOn,
   host,
@@ -53,6 +53,7 @@ import {
   createWebSocketTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
+  MAXIMUM_MESSAGE_FRAMES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type IWebSocketTransportClientConnectOptions,
@@ -65,6 +66,17 @@ import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
 import { createTlsFront, PKI, TLS_VERSIONS } from '../../shared/__tests__/tls-front';
+import {
+  closedPort,
+  PROBE,
+  replaceResolver,
+  settledOf,
+  startDropping,
+  startHeard,
+  startPlatformProxy,
+  watchResolver,
+  withoutUndici,
+} from '../../shared/__tests__/loopback-fixtures';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
@@ -506,14 +518,17 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('rejects with a ConnectError when nothing listens', async () => {
-        await expect(client.connect({ host, port: await closedPort() })).rejects.toBeInstanceOf(
+        await using closed = await closedPort();
+
+        await expect(client.connect({ host, port: closed.port })).rejects.toBeInstanceOf(
           ConnectError
         );
         expect(client.isClosed()).toBe(true);
       });
 
       test('keeps the error the implementation reported as the ConnectError cause', async () => {
-        const connecting = client.connect({ host, port: await closedPort() });
+        await using closed = await closedPort();
+        const connecting = client.connect({ host, port: closed.port });
 
         await expect(connecting).rejects.toBeInstanceOf(ConnectError);
         // ws reports the system's error; the global WebSocket a TypeError that says nothing more
@@ -678,6 +693,27 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           expect(client.isClosed()).toBe(true);
           expect(client.socket).toBeNull();
           await allClosed();
+
+          // * and by a localhost name, its handshake reached over the loopback's race (spec 13.4)
+          const named = new AbortController();
+          const held = pendingHandshakes.length;
+          const connectingByName = client.connect({
+            host: 'localhost',
+            port: portOf(gatedServer),
+            signal: named.signal,
+            timeout: Infinity,
+          });
+
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(held + 1);
+          named.abort('why');
+
+          await expect(connectingByName).rejects.toBeInstanceOf(CancelError);
+          expect(client.isClosed()).toBe(true);
+          await allClosed();
         } finally {
           for (const done of pendingHandshakes) {
             done(false);
@@ -729,8 +765,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       }
 
       test('asks for wss when secured', async () => {
+        await using closed = await closedPort();
+
         await expect(
-          client.connect({ host, port: await closedPort(), secured: true })
+          client.connect({ host, port: closed.port, secured: true })
         ).rejects.toBeInstanceOf(ConnectError);
 
         expect([...sockets.keys()].at(-1)?.url).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/$/);
@@ -1232,16 +1270,26 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
-        const reconnectOutcome = new Promise<unknown>((resolve) => {
+        await using refused = await closedPort();
+        const closed = new Promise<void>((resolve) => {
           client.once('close', () => {
-            client.reconnect({ delay: 10, maximumAttempts: 2 }).then(resolve, resolve);
+            resolve();
           });
         });
 
         await client.connect({ host, port });
         await stopServer(server);
+        await closed;
+        await expect(client.connect({ host, port: refused.port })).rejects.toBeInstanceOf(
+          ConnectError
+        );
 
-        const reason = await reconnectOutcome;
+        const reason = await client
+          .reconnect({ delay: 10, maximumAttempts: 2 })
+          .catch((error: unknown) => {
+            return error;
+          });
+
         expect(reason).toBeInstanceOf(ReconnectError);
         expect((reason as ReconnectError).cause).toBeInstanceOf(ConnectError);
         expect(client.isClosed()).toBe(true);
@@ -3199,6 +3247,199 @@ const answeringWith = async (frames: Buffer) => {
   };
 };
 
+// * a frame judged at its head over `ws`, which reads heads itself: a client takes no budget and
+// no rate (spec 15.3, decision 0056)
+test.describe('WebSocketTransportClient, the frames it reads at their heads', () => {
+  const [, [, TrackedWs]] = IMPLEMENTATIONS;
+
+  // a client over `ws` connected to a raw server, the close it sends and what it tells, in order
+  const connectRaw = async (
+    raw: Awaited<ReturnType<typeof startRaw>>,
+    options: { maxPayload?: number; maximumMessageFrames?: number } = {}
+  ) => {
+    const client = createWebSocketTransportClient({ ...options, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    endOnClose(socket);
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    return { client, sent, socket, told };
+  };
+
+  // spec 15.3
+  test('fails with 1009 at its head, without waiting for its payload, a frame that would take its message past maximumMessageBytes, a continuation among them', async () => {
+    await using raw = await startRaw();
+    const whole = await connectRaw(raw, { maxPayload: 1_024 });
+    const continued = await connectRaw(raw, { maxPayload: 1_024 });
+
+    // a head that announces 4,096 bytes, none of them sent
+    whole.socket.write(Uint8Array.of(0x82, 126, 0x10, 0x00));
+    // 1,000 bytes, then a continuation's head that announces 100: 1,100 past 1,024
+    continued.socket.write(
+      Buffer.concat([
+        Buffer.from([0x02, 126, 0x03, 0xe8]),
+        new Uint8Array(1_000),
+        Buffer.from([0x80, 100]),
+      ])
+    );
+
+    for (const { sent, told } of [whole, continued]) {
+      await expect
+        .poll(() => {
+          return [sent, told];
+        })
+        .toEqual([
+          [1009],
+          [
+            [
+              'error',
+              'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+            ],
+            ['close', false, false],
+          ],
+        ]);
+    }
+  });
+
+  // spec 15.3; docs/support.md
+  test('fails with 1008 the frame past maximumMessageFrames at its head, an empty frame counting', async () => {
+    await using raw = await startRaw();
+    const whole = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const past = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const withheld = await connectRaw(raw, { maximumMessageFrames: 4 });
+    const heard: unknown[] = [];
+    // three frames of a message, two of them empty
+    const three = Buffer.from([0x02, 1, 0x78, 0x00, 0, 0x00, 0]);
+
+    whole.client.on('message', ({ data }) => {
+      heard.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+
+    // four frames are one message
+    whole.socket.write(Buffer.concat([three, Buffer.from([0x80, 1, 0x79])]));
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([[0x78, 0x79]]);
+
+    // an empty fifth fails it, its head whole
+    past.socket.write(Buffer.concat([three, Buffer.from([0x00, 0, 0x00, 0])]));
+    await expect
+      .poll(() => {
+        return [past.sent, past.told];
+      })
+      .toEqual([
+        [1008],
+        [
+          [
+            'error',
+            'the connection is closed with 1008: a message past its maximumMessageFrames, 4 frames',
+          ],
+          ['close', false, false],
+        ],
+      ]);
+
+    // ! `ws` counts a frame past its `maxFragments` once its payload came, not at its head: a fifth
+    // that announces 10 bytes fails it with its tenth
+    withheld.socket.write(Buffer.concat([three, Buffer.from([0x00, 0, 0x00, 10])]));
+    await sleep(200);
+    expect(withheld.sent).toEqual([]);
+    withheld.socket.write(new Uint8Array(10));
+    await expect
+      .poll(() => {
+        return withheld.sent;
+      })
+      .toEqual([1008]);
+  });
+
+  // RFC 6455 §5.1, §5.2, §5.4, §5.5; spec 15.3; docs/support.md
+  test('fails with 1002 a frame head RFC 6455 forbids before its platform reads it', async () => {
+    await using raw = await startRaw();
+    const forbidden: [string, Uint8Array, number][] = [
+      ['a reserved bit set', Uint8Array.of(0xc2, 0), 1002],
+      ['a reserved opcode', Uint8Array.of(0x83, 0), 1002],
+      ['a control frame not final', Uint8Array.of(0x09, 0), 1002],
+      ['a continuation with no message under way', Uint8Array.of(0x80, 0), 1002],
+      [
+        'a data frame that is not a continuation while a message is under way',
+        Uint8Array.of(0x02, 1, 0x78, 0x82, 1, 0x79),
+        1002,
+      ],
+      ['a masked frame', Uint8Array.of(0x82, 0x80, 0, 0, 0, 0), 1002],
+      ['a control frame longer than 125 bytes', Uint8Array.of(0x89, 126, 0, 126), 1002],
+      // ! `ws` reads a 64-bit length past 2⁵³ − 1 as too long, 1009, its top bit among it
+      [
+        'a 64-bit length with its top bit set',
+        Uint8Array.of(0x82, 127, 0x80, 0, 0, 0, 0, 0, 0, 0),
+        1009,
+      ],
+    ];
+    const sent: unknown[] = [];
+
+    for (const [reason, bytes] of forbidden) {
+      const connected = await connectRaw(raw);
+
+      connected.socket.write(bytes);
+      await expect
+        .poll(() => {
+          return connected.told.at(-1);
+        })
+        .toEqual(['close', false, false]);
+      sent.push([reason, connected.sent]);
+    }
+
+    expect(sent).toEqual(
+      forbidden.map(([reason, , code]) => {
+        return [reason, [code]];
+      })
+    );
+  });
+
+  // spec 15.3, 15.12; RFC 6455 §7.1.7
+  test('closes at once a connection whose verdict falls behind a message its router paused on, dropping what the pause holds', async () => {
+    await using raw = await startRaw();
+
+    // * the head right behind the paused message, then a second message past 125 bytes between
+    for (const between of [[], [frameOf(0x2, new Uint8Array(200))]]) {
+      const connected = await connectRaw(raw);
+      const heard: unknown[] = [];
+
+      connected.client.on('message', ({ data }) => {
+        heard.push(typeof data === 'string' ? data : 'binary');
+        connected.client.pause();
+      });
+      connected.socket.write(
+        Buffer.concat([frameOf(0x1, Buffer.from('paused')), ...between, RESERVED_FRAME])
+      );
+
+      // never resumed: its verdict closes it all the same
+      await expect
+        .poll(() => {
+          return [connected.sent, connected.told.at(-1)];
+        })
+        .toEqual([[1002], ['close', false, false]]);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      expect(heard).toEqual(['paused']);
+      expect(connected.told.length).toBe(2);
+    }
+  });
+});
+
 // spec 15.15; RFC 6455 §4.1: a WebSocket opens with its 101, whatever its server wrote after it
 test.describe('WebSocketTransportClient, a close its server wrote with its 101', () => {
   test('opens on a 101 written together with a close, hears what came before it once open, and tells one close', async () => {
@@ -3257,7 +3498,12 @@ test.describe('WebSocketTransportClient, its close timeout', () => {
 
     expect(CLOSE_TIMEOUT).toBe(5_000);
     expect(given).toEqual([
-      { closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES, perMessageDeflate: false },
+      {
+        closeTimeout: CLOSE_TIMEOUT,
+        maxFragments: MAXIMUM_MESSAGE_FRAMES,
+        maxPayload: MAXIMUM_MESSAGE_BYTES,
+        perMessageDeflate: false,
+      },
     ]);
   });
 
@@ -4156,5 +4402,196 @@ test.describe('createWebSocketTransportClient, a client certificate', () => {
     expect(() => {
       return createWebSocketTransportClient({ tls: {} });
     }).not.toThrow();
+  });
+});
+
+// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+test.describe('WebSocketTransportClient, on the loopback', () => {
+  /** A `ws` server on 127.0.0.1 that notes the `Host` of each upgrade it takes. */
+  const startNoting = async () => {
+    const server = await startServer();
+    const hosts: (string | undefined)[] = [];
+
+    server.on('connection', (_socket, request) => {
+      hosts.push(request.headers.host);
+    });
+
+    return {
+      hosts,
+      port: portOf(server),
+      [Symbol.asyncDispose]: () => {
+        return stopServer(server);
+      },
+    };
+  };
+
+  /** Connects `client` to `target`, and disconnects it once open. */
+  const openedTo = async (
+    client: WebSocketTransportClient,
+    target: { host: string; port: number }
+  ) => {
+    await client.connect(target);
+    const isOpen = client.isOpen();
+    await client.disconnect();
+
+    return isOpen;
+  };
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
+    await using server = await startNoting();
+    using resolver = replaceResolver();
+
+    expect(
+      await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+    ).toBe(true);
+    expect([resolver.asked, server.hosts]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    await using server = await startNoting();
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        expect([written, await openedTo(client, { host: written, port: server.port })]).toEqual([
+          written,
+          true,
+        ]);
+      }
+    }
+
+    expect([resolver.asked, new Set(server.hosts)]).toEqual([
+      [],
+      new Set([`127.0.0.1:${String(server.port)}`]),
+    ]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', async () => {
+    using resolver = watchResolver();
+
+    for (const written of ['foo.123', 'x%20.localhost']) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        const refused = await settledOf(() => {
+          return client.connect({ host: written, port: 1 });
+        });
+
+        expect([refused instanceof ConnectError, (refused as Error).message]).toEqual([
+          true,
+          `${written} is no host a URL can name`,
+        ]);
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over ws', async () => {
+    await using server = await startNoting();
+    using resolver = replaceResolver();
+    const client = createWebSocketTransportClient({
+      WebSocket: WsClient as unknown as IWebSocketConstructor,
+    });
+
+    expect(await openedTo(client, { host: PROBE, port: server.port })).toBe(true);
+    expect([resolver.asked, server.hosts]).toEqual([[], [`${PROBE}:${String(server.port)}`]]);
+  });
+
+  test('sends nothing through the platform’s proxy to a host on the loopback', async () => {
+    await using server = await startNoting();
+    await using proxy = await startPlatformProxy();
+
+    for (const named of [PROBE, host]) {
+      expect(
+        await openedTo(createWebSocketTransportClient(), { host: named, port: server.port })
+      ).toBe(true);
+    }
+
+    // * the proxy stands for every request of the platform's, one off the machine among them, in the
+    // clear so that it reads its line
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
+    expect((await fetch('http://bead.invalid/')).status).toBe(502);
+    expect([proxy.received, server.hosts.length]).toEqual([
+      ['GET http://bead.invalid/ HTTP/1.1'],
+      2,
+    ]);
+  });
+
+  test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
+    await using closed = await closedPort();
+    using resolver = replaceResolver();
+
+    for (const client of [
+      createWebSocketTransportClient(),
+      createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+    ]) {
+      const refused = await settledOf(() => {
+        return client.connect({ host: PROBE, port: closed.port });
+      });
+
+      expect(refused).toBeInstanceOf(ConnectError);
+      expect((refused as ConnectError).message).toContain(
+        `${PROBE} names the loopback: connected to 127.0.0.1 and ::1, no resolver asked`
+      );
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {
+    // * its upgrade refused, and its socket closed unanswered
+    await using refusing = await startHeard();
+    await using dropping = await startDropping();
+    using resolver = replaceResolver();
+    const failures: unknown[] = [];
+
+    for (const port of [refusing.port, dropping.port]) {
+      for (const client of [
+        createWebSocketTransportClient(),
+        createWebSocketTransportClient({ WebSocket: WsClient as unknown as IWebSocketConstructor }),
+      ]) {
+        failures.push(
+          await settledOf(() => {
+            return client.connect({ host: PROBE, port });
+          })
+        );
+      }
+    }
+
+    expect(
+      failures.map((failure) => {
+        return failure instanceof ConnectError && !failure.message.includes('no resolver asked');
+      })
+    ).toEqual([true, true, true, true]);
+    expect([resolver.asked, refusing.heard.length]).toEqual([[], 2]);
+  });
+
+  test('reaches a host on the loopback through undici’s own dialer where undici resolves, and through Node’s global one where it does not', async () => {
+    await using server = await startNoting();
+    // * a resolver that answers the loopback, so that the global WebSocket connects all the same
+    using resolver = replaceResolver('127.0.0.1');
+
+    expect(
+      await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+    ).toBe(true);
+    expect(resolver.asked).toEqual([]);
+
+    {
+      using _absent = withoutUndici();
+
+      expect(
+        await openedTo(createWebSocketTransportClient(), { host: PROBE, port: server.port })
+      ).toBe(true);
+    }
+
+    expect([resolver.asked, server.hosts.length]).toEqual([[PROBE], 2]);
   });
 });

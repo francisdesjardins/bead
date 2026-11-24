@@ -96,6 +96,8 @@ Bead.Transport.WebSockets.WebSocketTransportClientOptions.Heartbeat.get -> Syste
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Heartbeat.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageBytes.get -> int?
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageBytes.init -> void
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageFrames.get -> int
+Bead.Transport.WebSockets.WebSocketTransportClientOptions.MaximumMessageFrames.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.get -> Bead.TlsOptions?
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.Tls.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientOptions.WebSocketTransportClientOptions() -> void
@@ -126,6 +128,8 @@ Bead.Transport.WebSockets.WebSocketTransportServer.Type.get -> string!
 Bead.Transport.WebSockets.WebSocketTransportServer.WebSocketTransportServer(Bead.Transport.WebSockets.WebSocketTransportServerOptions? options = null) -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.<Clone>$() -> Bead.Transport.WebSockets.WebSocketTransportServerOptions!
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.BodyGracePeriod.get -> System.TimeSpan
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.BodyGracePeriod.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Clock.get -> System.TimeProvider?
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Clock.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.CloseTimeout.get -> System.TimeSpan
@@ -143,8 +147,14 @@ Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumConnectionsPerA
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumConnectionsPerAddress.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageBytes.get -> int?
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageBytes.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageFrames.get -> int
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumMessageFrames.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumUnsentBytes.get -> long?
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MaximumUnsentBytes.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MessageBytesBudget.get -> long
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MessageBytesBudget.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumBodyBytesPerSecond.get -> int
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumBodyBytesPerSecond.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumSendBytesPerSecond.get -> int
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumSendBytesPerSecond.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Origins.get -> System.Collections.Generic.IReadOnlyList<string!>!

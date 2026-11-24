@@ -5,9 +5,10 @@
 //!
 //! One task owns it, its socket and its timers' word among it: what the side asks of it comes by
 //! its [`Commands`], and what it hears goes to its [`ConnectionHooks`], called within that task's
-//! turn. A message past its bound fails it with 1009 (RFC 6455 §7.1.7), which tungstenite does not
-//! send: it is sent here, and what comes after is read and dropped to the peer's end, or to the
-//! close timeout, then the socket is dropped, its close unclean whatever the peer answers.
+//! turn. Its socket is read through its [`Meter`], which judges each frame at its head. A verdict,
+//! the meter's or tungstenite's, fails it (RFC 6455 §7.1.7): its close is sent here, its writing
+//! ended, and what comes after is read raw and dropped to the peer's end, or to the close timeout,
+//! then the socket is dropped, its close unclean whatever the peer answers.
 
 use core::fmt;
 use core::future::poll_fn;
@@ -32,6 +33,8 @@ use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::NEVER;
 use crate::failure::byte_count_of;
 use crate::net::bounds::{SendPace, SendPaceHooks, SendPaceOptions};
+use crate::websocket::budget::{Outside, Partway};
+use crate::websocket::meter::{Meter, MeterVerdict, Verdict};
 
 #[cfg(test)]
 mod tests;
@@ -59,7 +62,9 @@ const PROTOCOL_ERROR: u16 = 1002;
 // the reason tungstenite gives the 1002 it reads a peer's close of a status no end sends as
 const REWRITTEN: &str = "Protocol violation";
 const INVALID_PAYLOAD: u16 = 1007;
+const POLICY_VIOLATION: u16 = 1008;
 const TOO_BIG: u16 = 1009;
+const TRY_AGAIN_LATER: u16 = 1013;
 
 // what a failed connection reads at once of its socket, and drops
 const DRAINED_BYTES: usize = 16_384;
@@ -173,6 +178,14 @@ pub(crate) enum Failed {
     InvalidPayload(String),
     /// Dropped behind a bound of its pace, and why, naming the bound and its value.
     Dropped(String),
+    /// A message past `maximumMessageFrames`, which it was failed with 1008 for.
+    TooManyFrames(u64),
+    /// A message that came too slowly, which it was failed with 1008 for, and why, naming the
+    /// rate's bounds.
+    Slow(String),
+    /// Cast off by its server's `messageBytesBudget`, of this many bytes, which it was failed
+    /// with 1013 for.
+    CastOff(u64),
 }
 
 enum Command {
@@ -181,6 +194,7 @@ enum Command {
     Close(u16),
     Drop,
     Resume,
+    Outside(Outside),
 }
 
 // what the side and the connection's task share
@@ -189,6 +203,8 @@ struct Shared {
     paused: AtomicBool,
     is_ended: AtomicBool,
     dropped: Mutex<Option<String>>,
+    // its message partway's clock, a server's, which its router's pause stops
+    partway: Option<Arc<Partway>>,
 }
 
 impl Shared {
@@ -303,12 +319,20 @@ impl Commands {
     /// Reads no message more, its router behind (spec 15.12): what its socket holds stays there,
     /// until a resume. Nothing once it closes, which reads on. It takes no lock.
     pub(crate) fn pause(&self) {
-        self.shared.paused.store(true, Ordering::SeqCst);
+        if !self.shared.paused.swap(true, Ordering::SeqCst)
+            && let Some(partway) = &self.shared.partway
+        {
+            partway.pause();
+        }
     }
 
     /// Reads again, from its task's own step, never within this call.
     pub(crate) fn resume(&self) {
         if self.shared.paused.swap(false, Ordering::SeqCst) {
+            if let Some(partway) = &self.shared.partway {
+                partway.resume();
+            }
+
             self.sender.send(Command::Resume).ok();
         }
     }
@@ -353,7 +377,7 @@ enum Writing {
 
 /// One connection, owned by the task that runs it.
 pub(crate) struct Connection<S: Wire> {
-    socket: WebSocketStream<S>,
+    socket: WebSocketStream<Meter<S>>,
     receiver: mpsc::UnboundedReceiver<Command>,
     shared: Arc<Shared>,
     pace: Option<SendPace>,
@@ -390,29 +414,34 @@ enum Step {
     Command(Option<Command>),
     Written(Result<u64, WsError>),
     Read(Option<Result<Message, WsError>>),
+    // its meter's verdict, drawn behind a message its router paused on
+    Judged(Verdict),
     Drained(bool),
     TimedOut,
 }
 
 impl<S: Wire> Connection<S> {
-    /// A connection over `socket`, its upgrade done and `read` what came past its head, within
-    /// `bounds`, and what the side asks of it by.
+    /// A connection over `meter`'s socket, its upgrade done and what came past its head in the
+    /// meter, within `bounds`, and what the side asks of it by.
     pub(crate) async fn open(
-        (socket, read): (S, Vec<u8>),
+        meter: Meter<S>,
         (role, bounds): (Role, ConnectionBounds),
     ) -> (Self, Commands) {
         let config = config_of(
             bounds.maximum_message_bytes,
             bounds.pacing.map(|pacing| pacing.maximum_unsent_bytes),
         );
-        let socket = WebSocketStream::from_partially_read(socket, read, role, Some(config)).await;
+        let socket = WebSocketStream::from_raw_socket(meter, role, Some(config)).await;
 
         Self::over(socket, bounds)
     }
 
     /// A connection over `socket`, its upgrade done by tungstenite under [`config_of`]'s config,
     /// within `bounds`, and what the side asks of it by.
-    pub(crate) fn over(socket: WebSocketStream<S>, bounds: ConnectionBounds) -> (Self, Commands) {
+    pub(crate) fn over(
+        socket: WebSocketStream<Meter<S>>,
+        bounds: ConnectionBounds,
+    ) -> (Self, Commands) {
         let (sender, receiver) = mpsc::unbounded_channel();
         let (ended, watched) = watch::channel(false);
         let shared = Arc::new(Shared {
@@ -420,7 +449,18 @@ impl<S: Wire> Connection<S> {
             paused: AtomicBool::new(false),
             is_ended: AtomicBool::new(false),
             dropped: Mutex::new(None),
+            partway: socket.get_ref().partway(),
         });
+        // * what comes from outside its reads, a cast-off or its rate's timer, judged in its turn;
+        // a weak sender, so its side letting it go still ends it
+        let outside = sender.downgrade();
+
+        socket.get_ref().on_outside(Box::new(move |came| {
+            if let Some(sender) = outside.upgrade() {
+                sender.send(Command::Outside(came)).ok();
+            }
+        }));
+
         let pacing = bounds.pacing;
         let pace = pacing.map(|pacing| {
             let unsent = Arc::downgrade(&shared);
@@ -547,13 +587,19 @@ impl<S: Wire> Connection<S> {
                 }
             }
             // * no message read while its router paused it but once this side closes, which
-            // reads on to its peer's close (spec 15.12); its socket's end, seen without reading
-            // it, ends it at once, what it held dropped with it
-            Closing::No if self.shared.paused.load(Ordering::SeqCst) => self
-                .socket
-                .get_ref()
-                .poll_ended(context)
-                .map(|()| Step::Read(None)),
+            // reads on to its peer's close (spec 15.12); a verdict its meter drew behind the
+            // message paused on fails it at once (spec 15.3), and its socket's end, seen without
+            // reading it, ends it at once, what it held dropped with it
+            Closing::No if self.shared.paused.load(Ordering::SeqCst) => {
+                if let Some(verdict) = self.socket.get_ref().verdict() {
+                    return Poll::Ready(Step::Judged(verdict.clone()));
+                }
+
+                self.socket
+                    .get_ref()
+                    .poll_ended(context)
+                    .map(|()| Step::Read(None))
+            }
             Closing::No | Closing::ByUs => Pin::new(&mut self.socket)
                 .poll_next(context)
                 .map(Step::Read),
@@ -631,6 +677,7 @@ impl<S: Wire> Connection<S> {
                 self.shared.unsent.store(0, Ordering::SeqCst);
             }
             Step::Read(read) => self.read(read, hooks),
+            Step::Judged(verdict) => self.fail(failed_of(verdict)),
             Step::Drained(true) => {}
             Step::Drained(false) => self.is_done = true,
             Step::TimedOut => {
@@ -669,8 +716,18 @@ impl<S: Wire> Connection<S> {
                 self.is_ended_here = true;
                 self.is_done = true;
             }
-            // its read's gate opened: its next step reads
-            Command::Resume => {}
+            // its read's gate opened: its next step reads, its rate's clock running again
+            Command::Resume => self.socket.get_mut().resumed(),
+            Command::Outside(Outside::CastOff) => {
+                if let Some(verdict) = self.socket.get_mut().judge_cast_off() {
+                    self.fail(failed_of(verdict));
+                }
+            }
+            Command::Outside(Outside::Late) => {
+                if let Some(verdict) = self.socket.get_mut().judge_late() {
+                    self.fail(failed_of(verdict));
+                }
+            }
         }
     }
 
@@ -693,10 +750,12 @@ impl<S: Wire> Connection<S> {
         self.arm_close_timeout();
     }
 
-    // fails it with `code`: its close sent, what comes read raw and dropped
+    // fails it with `code`: its close sent, what comes read raw and dropped, its meter's charge
+    // released
     fn fail(&mut self, (code, failed): (u16, Failed)) {
         self.failure.get_or_insert(failed);
         self.is_ended_here = true;
+        self.socket.get_mut().stop();
 
         if self.closing == Closing::No {
             self.queue.push_back((close_of(code), 0));
@@ -765,6 +824,12 @@ impl<S: Wire> Connection<S> {
 
                 self.peer_code = Some(frame.map_or(NO_STATUS, |frame| u16::from(frame.code)));
             }
+            // * its meter's verdict, which it hands tungstenite as an error of its socket
+            Some(Err(WsError::Io(_))) if self.socket.get_ref().verdict().is_some() => {
+                if let Some(verdict) = self.socket.get_ref().verdict().cloned() {
+                    self.fail(failed_of(verdict));
+                }
+            }
             None
             | Some(Err(
                 WsError::ConnectionClosed
@@ -792,6 +857,7 @@ impl<S: Wire> Connection<S> {
         self.shared.is_ended.store(true, Ordering::SeqCst);
         self.shared.unsent.store(0, Ordering::SeqCst);
         self.receiver.close();
+        self.socket.get_mut().stop();
 
         if let Some(timer) = self.timer.take() {
             timer.cancel();
@@ -850,6 +916,22 @@ fn write_bound_of(maximum_unsent_bytes: u64) -> usize {
         .saturating_add(usize::try_from(maximum_unsent_bytes).unwrap_or(usize::MAX))
         .saturating_add(FRAME_HEAD_BYTES)
         .saturating_add(CONTROL_FRAME_BYTES)
+}
+
+// the status a meter's verdict fails its connection with, and what failed it
+fn failed_of(verdict: Verdict) -> (u16, Failed) {
+    match verdict {
+        Verdict::Head(MeterVerdict::TooBig(maximum)) => (TOO_BIG, Failed::TooBig(maximum)),
+        Verdict::Head(MeterVerdict::TooManyFrames(maximum)) => {
+            (POLICY_VIOLATION, Failed::TooManyFrames(maximum))
+        }
+        Verdict::Head(MeterVerdict::Protocol(why)) => (
+            PROTOCOL_ERROR,
+            Failed::Protocol(format!("a frame head RFC 6455 forbids, {why}")),
+        ),
+        Verdict::Slow(why) => (POLICY_VIOLATION, Failed::Slow(why)),
+        Verdict::CastOff(budget) => (TRY_AGAIN_LATER, Failed::CastOff(budget)),
+    }
 }
 
 // a close frame of `code`, no reason

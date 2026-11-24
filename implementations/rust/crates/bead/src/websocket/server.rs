@@ -2,7 +2,8 @@
 //! `createWebSocketTransportServer` and `WebSocketTransportServer` serve them, with no HTTP server
 //! beneath: it reads each connection's one head itself, under 16 KiB and 100 fields and within its
 //! headers timeout, judges it in the order of spec 15.2, writes its 101 or its refusal, and hands
-//! its socket, what it read past the head first, to tungstenite.
+//! its socket, what it read past the head first, to tungstenite through the connection's frame
+//! meter, which holds each message partway to the server's budget and rate (decision 0056).
 
 use core::fmt;
 use core::time::Duration;
@@ -18,6 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tungstenite::protocol::Role;
 
+use crate::broker::participant::{BODY_GRACE_PERIOD, MINIMUM_BODY_BYTES_PER_SECOND};
 use crate::clock::{SharedClock, SystemClock};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
@@ -35,8 +37,8 @@ use crate::judgement::proxies::{
 use crate::judgement::security::is_loopback_host;
 use crate::life::Life;
 use crate::net::bounds::{
-    HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPaceOptions, dropped_of,
-    hold_count,
+    HEADERS_TIMEOUT, MAXIMUM_MESSAGE_FRAMES, MESSAGE_BYTES_BUDGET, MINIMUM_SEND_BYTES_PER_SECOND,
+    SEND_GRACE_PERIOD, SendPaceOptions, dropped_of, hold_count,
 };
 use crate::net::linger::close_in_stages;
 use crate::net::listening::{
@@ -48,12 +50,14 @@ use crate::transport::{
     Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerAddress,
     TransportServerClient, TransportServerRefusal, TransportServerStartOptions, tell_server,
 };
+use crate::websocket::budget::{MessageBounds, MessageBudget};
 use crate::websocket::connection::Pacing;
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
     GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL,
 };
-use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, Stamped, hold_heartbeat};
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, hold_heartbeat};
+use crate::websocket::meter::{FrameMeterOptions, Meter, Metering};
 use crate::{
     HEARTBEAT, MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS, MAXIMUM_UNSENT_BYTES,
 };
@@ -91,9 +95,25 @@ pub struct WebSocketTransportServerOptions {
     /// The hosts it takes besides those every server takes, the loopback's and its own (spec
     /// 15.12); `*` takes any. None when none.
     pub hosts: Option<Vec<String>>,
-    /// The largest message it reads, past which it fails the connection with 1009 (spec 15.3):
-    /// [`MAXIMUM_MESSAGE_BYTES`] when none.
+    /// The largest message it reads, past which it fails the connection with 1009 at the head that
+    /// takes it past (spec 15.3): [`MAXIMUM_MESSAGE_BYTES`] when none.
     pub maximum_message_bytes: Option<u64>,
+    /// The frames one message may have, an empty one counting, past which it fails the connection
+    /// with 1008 at the head of the frame past them (spec 15.3): [`MAXIMUM_MESSAGE_FRAMES`] when
+    /// none; never without end.
+    pub maximum_message_frames: Option<u64>,
+    /// What its connections' messages partway hold together, every byte their frames bring and
+    /// 128 a frame, past which a charge casts off with 1013 the connections whose messages hold the
+    /// most, then the one begun first, its own only when it comes first (spec 15.12):
+    /// [`MESSAGE_BYTES_BUDGET`] when none.
+    pub message_bytes_budget: Option<u64>,
+    /// The slowest, in bytes of payload a second, a message may come once its grace passed, past
+    /// which its connection fails with 1008 (spec 15.12): [`crate::MINIMUM_BODY_BYTES_PER_SECOND`]
+    /// when none.
+    pub minimum_body_bytes_per_second: Option<u64>,
+    /// How long a message comes, from its first byte, before its rate is held, on its clock:
+    /// [`crate::BODY_GRACE_PERIOD`] when none; never is refused.
+    pub body_grace_period: Option<Duration>,
     /// The connections it holds at once, past which an upgrade is refused 503 `busy` (spec 15.12):
     /// [`MAXIMUM_CONNECTIONS`] when none.
     pub maximum_connections: Option<u64>,
@@ -140,6 +160,7 @@ struct Settings {
     hosts: Vec<String>,
     origins: Vec<String>,
     maximum_message_bytes: u64,
+    maximum_message_frames: u64,
     maximum_connections: u64,
     maximum_per_address: u64,
     secure: Option<bool>,
@@ -184,6 +205,8 @@ pub(crate) struct ServerInner {
     clock: SharedClock,
     given: Option<SharedClock>,
     settings: Settings,
+    // what its connections' messages partway hold, and the rate they come at
+    budget: Arc<MessageBudget>,
     life: Life,
     state: Mutex<ServerState>,
     listeners: Listeners<dyn ServerListener>,
@@ -208,12 +231,21 @@ pub(crate) struct ServerInner {
 /// frame it read with the head. Each message is handed with the connection's address, its port and
 /// its upgrade's credential: its `Authorization`, as it came and trimmed, unless it carries an
 /// `Origin`, whose page's browser writes its own authentication; a text message is handed alike,
-/// marked `is_text`, for its router to report as no envelope (spec 15.2). A message past
-/// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
-/// `maximumMessageBytes`, then dropped at its peer's end or its close timeout, unclean; a text
-/// message, or a close's reason, that is no UTF-8 is reported alike, failed with 1007 (spec 15.3),
-/// and any other protocol error, failed with 1002. A peer that drops without its closing handshake
-/// tells its unclean close alone. A close is clean when its peer's carried 1000.
+/// marked `is_text`, for its router to report as no envelope (spec 15.2).
+///
+/// Each connection's frames are read at their heads, before tungstenite reads them (decision
+/// 0056): a head whose length takes its message past `maximum_message_bytes` fails its connection
+/// with 1009, reported on `on_error` naming `maximumMessageBytes`, without waiting for its payload;
+/// the frame past `maximum_message_frames`, with 1008; a head RFC 6455 forbids, with 1002; a text
+/// message, or a close's reason, that is no UTF-8, with 1007 (spec 15.3). What a read brings before
+/// the frame so judged is handed on; nothing from it on. Each message partway is charged to
+/// `message_bytes_budget` as its bytes come, and a charge that would pass it casts off with 1013
+/// the connections whose messages hold the most, then the one begun first; a message that
+/// comes slower than `minimum_body_bytes_per_second` once `body_grace_period` passed since its
+/// first byte fails with 1008, on its clock, its time paused not counted (spec 15.12). Each is
+/// reported naming its bound, its close sent, its writing ended, and what comes after dropped
+/// unparsed to its peer's end or its close timeout, unclean. A peer that drops without its closing
+/// handshake tells its unclean close alone. A close is clean when its peer's carried 1000.
 ///
 /// Each connection is pinged once nothing of it has been read for `heartbeat`, its ping ahead of
 /// what it holds unsent, and dropped, unclean and with no error told, once the pong that echoes that
@@ -625,11 +657,24 @@ impl ServerInner {
         };
         // what is read of it, each read of its socket, what its heartbeat counts its silence from
         let reads = Reads::new(Arc::clone(&self.platform));
-        let (connection, commands) = Connection::open(
-            (Stamped::new(socket, Arc::clone(&reads)), read),
-            (Role::Server, bounds),
-        )
-        .await;
+        let mut frames = FrameMeterOptions::new(true);
+
+        frames.maximum_message_bytes = Some(self.settings.maximum_message_bytes);
+        frames.maximum_message_frames = Some(self.settings.maximum_message_frames);
+
+        // * its frames metered from what came with its upgrade on, each message partway held to
+        // the server's budget and rate
+        let meter = Meter::new(
+            socket,
+            Metering {
+                read,
+                reads: Arc::clone(&reads),
+                frames,
+                holding: Some(self.budget.holding()),
+                is_upgrading: false,
+            },
+        );
+        let (connection, commands) = Connection::open(meter, (Role::Server, bounds)).await;
         // * drawn as it is taken, never from the peer's address alone, which another socket may
         // share (spec 15.1, decision 0025)
         let handle: ConnectionHandle = {
@@ -743,6 +788,18 @@ impl ServerInner {
                     format!("{handle} is closed with 1007: {why}"),
                 ))),
                 Failed::Dropped(why) => dropped_of(handle, why),
+                Failed::TooManyFrames(maximum) => {
+                    RouterError::Other(Arc::new(io::Error::other(format!(
+                        "{handle} is closed with 1008: a message past its maximumMessageFrames, {maximum} frames"
+                    ))))
+                }
+                Failed::Slow(why) => RouterError::Other(Arc::new(io::Error::other(format!(
+                    "{handle} is closed with 1008: {why}"
+                )))),
+                Failed::CastOff(budget) => RouterError::Other(Arc::new(io::Error::other(format!(
+                    "{handle} is closed with 1013: the messages partway would pass messageBytesBudget, {}",
+                    byte_count_of(*budget)
+                )))),
             };
 
             self.report((&error, Some(handle)));
@@ -757,15 +814,44 @@ impl ServerInner {
     }
 }
 
+// * its messages partway held to its budget and its rate as `options` says, on its clock, the one a
+// conformance case steps
+fn budget_of(
+    clock: &SharedClock,
+    options: &WebSocketTransportServerOptions,
+) -> Result<Arc<MessageBudget>, ProgrammerError> {
+    let message_bytes_budget = hold_count(
+        "messageBytesBudget",
+        options.message_bytes_budget.unwrap_or(MESSAGE_BYTES_BUDGET),
+    )?;
+    let minimum_body_bytes_per_second = hold_count(
+        "minimumBodyBytesPerSecond",
+        options
+            .minimum_body_bytes_per_second
+            .unwrap_or(MINIMUM_BODY_BYTES_PER_SECOND),
+    )?;
+    let body_grace_period = hold_finite(
+        "bodyGracePeriod",
+        options.body_grace_period.unwrap_or(BODY_GRACE_PERIOD),
+    )?;
+
+    Ok(MessageBudget::new(MessageBounds {
+        message_bytes_budget,
+        minimum_body_bytes_per_second,
+        body_grace_period,
+        clock: Arc::clone(clock),
+    }))
+}
+
 impl WebSocketTransportServer {
     /// A WebSocket transport server, which listens once started.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
-    /// IO driver; for a close timeout or a headers timeout spec 1.4 does not hold, never among them
-    /// for the headers timeout; a bound of 0; a hosts entry with a port; an origins entry that is
-    /// `*` or `null`.
+    /// IO driver; for a close timeout, a headers timeout or a body's grace spec 1.4 does not hold,
+    /// never among them for the headers timeout and the grace; a bound of 0; a hosts entry with a
+    /// port; an origins entry that is `*` or `null`.
     pub fn new(options: &WebSocketTransportServerOptions) -> Result<Self, ProgrammerError> {
         let runtime =
             platform::socket_runtime_of(options.runtime.as_ref(), "a WebSocket transport server")?;
@@ -793,6 +879,12 @@ impl WebSocketTransportServer {
             options
                 .maximum_message_bytes
                 .unwrap_or(MAXIMUM_MESSAGE_BYTES),
+        )?;
+        let maximum_message_frames = hold_count(
+            "maximumMessageFrames",
+            options
+                .maximum_message_frames
+                .unwrap_or(MAXIMUM_MESSAGE_FRAMES),
         )?;
         let maximum_connections = hold_count(
             "maximumConnections",
@@ -833,6 +925,7 @@ impl WebSocketTransportServer {
             .clone()
             .unwrap_or_else(|| Arc::clone(&platform));
         let covering = runtime.clone();
+        let budget = budget_of(&clock, options)?;
         let inner = Arc::new_cyclic(|me| ServerInner {
             me: Weak::clone(me),
             runtime,
@@ -847,6 +940,7 @@ impl WebSocketTransportServer {
                 hosts,
                 origins,
                 maximum_message_bytes,
+                maximum_message_frames,
                 maximum_connections,
                 maximum_per_address,
                 secure: options.secure,
@@ -863,6 +957,7 @@ impl WebSocketTransportServer {
                 procedures,
                 proxies,
             },
+            budget,
             life: Life::new(Box::new(move |future| {
                 drop(platform::spawn(&covering, future));
             })),
@@ -1021,8 +1116,8 @@ impl ServerTransport for WebSocketTransportServer {
         self.inner.life.stop(move || server.stopping())
     }
 
-    // what waits for each socket, all together and the most one holds, and the places upgrades
-    // hold, the busiest address's among them, each under its ceiling
+    // what waits for each socket, all together and the most one holds, the places upgrades hold,
+    // the busiest address's among them, and what messages partway hold, each under its ceiling
     fn gauges(&self) -> Option<Gauges> {
         let (unsent, handles, largest_address): (Vec<u64>, Vec<ConnectionHandle>, u64) = {
             let state = locked(&self.inner.state);
@@ -1055,6 +1150,9 @@ impl ServerTransport for WebSocketTransportServer {
             unsent.iter().copied().fold(0, u64::saturating_add),
         );
         gauges
+            .counts
+            .insert("messageBytes", self.inner.budget.held());
+        gauges
             .ceilings
             .insert("connections", self.inner.settings.maximum_connections);
         gauges.ceilings.insert(
@@ -1065,6 +1163,9 @@ impl ServerTransport for WebSocketTransportServer {
             "largestUnsentBytes",
             self.inner.settings.pacing.maximum_unsent_bytes,
         );
+        gauges
+            .ceilings
+            .insert("messageBytes", self.inner.budget.budget());
         gauges.connection_handles.extend(handles);
 
         Some(gauges)

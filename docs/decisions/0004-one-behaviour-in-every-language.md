@@ -7,13 +7,15 @@
 ## Context
 
 Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, and a
-Rust one, its core, its transports over WebSocket and HTTP and its MQTT 5 binding, each part it
-lacks a row of [the support matrix](../support.md) ahead
+Rust one, its core, its transports over WebSocket and HTTP, its MQTT 5 binding and its HTTP/JSON
+gateway, each part it lacks a row of [the support matrix](../support.md) ahead
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
-[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
-a builder generates servers and clients in the first two from the same definitions
-([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
+[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md),
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
+a builder generates servers and clients in all three from the same definitions
+([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md),
+[0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)), and
 a constrained C side besides is where Bead goes. Implementations of the same bytes drift unless
 something holds them to those bytes, and only a test every one runs does.
 
@@ -377,12 +379,15 @@ across languages in the interop, ahead, plays in their place
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
 there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
 the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which every
-side's HTTP server serves, an open row of the matrix; the keep or close of a connection after a
-refusal of the server's own, the service of a connection's requests in their order, and pipelining,
-which one request per socket leaves out; and the transport's contract with its router — its
-events, its handles, its gauges. Three framing cases over HTTP send on a socket that asks no close,
-one of them an HTTP/1.0 request that asks `connection: keep-alive`, and expect the socket's end:
-they play the close a framing refusal asks.
+side's HTTP server serves and the cases do not play, a step over HTTP/2 in the conformance files
+ahead; the close of a socket after a refusal of the server's own of a request that declares a body,
+which needs the requests behind it in that request's own write, never in a later step, and which no
+case writes; and the transport's contract with its router — its events, its handles, its gauges.
+Framing cases over HTTP send on a socket that asks no close, one of them an HTTP/1.0 request that
+asks `connection: keep-alive`, and expect the socket's end: they play the close a framing refusal
+asks. The service of a socket's requests in their order, pipelining, and the keep of a
+socket after a refusal of the server's own of a request that declares no body are played by the
+step `behind`, which writes requests on an open exchange's socket.
 
 **A twin test leaves every side one assertion at a time**, in the change that pairs that assertion
 with the case that plays it, and the cell of the matrix it proves points to that case in the same
@@ -525,7 +530,7 @@ decides.
 | The change writes totals in five places that every later change must move again                                                                                                                         | Accepted: no total in the changelog, the README's prose or this record; one count stays in `docs/support.md`, moved by each change that adds entries, and `spec/check.py` holds each count of that table, and of the README's, to the files it counts, on every push ([0006](0006-a-rule-has-its-gate.md)).                                                                              |
 | 17.6's "half the smallest positive double, 5 × 10⁻³²⁴" makes half 2.5 × 10⁻³²⁴, and numbers between 2⁻¹⁰⁷⁵ and it read 0 by the text and the smallest double on both sides                              | Accepted: 17.6 says 2⁻¹⁰⁷⁵ or less, half of 2⁻¹⁰⁷⁴; two entries of `spec/codecs.json` pin both sides of it.                                                                                                                                                                                                                                                                              |
 | "Each as its parser canonicalizes it" makes conforming a divergence the sides have: `127.0.0.1.` is on the loopback for the TypeScript side, not for the C# side                                        | Accepted: no clause leaves a side to its own parser; 13.4 names `[::1]` in a URL alone, and every client reads a host by the WHATWG URL Standard's host parser, `127.0.0.1.` on the loopback, a change of behaviour decided in a round of its own, Security for 0.2.0, in [0010](0010-a-request-presents-a-credential-of-a-scheme.md).                                                   |
-| Judging `localhost` "on the condition that the name resolves to the loopback alone" contradicts "never by what a name resolves to", and no side evaluates it                                            | Accepted: 13.4 says that a client judges such a name by the name alone and connects it through its platform's resolver, and that its application names the loopback by its address where that resolver sends the name elsewhere.                                                                                                                                                         |
+| Judging `localhost` "on the condition that the name resolves to the loopback alone" contradicts "never by what a name resolves to", and no side evaluates it                                            | Accepted: 13.4 says that a client judges such a name by the name alone, and connects it to the loopback itself on every dialer it owns, asking no resolver ([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)); over a dialer it does not own, the residual is stated.                                                       |
 | 9.7's "a failure on the call id of a subscription the side holds ends it" binds a server, which reports such a failure `CALL_UNKNOWN` and keeps the subscription                                        | Accepted: 9.7 says a failure a client receives on a subscription it holds, as 11.7's second item has it.                                                                                                                                                                                                                                                                                 |
 | "No decision changes" is not so: the conformance contract, the companion's subject, the `ELSEWHERE` the default admission passes, and the page                                                          | Accepted: this record's Decision says that what no entry cites binds all the same, and keeps the round; [0010](0010-a-request-presents-a-credential-of-a-scheme.md) names the `ELSEWHERE` beside the `JWT` and points here; the companion keeps [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s subject, which stays as it is; the page is rebuilt.                    |
 | 13.4's new sentence splits a sentence before its colon; a transfer credits nothing; a listen's count is read once its query is decoded                                                                  | Accepted: the sentence follows the one it continues and names `OPAQUE`; the budget is what a side reserves for its transfers, each opening's and each credit it grants; the count is read once the query is decoded.                                                                                                                                                                     |

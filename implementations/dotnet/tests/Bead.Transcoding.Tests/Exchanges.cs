@@ -151,7 +151,7 @@ internal static partial class Exchanges
 
         var address = await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true });
         var host = $"{Host}:{address.Port.ToString(CultureInfo.InvariantCulture)}";
-        var sockets = new Dictionary<string, (Socket Socket, Reader Reader, string Method)>(StringComparer.Ordinal);
+        var sockets = new Dictionary<string, Opened>(StringComparer.Ordinal);
         var captured = new Dictionary<string, string>(StringComparer.Ordinal);
 
         try
@@ -173,13 +173,50 @@ internal static partial class Exchanges
                         await socket.SendAsync(Hex(body));
                     }
 
-                    sockets[on] = (socket, new Reader(socket), head.Split(' ')[0]);
+                    sockets[on] = new Opened(socket);
+                    sockets[on].Methods.Enqueue(head.Split(' ')[0]);
+                }
+                else if (step.TryGetProperty("behind", out var behind))
+                {
+                    var opened = sockets[step.GetProperty("on").GetString()!];
+                    var octets = new List<byte>();
+
+                    foreach (var request in behind.EnumerateArray())
+                    {
+                        var head = Substituted(request.GetProperty("head").GetString()!, (host, captured));
+
+                        octets.AddRange(Encoding.Latin1.GetBytes(head));
+                        octets.AddRange(StringOf(request, "body") is { } body ? Hex(body) : []);
+                        opened.Methods.Enqueue(head.Split(' ')[0]);
+                    }
+
+                    opened.Behind([.. octets]);
                 }
                 else if (step.TryGetProperty("expect", out var expect))
                 {
                     var on = step.GetProperty("on").GetString()!;
-                    var (_, reader, method) = sockets[on];
-                    var parts = await Expect(expect, (reader, method, captured)).WaitAsync(Patience);
+                    var opened = sockets[on];
+
+                    // * its socket's end, its server's FIN or its reset, and nothing more on it
+                    if (expect.TryGetProperty("end", out _))
+                    {
+                        var past = await opened.Reader.UntilEnd().WaitAsync(Patience);
+
+                        if (past.Length > 0)
+                        {
+                            parted.Add($"exchanges: {name}: {past.Length} octets past its responses, then its end");
+                        }
+
+                        continue;
+                    }
+
+                    // * the next response, in the order of the requests written on its socket
+                    if (!opened.Methods.TryDequeue(out var method))
+                    {
+                        throw new InvalidOperationException("a response past the requests written on its socket");
+                    }
+
+                    var parts = await Expect(expect, (opened.Reader, method, captured)).WaitAsync(Patience);
 
                     parted.AddRange(parts.Select((part) =>
                     {
@@ -188,14 +225,12 @@ internal static partial class Exchanges
                 }
                 else if (step.TryGetProperty("close", out var close))
                 {
-                    var (socket, _, _) = sockets[close.GetString()!];
-
-                    socket.Close();
+                    sockets[close.GetString()!].Socket.Close();
                 }
-                else
+                else if (step.TryGetProperty("until", out var counts))
                 {
                     // * each count it names, waited on until it is that count, as the TypeScript side waits
-                    foreach (var count in step.GetProperty("until").EnumerateObject())
+                    foreach (var count in counts.EnumerateObject())
                     {
                         var until = count.Value.GetInt32();
                         var since = TimeProvider.System.GetTimestamp();
@@ -223,13 +258,18 @@ internal static partial class Exchanges
                         }
                     }
                 }
+                else
+                {
+                    // ! a step this player does not know fails its exchange, never passes unplayed
+                    throw new InvalidOperationException($"a step no test plays: {step.GetRawText()}");
+                }
             }
         }
         finally
         {
-            foreach (var (socket, _, _) in sockets.Values)
+            foreach (var opened in sockets.Values)
             {
-                socket.Dispose();
+                opened.Socket.Dispose();
             }
         }
     }
@@ -330,10 +370,64 @@ internal static partial class Exchanges
         return parts;
     }
 
+    // a socket an exchange's send opened: its reader, the methods of the requests written on it
+    // whose responses no expect read yet, in their order, a HEAD's framed as one, and its last write
+    // behind
+    private sealed class Opened(Socket socket)
+    {
+        private Task _written = Task.CompletedTask;
+
+        public Socket Socket { get; } = socket;
+
+        public Reader Reader { get; } = new(socket);
+
+        public Queue<string> Methods { get; } = new();
+
+        // requests written behind what it carried, in one write from a task of its own that no step
+        // awaits, after any written behind before it; a write its socket refuses, its server having
+        // ended it, fails no step
+        public void Behind(byte[] octets)
+        {
+            _written = WriteAfter((_written, octets));
+        }
+
+        private async Task WriteAfter((Task Before, byte[] Octets) write)
+        {
+            await write.Before;
+
+            try
+            {
+                await Socket.SendAsync(write.Octets);
+            }
+            catch (Exception reason) when (reason is SocketException or ObjectDisposedException)
+            {
+                // refused, its socket ended or the exchange done
+            }
+        }
+    }
+
     // a response read off a socket: its head, then its body by its length, de-chunked, or to its end
     internal sealed class Reader(Socket socket)
     {
         private readonly List<byte> _came = [];
+
+        // what comes past the responses read, until its socket ends, a reset ending it as its end does
+        public async Task<byte[]> UntilEnd()
+        {
+            try
+            {
+                while (await Fill())
+                {
+                    // to its end
+                }
+            }
+            catch (SocketException)
+            {
+                // its reset
+            }
+
+            return Take(_came.Count);
+        }
 
         public async Task<(int Status, Dictionary<string, string> Fields)> ReadHead()
         {

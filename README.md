@@ -48,8 +48,11 @@ This repository holds the protocol and its implementations, side by side:
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   each other side's generated HTTP client calls.
 
-**Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry.
-Publication is ahead. Bead has not run in production, and before 1.0.0 a minor may break.
+**beadc's image is published; the packages are not.** At each release, beadc's image goes to
+GitHub's container registry, `ghcr.io/francisdesjardins/beadc:<version>`, attested and signed, and
+a team pins it by its digest ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). No package goes to npm, NuGet or crates.io: the runtimes come
+from a clone at the release's tag, and their publication is ahead. Bead has not run in production,
+and before 1.0.0 a minor may break.
 
 ## At a glance
 
@@ -90,9 +93,10 @@ await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
 
 ## Getting started for teams
 
-**[Getting started](docs/guides/getting-started.md)** builds a service from an empty folder to a
-running C# server and a TypeScript client, in Node and in a page: a request held to its rules, a
-command the server sends mid-call, and a subscription the client paces. Beside it,
+**[Getting started](docs/guides/getting-started.md)** verifies beadc's published image, pins it by
+its digest, and builds a service from an empty folder to a running C# server and a TypeScript
+client, in Node and in a page: a request held to its rules, a command the server sends mid-call,
+and a subscription the client paces. Beside it,
 [real-time recipes](docs/guides/cookbook-realtime.md) — a `JWT` and admission hooks, reconnection,
 Prometheus in .NET, Chrome's DevTools — and [how Bead fits together](docs/guides/architecture-overview.md),
 with Bead beside gRPC-Web, Connect and SignalR.
@@ -129,12 +133,14 @@ and AMQP 1.0 on RabbitMQ 4 its second
   what its transport carries — relays that forward it to the destination that verifies it, and
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. Every
-  implementation plays them, the Rust side the part it reaches; the three call each other in CI over
+  implementation plays them, the Rust side with their AMQP 1.0 cases ahead, with its binding; the
+  three call each other in CI over
   WebSocket, HTTP and MQTT 5, and the TypeScript and C# ones over AMQP 1.0 too, and through each
   other's gateway.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
   Its four optional peers come with what a project uses: protobuf-es to bind `proto`, MQTT.js over
-  MQTT 5, rhea over AMQP 1.0, and undici for an HTTP client's `tls` in Node.
+  MQTT 5, rhea over AMQP 1.0, and undici in Node, for an HTTP client's `tls` and for a client that
+  connects the loopback's names to the loopback without asking a resolver.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
 from a browser over WebSocket or plain HTTP, and across a topic-based publish/subscribe broker that
@@ -148,15 +154,10 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the rules a security pass brings to every side: a `localhost` name reached on the
-  loopback without a resolver, as RFC 6761 §6.3 gives it ([0024](docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md));
-  a bound on what a server reads of a connection ahead of the request it serves, and on a
-  `Content-Length`; a transfer coding other than `chunked` refused, as RFC 9112 §6.1 asks; and a
-  malformed `Bearer` answered as RFC 6750 §3.1 gives it.
-- **Then**: the Rust side's AMQP 1.0 binding, a record of its own
+- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   a row of the [support matrix](docs/support.md#differences) ahead.
-- **After it**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
+- **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
   a connection's close code carried on `close`
@@ -192,13 +193,13 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
+tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, verify-image.mjs, which runs a document's verify block for beadc's image, Node without dependencies
   fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
   protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
 .githooks/                    the repository checks before each commit, opt-in
 .github/
-  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release
+  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release; image.yml, beadc's image at each release; guides.yml, the getting-started guide's verify block
   dependabot.yml              the dependencies' updates, every week, grouped
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
 ```
@@ -221,9 +222,9 @@ procedures, each under a version of its own. Beside them:
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                             | 474 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
-| [`transports.json`](spec/transports.json)                       | 296 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
+| [`transports.json`](spec/transports.json)                       | 315 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
-| [`durations.json`](spec/durations.json)                         | 35 places that take a duration an application gives a side, by 57 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
+| [`durations.json`](spec/durations.json)                         | 36 places that take a duration an application gives a side, by 58 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
 | [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
 | [`codecs.json`](spec/codecs.json)                               | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                                                                                                                                                     |
 | [`codecs.proto`](spec/codecs.proto)                             | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                                                                                                                                                              |
@@ -231,7 +232,7 @@ procedures, each under a version of its own. Beside them:
 | [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 61 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 96 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 45 failures, 10 events and 104 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                   |
 | [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
 | [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
@@ -918,7 +919,7 @@ machine.
 
 ## Fuzzing
 
-Every side fuzzes the same nine parsers, guided by coverage, each fed raw bytes:
+Every side fuzzes the same ten parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -937,7 +938,10 @@ it back; `json-form`, protobuf's JSON read by Bead's mapping over `spec/transcod
 `Everything` and `Edges` (transcoding 5.2), the first byte picking the message, where what reads is
 written, what was written reads, and it writes again to the same text, byte for byte, never a
 message's bytes compared, since a map's entries are written in 17.7.6's order and a `-0` as `0` or
-left out (5.6). The Rust side fuzzes all nine, over its core's judgement and codecs and
+left out (5.6); `websocket-frames`, the WebSocket transport's frame meter (spec 15.3) beside its
+platform's reader, `ws`'s, .NET's or tungstenite's, fed the same bytes, the two agreeing on each
+frame's bounds, on each message's end, and on whether the stream fails and at which frame. The Rust
+side fuzzes all ten, over its core's judgement and codecs and
 `bead-protobuf`'s JSON form, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
 and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
@@ -1097,9 +1101,9 @@ against each server.
 - `node tools/check-validations.mjs [typescript|csharp|rust]`: each side's validators of
   `spec/validations.proto`, committed beside its verdicts test, are what beadc writes for it;
   `--write` writes them. It needs the builder installed.
-- `node tools/check-transcoding.mjs [typescript|csharp]`: each side's route table and document of
-  `spec/transcoding.proto`, committed beside its gateway's tests, are what beadc writes for it;
-  `--write` writes them. It needs the builder installed.
+- `node tools/check-transcoding.mjs [typescript|csharp|rust]`: each side's route table and
+  document of `spec/transcoding.proto`, committed beside its gateway's tests, are what beadc writes
+  for it; `--write` writes them. It needs the builder installed.
 - `node tools/mqtt-broker.mjs start|stop|run -- <command…>`: a Mosquitto 2.1.2 of the run's own,
   by its digest under Docker or natively with `--native <folder>`, that `spec/transports.json`'s
   `brokers.mqtt` describes, its access control spec 15.31's, under a container name, loopback ports
@@ -1120,9 +1124,9 @@ against each server.
   whatever the command's end. What it shares with
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
-- `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
-  committed `site/dist/index.html` and `site/dist/404.html` byte for byte
-  ([The page](#the-page)).
+- `node site/check.mjs`: the page's SVGs are their sources' renders, each icon the mark's, and its
+  build gives the committed `site/dist/index.html`, `site/dist/privacy/index.html` and
+  `site/dist/404.html` byte for byte ([The page](#the-page)).
 - `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
   axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
   installed, with Playwright's Chromium.
@@ -1186,11 +1190,19 @@ git flow release finish --keepremote 0.2.0     # without -p: origin's branch goe
 node tools/release.mjs tag                     # spec-v…, debugging-v… and transcoding-v… at v0.2.0, then the gate on develop
 git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml   # only if tag took one out
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
+gh run list --workflow image.yml --limit 1     # beadc's image, published from v0.2.0
+gh workflow run image.yml --ref v0.2.0         # on the tag, only if no run started
 ```
 
-Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
-Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
-image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
+The tag `v*` starts [`image.yml`](.github/workflows/image.yml), which publishes beadc's image under
+the release's version, attested and signed ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)); GitHub starts no run when more than three tags
+are pushed at once, and the release then dispatches it on the tag.
+
+Before `prepare`, the release moves by hand the pins of beadc's image and its lint: the Dockerfile
+frontend's and the Node base's (`NODE_DIGEST`) digests in `builder/Dockerfile` and shellcheck's
+image's in `ci.yml`, each to its tag's current digest, on which CI then builds and tests the image;
+and in `image.yml`, buildx's version and BuildKit's image, by its version and its digest, to those
+GitHub's runners hold.
 `prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
 tells a document's new version and its tag, the spec's or a companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
@@ -1300,8 +1312,8 @@ Those rules keep every language to one behaviour. They hold each one to the same
 to the interop between sides, and to a strict linter and analyzer set, and they put every change
 that reaches across the languages through an adversarial review before it lands. What these gates
 hold is held. Where a side departs from TypeScript's idioms, or where the spec reads a standard, it
-has been checked by tests and by those reviews, not by a specialist. Corrections from people who
-know better are welcome.
+has been checked by tests and by those reviews, and reviewed by no one with the knowledge to judge
+it. Corrections from people who know better are welcome.
 
 ## Contributing
 

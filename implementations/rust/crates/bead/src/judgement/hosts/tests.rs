@@ -4,9 +4,10 @@
 
 use super::{
     EVERY_HOST, HOST_REFUSAL, ORIGIN_REFUSAL, RequestTarget, TakenOrigins, assert_hosts,
-    assert_listening_address, assert_origins, credential_of, has_visible_fields, is_ip_address,
-    is_ipv4_address, is_listed_origin, is_taken_host, is_taken_origin, is_visible_field,
-    is_visible_target, is_well_formed_host, origin_of, own_authority_of, request_target_of,
+    assert_listening_address, assert_origins, credential_of, has_visible_fields, is_counted_length,
+    is_ip_address, is_ipv4_address, is_listed_origin, is_taken_host, is_taken_origin,
+    is_transfer_encoding_framed, is_visible_field, is_visible_target, is_well_formed_host,
+    origin_of, own_authority_of, request_target_of,
 };
 
 // what every server takes, by its host on any port
@@ -1287,4 +1288,83 @@ fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_a
 fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_and_refuses_one_without_an_authority()
  {
     reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority_scenario();
+}
+
+#[test]
+fn is_counted_length_takes_digits_alone_whose_number_is_2_63_1_at_most_leading_zeros_read_by_value_and_refuses_any_other()
+ {
+    let zeros = core::iter::repeat_n('0', 40).collect::<String>();
+    let one = format!("{}1", core::iter::repeat_n('0', 39).collect::<String>());
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+    let twenty_three = core::iter::repeat_n('9', 23).collect::<String>();
+
+    // 0 in any width, 2⁶³ − 1 in 19 digits and in 23
+    for value in [
+        "0",
+        zeros.as_str(),
+        one.as_str(),
+        "9223372036854775807",
+        "00009223372036854775807",
+    ] {
+        assert!(is_counted_length(value), "{value:?} counted");
+    }
+
+    // 2⁶³ in 19 digits and in 23, 19 nines, 2⁶⁴, 23 nines; nothing, a sign, a word, a space
+    for value in [
+        "9223372036854775808",
+        "00009223372036854775808",
+        nineteen.as_str(),
+        "18446744073709551616",
+        twenty_three.as_str(),
+        "",
+        "+1",
+        "-0",
+        "abc",
+        "1 2",
+    ] {
+        assert!(!is_counted_length(value), "{value:?} refused");
+    }
+}
+
+#[test]
+fn is_transfer_encoding_framed_takes_chunked_as_its_one_coding_in_any_case_over_http_1_1_an_empty_element_before_it_ignored_and_refuses_a_coding_before_it_anything_after_it_and_one_an_http_1_0_request_carries()
+ {
+    // chunked in any case, the empty elements before it ignored, in one line or two; none at all
+    for lines in [
+        &["chunked"][..],
+        &["Chunked"],
+        &[", chunked"],
+        &[",  , chunked"],
+        &["", "chunked"],
+        &[],
+    ] {
+        assert!(is_transfer_encoding_framed("1.1", lines), "{lines:?} taken");
+    }
+
+    // a coding before it, in one line or two, an empty element among them; a final coding but
+    // chunked; anything after it; a parameter on it
+    for lines in [
+        &["gzip, chunked"][..],
+        &["x-unknown, chunked"],
+        &["identity, chunked"],
+        &["gzip, , chunked"],
+        &["gzip", "chunked"],
+        &["gzip"],
+        &["chunked, gzip"],
+        &["chunked,"],
+        &["chunked, chunked"],
+        &["chunked;q=1"],
+    ] {
+        assert!(
+            !is_transfer_encoding_framed("1.1", lines),
+            "{lines:?} refused"
+        );
+    }
+
+    // over HTTP/1.0: none at all taken, chunked refused
+    assert!(is_transfer_encoding_framed("1.0", &[]), "none taken");
+    assert!(
+        !is_transfer_encoding_framed("1.0", &["chunked"]),
+        "HTTP/1.0's refused"
+    );
 }

@@ -1,5 +1,5 @@
 //! A gateway's bodies: a body a mounted gateway is handed, judged by hyper's hints before its first
-//! byte and by its count at its end (7.6.27), each clause and what none of them takes; and a body
+//! byte and by its count at its end (7.6.26), each clause and what none of them takes; and a body
 //! read under its bound, the budget of every body, and its rate.
 
 use core::pin::Pin;

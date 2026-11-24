@@ -98,9 +98,15 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
   router, sections 15.2 and 15.12;
 - [0053](../docs/decisions/0053-a-client-presents-the-tls-certificate-and-trusts-the-authorities-its-application-names-in-one-shape-on-every-side.md):
-  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39.
+  a client's TLS, the authorities it trusts and the certificate it presents, section 15.39;
+- [0054](../docs/decisions/0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md):
+  a client's connect of a host on the loopback, to the loopback itself, through no resolver and
+  no proxy, sections 13.4 and 15.12;
+- [0056](../docs/decisions/0056-a-websocket-server-holds-a-message-partway-to-a-budget-and-a-rate-and-every-side-reads-its-frames-at-their-heads.md):
+  a WebSocket message held partway to a budget and a rate, its frames read at their heads, sections
+  15.3 and 15.12.
 
-**Version: 0.17.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.18.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -869,31 +875,58 @@ a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over
 memory or over a broker (sections 15.9, 15.2, 15.13, 15.22) — and for one that presents a `JWT` or
 an `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential
 crosses only TLS off the machine
-([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a resolver sends a
-`localhost` name elsewhere (below). A transport is judged by what it is given, never by what a name
-resolves to. It is secure under TLS, its scheme `wss` or
-`https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
-in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
+([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a dialer the client
+does not own sends a `localhost` name elsewhere (below). A transport is judged by what it is given,
+never by what a name resolves to. It is secure under TLS, its scheme `wss` or `https`; on the
+loopback: a client by the host it names in its URL — `localhost` or a name that ends in
+`.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
 `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy, without its condition that the user agent keep such a name on the
-loopback; a server by the address it listens on (section 15.12), in 127.0.0.0/8, `::1`, or
-`localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
-transport or a router called in process. A broker's transport is secure while its own leg and its
-peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
-which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
-space among them, is not, nor is `localhost.`, which it keeps as given. A client judges a
-`localhost` name by the name alone, and connects it through its platform's resolver, as
-[RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets application software do
-(item 2). A resolver that sends a name under `.localhost` on to its DNS server, as glibc's and
-musl's do, connects it wherever that server answers, and a credential judged secure crosses there
-in the clear. An application whose platform resolves so names the loopback by its address,
-`127.0.0.1` or `[::1]`, which no resolver is asked. Any other host leaves the machine in the clear. A server cannot tell
-what stands in front of it: its application MAY say so, and is then believed whatever the server
-listens on — TLS terminated before it, which makes it secure, or a proxy that serves the network in
-the clear, which leaves it in the clear.
+potentially trustworthy, its condition that the user agent keep such a name on the loopback met by
+every dialer the client owns (below); a server by the address it listens on (section 15.12), in
+127.0.0.0/8, `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an
+in-memory transport or a router called in process. A broker's transport is secure while its own leg
+and its peer's are (section 15.22). Every client reads a host alike, once, as that parser reads a
+special scheme's host whatever its URL's scheme, `mqtt` and `amqp` among them, and judges, connects
+and names the host it read: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on
+the loopback, connected to 127.0.0.1 and named so, and ask no resolver. A host it fails on, one
+followed by a space among them, is refused before any socket opens: by a broker adapter or a caller
+as it is built, by a transport client at its connect. Nor is `localhost.` on the loopback, nor a
+name that ends in `.localhost.`, which it keeps as given. These two are Bead's departures from
+Secure Contexts, which takes both: every server refuses them, since it compares a host as it comes
+(section 15.12), and a client and a server read one set of names. Any other host leaves the machine
+in the clear. A server cannot tell what stands in front of it: its application MAY say so, and is
+then believed whatever the server listens on — TLS terminated before it, which makes it secure, or
+a proxy that serves the network in the clear, which leaves it in the clear.
+
+A client connects a host it judges on the loopback to the loopback itself, through no proxy, its
+own or its platform's. It connects `localhost` and a name that ends in `.localhost` to `127.0.0.1`
+and `::1`, and asks no resolver.
+[draft-ietf-dnsop-let-localhost-be-localhost-02](https://datatracker.ietf.org/doc/html/draft-ietf-dnsop-let-localhost-be-localhost-02#section-3)
+asks this of application software that makes a security decision on such a name (section 3,
+item 2). That draft has expired; its rules are the ones by which Secure Contexts conditions its
+trust in such a name. [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets
+application software treat the name so (item 2). A client races the two addresses as
+[RFC 8305 §5](https://www.rfc-editor.org/rfc/rfc8305#section-5) races its attempts: `127.0.0.1`
+at once, then `::1` 250 ms later, or at once when the attempt before it fails, which is Bead's
+own; each attempt is kept until one connects, the first connected kept and the other closed. A
+connect given up ends every attempt. `127.0.0.1` goes first, since a server on its defaults listens
+there (section 15.12), where
+[RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
+first. Its request names the host as its URL serializes it, in its `Host` and in its TLS server
+name, whatever its scheme. A connect whose every attempt failed says that it went to the loopback
+and asked no resolver. No option points such a name elsewhere: a host off the machine is named by
+its own name or address.
+
+A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
+`localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps
+such a name on the loopback. Such a dialer is one its application gives it, a page's, which its user
+agent connects, or its platform's own, which a side takes where it has not built one of its own
+([`docs/support.md`](../docs/support.md), "Differences"). There, a resolver that sends a name under
+`.localhost` on to its DNS server, as glibc's and musl's do, a proxy, or a user agent that does not
+follow the draft's rules takes a credential judged secure wherever it answers, in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -1408,10 +1441,10 @@ WebSocket's address in this order, and answers the first that applies:
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
    path whose percent-decoding holds NUL, a field that holds a control character or an octet past
-   US-ASCII, a `Content-Length` that frames no body or one beside a `Transfer-Encoding`, or a
-   `Transfer-Encoding` whose final coding is not `chunked` or that lists anything after its first
-   `chunked`, or one an HTTP/1.0 request carries (section 15.12), its HTTP server answers,
-   unmarked.
+   US-ASCII, a `Content-Length` that frames no body, one whose number passes 2⁶³ − 1 or one beside
+   a `Transfer-Encoding`, or a `Transfer-Encoding` whose final coding is not `chunked`, that lists a
+   coding before its `chunked` or anything after its first `chunked`, or one an HTTP/1.0 request
+   carries (section 15.12), its HTTP server answers, unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1456,10 +1489,26 @@ connection; a 426 names `upgrade` in its `Connection`.
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it fails the connection with 1009
 ([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
-[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
-still comes until the peer's close or its close timeout, then ends the connection, its close
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, ends its
+writing where its platform lets it, and reads on, dropping what comes unparsed, the peer's close
+among it, until the peer ends the connection or its close timeout passes, then ends it, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A text message that is not UTF-8 fails the connection with 1007
+(section 15.1). A side judges each frame at its head, where its platform lets it read heads: a
+head that announces a length taking its message past `maximumMessageBytes`, a continuation's among
+them, fails the connection with 1009 at its head, without waiting for its payload; the head of a
+frame that takes its message past `maximumMessageFrames` — 16,384 by default, and never without
+end — frames each counting, an empty one among them, fails it with 1008
+([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)); a head that breaks
+[RFC 6455 §5.2](https://www.rfc-editor.org/rfc/rfc6455#section-5.2), §5.4 or §5.5 fails it
+with 1002, but for a data frame's length not in its minimal form, which a side takes as every
+platform's reader takes it. A control frame's length is read in its 7 bits alone, so one written in
+a longer form fails with 1002 whatever its value (§5.2, §5.5). Each closes the connection and is
+reported as a 1009 is. What a read brings before the frame so judged is read as it would be, and
+charged (section 15.12); nothing from that frame on is. A verdict drawn behind what a read handed
+on takes effect once that is read, even while its router pauses the connection: what the pause
+holds is dropped, as on any failure. A page's `WebSocket` fails a message as its browser does. A
+text message that is not UTF-8 fails the connection with 1007
 ([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
 (section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
@@ -1482,7 +1531,8 @@ for it is held as section 15.12 says on a server, and is its application's on a 
 heartbeat counts what it reads, so a connection it pauses past about twice `heartbeat` is dropped by
 its own heartbeat (section 15.12). A page's `WebSocket` sends none: its browser answers the server's
 pings with their data, and the server's heartbeat drops a page gone without a word. What waits for a
-server's socket is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+server's socket is held besides as section 15.12 says. What comes of a message is held on a server
+as section 15.12 holds a message partway. A side that closes says 1000; a server that stops, 1001, to
 each connection it holds, one whose opening handshake completes as its stop begins among them. A
 close with 1000 is the clean one.
 
@@ -1709,10 +1759,11 @@ reads by `maximumUntakenEnvelopes` and `maximumUntakenBytes`:
 | `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                                                                                 | HTTP, WebSocket                    |
 | `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket, or for a broker at both ends                                                                               | WebSocket, broker                  |
 | `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                                                                                | HTTP, WebSocket                    |
-| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, or an envelope's parts over a broker, once its grace passed                                                        | HTTP, broker                       |
-| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, or an envelope's parts over a broker, before its rate is held                                                            | HTTP, broker                       |
+| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, an envelope's parts over a broker, or a WebSocket's message, once its grace passed                                 | HTTP, WebSocket, broker            |
+| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, an envelope's parts over a broker, or a WebSocket's message, before its rate is held                                     | HTTP, WebSocket, broker            |
 | `maximumUntakenEnvelopes`      | 64                                                                                                             | the envelopes one connection's transport handed its router that no turn of it took yet                                                          | HTTP, WebSocket, broker, in memory |
 | `maximumUntakenBytes`          | 1,048,576                                                                                                      | their bytes                                                                                                                                     | HTTP, WebSocket, broker, in memory |
+| `messageBytesBudget`           | 268,435,456                                                                                                    | the bytes a WebSocket server holds of messages partway, across its connections                                                                  | WebSocket                          |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait`, `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod` are never without end.
@@ -1778,12 +1829,51 @@ asks a server to sustain a connection. An answer written before its request's bo
 on and dropping what still comes until its client closes or 2 seconds pass, so its client reads the
 answer before the close ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)).
 Nothing of such an exchange is handed on, and the close of its socket closes no Bead connection.
-What HTTP refuses of its own closes the connection. A server answers a connection's requests in the
-order they came ([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and
-serves none received behind an answer that closes it: none is judged, handed on or told
-([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close its
-connection after its request was read whole — a drop past a bound, a failure unforeseen — a server
-serves a request once the answers before it on that connection ended.
+What HTTP refuses of its own closes the connection. A chunk size a server cannot hold is refused as
+HTTP's own, 400 unmarked ([RFC 9112 §7.1](https://www.rfc-editor.org/rfc/rfc9112#section-7.1)),
+never answered 2xx (section 15.7); past 2⁶⁴ − 1, every server refuses it
+([`docs/support.md`](../docs/support.md), "Differences"). Over HTTP/1, a server answers the
+requests of one socket in the order they came
+([RFC 9112 §9.3.2](https://www.rfc-editor.org/rfc/rfc9112#section-9.3.2)), and serves none
+received behind an answer that closes it: none is judged, handed on or told
+([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Since an answer may close
+its socket after its request was read whole — a drop past a bound, a failure unforeseen — a server
+serves a request once the answers before it on that socket ended.
+
+A WebSocket server holds each message partway, from the first byte of its first frame's head to
+the last byte of its last frame. What it reads of it is charged to `messageBytesBudget` as it
+comes: each byte of payload as it is read, a control frame's between its frames among them, and
+each frame's head once whole, its bytes and 128 more; never what a head announces. A charge of _n_
+decides as _n_ charges of one: one that would pass the budget casts off the connection whose
+message holds the most, its own sum counting that one, then, among equal sums, the one whose
+message began first; each fails with 1013
+([IANA's WebSocket Close Code Number Registry](https://www.iana.org/assignments/websocket/websocket.xhtml#close-code-number)),
+its charge released at once, its own connection only when it comes first. So a message whose
+charge alone passes the budget casts off each holder that comes before it, then its own
+connection. A head that draws a verdict is never whole and charges nothing, and what came before
+it is charged first, so a cast-off at an earlier byte wins over that verdict. A message's charge is
+released once it is whole, or once its connection fails, which charges nothing after. A paused
+connection is charged what its read before the pause brought, and nothing it has not read. A
+message that brought _R_ bytes of payload, and none more, by its first byte plus
+max(`bodyGracePeriod`, ⌈_R_ × 1,000 / `minimumBodyBytesPerSecond`⌉) milliseconds fails its
+connection with 1008 ([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)),
+on the server's clock, the time its router's pause holds its reads not counted. Each fails as
+section 15.3 says, reported naming the bound and its value. What a side holds of a message may pass
+its charge, up to twice it where a side's buffer grows by doubling, and by what its platform reads
+below a pause, a bound of the platform's ([`docs/support.md`](../docs/support.md), "Differences").
+
+Over HTTP/1, a server holds no more of a socket than a bound of its own of what it read behind the
+answer under way and has not served, its platform's
+([`docs/support.md`](../docs/support.md), "Differences"), as
+[RFC 9110 §17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5) has a recipient limit what
+it processes. Past it, it reads nothing more of that socket until the answers ahead end, and keeps
+it: each request a client pipelines is answered in its turn, however many come in one write, the
+client paced meanwhile by its transport's window
+([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)), as a paused
+connection's peer is. A server learns its client went by the end of the socket it reads, and, once
+it reads nothing more of the socket, by a write that fails: a listen's answer, held no longer than
+`maximumWait`, or a stream's heartbeat or event (section 8.7 of `transcoding.md`); never by a
+close it has not read.
 
 A request names its authority by its target when the target is in absolute-form, the `Host`
 beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over
@@ -1876,9 +1966,23 @@ path carries, and its stream reset `PROTOCOL_ERROR` over HTTP/2, a stream error
 ([RFC 9113 §5.4.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.2)), before anything else of
 the request is judged. That is a `Content-Length` that is not digits alone
 ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), an empty one among them,
-or one that names two numbers, in one line or across its lines. So is one that names one number
-more than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or
-read as that number: every side refuses it, since not every platform's HTTP can read it
+or one that names two numbers, in one line or across its lines. A sign before its digits, `+0` or
+`-0`, is no digit: one platform's HTTP reads it as the number it writes, and serves the request
+(`docs/support.md`, "Differences"). So is one that names one number more than once, `0, 0` or `0`
+in two lines, which RFC 9110 §8.6 lets a recipient either refuse or read as that number: every side
+refuses it, since not every platform's HTTP can read it (`docs/support.md`, "Leveled down").
+
+A request's `Content-Length` whose number passes 2⁶³ − 1, the largest signed 64-bit count, is
+answered alike: 400 unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields
+every response on the path carries, its connection closed once answered, and its stream reset
+`PROTOCOL_ERROR` over HTTP/2. It is judged before anything else of the request, whether a
+`Transfer-Encoding` comes beside it or not. Its number is its digits' decimal value, and its leading
+zeros count for nothing ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)):
+2⁶³ − 1 written in 23 digits is a length, and 2⁶³ so written is not. RFC 9110 §8.6 holds any such
+number valid and has a recipient guard against its overflow. A server may refuse content too large
+to process ([§17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5)), 413
+([§15.5.14](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.14)). Every side answers it as
+HTTP's own all the same, since not every platform's HTTP lets a server read such a request
 (`docs/support.md`, "Leveled down").
 
 A request that carries a `Content-Length` beside a `Transfer-Encoding`, in either order and
@@ -1895,15 +1999,35 @@ line or across its lines. Another `chunked` is one a sender never applies
 tell whether a body that names it twice was coded twice. An empty element after it, which
 [RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2) has a recipient
 ignore, is refused alike, since not every platform's HTTP takes it (`docs/support.md`, "Leveled
-down"). So is an HTTP/1.0 request that carries a `Transfer-Encoding`.
+down"). So is a request whose `Transfer-Encoding` lists a coding before its `chunked`,
+`gzip, chunked` among them, in one line or across its lines. A server decodes no transfer coding
+but `chunked`, and would hand on a body still coded. An empty element before `chunked` is no
+coding, and is ignored ([RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2)).
+[RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server answer a transfer
+coding it does not understand 501. A 501 is heuristically cacheable
+([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), where a refusal of
+HTTP's own carries no `cache-control`, and not every platform's HTTP lets a server see a
+`Content-Length` beside such a field (`docs/support.md`, "Leveled down"). So every side refuses it
+400, as it refuses a final coding other than `chunked`. So is an HTTP/1.0 request that carries a
+`Transfer-Encoding`.
 [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server treat its framing
 as faulty and close its connection, since its sender may have passed on a chunked body it never
 decoded. A server may refuse it all the same, and the refusal reads none of that body. One
 platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
-`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences"). Over
-HTTP/2 a `Transfer-Encoding` is malformed
-([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)), a `Content-Length`
-beside it or none: its stream is reset `PROTOCOL_ERROR`.
+`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences").
+
+Over HTTP/2, a request that carries a connection-specific field is malformed
+([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)): a `connection`, a
+`proxy-connection`, a `keep-alive`, a `transfer-encoding`, a `content-length` beside it or none,
+or an `upgrade`, and a `te` whose value is not `trailers`. Its stream is reset `PROTOCOL_ERROR`, a
+stream error ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), before
+anything else of the request is judged. One platform's HTTP/2 ends the session of a `connection`
+or of such a `te` instead, `GOAWAY` `PROTOCOL_ERROR`, as
+[§5.4.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.1) lets an endpoint treat a stream
+error (`docs/support.md`, "Differences"). A `te` is compared as it comes: `trailers` in lower
+case is the one value taken.
+[RFC 9110 §10.1.4](https://www.rfc-editor.org/rfc/rfc9110#section-10.1.4) reads it in any case,
+and not every platform's HTTP/2 does (`docs/support.md`, "Leveled down").
 
 A request's field in more than one field line is read with its lines joined in their order by
 `, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient
@@ -2026,10 +2150,12 @@ for want of the address or of the family, it listens on `127.0.0.1` alone, and r
 as its address in place of `localhost`. A server the network reaches is one its application opened
 to it, `0.0.0.0` or `::` among them ([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)).
 Its address keeps the network out, and `hosts` a page on its own machine that rebinds its name to
-it; neither stands for the other. A client that connects by `localhost` reaches it on whichever
-family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); a server
-given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
-there, which then answers a client that tries that family first.
+it; neither stands for the other. A client connects `localhost`, over a dialer it owns, to
+`127.0.0.1` first, then to `::1`, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305))
+(section 13.4). A server given `::1` alone leaves `127.0.0.1`'s port to any process that listens
+there, which then answers every such connect by a `localhost` name. A server given `127.0.0.1` alone
+leaves `::1`'s port to a process that answers a client that tries the IPv6 loopback first: a
+browser, a client of another library, or one over a dialer it does not own.
 
 ### In memory
 

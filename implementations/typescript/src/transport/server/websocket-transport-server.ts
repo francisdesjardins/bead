@@ -18,17 +18,20 @@ import {
   REFUSAL_EVENT,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WEBSOCKET,
+  WS_LARGEST_COUNT,
   WS_TOO_BIG_CODE,
 } from '../shared/constants';
-import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
+import { assertHeld, assertHeldFinite, LONGEST_TIMER, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { byteCountOf, toError, tooBigOf } from '../shared/errors';
+import { byteCountOf, closedWithOf, ProgrammerError, toError, tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { createHold, type IHold } from '../shared/hold';
 import { ReadyState } from '../shared/ready-state';
 import { bytesOf, createSendQueue, type ISendQueue } from '../shared/send-queue';
 import type { Data, ITransportMessage } from '../shared/types';
+import { createFrameMeter, type IFrameVerdict, rateDueOf } from '../shared/websocket-frame-meter';
+import { createMessageBudget } from '../shared/websocket-message-budget';
 import {
   assertHosts,
   assertListeningAddress,
@@ -37,13 +40,18 @@ import {
 } from './hosts-and-origins';
 import {
   assertCount,
+  BODY_GRACE_PERIOD,
   createSendPace,
   droppedOf,
   HEADERS_TIMEOUT,
   type ISendPace,
   lateOf,
+  lingerOn,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MAXIMUM_MESSAGE_FRAMES,
+  MESSAGE_BYTES_BUDGET,
+  MINIMUM_BODY_BYTES_PER_SECOND,
   MINIMUM_SEND_BYTES_PER_SECOND,
   SEND_GRACE_PERIOD,
 } from './server-bounds';
@@ -70,6 +78,7 @@ import type {
 } from './types';
 import {
   BUSY_HANDSHAKE,
+  hasContent,
   type IHandshakeRefusal,
   MALFORMED_HANDSHAKE,
   refusalOfHandshake,
@@ -81,9 +90,13 @@ export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constan
 export { HEARTBEAT } from '../shared/heartbeat';
 export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
 export {
+  BODY_GRACE_PERIOD,
   HEADERS_TIMEOUT,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MAXIMUM_MESSAGE_FRAMES,
+  MESSAGE_BYTES_BUDGET,
+  MINIMUM_BODY_BYTES_PER_SECOND,
   MINIMUM_SEND_BYTES_PER_SECOND,
   SEND_GRACE_PERIOD,
 } from './server-bounds';
@@ -120,6 +133,17 @@ export const START_DEFAULTS = Object.freeze({
 } satisfies ITransportServerStartOptions);
 
 // helpers
+
+// what reads one connection's raw socket below `ws`: its frame meter, its share of the budget and
+// its rate's clock
+interface IMetered {
+  /** Its router paused it: its rate's clock stops. */
+  pause(): void;
+  /** Its socket is read again: its rate's clock runs on. */
+  resume(): void;
+  /** Hands nothing more on and charges nothing more: its connection failed or ended. */
+  stop(): void;
+}
 
 // an HTTP server of the transport's, bound on one address, and its `WebSocketServer`: serving once
 // it listens, until a stop, or a start that does not keep it, lets it go
@@ -191,9 +215,11 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  *
  * A text message is delivered as a `string` and a binary one per `binaryType`. `error` tells, with
  * a connection's handle (spec 15.1): a protocol error on it; a bound it is dropped behind, or a
- * message past `maxPayload`, the spec's `maximumMessageBytes`, it is failed with 1009 for, each a
- * `GenericError` naming the bound in the spec's spelling and its value, the 1009's keeping
- * `ws`'s own error as its `cause`; each told once, as its connection ends, its close begun, before
+ * verdict it is failed for — a message past `maxPayload`, the spec's `maximumMessageBytes`, 1009;
+ * past `maximumMessageFrames`, or slower than `minimumBodyBytesPerSecond`, 1008; cast off by
+ * `messageBytesBudget`, 1013; a frame head RFC 6455 forbids, 1002 — each a `GenericError` naming
+ * the bound in the spec's spelling and its value, or the rule; each told once, as its connection
+ * ends, its close begun, before
  * its unclean `close`, so a listener that throws keeps nothing open; and what a listener of its
  * other events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
  * ended or reset, emits no `error`: its unclean `close` tells it; nor does a peer its heartbeat
@@ -221,9 +247,19 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * `unnamedProxies` counts, the upgrade's `X-Forwarded-For` entry the walk reaches, as the HTTP
  * transport reads it (spec 15.12), else its socket's. It listens on `localhost` by default, both
  * loopbacks on one port. Each message is an envelope at most by default,
- * {@link MAXIMUM_MESSAGE_BYTES}, and `ws` fails a connection that sends a larger one with 1009:
- * it reads on to the peer's close, or to `closeTimeout`, which it is given, and drops it then,
- * reading nothing of the answer, so its close is unclean whatever the peer answers (spec 15.3).
+ * {@link MAXIMUM_MESSAGE_BYTES}.
+ *
+ * Where `ws` hands it the raw socket of each upgrade, as Node's own upgrade does, a frame meter
+ * reads each read of it before `ws` does, taking the place of `ws`'s listener: it judges each frame
+ * at its head (spec 15.3) — a message past `maxPayload`, 1009, a frame past
+ * `maximumMessageFrames`, 1008, a head RFC 6455 forbids, 1002 — and charges each message partway to
+ * `messageBytesBudget` and holds it to `minimumBodyBytesPerSecond` (spec 15.12). What a read brings
+ * before the frame a verdict falls at is read as it would be; nothing from that frame on is. A
+ * connection a verdict fails sends its close, ends its writing, and reads on, dropping what comes
+ * unparsed, to the peer's end or to `closeTimeout`, which `ws` is given too, and drops it then, so
+ * its close is unclean whatever the peer answers (RFC 6455 §7.1.7). A `WebSocketServer` that gives
+ * no raw socket is held by `ws`'s own bounds alone: `maxPayload` and `maxFragments`, which it is
+ * given, and no budget or rate.
  *
  * A connection its router paused reads no more of its socket, `ws` paused, and holds in order what
  * `ws` still emits of the read under way, one socket read at most; resumed, it hands that on from a
@@ -242,6 +278,7 @@ export const createWebSocketTransportServer = (
 ): WebSocketTransportServer => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
+    bodyGracePeriod: givenBodyGracePeriod = BODY_GRACE_PERIOD,
     clock,
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     headersTimeout: givenHeadersTimeout = HEADERS_TIMEOUT,
@@ -250,7 +287,10 @@ export const createWebSocketTransportServer = (
     maxPayload = MAXIMUM_MESSAGE_BYTES,
     maximumConnections = MAXIMUM_CONNECTIONS,
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
+    maximumMessageFrames = MAXIMUM_MESSAGE_FRAMES,
     maximumUnsentBytes = MAXIMUM_UNSENT_BYTES,
+    messageBytesBudget = MESSAGE_BYTES_BUDGET,
+    minimumBodyBytesPerSecond = MINIMUM_BODY_BYTES_PER_SECOND,
     minimumSendBytesPerSecond = MINIMUM_SEND_BYTES_PER_SECOND,
     origins = [],
     procedures,
@@ -265,11 +305,19 @@ export const createWebSocketTransportServer = (
   const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
   assertCount('maximumConnections', { value: maximumConnections });
   assertCount('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
+  assertCount('maximumMessageFrames', { value: maximumMessageFrames });
   assertCount('maximumUnsentBytes', { value: maximumUnsentBytes });
+  assertCount('messageBytesBudget', { value: messageBytesBudget });
+  assertCount('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
   assertCount('minimumSendBytesPerSecond', { mayBeNone: true, value: minimumSendBytesPerSecond });
   const pace = {
     minimumSendBytesPerSecond,
     sendGracePeriod: assertHeldFinite('sendGracePeriod', givenSendGracePeriod),
+  };
+  // a message partway's rate (spec 15.12)
+  const rate = {
+    bodyGracePeriod: assertHeldFinite('bodyGracePeriod', givenBodyGracePeriod),
+    minimumBodyBytesPerSecond,
   };
   assertHosts(hosts);
   assertOrigins(origins);
@@ -301,6 +349,10 @@ export const createWebSocketTransportServer = (
       const holds = new WeakMap<IServerSocketLike, IHold<ITransportMessage>>();
       // the sockets this side closes, which read on to their peer's Close, paused no more
       const closing = new WeakSet<IServerSocketLike>();
+      // * the bytes of messages partway, across every connection (spec 15.12), and what reads each
+      // connection's raw socket below `ws`, where its upgrade gave one
+      const budget = createMessageBudget(messageBytesBudget);
+      const meters = new WeakMap<IServerSocketLike, IMetered>();
 
       const heldBy = (address: string): number => {
         return perAddress.get(address) ?? 0;
@@ -407,6 +459,7 @@ export const createWebSocketTransportServer = (
         holds.get(socket)?.drop();
         holds.get(socket)?.resume();
         socket.resume?.();
+        meters.get(socket)?.resume();
 
         return createPromise((resolve) => {
           // a drop that throws ended the connection here: its socket's close is waited on no more
@@ -441,6 +494,197 @@ export const createWebSocketTransportServer = (
             dropSocket();
           }
         });
+      };
+
+      // ! a verdict sends its close, ends its writing, and drops what comes to the peer's end or
+      // the close timeout, its close unclean (RFC 6455 §7.1.7)
+      const failBy = (
+        { connectionHandle, socket }: ITransportServerClientAware<IServerSocketLike>,
+        { code, raw, why }: { code: number; raw: IIncomingMessageLike['socket']; why: string }
+      ): void => {
+        meters.get(socket)?.stop();
+        fail(
+          socket,
+          code === 1009
+            ? tooBigOf(connectionHandle, { maximumMessageBytes: maxPayload })
+            : closedWithOf(connectionHandle, { code, why })
+        );
+        void closeSocket(socket, code);
+        raw.resume?.();
+
+        // a close `ws` queues behind a send in flight leaves the writing to end with the connection
+        if ((socket.bufferedAmount ?? 0) <= (raw.writableLength ?? 0)) {
+          raw.end?.();
+        }
+      };
+
+      // why a verdict fails a connection, naming the bound and its value, or the rule its head
+      // broke (spec 15.3, 15.12)
+      const whyOf = ({ code, reason }: IFrameVerdict): string => {
+        return code === 1008
+          ? `${reason}, ${String(maximumMessageFrames)} frames`
+          : `a frame head RFC 6455 forbids, ${reason}`;
+      };
+      const overBudget = `the messages partway would pass messageBytesBudget, ${byteCountOf(messageBytesBudget)}`;
+      const tooSlow = `a message came slower than minimumBodyBytesPerSecond, ${byteCountOf(rate.minimumBodyBytesPerSecond)} a second, past bodyGracePeriod, ${String(rate.bodyGracePeriod)} ms`;
+
+      /**
+       * Reads each read of a connection's raw socket below `ws`, whose own listener of its reads,
+       * `reader`, is handed what its frame meter lets through: each frame judged at its head
+       * (spec 15.3), each message partway charged to the budget and held to its rate (spec 15.12).
+       * `heard` stamps its heartbeat at every read, after a verdict too.
+       */
+      const meterOf = (
+        connection: ITransportServerClientAware<IServerSocketLike>,
+        {
+          heard,
+          raw,
+          reader,
+        }: {
+          heard: () => void;
+          raw: IIncomingMessageLike['socket'];
+          reader: (chunk: Uint8Array) => void;
+        }
+      ): IMetered => {
+        const timers = server.clock;
+        const meter = createFrameMeter({
+          maximumMessageBytes: maxPayload,
+          maximumMessageFrames,
+          side: 'server',
+        });
+        // nothing more handed on or charged: a verdict, `ws`'s own failure, the peer's close read,
+        // or the connection's end
+        let isStopped = false;
+        // * the message partway's first byte, on the server's clock, moved on by the time its router
+        // held it paused; its payload so far; and the rate's timer, armed for its due
+        let began: number | undefined;
+        let payload = 0;
+        let pausedAt: number | undefined;
+        let due: TimeoutId | undefined;
+
+        const failWith = (code: number, why: string): void => {
+          if (!isStopped) {
+            failBy(connection, { code, raw, why });
+          }
+        };
+
+        const unpace = (): void => {
+          timers.clearTimeout(due);
+          due = undefined;
+        };
+
+        // the rate's timer, for the message partway while its socket is read (spec 15.12)
+        const pace = (): void => {
+          unpace();
+
+          if (began === undefined || pausedAt !== undefined || isStopped) {
+            return;
+          }
+
+          const dueAt = rateDueOf(began, { ...rate, payload });
+
+          due = timers.setTimeout(
+            () => {
+              due = undefined;
+              failWith(1008, tooSlow);
+            },
+            // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
+            Math.max(1, Math.ceil(dueAt - timers.performance.now()))
+          );
+          // a browser's timer has no `unref`
+          (due as { unref?: () => unknown }).unref?.();
+        };
+
+        const holder = budget.holderOf({
+          castOff: () => {
+            failWith(1013, overBudget);
+          },
+        });
+
+        const stop = (): void => {
+          isStopped = true;
+          unpace();
+          holder.release();
+          began = undefined;
+        };
+
+        raw.on?.('data', (chunk) => {
+          heard();
+
+          if (isStopped) {
+            return;
+          }
+
+          const { handed: cut, shares, verdict } = meter.read(chunk);
+          let handed = cut;
+          let isCastOff = false;
+
+          // * each message's share charged in the order the read brought it, one whole released
+          // at once; those before a verdict's frame charged first, so a cast-off at an earlier
+          // byte wins over the verdict (spec 15.3, 15.12)
+          for (const share of shares) {
+            if (share.isFirst) {
+              began = timers.performance.now();
+              payload = 0;
+              holder.begin();
+            }
+
+            if (!holder.charge(share.charge)) {
+              handed = share.from;
+              isCastOff = true;
+              break;
+            }
+
+            payload += share.payload;
+
+            if (share.isWhole) {
+              holder.release();
+              began = undefined;
+            }
+          }
+
+          // ! `ws`'s own listener, called as its socket's: what came before the cut is read as it
+          // would be, a message whole ahead of it handed on, before a verdict closes the socket
+          if (handed > 0) {
+            reader.call(raw, handed === chunk.length ? chunk : chunk.subarray(0, handed));
+          }
+
+          if (isCastOff) {
+            failWith(1013, overBudget);
+          } else if (verdict !== undefined) {
+            failWith(verdict.code, whyOf(verdict));
+          } else if (meter.isEnded) {
+            // the peer's close read: `ws` reads nothing past it, and the connection closes
+            stop();
+          } else {
+            pace();
+          }
+        });
+
+        return {
+          pause: () => {
+            if (began !== undefined && pausedAt === undefined) {
+              pausedAt = timers.performance.now();
+              unpace();
+            }
+          },
+          resume: () => {
+            if (pausedAt === undefined) {
+              return;
+            }
+
+            if (began !== undefined) {
+              began += timers.performance.now() - pausedAt;
+            }
+
+            pausedAt = undefined;
+            pace();
+          },
+          stop: () => {
+            stop();
+            budget.forget(holder);
+          },
+        };
       };
 
       // the client's address: the socket's, in the one form, or, behind the proxies the transport
@@ -522,6 +766,12 @@ export const createWebSocketTransportServer = (
           refuse(request, {
             refusal,
             write: () => {
+              // * a refusal of an upgrade that declares a body closes its socket in stages, so a
+              // client still sending reads it before the close (RFC 9112 §9.6; spec 15.12)
+              if (hasContent(request)) {
+                lingerOn(request.socket, response);
+              }
+
               response.sendDate = false;
               response.writeHead(refusal.status, { date: dateOf(), ...refusal.fields }).end();
             },
@@ -595,6 +845,21 @@ export const createWebSocketTransportServer = (
           return (terminate(socket), undefined);
         }
 
+        // * the listener `ws` reads its raw socket by, which the frame meter takes the place of
+        const raw = request.socket;
+        const readers = raw.listeners?.('data');
+
+        if (readers !== undefined && readers.length !== 1) {
+          report(
+            new ProgrammerError(
+              `an upgraded socket is read by ws's own listener alone, not by ${String(readers.length)}`
+            ),
+            ''
+          );
+
+          return (terminate(socket), undefined);
+        }
+
         // drawn as it is taken, never from the peer's address alone, which another socket may share
         const connectionHandle = generateHandle({
           ip: address,
@@ -622,9 +887,10 @@ export const createWebSocketTransportServer = (
               }
             },
             {
-              // its socket read again once what it held was handed on
+              // its socket read again once what it held was handed on, its rate's clock running on
               onReleased: () => {
                 socket.resume?.();
+                meters.get(socket)?.resume();
               },
             }
           )
@@ -659,11 +925,31 @@ export const createWebSocketTransportServer = (
           },
         });
 
-        // * what is read of the connection: each read of its raw socket, a frame's part among it;
-        // a socket given without one, each message and pong it emits
-        request.socket.on?.('data', () => {
-          beating.heard();
-        });
+        // * what is read of the connection: each read of its raw socket, a frame's part among it,
+        // metered below `ws` where its upgrade gave the socket with `ws`'s own listener; a socket
+        // given without one, each message and pong it emits
+        const [given] = readers ?? [];
+
+        if (typeof given === 'function') {
+          const reader = given as (chunk: Uint8Array) => void;
+
+          raw.removeListener?.('data', reader);
+          meters.set(
+            socket,
+            meterOf(connection, {
+              heard: () => {
+                beating.heard();
+              },
+              raw,
+              reader,
+            })
+          );
+        } else {
+          raw.on?.('data', () => {
+            beating.heard();
+          });
+        }
+
         socket.on('pong', (data) => {
           beating.answer(data);
         });
@@ -680,6 +966,7 @@ export const createWebSocketTransportServer = (
 
           isEnded = true;
           beating.stop();
+          meters.get(socket)?.stop();
           paces.get(socket)?.stop();
           queues.get(socket)?.clear();
           holds.get(socket)?.drop();
@@ -711,6 +998,8 @@ export const createWebSocketTransportServer = (
         // ! `ws` fails the connection before it emits its error, and reads nothing more: a message
         // past its bound is told as Bead's own, naming the bound and its value (spec 15.3)
         socket.on(ERROR_EVENT, (error) => {
+          // `ws` reads nothing more of its socket: its listener, the meter's now, hands nothing on
+          meters.get(socket)?.stop();
           fail(
             socket,
             (error as NodeJS.ErrnoException).code === WS_TOO_BIG_CODE
@@ -802,6 +1091,9 @@ export const createWebSocketTransportServer = (
                   handleProtocols: () => {
                     return false;
                   },
+                  // behind the frame meter, which judges both first where it reads the socket;
+                  // ! never without end: `ws` truncates a count to 32 bits
+                  maxFragments: Math.min(maximumMessageFrames, WS_LARGEST_COUNT),
                   maxPayload,
                   server: http,
                 }),
@@ -910,6 +1202,7 @@ export const createWebSocketTransportServer = (
 
           holds.get(socket)?.pause();
           socket.pause?.();
+          meters.get(socket)?.pause();
         },
         // what it held handed on from a microtask, its socket read again once nothing is held
         resume: ({ socket }) => {
@@ -917,7 +1210,8 @@ export const createWebSocketTransportServer = (
         },
 
         // what each socket holds that it has not taken yet, all together and the most one holds,
-        // under its ceiling; and the places upgrades hold, the busiest address's under its own
+        // under its ceiling; the places upgrades hold, the busiest address's under its own; and the
+        // bytes of messages partway, under the budget
         gauges: () => {
           let unsentBytes = 0;
           let largestUnsentBytes = 0;
@@ -939,8 +1233,14 @@ export const createWebSocketTransportServer = (
               connections: maximumConnections,
               largestAddressConnections: maximumConnectionsPerAddress,
               largestUnsentBytes: maximumUnsentBytes,
+              messageBytes: messageBytesBudget,
             },
-            counts: { largestAddressConnections, largestUnsentBytes, unsentBytes },
+            counts: {
+              largestAddressConnections,
+              largestUnsentBytes,
+              messageBytes: budget.held,
+              unsentBytes,
+            },
           });
         },
 

@@ -14,7 +14,7 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Thirty-five places take such a duration, by 57 ways, from a call's timeout to a gateway's heartbeat
+Thirty-six places take such a duration, by 58 ways, from a call's timeout to a gateway's heartbeat
 and a broker's: its participant's heartbeat, `bodyGracePeriod` and reconnection delay, its server
 transport's `acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and
 connect timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout

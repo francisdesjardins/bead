@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::clock::{HyperTimer, SharedClock, SystemClock};
+use crate::clock::{HyperTimer, SystemClock};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::MAXIMUM_ENVELOPE_BYTES;
 use crate::errors::{CallError, ProgrammerError};
@@ -36,9 +36,10 @@ use crate::http::server::MAXIMUM_BODY_BYTES;
 use crate::http::wire::Spawner;
 use crate::json::{self, integer_of};
 use crate::judgement::security::is_secure;
+use crate::judgement::url_host::url_host_of;
 use crate::net::bounds::hold_count;
 use crate::net::listening::unless_cancelled;
-use crate::net::racing::RacingOptions;
+use crate::net::racing::{RacingOptions, Resolve};
 use crate::net::tls::ClientTls;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::platform::{self, Handle};
@@ -167,6 +168,23 @@ impl fmt::Debug for HttpCaller {
     }
 }
 
+// an authority, its host read as the URL Standard's host parser reads it and its port as given:
+// what it judges, connects to and names in its `Host` (spec 13.4); none for a host it fails on
+fn authority_of(authority: &str) -> Option<String> {
+    let (host, port) = if authority.starts_with('[') {
+        let end = authority.find(']')?.saturating_add(1);
+
+        authority.split_at_checked(end)?
+    } else {
+        authority
+            .rfind(':')
+            .map_or((authority, ""), |at| authority.split_at(at))
+    };
+    let host = url_host_of(host)?;
+
+    Some(format!("{host}{port}"))
+}
+
 // a URL's scheme, authority and path, as a base: its path ending in `/`
 fn base_of(url: &str) -> Option<(String, String, String)> {
     let (scheme, rest) = url.split_once("://")?;
@@ -182,6 +200,9 @@ fn base_of(url: &str) -> Option<(String, String, String)> {
         return None;
     }
 
+    // ! its host read once: `127.0.0.1.` and `127.1` are `127.0.0.1`, and a host the parser fails
+    // on, `foo.123` among them, is refused as it is built
+    let authority = authority_of(authority)?;
     // ! the whole URL as http reads it: a host it holds, its characters a URI's
     let uri = Uri::try_from(format!("{scheme}://{authority}{path}")).ok()?;
 
@@ -193,7 +214,7 @@ fn base_of(url: &str) -> Option<(String, String, String)> {
         format!("{path}/")
     };
 
-    Some((scheme, authority.to_ascii_lowercase(), path))
+    Some((scheme, authority, path))
 }
 
 // a path's dot segments removed (RFC 3986 §5.2.4)
@@ -249,6 +270,10 @@ impl Calling {
     // `/` taken away so that the base's path stays its prefix; none off its origin
     fn target_of(&self, template: &str) -> Result<Uri, ProgrammerError> {
         let reference = template.strip_prefix('/').unwrap_or(template);
+        // * a template's authority read as its base's is, so that each names its host alike
+        let read = |authority: &str| {
+            authority_of(authority).unwrap_or_else(|| authority.to_ascii_lowercase())
+        };
         let (authority, path) = if has_scheme(reference) {
             let (scheme, rest) = reference.split_once(':').unwrap_or_default();
             let rest = rest.strip_prefix("//").unwrap_or_default();
@@ -258,11 +283,11 @@ impl Calling {
                 return Err(ProgrammerError::new(OTHER_ORIGIN));
             }
 
-            (authority.to_ascii_lowercase(), without_dot_segments(path))
+            (read(authority), without_dot_segments(path))
         } else if let Some(rest) = reference.strip_prefix("//") {
             let (authority, path) = rest.find('/').map_or((rest, "/"), |at| rest.split_at(at));
 
-            (authority.to_ascii_lowercase(), without_dot_segments(path))
+            (read(authority), without_dot_segments(path))
         } else if reference.starts_with('/') {
             (self.authority.clone(), without_dot_segments(reference))
         } else {
@@ -313,6 +338,16 @@ impl HttpCaller {
     /// information, a query or a fragment; for a bound of 0; outside a tokio runtime, given none, or
     /// on one without its time or its IO driver.
     pub fn new(url: &str, options: &HttpCallerOptions) -> Result<Self, ProgrammerError> {
+        Self::resolving(url, None, options)
+    }
+
+    // a caller whose connects ask `resolve` for a name's addresses: the platform's resolver when
+    // none, a test's otherwise
+    fn resolving(
+        url: &str,
+        resolve: Option<Resolve>,
+        options: &HttpCallerOptions,
+    ) -> Result<Self, ProgrammerError> {
         let (scheme, authority, path) =
             base_of(url).ok_or_else(|| ProgrammerError::new(URL_REFUSED))?;
         let maximum_body_bytes = hold_count(
@@ -320,14 +355,17 @@ impl HttpCaller {
             options.maximum_body_bytes.unwrap_or(MAXIMUM_BODY_BYTES),
         )?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP caller")?;
-        let clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let tls = options
             .client_config
             .as_ref()
             .map_or_else(ClientTls::default, |config| {
                 ClientTls::Given(Arc::clone(config))
             });
-        let connector = Connector::new(tls, &RacingOptions::on(clock));
+        let racing = RacingOptions {
+            resolve,
+            ..RacingOptions::on(Arc::new(SystemClock::on(runtime.clone())))
+        };
+        let connector = Connector::new(tls, &racing);
         // * HTTP/1.1, a pooled connection let go once idle on Bead's timer, its executor Bead's;
         // hyper follows no redirect and keeps no cookie
         let client = Client::builder(Spawner::on(runtime.clone()))

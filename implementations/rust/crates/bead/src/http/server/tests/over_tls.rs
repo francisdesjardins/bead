@@ -614,6 +614,85 @@ async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_names_o
     started.stop().await;
 }
 
+// what a `POST` of Bead's type whose `Content-Length` is `length` is answered over `session` of
+// h2's, its stream left open behind its head, so that h2 resets no length it counts for content
+// not yet come: its status, or the code its stream was reset with
+async fn opened_answer_of(
+    session: &h2::client::SendRequest<Bytes>,
+    (port, length): (u16, &str),
+) -> Result<u16, Option<h2::Reason>> {
+    let fields = [
+        ("content-type", BEAD_MEDIA_TYPE),
+        ("content-length", length),
+    ];
+    let (response, _sending) = sent(session, (request_of(("POST", port), &fields), false)).await;
+
+    match patience(PATIENCE, response)
+        .await
+        .expect("answered within patience")
+    {
+        Ok(response) => Ok(response.status().as_u16()),
+        Err(error) => Err(error.reason()),
+    }
+}
+
+// spec 15.12; RFC 9110 §8.6
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_passes_2_63_1() {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let session = session_of(port).await;
+    let nineteen = core::iter::repeat_n('9', 19).collect::<String>();
+
+    // * 2⁶³ and 19 nines h2 hands on, and the transport resets their stream (spec 15.12); 2⁶³ in
+    // 23 digits h2 resets itself; PROTOCOL_ERROR, from a host it takes, nothing drawn
+    for length in [
+        "9223372036854775808",
+        nineteen.as_str(),
+        "00009223372036854775808",
+    ] {
+        assert_eq!(
+            opened_answer_of(&session, (port, length)).await,
+            Err(Some(h2::Reason::PROTOCOL_ERROR)),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
+// docs/support.md; RFC 9110 §8.6
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_is_more_than_nineteen_digits_whatever_its_number_as_h2_does()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let session = session_of(port).await;
+    let one = format!("{}1", core::iter::repeat_n('0', 19).collect::<String>());
+
+    // * h2 parses 19 digits at most, and resets the stream of more before the transport reads the
+    // request, whatever their number: 1 in 20 digits, and 2⁶³ − 1 in 23
+    for length in [one.as_str(), "00009223372036854775807"] {
+        assert_eq!(
+            opened_answer_of(&session, (port, length)).await,
+            Err(Some(h2::Reason::PROTOCOL_ERROR)),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
 // spec 15.12
 #[tokio::test]
 async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specific_field_a_transfer_encoding_with_a_content_length_beside_it_or_none_a_keep_alive_a_proxy_connection_or_an_upgrade()
@@ -655,6 +734,80 @@ async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_specif
         http2_of(port, &[own, bead]).await,
         TlsAnswer::of(201, None),
         "none"
+    );
+    started.stop().await;
+}
+
+// spec 15.12
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_carrying_a_connection_or_a_te_other_than_trailers_in_lower_case_and_serves_one_whose_te_is_trailers()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * h2 resets each before the transport reads the request (RFC 9113 §8.2.2), comparing a `te`
+    // byte for byte, PROTOCOL_ERROR, nothing written
+    for carried in [
+        ("connection", "keep-alive"),
+        ("connection", "close"),
+        ("te", "gzip"),
+        ("te", "trailers, gzip"),
+        ("te", "Trailers"),
+    ] {
+        assert_eq!(
+            http2_of(port, &[own, bead, carried]).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{carried:?}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // a te of trailers, a connect drawn
+    assert_eq!(
+        http2_of(port, &[own, bead, ("te", "trailers")]).await,
+        TlsAnswer::of(201, None),
+        "trailers"
+    );
+    started.stop().await;
+}
+
+// spec 15.12
+#[tokio::test]
+async fn resets_over_http_2_the_stream_of_a_request_whose_content_length_is_signed_a_plus_or_a_minus_before_its_0()
+ {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let own = (":authority", own.as_str());
+    let bead = ("content-type", BEAD_MEDIA_TYPE);
+
+    // * a sign is no digit (RFC 9110 §8.6): h2 resets the stream before the transport reads the
+    // request, PROTOCOL_ERROR, nothing written
+    for length in ["+0", "-0"] {
+        assert_eq!(
+            http2_of(port, &[own, bead, ("content-length", length)]).await,
+            TlsAnswer::reset(PROTOCOL_ERROR),
+            "{length}"
+        );
+    }
+
+    assert!(started.recorder.told().refusals.is_empty(), "nothing told");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    // its digits alone, a connect drawn
+    assert_eq!(
+        http2_of(port, &[own, bead, ("content-length", "0")]).await,
+        TlsAnswer::of(201, None),
+        "0"
     );
     started.stop().await;
 }

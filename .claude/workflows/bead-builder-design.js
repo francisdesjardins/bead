@@ -19,7 +19,7 @@ const CONTEXT = `
 You are designing the API builder of Bead, a binary wire protocol with a normative spec (spec/spec.md), conformance files (spec/vectors.json, spec/conversations.json, spec/transports.json, spec/clocks.json, spec/durations.json, spec/interop-service.json; and, beside the wire's spec, spec/debugging.md with spec/debug-filters.json and spec/metrics.json), and two implementations at behavioural parity: implementations/typescript and implementations/dotnet. The repository is ${REPO}.
 Read first:
 - ${REPO}/.claude/local/plan.md (phase 5) and the builder's inputs in ${REPO}/.claude/local/builder/: api-builder.md (with the synthesis on the builder at its end) and inspiration.md;
-- the runtimes: how a service, its procedures and its notifications are declared and offered today on both sides (the interop service: offer.ts, InteropService.cs).
+- the runtimes: how a service, its procedures and its notifications are declared and offered today on every side (the interop service: offer.ts, InteropService.cs and the Rust side's).
 
 THE USER'S DIRECTION, which is not up for debate in this design:
 - Input: .proto files, services and messages.

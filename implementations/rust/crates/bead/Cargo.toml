@@ -199,5 +199,11 @@ required-features = ["mqtt"]
 name = "mqtt_websocket_frames_fuzz"
 required-features = ["mqtt"]
 
+# seeded mutations of the frames a client sends a WebSocket server, fed to its frame meter and to
+# tungstenite alike (decision 0056)
+[[test]]
+name = "websocket_frames_fuzz"
+required-features = ["websocket"]
+
 [lints]
 workspace = true

@@ -24,7 +24,7 @@ namespace Bead.Transport.WebSockets.Tests;
 /// refuses it, or never answers it: how it connects, what it delivers, how its connection closes,
 /// and how it reconnects.
 /// </summary>
-public sealed class WebSocketTransportClientTests : IAsyncLifetime
+public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
 {
     // constants
 
@@ -358,20 +358,6 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     private static async Task<T> Next<T>(Channel<T> channel, TimeSpan? within = null)
     {
         return await channel.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(within ?? Patience, Cancelled);
-    }
-
-    // a port nothing listens on
-    private static int ClosedPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-
-        listener.Start();
-
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-
-        listener.Stop();
-
-        return port;
     }
 
     // whether the peer closed its end of the connection: what is read then is nothing, or a reset
@@ -823,9 +809,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Throws_what_its_socket_threw_when_nothing_listens_ending_closed_and_can_connect_again()
     {
+        using var closed = new ClosedPort();
+
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
-            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort(), CancellationToken = Cancelled });
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = closed.Port, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
 
@@ -1640,9 +1628,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Asks_for_wss_when_secured()
     {
+        using var closed = new ClosedPort();
+
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
-            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort(), Secured = true, CancellationToken = Cancelled });
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = closed.Port, Secured = true, CancellationToken = Cancelled });
         });
 
         using var listener = new Listener(IPAddress.Loopback);
@@ -3396,11 +3386,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Reconnects_to_the_target_of_the_last_accepted_connect()
     {
+        using var closed = new ClosedPort();
+
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _client.Connect(Target with { Port = ClosedPort(), CancellationToken = Cancelled });
+            return _client.Connect(Target with { Port = closed.Port, CancellationToken = Cancelled });
         });
         await _client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
         await Next(_connections);
@@ -3411,13 +3403,15 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task A_connect_refused_after_a_close_keeps_the_target_before_it_which_a_reconnection_replays()
     {
+        using var closed = new ClosedPort();
+
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await _client.CloseConnection().WaitAsync(Patience, Cancelled);
 
         var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
         {
-            return _client.Connect(Target with { Port = ClosedPort(), Timeout = TimeSpan.FromMilliseconds(0.5), CancellationToken = Cancelled });
+            return _client.Connect(Target with { Port = closed.Port, Timeout = TimeSpan.FromMilliseconds(0.5), CancellationToken = Cancelled });
         });
 
         Assert.StartsWith("a connect's timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0.5", refused.Message, StringComparison.Ordinal);
@@ -4225,22 +4219,25 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_socket_threw_when_the_server_is_gone()
     {
-        var reconnecting = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var refused = new ClosedPort();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // from its close, as the TypeScript side's test reconnects; one attempt, for a port nothing
-        // listens on takes this system two seconds to refuse
         _client.Close += (_, _) =>
         {
-            reconnecting.TrySetResult(_client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            closed.TrySetResult();
         };
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await _server.Stop().WaitAsync(Patience, Cancelled);
+        await closed.Task.WaitAsync(Patience, Cancelled);
+        await Assert.ThrowsAsync<WebSocketException>(() =>
+        {
+            return _client.Connect(Target with { Port = refused.Port, CancellationToken = Cancelled });
+        });
 
-        var reconnect = await reconnecting.Task.WaitAsync(Patience, Cancelled);
         var thrown = await Assert.ThrowsAsync<ReconnectException>(() =>
         {
-            return reconnect.WaitAsync(Patience, Cancelled);
+            return _client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 2, Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(10)) }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.IsType<WebSocketException>(thrown.InnerException);

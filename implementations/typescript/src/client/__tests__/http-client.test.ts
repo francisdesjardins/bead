@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { closedPort } from '../../transport/shared/__tests__/loopback-fixtures';
 import { createServer } from 'node:http';
 import { createHTTPServer } from '../../server/http-server';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
@@ -14,6 +15,7 @@ import { ReadyState } from '../../transport/shared/ready-state';
 import {
   createHTTPClient,
   CancelError,
+  ConnectError,
   DisconnectError,
   ReadyStateError,
   SERVER_FAILURES,
@@ -123,15 +125,39 @@ test.describe('createHTTPClient', () => {
     await using other = createHTTPClient({ transport: { isListening: false } });
 
     await other.connect({ host: '127.0.0.1', port });
+    await client.disconnect();
+    await other.disconnect();
     await server.transport.stop();
+    await using refused = await closedPort();
+
+    for (const subject of [client, other]) {
+      await expect(
+        subject.connect({ host: '127.0.0.1', port: refused.port })
+      ).rejects.toBeInstanceOf(ConnectError);
+    }
+
+    const attempts: [number, number][] = [];
+    const waiting = Promise.withResolvers<void>();
+    const tap = (delay: number, attempt: number) => {
+      attempts.push([delay, attempt]);
+      if (attempts.length === 2) {
+        waiting.resolve();
+      }
+    };
+
     const controller = new AbortController();
-    const byDispose = expect(client.reconnect({ delay: 60_000 })).rejects.toBeInstanceOf(
+    const byDispose = expect(client.reconnect({ delay: 60_000, tap })).rejects.toBeInstanceOf(
       CancelError
     );
     const bySignal = expect(
-      other.reconnect({ delay: 60_000, signal: controller.signal })
+      other.reconnect({ delay: 60_000, signal: controller.signal, tap })
     ).rejects.toBeInstanceOf(CancelError);
 
+    await waiting.promise;
+    expect(attempts).toEqual([
+      [60_000, 1],
+      [60_000, 1],
+    ]);
     await client[Symbol.asyncDispose]();
     controller.abort();
     await byDispose;

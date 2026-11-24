@@ -13,6 +13,7 @@ use tungstenite::handshake::server::{
 use tungstenite::protocol::Message;
 
 use super::*;
+use crate::testing::closed_port::closed_port;
 use crate::testing::{Instant, SteppingClock, patience, spawn, yield_now};
 use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
@@ -137,13 +138,6 @@ async fn settled(connecting: Connect) -> Result<(), TransportError> {
 
 fn is_state(client: &WebSocketTransportClient, ready: ReadyState) -> bool {
     client.ready_state() == ready
-}
-
-// a port nothing listens on
-async fn closed_port() -> u16 {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-
-    listener.local_addr().unwrap().port()
 }
 
 // whether this machine has the IPv6 loopback
@@ -759,7 +753,8 @@ async fn fails_a_101_whose_connection_lists_upgrade_among_other_tokens() {
 
 async fn compares_a_refused_connect_and_its_retry() {
     let client = client();
-    let refused = settled(client.connect(&to(closed_port().await))).await;
+    let closed = closed_port().unwrap();
+    let refused = settled(client.connect(&to(closed.port()))).await;
 
     assert!(
         matches!(refused, Err(TransportError::Connect(_))),
@@ -779,7 +774,8 @@ async fn compares_a_refused_connect_and_its_retry() {
 #[tokio::test]
 async fn keeps_the_error_the_implementation_reported_as_the_connect_error_cause() {
     let client = client();
-    let refused = settled(client.connect(&to(closed_port().await))).await;
+    let closed = closed_port().unwrap();
+    let refused = settled(client.connect(&to(closed.port()))).await;
     let Err(TransportError::Connect(error)) = &refused else {
         panic!("a connect error: {refused:?}");
     };
@@ -1023,9 +1019,10 @@ async fn requests_the_path_its_pathname_names() {
 #[tokio::test]
 async fn asks_for_wss_when_secured() {
     let client = client();
+    let closed = closed_port().unwrap();
     let refused = settled(client.connect(&WebSocketTransportClientConnectOptions {
         secured: Some(true),
-        ..to(closed_port().await)
+        ..to(closed.port())
     }))
     .await;
 
@@ -2078,6 +2075,133 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
     }
 }
 
+// a client whose resolver answers 192.0.2.7 and records each name it is asked
+fn resolving_client(asked: &Arc<Mutex<Vec<String>>>) -> WebSocketTransportClient {
+    let runtime = platform::socket_runtime_of(None, "a test's client").unwrap();
+    let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+
+    WebSocketTransportClient::resolving(
+        (runtime, platform),
+        Some(crate::net::racing::recording(asked)),
+        &WebSocketTransportClientOptions::default(),
+    )
+    .unwrap()
+}
+
+// spec 13.4
+#[tokio::test]
+async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
+    let server = hearing(None).await;
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let client = resolving_client(&asked);
+
+    settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+        "bead-probe.localhost",
+        server.port,
+    )))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        server.heard.lock().unwrap()[0]
+            .headers()
+            .get("host")
+            .and_then(|host| host.to_str().ok())
+            .map(str::to_owned),
+        Some(format!("bead-probe.localhost:{}", server.port)),
+        "its name kept"
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+    client.dispose();
+}
+
+// spec 13.4
+#[tokio::test]
+async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let client = resolving_client(&asked);
+    let closed = closed_port().unwrap();
+    let failed = settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+        "bead-probe.localhost",
+        closed.port(),
+    )))
+    .await;
+
+    assert!(
+        matches!(&failed, Err(TransportError::Connect(error)) if error.message().contains("no resolver asked")),
+        "{failed:?}"
+    );
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
+
+// spec 13.4
+#[tokio::test]
+async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+ {
+    for host in ["127.0.0.1.", "127.1"] {
+        let server = hearing(None).await;
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked);
+
+        settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+            host,
+            server.port,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(
+            server.heard.lock().unwrap()[0]
+                .headers()
+                .get("host")
+                .and_then(|named| named.to_str().ok())
+                .map(str::to_owned),
+            Some(format!("127.0.0.1:{}", server.port)),
+            "{host}: named 127.0.0.1"
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{host}: none asked"
+        );
+        client.dispose();
+    }
+}
+
+// spec 13.4
+#[tokio::test]
+async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+ {
+    let server = hearing(None).await;
+
+    for host in ["foo.123", "x%20.localhost"] {
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let client = resolving_client(&asked);
+        let failed = settled(client.connect(&WebSocketTransportClientConnectOptions::new(
+            host,
+            server.port,
+        )))
+        .await;
+
+        assert!(
+            matches!(&failed, Err(TransportError::Connect(error)) if error.message() == format!("{host} is no host a URL can name")),
+            "{host}: {failed:?}"
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{host}: none asked"
+        );
+    }
+
+    crate::testing::rest(Duration::from_millis(50)).await;
+    assert_eq!(
+        server.accepted.load(Ordering::SeqCst),
+        0,
+        "no socket opened to its server"
+    );
+}
+
 // ── A raw server ─────────────────────────────────────────────────────────────────────────────
 
 /// A server that completes each upgrade by hand and hands the test its socket, raw: what goes
@@ -3075,6 +3199,7 @@ async fn rejects_while_a_connect_is_pending_and_that_connect_still_opens() {
 
 #[tokio::test]
 async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone() {
+    let refused = closed_port().unwrap();
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -3086,6 +3211,12 @@ async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_serve
     drop(server);
     drop(upgraded);
     closes_within(&recorder, 1).await;
+
+    // * the failed connect keeps a held destination for every reconnection attempt
+    assert!(matches!(
+        settled(client.connect(&to(refused.port()))).await,
+        Err(TransportError::Connect(_))
+    ));
 
     let failed = reconnected(&client, &reconnecting_by((Duration::from_millis(10), 2))).await;
     let Err(TransportError::Reconnect(error)) = &failed else {
@@ -4074,6 +4205,56 @@ impl ClientListener for PausingAtOnce {
     }
 }
 
+// spec 15.3 and 15.12; RFC 6455 §7.1.7
+#[tokio::test]
+async fn closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+ {
+    let mut server = raw().await;
+
+    // * a head RFC 6455 forbids right behind the message paused on, or behind a second one past
+    // 125 bytes, in one write: never resumed, it fails at once, the second never handed
+    for between in [Vec::new(), frame_of(0x2, &[0x78; 200])] {
+        let client = client_of(&WebSocketTransportClientOptions {
+            heartbeat: Some(NEVER),
+            ..WebSocketTransportClientOptions::default()
+        });
+        let recorder = recorded(&client);
+        let pausing = Arc::new(PausingAtOnce {
+            client: Mutex::new(Some(client.clone())),
+        });
+
+        client.listen(Arc::<PausingAtOnce>::clone(&pausing));
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+        let mut written = frame_of(0x2, &[1]);
+
+        written.extend(between);
+        written.extend(reserved_frame());
+        socket.write_all(&written).await.unwrap();
+
+        assert_eq!(close_code_from(&mut socket).await, Some(1002), "1002");
+        socket.shutdown().await.unwrap();
+        closes_within(&recorder, 1).await;
+
+        let told = told_of(&recorder);
+
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert!(
+            told[0].starts_with(
+                "error: the connection is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3"
+            ),
+            "{told:?}"
+        );
+        assert_eq!(
+            recorder.messages(),
+            [Bytes::from_static(&[1])],
+            "the message paused on alone"
+        );
+        pausing.client.lock().unwrap().take();
+    }
+}
+
 // spec 15.3 and 15.12
 #[tokio::test]
 async fn drops_a_connection_paused_past_twice_its_heartbeat_by_its_own_heartbeat_its_server_answering_every_ping()
@@ -4919,4 +5100,211 @@ async fn raises_no_message_for_what_comes_after_it_sent_its_close() {
     );
     assert_eq!(recorder.errors(), Vec::<String>::new(), "no error");
     assert_eq!(client.ready_state(), ReadyState::Closed);
+}
+
+// ── Its frame meter (decision 0056) ──────────────────────────────────────────────────────────
+
+// a head of a server's frame, unmasked: `fin`, `opcode`, and the length it announces
+fn head_announcing(opcode: u8, (fin, length): (bool, u64)) -> Vec<u8> {
+    let mut head = vec![if fin { 0x80 } else { 0 } | opcode];
+
+    if length < 126 {
+        head.push(u8::try_from(length).unwrap());
+    } else if let Ok(medium) = u16::try_from(length) {
+        head.push(126);
+        head.extend_from_slice(&medium.to_be_bytes());
+    } else {
+        head.push(127);
+        head.extend_from_slice(&length.to_be_bytes());
+    }
+
+    head
+}
+
+// a frame of a server's, not final: its opcode and its payload, under 126 bytes
+fn fragment_of(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mut frame = head_announcing(opcode, (false, u64::try_from(payload.len()).unwrap()));
+
+    frame.extend_from_slice(payload);
+    frame
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1009_at_its_head_without_waiting_for_its_payload_a_frame_that_would_take_its_message_past_maximum_message_bytes_a_continuation_among_them()
+ {
+    // its head alone, written with its 101 in one write, its payload never sent
+    let mut server = raw_writing(head_announcing(0x2, (true, 100_000))).await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_bytes: Some(1_024),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1009),
+        "1009 at its head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(
+        told_of(&recorder),
+        [
+            "error: the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes",
+            "close: false false"
+        ],
+        "one error, then its close"
+    );
+
+    // a continuation whose head takes its message past
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_bytes: Some(1_024),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut written = fragment_of(0x2, &[0; 100]);
+
+    written.extend(head_announcing(0x0, (true, 1_000)));
+    socket.write_all(&written).await.unwrap();
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1009),
+        "1009 at its head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(recorder.messages(), Vec::<Bytes>::new(), "nothing handed");
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1008_the_frame_past_maximum_message_frames_at_its_head_an_empty_frame_counting()
+{
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        maximum_message_frames: Some(3),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+    let mut whole = fragment_of(0x2, &[1]);
+
+    // three frames, a ping between them counting for none, are one message
+    whole.extend(fragment_of(0x0, &[]));
+    whole.extend(frame_of(0x9, b"beat"));
+    whole.extend(frame_of(0x0, &[2]));
+    socket.write_all(&whole).await.unwrap();
+
+    assert_eq!(
+        messages_within(&recorder, 1).await,
+        [Bytes::from_static(&[1, 2])],
+        "one message of three frames"
+    );
+
+    let mut past = fragment_of(0x2, &[1]);
+
+    past.extend(fragment_of(0x0, &[]));
+    past.extend(fragment_of(0x0, &[]));
+    past.extend(head_announcing(0x0, (true, 10)));
+    socket.write_all(&past).await.unwrap();
+
+    assert_eq!(
+        close_code_from(&mut socket).await,
+        Some(1008),
+        "1008 at the fourth frame's head"
+    );
+    socket.shutdown().await.unwrap();
+    closes_within(&recorder, 1).await;
+    assert_eq!(
+        told_of(&recorder),
+        [
+            "error: the connection is closed with 1008: a message past its maximumMessageFrames, 3 frames",
+            "close: false false"
+        ],
+        "one error, then its close"
+    );
+}
+
+// spec 15.3
+#[tokio::test]
+async fn fails_with_1002_a_frame_head_rfc_6455_forbids_before_its_platform_reads_it() {
+    let heads: [(&[u8], &str); 4] = [
+        (&[0xC2, 0x00], "a reserved bit set"),
+        (&[0x80, 0x00], "a continuation with no message under way"),
+        (&[0x82, 0x81, 1, 2, 3, 4, 5], "a masked frame"),
+        (
+            &[0x82, 0x7F, 0x80, 0, 0, 0, 0, 0, 0, 0],
+            "a 64-bit length with its top bit set",
+        ),
+    ];
+
+    for (head, why) in heads {
+        let mut server = raw().await;
+        let client = client();
+        let recorder = recorded(&client);
+
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+
+        socket.write_all(head).await.unwrap();
+
+        assert_eq!(
+            close_code_from(&mut socket).await,
+            Some(1002),
+            "{why}: 1002"
+        );
+        socket.shutdown().await.unwrap();
+        closes_within(&recorder, 1).await;
+        assert_eq!(
+            told_of(&recorder),
+            [
+                format!(
+                    "error: the connection is closed with 1002: a frame head RFC 6455 forbids, {why}"
+                ),
+                "close: false false".to_owned()
+            ],
+            "{why}: one error, then its close"
+        );
+    }
+}
+
+// spec 15.3
+#[tokio::test]
+async fn reads_a_message_of_frames_past_64_kib_whose_first_came_with_its_101() {
+    let payload = vec![0x2a_u8; 200_000];
+    let mut written = head_announcing(0x2, (true, 200_000));
+
+    written.extend_from_slice(&payload[..1_000]);
+
+    let mut server = raw_writing(written).await;
+    let client = client();
+    let recorder = recorded(&client);
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+
+    let mut socket = server.next().await;
+
+    socket.write_all(&payload[1_000..]).await.unwrap();
+
+    assert_eq!(
+        messages_within(&recorder, 1).await,
+        [Bytes::from(payload)],
+        "one message, as it was sent"
+    );
+    assert_eq!(recorder.errors(), Vec::<String>::new(), "no error");
 }

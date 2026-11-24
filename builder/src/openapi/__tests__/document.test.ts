@@ -56,6 +56,7 @@ const BESIDE_THE_FORM: Readonly<Record<string, string>> = Object.freeze({
 interface IStep {
   readonly on?: string;
   readonly send?: { readonly head: string };
+  readonly behind?: readonly { readonly head: string }[];
   readonly expect?: {
     readonly status: number;
     readonly fields?: Readonly<Record<string, string | null>>;
@@ -211,13 +212,27 @@ test("every JSON body spec/transcoding.json's exchanges answer is valid against 
   let checked = 0;
 
   for (const exchange of transcoding().exchanges) {
+    // * a socket's request lines in the order sent, a `behind`'s included: an expect of a status
+    // reads the next response on its socket, so it answers the next of them
+    const waiting = new Map<string, string[]>();
     const sent = new Map<string, string>();
 
     for (const step of exchange.steps) {
       const on = step.on ?? 'a';
+      const queue = waiting.get(on) ?? [];
+
+      waiting.set(on, queue);
 
       if (step.send !== undefined) {
-        sent.set(on, step.send.head.split('\r\n')[0] ?? '');
+        queue.push(step.send.head.split('\r\n')[0] ?? '');
+      }
+
+      for (const request of step.behind ?? []) {
+        queue.push(request.head.split('\r\n')[0] ?? '');
+      }
+
+      if (step.expect !== undefined && queue.length > 0) {
+        sent.set(on, queue.shift() ?? '');
       }
 
       const body = step.expect?.body;

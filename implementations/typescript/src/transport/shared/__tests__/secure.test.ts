@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { isLoopbackHost, isSecureUrl } from '../secure';
+import { isLoopbackHost, isSecureUrl, urlHostOf } from '../secure';
 
 // constants
 
@@ -14,6 +14,11 @@ const SECURE = [
   'ws://127.255.255.254',
   'ws://[::1]:8080',
   'ws://[0:0:0:0:0:0:0:1]',
+  // * a broker's URL, its host read as a special scheme's whatever its scheme (spec 13.4)
+  'mqtt://LOCALHOST:1883',
+  'amqp://127.1',
+  'mqtt://127.0.0.1.:1883',
+  'amqp://loc%61lhost',
 ];
 const IN_THE_CLEAR = [
   'ws://bead.example',
@@ -23,6 +28,9 @@ const IN_THE_CLEAR = [
   'ws://127.0.0.1.example',
   'ws://[::2]',
   'ws://[::ffff:127.0.0.1]',
+  'mqtt://bead.example',
+  'mqtt://foo.123',
+  'amqp://x%20.localhost',
 ];
 
 // a host, and what the parser reads it as: none where it fails; the C# side's port reads the rows
@@ -137,6 +145,7 @@ test.describe('the loopback host', () => {
       ['[::1]', true],
       ['localhost', true],
       ['localhost.', false],
+      ['a.localhost.', false],
       ['127.0.0.1 ', false],
       ['localhost ', false],
       ['[::1] ', false],
@@ -163,5 +172,15 @@ test.describe('the URL Standard’s host parser', () => {
         return [host, URL.parse(`http://${host}/`)?.hostname];
       })
     ).toEqual(PARSED_HOSTS);
+
+    // * read once, whatever the URL's scheme: an MQTT or AMQP URL's opaque host as an HTTP one's
+    for (const scheme of ['mqtt', 'amqps', 'ws']) {
+      expect(
+        PARSED_HOSTS.map(([host]) => {
+          return [host, urlHostOf(`${scheme}://${host}:1883/`)];
+        }),
+        scheme
+      ).toEqual(PARSED_HOSTS);
+    }
   });
 });

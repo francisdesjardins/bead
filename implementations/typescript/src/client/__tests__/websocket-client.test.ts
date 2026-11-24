@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { closedPort } from '../../transport/shared/__tests__/loopback-fixtures';
 import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import { WebSocketServer as WsServer } from 'ws';
 import { createWebSocketServer } from '../../server/websocket-server';
@@ -17,7 +18,7 @@ import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelo
 import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
 import { ReadyState } from '../../transport/shared/ready-state';
-import { CancelError, ProgrammerError } from '../../transport/shared/errors';
+import { CancelError, ConnectError, ProgrammerError } from '../../transport/shared/errors';
 import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
   createWebSocketClient,
@@ -150,7 +151,12 @@ test('createWebSocketClient takes a message of an envelope at most, more when th
       function (
         _url: string,
         _protocols: unknown,
-        options?: { closeTimeout?: number; maxPayload?: number; perMessageDeflate?: false }
+        options?: {
+          closeTimeout?: number;
+          maxFragments?: number;
+          maxPayload?: number;
+          perMessageDeflate?: false;
+        }
       ) {
         given.push(options);
 
@@ -168,7 +174,12 @@ test('createWebSocketClient takes a message of an envelope at most, more when th
     await connecting;
 
     expect(given).toEqual([
-      { closeTimeout: CLOSE_TIMEOUT, maxPayload: expected, perMessageDeflate: false },
+      {
+        closeTimeout: CLOSE_TIMEOUT,
+        maxFragments: 16_384,
+        maxPayload: expected,
+        perMessageDeflate: false,
+      },
     ]);
     await client[Symbol.asyncDispose]();
   }
@@ -340,14 +351,36 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       await other.connect({ host, port: portOf(server) });
       await stopServer(server);
 
+      await using refused = await closedPort();
+
+      for (const subject of [client, other]) {
+        await expect(
+          subject.connect({ host: '127.0.0.1', port: refused.port })
+        ).rejects.toBeInstanceOf(ConnectError);
+      }
+
+      const attempts: [number, number][] = [];
+      const waiting = Promise.withResolvers<void>();
+      const tap = (delay: number, attempt: number) => {
+        attempts.push([delay, attempt]);
+        if (attempts.length === 2) {
+          waiting.resolve();
+        }
+      };
+
       const controller = new AbortController();
-      const byDispose = expect(client.reconnect({ delay: 60_000 })).rejects.toBeInstanceOf(
+      const byDispose = expect(client.reconnect({ delay: 60_000, tap })).rejects.toBeInstanceOf(
         CancelError
       );
       const bySignal = expect(
-        other.reconnect({ delay: 60_000, signal: controller.signal })
+        other.reconnect({ delay: 60_000, signal: controller.signal, tap })
       ).rejects.toBeInstanceOf(CancelError);
 
+      await waiting.promise;
+      expect(attempts).toEqual([
+        [60_000, 1],
+        [60_000, 1],
+      ]);
       await client[Symbol.asyncDispose]();
       controller.abort();
       await byDispose;

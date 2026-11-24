@@ -337,11 +337,97 @@ impl ResponseReader {
     pub fn take_rest(&mut self) -> Vec<u8> {
         core::mem::take(&mut self.rest)
     }
+
+    // whether any octet of a response came to it
+    fn has_read(&self) -> bool {
+        self.head.is_some() || self.whole.is_some() || !self.pending.is_empty()
+    }
+}
+
+/// A reader of the responses one socket carries in turn, as requests pipelined on it bring them
+/// (RFC 9112 §9.3): each read by a reader of one response, what came past it read as the next.
+#[derive(Debug, Default)]
+pub struct ResponsesReader {
+    reader: ResponseReader,
+    whole: VecDeque<Response>,
+}
+
+impl ResponsesReader {
+    /// A reader that read nothing yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reads `bytes`, as they came after what it read before: each response whole set aside in its
+    /// order, a 101 kept by the reader of its own, what came past it for the protocol it switched to.
+    pub fn feed(&mut self, bytes: &[u8]) {
+        self.reader.feed(bytes);
+        self.settle();
+    }
+
+    // each response whole set aside, and what came past it read as the next
+    fn settle(&mut self) {
+        while let Some(response) = self.reader.response() {
+            if response.head.status == 101 {
+                return;
+            }
+
+            let response = response.clone();
+            let rest = self.reader.take_rest();
+
+            self.whole.push_back(response);
+            self.reader = ResponseReader::new();
+
+            if rest.is_empty() {
+                return;
+            }
+
+            self.reader.feed(&rest);
+        }
+    }
+
+    /// Reads that the stream ended: a body framed to its end is whole; any response cut short, and
+    /// the next one, which never comes, fail.
+    pub fn end(&mut self) {
+        self.reader.end();
+        self.settle();
+        self.reader.end();
+    }
+
+    /// The first response read whole and not taken yet.
+    #[must_use]
+    pub fn first(&self) -> Option<&Response> {
+        self.whole.front()
+    }
+
+    /// The first response read whole, taken from it.
+    pub fn take(&mut self) -> Option<Response> {
+        self.whole.pop_front()
+    }
+
+    /// The reader of the response it reads now, past those read whole.
+    #[must_use]
+    pub const fn reading(&self) -> &ResponseReader {
+        &self.reader
+    }
+
+    /// Whether octets came of a response not yet whole, past those read whole.
+    #[must_use]
+    pub fn is_amid(&self) -> bool {
+        self.reader.response().is_none() && self.reader.has_read()
+    }
+
+    /// What came past a 101, taken from it.
+    pub fn take_rest(&mut self) -> Vec<u8> {
+        self.reader.take_rest()
+    }
 }
 
 // ── WebSocket's frames ─────────────────────────────────────────────────────────────────────────
 
-/// A WebSocket frame, RFC 6455 §5.2: its opcode, whether it ends its message, and its payload.
+/// A WebSocket frame, RFC 6455 §5.2: its opcode, whether it ends its message, its payload, and the
+/// length its head announces where that is more than its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// Whether it ends its message.
@@ -350,6 +436,10 @@ pub struct Frame {
     pub opcode: u8,
     /// Its payload.
     pub payload: Vec<u8>,
+    /// The length its head announces past its payload, which is written alone after that head, as
+    /// a peer that sends a frame's head and leaves its payload to come does: its payload's when
+    /// none.
+    pub length: Option<u64>,
 }
 
 impl Frame {
@@ -360,6 +450,7 @@ impl Frame {
             fin: true,
             opcode,
             payload,
+            length: None,
         }
     }
 
@@ -370,10 +461,12 @@ impl Frame {
     }
 
     /// Its bytes as a client writes them, RFC 6455 §5.2: masked, its length in 7, 16 or 64 bits as
-    /// it needs.
+    /// it needs, the length its head announces, then its payload.
     #[must_use]
     pub fn masked(&self) -> Vec<u8> {
-        let length = self.payload.len();
+        let length = self.length.map_or(self.payload.len(), |length| {
+            usize::try_from(length).unwrap_or(usize::MAX)
+        });
         let mut frame = vec![if self.fin { 0x80 } else { 0 } | (self.opcode & 0x0F)];
 
         if let Ok(short) = u8::try_from(length)
@@ -497,6 +590,7 @@ impl FrameReader {
             fin: first & 0x80 != 0,
             opcode: first & 0x0F,
             payload,
+            length: None,
         })
     }
 
@@ -567,14 +661,58 @@ impl ExchangeOptions {
     }
 }
 
-// what came on an exchange's socket, as its reader keeps it
+// what came on an exchange's socket, as its readers keep it: its responses in turn, those a step
+// read past before they came whole counted, to be dropped as they do
 #[derive(Debug, Default)]
 struct Read {
-    reader: ResponseReader,
+    responses: ResponsesReader,
+    passed: usize,
     frames: Option<FrameReader>,
     heard: VecDeque<Heard>,
     has_closed: bool,
     has_ended: bool,
+}
+
+impl Read {
+    // the responses a step read past before they came whole, dropped as they do
+    fn drop_passed(&mut self) {
+        while self.passed > 0 && self.responses.take().is_some() {
+            self.passed = self.passed.saturating_sub(1);
+        }
+    }
+
+    // the response a step reads now: the first whole, or the one coming, unless a step read past it
+    fn head(&self) -> Option<Result<ResponseHead, String>> {
+        if let Some(response) = self.responses.first() {
+            return Some(Ok(response.head.clone()));
+        }
+
+        let reading = self.responses.reading();
+
+        if self.passed == 0
+            && let Some(head) = reading.head()
+        {
+            return Some(Ok(head.clone()));
+        }
+
+        reading.failed().map(|failed| Err(failed.to_owned()))
+    }
+
+    fn response(&self) -> Option<Result<Response, String>> {
+        if let Some(response) = self.responses.first() {
+            return Some(Ok(response.clone()));
+        }
+
+        let reading = self.responses.reading();
+
+        if self.passed == 0
+            && let Some(response) = reading.response()
+        {
+            return Some(Ok(response.clone()));
+        }
+
+        reading.failed().map(|failed| Err(failed.to_owned()))
+    }
 }
 
 #[derive(Debug)]
@@ -592,15 +730,17 @@ impl Shared {
         let mut read = locked(&self.read);
 
         if read.frames.is_none() {
-            read.reader.feed(bytes);
+            read.responses.feed(bytes);
+            read.drop_passed();
 
             let is_upgraded = read
-                .reader
+                .responses
+                .reading()
                 .response()
                 .is_some_and(|response| response.head.status == 101);
 
             if is_upgraded {
-                let rest = read.reader.take_rest();
+                let rest = read.responses.take_rest();
 
                 read.frames = Some(FrameReader::new());
                 answers = hear(&mut read, (&rest, self.answers_pings));
@@ -617,7 +757,8 @@ impl Shared {
     fn end(&self) {
         let mut read = locked(&self.read);
 
-        read.reader.end();
+        read.responses.end();
+        read.drop_passed();
 
         if !read.has_ended {
             read.has_ended = true;
@@ -626,10 +767,14 @@ impl Shared {
     }
 
     async fn write(&self, frames: &[Frame]) -> io::Result<()> {
-        let bytes: Vec<u8> = frames.iter().flat_map(Frame::masked).collect();
+        self.write_bytes(&frames.iter().flat_map(Frame::masked).collect::<Vec<u8>>())
+            .await
+    }
+
+    async fn write_bytes(&self, bytes: &[u8]) -> io::Result<()> {
         let mut writer = self.writer.lock().await;
         let written = match writer.as_mut() {
-            Some(writer) => writer.write_all(&bytes).await,
+            Some(writer) => writer.write_all(bytes).await,
             None => Err(io::Error::from(io::ErrorKind::NotConnected)),
         };
 
@@ -700,12 +845,22 @@ async fn read_on(shared: Arc<Shared>, mut socket: OwnedReadHalf) {
     shared.writer.lock().await.take();
 }
 
-/// One exchange: its socket, its response as it comes, and, once answered 101, its WebSocket.
+// the task that writes what a step writes behind an exchange's request, each in its order, and
+// where it takes it
+#[derive(Debug)]
+struct Behind {
+    sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    writing: tokio::task::JoinHandle<()>,
+}
+
+/// One exchange: its socket, its responses in turn as they come, and, once answered 101, its
+/// WebSocket.
 #[derive(Debug)]
 pub struct Exchange {
     shared: Arc<Shared>,
     local_port: u16,
     reading: tokio::task::JoinHandle<()>,
+    behind: Mutex<Option<Behind>>,
 }
 
 impl Exchange {
@@ -734,6 +889,7 @@ impl Exchange {
             shared,
             local_port,
             reading,
+            behind: Mutex::new(None),
         })
     }
 
@@ -769,51 +925,94 @@ impl Exchange {
         patience(within, waiting).await.ok()
     }
 
-    /// Its response's head, once read within `within`; or why none came: a stream that ended
-    /// before it, what could not be read, or nothing in time.
+    /// Its response's head, once read within `within`, the first its socket carries that it did
+    /// not read past; or why none came: a stream that ended before it, what could not be read, or
+    /// nothing in time.
     ///
     /// # Errors
     ///
     /// Why no head came.
     pub async fn head(&self, within: Duration) -> Result<ResponseHead, String> {
-        self.until((
-            |read: &mut Read| {
-                read.reader
-                    .head()
-                    .cloned()
-                    .map(Ok)
-                    .or_else(|| read.reader.failed().map(|failed| Err(failed.to_owned())))
-            },
-            within,
-        ))
-        .await
-        .unwrap_or_else(|| Err(format!("no head within {} ms", within.as_millis())))
+        self.until((|read: &mut Read| read.head(), within))
+            .await
+            .unwrap_or_else(|| Err(format!("no head within {} ms", within.as_millis())))
     }
 
-    /// Its response whole, once read within `within`.
+    /// Its response whole, once read within `within`, the first its socket carries that it did not
+    /// read past.
     ///
     /// # Errors
     ///
     /// Why no response came whole.
     pub async fn response(&self, within: Duration) -> Result<Response, String> {
-        self.until((
-            |read: &mut Read| {
-                read.reader
-                    .response()
-                    .cloned()
-                    .map(Ok)
-                    .or_else(|| read.reader.failed().map(|failed| Err(failed.to_owned())))
-            },
-            within,
-        ))
-        .await
-        .unwrap_or_else(|| Err(format!("no response within {} ms", within.as_millis())))
+        self.until((|read: &mut Read| read.response(), within))
+            .await
+            .unwrap_or_else(|| Err(format!("no response within {} ms", within.as_millis())))
+    }
+
+    /// Reads past its response, so that its head and its response are those of the next its socket
+    /// carries, as a request pipelined behind brings it (RFC 9112 §9.3); one not yet whole is
+    /// dropped as it comes whole. On a WebSocket, nothing.
+    pub fn pass(&self) {
+        let mut read = locked(&self.shared.read);
+
+        if read.frames.is_none() && read.responses.take().is_none() {
+            read.passed = read.passed.saturating_add(1);
+        }
+    }
+
+    /// What came on its socket past the responses it read: none on a WebSocket, or where nothing
+    /// did.
+    #[must_use]
+    pub fn came_past(&self) -> Option<String> {
+        let read = locked(&self.shared.read);
+
+        if read.frames.is_some() {
+            return None;
+        }
+
+        if let Some(response) = read.responses.first() {
+            return Some(format!(
+                "a response {} past those read",
+                response.head.status
+            ));
+        }
+
+        (read.passed == 0 && read.responses.is_amid())
+            .then(|| "a response's octets past those read".to_owned())
     }
 
     /// Whether its stream ended before any status line: the exchange is lost.
     #[must_use]
     pub fn is_lost(&self) -> bool {
-        locked(&self.shared.read).reader.is_lost()
+        let read = locked(&self.shared.read);
+
+        read.responses.first().is_none() && read.responses.reading().is_lost()
+    }
+
+    /// Writes `bytes` on its socket behind what it carried, as requests pipelined behind its own:
+    /// from a task of its own, which writes each in its order, and never awaited, so that a socket
+    /// its server reads no further does not hold the caller; a write refused is no failure, since
+    /// its server may have ended its side.
+    pub fn write_behind(&self, bytes: Vec<u8>) {
+        let mut behind = locked(&self.behind);
+
+        behind
+            .get_or_insert_with(|| {
+                let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+                let shared = Arc::clone(&self.shared);
+                let writing = spawn(async move {
+                    while let Some(bytes) = receiver.recv().await {
+                        shared.write_bytes(&bytes).await.ok();
+                    }
+                });
+
+                Behind { sender, writing }
+            })
+            .sender
+            .send(bytes)
+            .ok();
+        drop(behind);
     }
 
     /// The next thing its server sends on its WebSocket, or none within `within`.
@@ -835,12 +1034,29 @@ impl Exchange {
         self.shared.write(frames).await
     }
 
+    // stops what it writes behind its request
+    fn stop_behind(&self) {
+        let behind = locked(&self.behind).take();
+
+        if let Some(behind) = behind {
+            behind.writing.abort();
+        }
+    }
+
     /// Ends its socket at once.
     pub fn destroy(&self) {
         self.reading.abort();
+        self.stop_behind();
 
         if let Ok(mut writer) = self.shared.writer.try_lock() {
             writer.take();
+        } else {
+            // ! a write behind holds its writer until its task, aborted, lets it go
+            let shared = Arc::clone(&self.shared);
+
+            drop(spawn(async move {
+                shared.writer.lock().await.take();
+            }));
         }
     }
 }
@@ -848,5 +1064,6 @@ impl Exchange {
 impl Drop for Exchange {
     fn drop(&mut self) {
         self.reading.abort();
+        self.stop_behind();
     }
 }

@@ -9,7 +9,9 @@
   credential a WebSocket's upgrade carries, and a client that follows no redirect,
   [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)'s;
   an access refused, told,
-  [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s.
+  [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s; a client's connect of
+  the loopback's names,
+  [0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)'s.
 
 ## Context
 
@@ -336,7 +338,11 @@ cannot tell. A server's transport judges a connection by what it listens on, unl
 says what stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy that
 serves the network in the clear, believed whatever it listens on. A host is on the loopback as the
 WHATWG URL Standard's host parser reads it, the one by which Secure Contexts judges an origin, on
-every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not.
+every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not. A client connects a
+host it judges on the loopback to the loopback itself, through no proxy, and asks no resolver for a
+localhost name, on every dialer it owns; over one it does not own, its application's, a page's or
+its platform's own, it judges the host by its name
+([0054](0054-a-client-connects-the-loopbacks-names-to-the-loopback-itself-through-no-resolver-and-no-proxy.md)).
 
 **A client certificate authenticates the TLS peer, and a credential the call.** A client's
 certificate authenticates it to whatever terminates TLS (RFC 8446 §4.3.2, §4.4.2), and the

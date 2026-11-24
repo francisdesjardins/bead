@@ -898,7 +898,6 @@
   IJsonForm	src/transcoding/json-form.ts
   IJsonPlace	src/transcoding/json-form.ts
   IJsonToken	src/transcoding/json-form.ts
-  IOwnProblemOptions	src/transcoding/problems.ts
   IProblem	src/transcoding/problems.ts
   IProblemOptions	src/transcoding/problems.ts
   IProblemRoute	src/transcoding/problems.ts
@@ -1192,10 +1191,12 @@
   IWebSocketTransportClientConnectOptions	src/transport/client/types.ts
   IWebSocketTransportClientOptions	src/transport/client/types.ts
   MAXIMUM_MESSAGE_BYTES	src/transport/client/websocket-transport-client.ts
+  MAXIMUM_MESSAGE_FRAMES	src/transport/server/server-bounds.ts
   TRANSPORT_WEBSOCKET_BINARYTYPE	src/transport/shared/constants.ts
   WebSocketTransportClient	src/transport/client/types.ts
   createWebSocketTransportClient	src/transport/client/websocket-transport-client.ts
 ./websocket-transport-server
+  BODY_GRACE_PERIOD	src/transport/server/server-bounds.ts
   CLOSE_TIMEOUT	src/transport/shared/constants.ts
   HEADERS_TIMEOUT	src/transport/server/server-bounds.ts
   HEARTBEAT	src/transport/shared/heartbeat.ts
@@ -1211,7 +1212,10 @@
   MAXIMUM_CONNECTIONS	src/transport/server/server-bounds.ts
   MAXIMUM_CONNECTIONS_PER_ADDRESS	src/transport/server/server-bounds.ts
   MAXIMUM_MESSAGE_BYTES	src/transport/server/websocket-transport-server.ts
+  MAXIMUM_MESSAGE_FRAMES	src/transport/server/server-bounds.ts
   MAXIMUM_UNSENT_BYTES	src/transport/server/websocket-transport-server.ts
+  MESSAGE_BYTES_BUDGET	src/transport/server/server-bounds.ts
+  MINIMUM_BODY_BYTES_PER_SECOND	src/transport/server/server-bounds.ts
   MINIMUM_SEND_BYTES_PER_SECOND	src/transport/server/server-bounds.ts
   ORIGIN_REFUSAL	src/transport/server/hosts-and-origins.ts
   SEND_GRACE_PERIOD	src/transport/server/server-bounds.ts
@@ -2899,9 +2903,6 @@ src/transcoding/problems.ts ICallFailure
     readonly encoding?: Encoding | undefined
     readonly place?: RequestPlace | undefined
     readonly scope: 'application' | 'protocol'
-src/transcoding/problems.ts IOwnProblemOptions
-  interface IOwnProblemOptions
-    readonly challenge?: string | undefined
 src/transcoding/problems.ts IProblem
   interface IProblem
     readonly body: string
@@ -2919,7 +2920,7 @@ src/transcoding/problems.ts IProblemRoute
     readonly request: DescMessage
     readonly variables: readonly string[]
 src/transcoding/problems.ts OwnFailure
-  type OwnFailure = 'closed' | 'failed' | 'jwt' | 'scheme' | 'timeout' | 'unwritable'
+  type OwnFailure = 'closed' | 'failed' | 'jwt' | 'timeout' | 'unwritable'
 src/transcoding/problems.ts PROBLEM_MEDIA_TYPE
   const PROBLEM_MEDIA_TYPE: "application/problem+json"
 src/transcoding/problems.ts PROTOCOL_TYPES
@@ -2929,7 +2930,7 @@ src/transcoding/problems.ts STATUS_PHRASES
 src/transcoding/problems.ts problemOfFailure
   const problemOfFailure(failure: ICallFailure, options: IProblemOptions = {}): IProblem
 src/transcoding/problems.ts problemOfOwn
-  const problemOfOwn(own: OwnFailure, detail: string, {challenge = DEFAULT_CHALLENGE}: IOwnProblemOptions = {}): IProblem
+  const problemOfOwn(own: OwnFailure, detail: string): IProblem
 src/transcoding/problems.ts problemOfRefusal
   const problemOfRefusal(status: number, detail: string): IProblem
 src/transcoding/routes.ts GENERATED_CODE_SUPPORTS_VERSION_5
@@ -3222,7 +3223,7 @@ src/transport/client/types.ts IUpgradeResponseLike
     resume?(): unknown
 src/transport/client/types.ts IWebSocketConstructor
   interface IWebSocketConstructor
-    new (url: string, protocols?: string | string[], options?: {ca?: string; cert?: string; closeTimeout?: number; headers?: Record<string, string>; key?: string; maxPayload?: number; perMessageDeflate?: false}): IWebSocketLike
+    new (url: string, protocols?: string | string[], options?: {ca?: string; cert?: string; closeTimeout?: number; headers?: Record<string, string>; key?: string; maxFragments?: number; maxPayload?: number; perMessageDeflate?: false}): IWebSocketLike
     readonly CONNECTING: number
     readonly OPEN: number
 src/transport/client/types.ts IWebSocketLike
@@ -3261,6 +3262,7 @@ src/transport/client/types.ts IWebSocketTransportClientOptions
     closeTimeout?: number | undefined
     heartbeat?: number | undefined
     maxPayload?: number | undefined
+    maximumMessageFrames?: number | undefined
     tls?: ITlsOptions | undefined
     WebSocket?: IWebSocketConstructor | undefined
     clock?: IClock | undefined
@@ -3406,12 +3408,20 @@ src/transport/server/memory-transport-server.ts START_DEFAULTS
   const START_DEFAULTS: Readonly<{address: string; findOpenPort: false; port: number}>
 src/transport/server/memory-transport-server.ts createMemoryTransportServer
   const createMemoryTransportServer(options?: IMemoryTransportServerOptions): MemoryTransportServer
+src/transport/server/server-bounds.ts BODY_GRACE_PERIOD
+  const BODY_GRACE_PERIOD: 5000
 src/transport/server/server-bounds.ts HEADERS_TIMEOUT
   const HEADERS_TIMEOUT: 30000
 src/transport/server/server-bounds.ts MAXIMUM_CONNECTIONS
   const MAXIMUM_CONNECTIONS: 10000
 src/transport/server/server-bounds.ts MAXIMUM_CONNECTIONS_PER_ADDRESS
   const MAXIMUM_CONNECTIONS_PER_ADDRESS: 64
+src/transport/server/server-bounds.ts MAXIMUM_MESSAGE_FRAMES
+  const MAXIMUM_MESSAGE_FRAMES: 16384
+src/transport/server/server-bounds.ts MESSAGE_BYTES_BUDGET
+  const MESSAGE_BYTES_BUDGET: 268435456
+src/transport/server/server-bounds.ts MINIMUM_BODY_BYTES_PER_SECOND
+  const MINIMUM_BODY_BYTES_PER_SECOND: 240
 src/transport/server/server-bounds.ts MINIMUM_SEND_BYTES_PER_SECOND
   const MINIMUM_SEND_BYTES_PER_SECOND: 240
 src/transport/server/server-bounds.ts SEND_GRACE_PERIOD
@@ -3535,7 +3545,7 @@ src/transport/server/types.ts IIncomingMessageLike
     readonly httpVersion: string
     readonly method?: string | undefined
     readonly rawHeaders: readonly string[]
-    readonly socket: {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined; on?(event: 'data', listener: () => void): unknown}
+    readonly socket: {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined; readonly writableLength?: number | undefined; end?(): unknown; listeners?(event: 'data'): unknown[]; on?(event: 'data', listener: (chunk: Uint8Array) => void): unknown; removeListener?(event: 'data', listener: (chunk: Uint8Array) => void): unknown; resume?(): unknown}
     readonly url?: string | undefined
 src/transport/server/types.ts IJoinableTransportServer
   interface IJoinableTransportServer
@@ -3698,7 +3708,7 @@ src/transport/server/types.ts IUpgradeSocketLike
     once(event: 'finish', listener: () => void): unknown
 src/transport/server/types.ts IWebSocketServerConstructor
   interface IWebSocketServerConstructor
-    new (options: {closeTimeout?: number | undefined; handleProtocols: () => false; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
+    new (options: {closeTimeout?: number | undefined; handleProtocols: () => false; maxFragments?: number | undefined; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
 src/transport/server/types.ts IWebSocketServerLike
   interface IWebSocketServerLike
     address(): {address: string; port: number} | string | null
@@ -3710,14 +3720,18 @@ src/transport/server/types.ts IWebSocketServerLike
 src/transport/server/types.ts IWebSocketTransportServerOptions
   interface IWebSocketTransportServerOptions extends ITransportServerOptions
     binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
+    bodyGracePeriod?: number | undefined
     closeTimeout?: number | undefined
     headersTimeout?: number | undefined
     heartbeat?: number | undefined
     hosts?: readonly string[] | undefined
     maxPayload?: number | undefined
+    maximumMessageFrames?: number | undefined
     maximumConnections?: number | undefined
     maximumConnectionsPerAddress?: number | undefined
     maximumUnsentBytes?: number | undefined
+    messageBytesBudget?: number | undefined
+    minimumBodyBytesPerSecond?: number | undefined
     minimumSendBytesPerSecond?: number | undefined
     origins?: readonly string[] | undefined
     secure?: boolean | undefined

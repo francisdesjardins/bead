@@ -10,8 +10,11 @@ public sealed record HttpTransportClientOptions
 {
     /// <summary>
     /// What its exchanges go through; a handler of its own when none, which follows no redirect and
-    /// races the address families of a name (RFC 8305), as Node's and a browser's do. One given
-    /// keeps its own behaviour, and follows no redirect: an <see cref="HttpClientHandler"/> or a
+    /// races the address families of a name (RFC 8305), as Node's and a browser's do, and connects
+    /// a host on the loopback to the loopback itself, through no proxy, a localhost name asking no
+    /// resolver (spec 13.4). One given keeps its own behaviour, its connect and its proxy among it,
+    /// so a localhost name is judged by the name alone, wherever its resolver sends it, and follows
+    /// no redirect: an <see cref="HttpClientHandler"/> or a
     /// <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s given,
     /// whose <c>AllowAutoRedirect</c> is true is refused as the client is built; an answer from
     /// another URL than the one asked fails the connect, and loses the connection of a send or a
@@ -307,8 +310,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
     /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
-    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, and with a
+    /// <see cref="ConnectException"/> for a host the URL Standard's host parser fails on, before any
+    /// socket opens, each of which leaves the state, and the target a reconnection replays, as they
+    /// were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
     /// Then it throws a <see cref="TimeoutException"/> past its timeout, an
@@ -642,11 +647,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return readyState.ToString().ToLowerInvariant();
     }
 
-    // http://host:port/pathname, or https://; an IPv6 literal bracketed, or its colons would read as
-    // the port's
+    // http://host:port/pathname, or https://, its host read once as the URL Standard reads it, an
+    // IPv6 literal bracketed (spec 13.4): one that parser fails on is a ConnectException, before any
+    // socket opens
     private static Uri UriOf(HttpTransportClientConnectOptions options)
     {
-        var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
+        string host;
+
+        try
+        {
+            host = TransportSecurity.DialedHost(options.Host);
+        }
+        catch (ArgumentException reason)
+        {
+            throw new ConnectException(reason.Message, reason);
+        }
+
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");
@@ -717,8 +733,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // its own handler races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn, and speaks its TLS, whose credentials `tls` hands back
-    // to be let go of with the HTTP client
+    // platform's tries each address in turn, connects a host on the loopback to the loopback itself
+    // through no proxy, and speaks its TLS, whose credentials `tls` hands back to be let go of with
+    // the HTTP client
     private HttpClient NewHttp(out TlsCredentials? tls)
     {
         tls = null;
@@ -728,7 +745,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
         }
 
-        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback };
+        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
 
         if (_options.Tls is { } given)
         {

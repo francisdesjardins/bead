@@ -7,6 +7,7 @@ use super::*;
 use crate::clock::SharedClock;
 use crate::errors::{ResolverError, TransportError};
 use crate::testing::SteppingClock;
+use crate::testing::closed_port::closed_port;
 use crate::transport::{
     ClientListener, ReadyState, RouterClientTransport, TransportClientDisconnectOptions,
     TransportClientReconnectDelay, TransportClientReconnectOptions,
@@ -392,18 +393,45 @@ async fn a_dispose_cancels_a_reconnection_under_way_and_a_token_given_still_canc
     let client = served.connected().await;
     let other = served.connected().await;
     let signal = CancellationToken::new();
+    let (failed, mut waiting) = tokio::sync::mpsc::unbounded_channel();
     let reconnecting = TransportClientReconnectOptions {
         delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
             60,
         ))),
+        tap: Some(Arc::new(move |delay, attempt| {
+            failed.send((delay, attempt)).expect("a waiting test");
+        })),
         ..TransportClientReconnectOptions::default()
     };
 
-    // nothing listens any more: each attempt fails, then waits a minute
+    for subject in [&client, &other] {
+        patience(
+            PATIENCE,
+            subject
+                .disconnect(&TransportClientDisconnectOptions::default())
+                .expect("open"),
+        )
+        .await
+        .expect("closed in time");
+    }
+
+    // each attempt targets a held port, then waits a minute
     patience(PATIENCE, served.server.dispose())
         .await
         .expect("in time")
         .expect("stopped");
+
+    let refused = closed_port().expect("a held port");
+    let target = HttpTransportClientConnectOptions::new("127.0.0.1", refused.port());
+
+    for subject in [&client, &other] {
+        assert!(matches!(
+            patience(PATIENCE, subject.connect(&target))
+                .await
+                .expect("in time"),
+            Err(TransportError::Connect(_))
+        ));
+    }
 
     let by_dispose = client.reconnect(&reconnecting).expect("reconnecting");
     let by_signal = other
@@ -412,6 +440,14 @@ async fn a_dispose_cancels_a_reconnection_under_way_and_a_token_given_still_canc
             ..reconnecting.clone()
         })
         .expect("reconnecting");
+
+    for _ in 0..2 {
+        assert_eq!(
+            patience(PATIENCE, waiting.recv()).await.expect("in time"),
+            Some((Duration::from_secs(60), 1)),
+            "waiting after its first failed attempt"
+        );
+    }
 
     client.dispose().await;
     signal.cancel();

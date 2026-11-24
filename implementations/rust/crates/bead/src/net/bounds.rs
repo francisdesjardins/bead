@@ -23,6 +23,15 @@ pub const SEND_GRACE_PERIOD: Duration = Duration::from_secs(5);
 /// How long, by default, a request's head may take to come whole: 30 seconds (spec 15.12).
 pub const HEADERS_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// What a WebSocket server holds by default of messages partway, across its connections: every
+/// byte their frames bring and 128 a frame (spec 15.12).
+#[cfg(feature = "websocket")]
+pub const MESSAGE_BYTES_BUDGET: u64 = 268_435_456;
+
+/// The frames one WebSocket message may have by default, on every side (spec 15.3).
+#[cfg(feature = "websocket")]
+pub const MAXIMUM_MESSAGE_FRAMES: u64 = 16_384;
+
 /// How long a socket closed in stages reads on and drops what still comes once its answer is
 /// written, unless its client closes first: 2 seconds, as Apache httpd lingers (RFC 9112 §9.6).
 pub(crate) const LINGER: Duration = Duration::from_secs(2);

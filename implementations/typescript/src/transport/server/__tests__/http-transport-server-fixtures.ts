@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { connect as connectTcp } from 'node:net';
+import { connect as connectTcp, type Socket } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { expect } from '@playwright/test';
 import {
   AFTER_HEADER,
@@ -358,6 +359,75 @@ export const refusalsOf = (server: HTTPTransportServer) => {
 /** The port of a transport's URL. */
 export const portOf = (url: string): number => {
   return Number(new URL(url).port);
+};
+
+/**
+ * The most octets a server may take of requests pipelined behind an answer it holds, before its
+ * read stops: 64 MiB, far past what any side holds and the host's buffers take, as the C# and Rust
+ * twins write it.
+ */
+export const MOST_TAKEN = 64 * 1024 * 1024;
+
+/**
+ * Writes `batch` on `socket` again and again until a write is not taken within a second, or
+ * {@link MOST_TAKEN} octets were: the octets taken, those of each write whose callback came, counted
+ * on as later callbacks come.
+ */
+export const takenUntilStalled = async (
+  socket: Socket,
+  batch: string
+): Promise<{ readonly octets: number }> => {
+  const taken = { octets: 0 };
+
+  while (taken.octets < MOST_TAKEN) {
+    const isTaken = socket.write(batch, 'latin1', (error) => {
+      taken.octets += error === undefined || error === null ? batch.length : 0;
+    });
+
+    if (!isTaken) {
+      // * a server that stopped reading leaves a full buffer that never drains
+      const isDrained = await Promise.race([
+        once(socket, 'drain').then(
+          () => {
+            return true;
+          },
+          () => {
+            return false;
+          }
+        ),
+        sleep(1_000).then(() => {
+          return false;
+        }),
+      ]);
+
+      if (!isDrained) {
+        break;
+      }
+    }
+  }
+
+  return taken;
+};
+
+/**
+ * Settles once the process's event loop is free again, three timers of 10 ms in a row each coming
+ * within 20 ms of due: a server in the same process has then caught up with what it read, and what
+ * it did of it reached its peer.
+ */
+export const settled = async (): Promise<void> => {
+  for (let free = 0; free < 3;) {
+    const before = performance.now();
+
+    await sleep(10);
+    free = performance.now() - before < 30 ? free + 1 : 0;
+  }
+};
+
+/** The statuses of the responses in `text`, in their order. */
+export const statusesOf = (text: string): string[] => {
+  return [...text.matchAll(/HTTP\/1\.1 (\d{3}) /gu)].map(([, status]) => {
+    return status ?? '';
+  });
 };
 
 /** A raw socket on `port`, what it reads kept as text, and whether it closed. */

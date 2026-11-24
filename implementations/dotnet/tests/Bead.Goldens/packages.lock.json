@@ -20,15 +20,15 @@
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.16.0, )",
+          "Bead.Core": "[0.17.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       },
       "bead.transcoding": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.16.0, )",
-          "Bead.Protobuf": "[0.16.0, )",
+          "Bead.Core": "[0.17.0, )",
+          "Bead.Protobuf": "[0.17.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       }

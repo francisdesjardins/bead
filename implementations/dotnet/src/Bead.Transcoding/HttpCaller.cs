@@ -11,7 +11,12 @@ namespace Bead.Transcoding;
 /// <summary>A generated HTTP client's handler, default authorization and body bound.</summary>
 public sealed record HttpCallerOptions
 {
-    /// <summary>Its HTTP handler, which follows no redirect; a handler of its own when none.</summary>
+    /// <summary>
+    /// Its HTTP handler, which follows no redirect; a handler of its own when none, which connects a
+    /// host on the loopback to the loopback itself, through no proxy, a localhost name asking no
+    /// resolver (spec 13.4). One given keeps its own connect and proxy, so a localhost name is judged
+    /// by the name alone, wherever its resolver sends it.
+    /// </summary>
     public HttpMessageHandler? Handler { get; init; }
 
     /// <summary>The Authorization field every call presents unless it gives its own or omits it.</summary>
@@ -75,6 +80,8 @@ public sealed record HttpEvent<TResult, TNotification>
 /// </summary>
 public sealed class HttpCaller : IDisposable
 {
+    private const string UrlRefused = "an HTTP client URL uses HTTP or HTTPS without user information, query or fragment";
+
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private readonly HttpClient _http;
     private readonly Uri _url;
@@ -89,7 +96,20 @@ public sealed class HttpCaller : IDisposable
 
         if (!url.IsAbsoluteUri || (url.Scheme != "http" && url.Scheme != "https") || url.UserInfo.Length != 0 || url.Query.Length != 0 || url.Fragment.Length != 0)
         {
-            throw new ArgumentException("an HTTP client URL uses HTTP or HTTPS without user information, query or fragment", nameof(url));
+            throw new ArgumentException(UrlRefused, nameof(url));
+        }
+
+        // * its host read once, as the URL Standard reads it (spec 13.4): judged, dialed and named as
+        // read, one that parser fails on refused as it is built, in the words of any URL it refuses
+        string host;
+
+        try
+        {
+            host = TransportSecurity.DialedHost(url.Host);
+        }
+        catch (ArgumentException)
+        {
+            throw new ArgumentException(UrlRefused, nameof(url));
         }
 
         _options = options ?? new HttpCallerOptions();
@@ -99,10 +119,10 @@ public sealed class HttpCaller : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options), "maximumBodyBytes is a whole number above 0");
         }
 
-        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback };
+        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
         HttpRedirects.AssertHandler(handler, nameof(options));
 
-        _url = url;
+        _url = new UriBuilder(url) { Host = host }.Uri;
         _http = new HttpClient(handler, disposeHandler: _options.Handler is null) { Timeout = Timeout.InfiniteTimeSpan };
         _form = new JsonForm(routes.SelectMany((route) =>
         {
