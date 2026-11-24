@@ -4206,6 +4206,31 @@ public sealed partial class HttpTransportClientTests
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_connect_threw_when_the_server_is_gone()
     {
+        await using var started = await Started.Start();
+        await using var client = new HttpTransportClient();
+        var offered = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reentered = false;
+        client.Close += (_, _) =>
+        {
+            if (!reentered)
+            {
+                reentered = true;
+                offered.TrySetResult(client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            }
+        };
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
+        await Eventually(() => { return started.Server.Gauges().Counts["listens"] == 1; });
+        await started.Server.Stop().WaitAsync(Patience, Cancelled);
+        var reconnecting = await offered.Task.WaitAsync(Patience, Cancelled);
+        var failure = await Assert.ThrowsAsync<ReconnectException>(() => { return reconnecting.WaitAsync(Patience, Cancelled); });
+
+        Assert.IsType<HttpRequestException>(failure.InnerException);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone()
+    {
         using var refused = new ClosedPort();
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient();
