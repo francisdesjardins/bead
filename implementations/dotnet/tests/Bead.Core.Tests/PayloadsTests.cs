@@ -44,6 +44,50 @@ public sealed class PayloadsTests
     // definition
 
     [Fact]
+    public void Builds_a_payload_whose_name_holds_an_escape_as_JSON_parse_builds_one_a_member_named_proto_its_own()
+    {
+        var text = """{"__prot\u006f__":{"a":[1,-0,1E2,"\n",true,null]},"2":false,"1":0}""";
+        var read = PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+
+        Assert.True(read.TryGetProperty("__proto__", out _));
+        Assert.Equal(["1", "2", "__proto__"], NamesOf(text));
+        Assert.Equal(
+            """{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\n",true,null]}}""",
+            Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(read).Span));
+    }
+
+    [Fact]
+    public void Writes_an_object_of_no_prototype_and_a_member_named_proto_as_a_member()
+    {
+        var value = JsonElement.Parse("""{"b":true,"__proto__":"x"}""");
+
+        Assert.Equal("""{"__proto__":"x","b":true}""", Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(value).Span));
+    }
+
+    [Fact]
+    public void Refuses_a_value_nested_deeper_than_64_a_cycle_among_them()
+    {
+        foreach (var depth in new[] { 64, 65 })
+        {
+            var text = new string('[', depth) + "1" + new string(']', depth);
+            using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 65 });
+
+            if (depth == 64)
+            {
+                Assert.Equal(text, Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(document.RootElement).Span));
+            }
+            else
+            {
+                Assert.Equal("nested past 64", RefusalOf(() =>
+                {
+                    return PayloadCodecs.Json.Encode(document.RootElement);
+                }));
+            }
+        }
+    }
+
+
+    [Fact]
     public void Refuses_a_string_never_closed_as_not_JSON_its_scan_bounded_by_the_text()
     {
         Assert.Equal("not JSON", RefusalOf(() =>
