@@ -1685,6 +1685,29 @@ test.describe('createHTTPTransportClient', () => {
     await client.disconnect();
   });
 
+  test('throws a ReconnectException from what its connect threw when the server is gone', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    await using client = createHTTPTransportClient();
+    const failed = new Promise<unknown>((resolve) => {
+      client.once('close', () => {
+        client.reconnect({ maximumAttempts: 1 }).then(resolve, resolve);
+      });
+    });
+    await client.connect({ host, port });
+    await expect
+      .poll(() => {
+        return server.gauges().counts['listens'];
+      })
+      .toBe(1);
+    await server.stop();
+    const failure = await failed;
+
+    expect(failure).toBeInstanceOf(ReconnectError);
+    expect((failure as ReconnectError).cause).toBeInstanceOf(ConnectError);
+    expect(client.isClosed()).toBe(true);
+  });
+
   test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
     await using started = await startServer();
     const { port, server } = started;
