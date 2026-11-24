@@ -359,7 +359,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.3, 12.7
     [Fact]
-    public async Task Rejects_a_result_whose_opening_carries_other_than_its_sender_places_in_it_CHUNK_INVALID_and_cancels_its_call()
+    public async Task Reject_a_result_whose_opening_carries_other_than_its_sender_places_in_it_chunk_invalid_and_cancel_its_call()
     {
         var client = new Peer(RouterSide.Client);
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
@@ -382,7 +382,7 @@ public sealed partial class RouterCoreTests
 
     // spec 8.2, 12.4
     [Fact]
-    public async Task Ends_a_call_whose_result_s_transfer_waits_for_the_budget_past_half_its_inactivity_CAPACITY_EXCEEDED_and_cancels_it()
+    public async Task End_a_call_whose_result_s_transfer_waits_for_the_budget_past_half_its_inactivity_capacity_exceeded_and_cancel_it()
     {
         var client = new Peer(RouterSide.Client, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256, TransferInactivityTimeout = TimeSpan.FromSeconds(20) });
         var holding = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(60));
@@ -416,7 +416,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.4, 12.8
     [Fact]
-    public async Task Credits_a_result_s_transfer_once_the_budget_admits_it_setting_its_call_s_inactivity_going_again()
+    public async Task Credit_a_result_s_transfer_once_the_budget_admits_it_setting_its_call_s_inactivity_going_again()
     {
         var client = new Peer(RouterSide.Client, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256, TransferInactivityTimeout = TimeSpan.FromSeconds(20) });
         using var cancelling = new CancellationTokenSource();

@@ -17,7 +17,7 @@ public sealed class CallIdsTests
     // definition
 
     [Fact]
-    public void Walks_its_range_by_two_then_from_its_first_again()
+    public void Walks_its_range_by_its_step_then_from_its_first_again()
     {
         var sequence = new CallIdSequence(RouterSide.Client, 7);
 

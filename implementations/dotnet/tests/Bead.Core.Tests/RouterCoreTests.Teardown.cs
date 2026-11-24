@@ -285,7 +285,7 @@ public sealed partial class RouterCoreTests
 
     // debugging 9.7
     [Fact]
-    public async Task Detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_given_its_signal_and_fails_that_call_as_closed_never_as_a_cancel()
+    public async Task Detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_given_its_signal_and_fail_that_call_as_closed_never_as_a_cancel()
     {
         var closed = await CloseAwaiting((true, 1));
 
@@ -310,7 +310,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Detaches_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
+    public async Task Detach_every_transfer_of_a_closing_connection_before_counting_any_of_its_calls_two_incoming_calls_each_answering_as_a_transfer()
     {
         var closed = await CloseAwaiting((false, 2));
 

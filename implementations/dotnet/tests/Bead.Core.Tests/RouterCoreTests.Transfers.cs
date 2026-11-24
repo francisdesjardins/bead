@@ -601,7 +601,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.3
     [Fact]
-    public async Task Answers_CHUNK_INVALID_to_an_opening_that_carries_other_than_its_sender_places_in_it()
+    public async Task Answer_chunk_invalid_to_an_opening_that_carries_other_than_its_sender_places_in_it()
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumPayloadBytes = 1_024 });
         var resolver = server.Resolve();

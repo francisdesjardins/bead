@@ -549,7 +549,7 @@ public sealed partial class RouterClientTests
 
     // spec 12.1, 12.3
     [Fact]
-    public async Task Takes_a_result_s_opening_that_carries_an_announcement_OPAQUE_or_NONE_counted_as_its_sender_placed_it()
+    public async Task Take_a_result_s_opening_that_carries_an_announcement_opaque_or_none_counted_as_its_sender_placed_it()
     {
         using var scripted = new ScriptedRouter(SmallChunks);
         var (router, transport) = (scripted.Router, scripted.Transport);
