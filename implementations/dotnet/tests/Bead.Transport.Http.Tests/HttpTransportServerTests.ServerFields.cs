@@ -3,8 +3,10 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
+using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -14,6 +16,70 @@ namespace Bead.Transport.Http.Tests;
 /// </summary>
 public sealed partial class HttpTransportServerTests
 {
+    [Fact]
+    public void Reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_RFC_9651_Items_and_a_body_as_its_length_or_its_coding_says()
+    {
+        var fields = typeof(HttpTransportServer).GetNestedType("HttpServerFields", BindingFlags.NonPublic)!;
+        object? Read(string name, object?[] arguments)
+        {
+            return fields.GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, arguments);
+        }
+        static HttpRequest RequestOf(string name, string[] values)
+        {
+            var request = new DefaultHttpContext().Request;
+            request.Headers[name] = values;
+            return request;
+        }
+
+        var twice = RequestOf("authorization", [Bearer, "Basic"]);
+        Assert.Equal(Bearer, twice.Headers.Authorization[0]);
+        Assert.Equal([Bearer, "Basic"], twice.Headers.Authorization.ToArray());
+        Assert.Equal($"{Bearer}, Basic", Read("HeaderOf", [twice, "authorization"]));
+        Assert.Null(Read("HeaderOf", [new DefaultHttpContext().Request, "authorization"]));
+
+        foreach (var (values, expected) in new (string[], long?)[]
+        {
+            (["3"], 3), (["0;p=1"], 0), ([], 0), (["-1"], null), (["1", "2"], null),
+        })
+        {
+            Assert.Equal(expected, Read("CountOf", [RequestOf(HttpTransport.AfterHeader, values), HttpTransport.AfterHeader, null]));
+        }
+        var requiredType = typeof(HttpTransportServer).GetNestedType("CountOptions", BindingFlags.NonPublic)!;
+        var required = Activator.CreateInstance(requiredType)!;
+        requiredType.GetProperty("IsRequired")!.SetValue(required, true);
+        Assert.Null(Read("CountOf", [new DefaultHttpContext().Request, HttpTransport.AfterHeader, required]));
+
+        foreach (var (values, expected) in new (string[], bool?)[]
+        {
+            (["?1"], true), (["?0"], false), ([], false), (["1"], null),
+        })
+        {
+            Assert.Equal(expected, Read("ListeningOf", [RequestOf(HttpTransport.ListenHeader, values)]));
+        }
+        foreach (var (name, value, expected) in new[]
+        {
+            ("Content-Length", "0", false), ("Content-Length", "8", true),
+            ("Transfer-Encoding", "chunked", true), ("x-none", "", false),
+        })
+        {
+            Assert.Equal(expected, Read("HasBody", [RequestOf(name, [value]).HttpContext]));
+        }
+        foreach (var (types, codings, expected) in new (string[], string[], bool)[]
+        {
+            ([HttpTransport.MediaType], [], true),
+            ([HttpTransport.MediaType], ["IDENTITY"], true),
+            ([HttpTransport.MediaType, HttpTransport.MediaType], [], false),
+            ([HttpTransport.MediaType, "text/html"], [], false),
+            ([HttpTransport.MediaType], ["identity", "identity"], false),
+            ([HttpTransport.MediaType], ["identity, gzip"], false),
+        })
+        {
+            var request = RequestOf("Content-Type", types);
+            request.Headers.ContentEncoding = codings;
+            Assert.Equal(expected, Read("IsBeadBody", [request]));
+        }
+    }
+
     [Fact]
     public async Task Keeps_an_HTTP_2_session_past_headers_timeout_while_an_answer_is_under_way()
     {
