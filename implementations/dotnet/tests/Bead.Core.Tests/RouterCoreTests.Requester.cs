@@ -1350,27 +1350,49 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer()
     {
-        var client = new Peer(RouterSide.Client);
-        var held = new TaskCompletionSource();
-
-        client.OnSend = (envelope) =>
+        foreach (var serverCredit in new[] { 92, 100 })
         {
-            return envelope.Header is ChunkHeader ? held.Task : Task.CompletedTask;
-        };
+            foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
+            {
+                var peer = new Peer(side);
+                using var core = peer.Core;
+                var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var callId = side == RouterSide.Client ? 1u : 2u;
+                var total = side == RouterSide.Client ? 300 : 200;
 
-        var asked = client.Request(PatternOf(300), TimeSpan.FromSeconds(5));
+                peer.OnSend = (envelope) =>
+                {
+                    return envelope.Header is ChunkHeader ? held.Task : Task.CompletedTask;
+                };
 
-        await client.Settle();
-        await client.Deliver(CreditOf(1, 100));
-        await client.Deliver(ResultOf(1));
-        await asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        held.SetException(new IOException("the transport lost the chunk"));
-        await client.Settle();
-        Assert.DoesNotContain(client.Sent, (envelope) =>
-        {
-            return envelope.Header is CancelHeader;
-        });
-        Assert.Empty(client.Reports);
+                var asked = peer.Request(PatternOf(total), TimeSpan.FromSeconds(5));
+
+                await peer.Settle();
+                await peer.Deliver(CreditOf(callId, side == RouterSide.Client ? 100 : serverCredit));
+                Assert.Equal([EnvelopeKind.Request, EnvelopeKind.Chunk], peer.Sent.Select((envelope) => { return envelope.Kind; }));
+
+                if (side == RouterSide.Server)
+                {
+                    await peer.Deliver(new Envelope { Header = new FailureHeader { CallId = callId }, Failure = Failure.OfApplication(21) });
+                    var failure = await Assert.ThrowsAsync<FailureException>(() => { return asked.WaitAsync(Patience, TestContext.Current.CancellationToken); });
+
+                    Assert.Equal(21, failure.Code);
+                }
+                else
+                {
+                    await peer.Deliver(ResultOf(callId));
+                    Assert.Equal(callId, (await asked.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+                }
+
+                held.SetException(new IOException("the transport lost the chunk"));
+                await peer.Settle();
+                Assert.Equal([EnvelopeKind.Request, EnvelopeKind.Chunk], peer.Sent.Select((envelope) => { return envelope.Kind; }));
+                Assert.Equal(new RequestHeader { CallId = callId, ServiceId = Echo.ServiceId, ProcedureId = Echo.ProcedureId, Total = total }, peer.Sent[0].Header);
+                Assert.Equal(new ChunkHeader { CallId = callId, Offset = 44, IsLast = false }, peer.Sent[1].Header);
+                Assert.Equal([44, 48], peer.Sent.Select((envelope) => { return envelope.Payload.Length; }));
+                Assert.Empty(peer.Reports);
+            }
+        }
     }
 
     [Fact]
