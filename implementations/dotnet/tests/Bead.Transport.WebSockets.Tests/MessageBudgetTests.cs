@@ -42,7 +42,7 @@ public sealed class MessageBudgetTests
 
     // spec 15.12; IANA's WebSocket Close Code Number Registry, 1013
     [Fact]
-    public void Casts_off_with_1013_the_connections_whose_messages_hold_the_most_when_a_charge_would_pass_messageBytesBudget_its_own_only_when_it_comes_first()
+    public void Casts_off_other_budget_holders_or_refuses_the_asker_when_the_next_byte_passes_the_bound()
     {
         var budget = new MessageBudget(500);
         var gone = new List<string>();

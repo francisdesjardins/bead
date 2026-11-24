@@ -36,7 +36,7 @@ const holdersOf = (budget: IMessageBudget, { names }: { names: readonly string[]
 
 test.describe('createMessageBudget', () => {
   // spec 15.12; IANA's WebSocket Close Code Number Registry, 1013
-  test('casts off with 1013 the connections whose messages hold the most when a charge would pass messageBytesBudget, its own only when it comes first', () => {
+  test('casts off other budget holders or refuses the asker when the next byte passes the bound', () => {
     const budget = createMessageBudget(500);
     const { castOff, charge, holders } = holdersOf(budget, {
       names: ['ada', 'bob', 'carol', 'dave', 'eve'],
