@@ -1,16 +1,23 @@
 import { EventEmitter, once } from 'node:events';
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
+import { createServer as createTlsServer } from 'node:tls';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import {
   isConnectFailure,
   isLocalhostName,
+  type IUndici,
+  type IUndiciConnectOptions,
   LOOPBACK_ATTEMPT_DELAY,
+  loopbackConnector,
+  loopbackCreateConnection,
   loopbackFailureOf,
   loopbackLookup,
   raceLoopback,
+  type UndiciConnector,
 } from '../loopback';
+import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { closedPort, PROBE, replaceResolver } from './loopback-fixtures';
 
 // interfaces
@@ -94,15 +101,36 @@ const heldSocketOf = (address: string): IHeldSocket => {
   return socket;
 };
 
+// a connect refused, as Node fails one
+const refusedOf = (address: string): Error => {
+  return Object.assign(new Error(`connect ECONNREFUSED ${address}:4242`), {
+    code: 'ECONNREFUSED',
+    syscall: 'connect',
+  });
+};
+
 /**
  * A race of the loopback on a clock of the test's, each attempt a socket of the test's it notes,
- * with the time it began; given up by `signal` or at `timeout`, never by default.
+ * with the time it began, but an attempt to an address of `throwing`, which throws as it is made;
+ * given up by `signal` or at `timeout`, never by default.
  */
-const heldRaceOf = ({ signal, timeout = Infinity }: { signal?: AbortSignal; timeout?: number }) => {
+const heldRaceOf = ({
+  signal,
+  throwing = [],
+  timeout = Infinity,
+}: {
+  signal?: AbortSignal;
+  throwing?: readonly string[];
+  timeout?: number;
+}) => {
   const clock = createClock();
   const attempts: { at: number; socket: IHeldSocket }[] = [];
   const outcome = raceLoopback(4_242, {
     attempt: (address) => {
+      if (throwing.includes(address)) {
+        throw refusedOf(address);
+      }
+
       const socket = heldSocketOf(address);
 
       attempts.push({ at: clock.now, socket });
@@ -145,14 +173,6 @@ const heldRaceOf = ({ signal, timeout = Infinity }: { signal?: AbortSignal; time
   };
 
   return { attemptOf, begunOf, clock, destroyedOf, outcome };
-};
-
-// a connect refused, as Node fails one
-const refusedOf = (address: string): Error => {
-  return Object.assign(new Error(`connect ECONNREFUSED ${address}:4242`), {
-    code: 'ECONNREFUSED',
-    syscall: 'connect',
-  });
 };
 
 // definition
@@ -238,6 +258,16 @@ test.describe('loopbackLookup', () => {
         ['127.0.0.1', 0],
         ['::1', 0],
       ],
+    ]);
+
+    // and so does an attempt that throws as it is made, which fails as one refused
+    const thrown = heldRaceOf({ throwing: ['127.0.0.1'] });
+
+    thrown.attemptOf('::1').emit('connect');
+    expect([await thrown.outcome, thrown.begunOf(), thrown.clock.countTimers()]).toEqual([
+      { address: '::1' },
+      [['::1', 0]],
+      0,
     ]);
   });
 
@@ -338,6 +368,15 @@ test.describe('loopbackLookup', () => {
     aborted.attemptOf('127.0.0.1').emit('connect');
     expect(aborted.begunOf()).toEqual([['127.0.0.1', 0]]);
 
+    // given up before it began: no attempt made, the signal's reason its own
+    const before = heldRaceOf({ signal: AbortSignal.abort(reason) });
+
+    expect([await before.outcome, before.begunOf(), before.clock.countTimers()]).toEqual([
+      reason,
+      [],
+      0,
+    ]);
+
     // every attempt failed: their errors in one, a connect failure
     const refused = heldRaceOf({});
 
@@ -347,6 +386,16 @@ test.describe('loopbackLookup', () => {
     const both = (await refused.outcome) as AggregateError;
 
     expect([isConnectFailure(both), both.message, refused.clock.countTimers()]).toEqual([
+      true,
+      'connect ECONNREFUSED 127.0.0.1:4242; connect ECONNREFUSED ::1:4242',
+      0,
+    ]);
+
+    // and so does every attempt that threw as it was made
+    const thrown = heldRaceOf({ throwing: ['127.0.0.1', '::1'] });
+    const neither = (await thrown.outcome) as AggregateError;
+
+    expect([isConnectFailure(neither), neither.message, thrown.clock.countTimers()]).toEqual([
       true,
       'connect ECONNREFUSED 127.0.0.1:4242; connect ECONNREFUSED ::1:4242',
       0,
@@ -379,7 +428,19 @@ test.describe('loopbackLookup', () => {
     expect(await lookedUp('a.localhost.', { all: true })).toEqual([
       { address: '192.0.2.7', family: 4 },
     ]);
-    expect(resolver.asked).toEqual(['a.localhost.']);
+
+    // and asked with its callback alone, as `dns.lookup` may be
+    const answered = await new Promise((resolve) => {
+      // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback
+      loopbackLookup('localhost.', (error, address, family) => {
+        resolve([error, address, family]);
+      });
+    });
+
+    expect([answered, resolver.asked]).toEqual([
+      [null, '192.0.2.7', 4],
+      ['a.localhost.', 'localhost.'],
+    ]);
   });
 
   test('answers a lookup of one family with that family’s loopback alone', async () => {
@@ -388,12 +449,23 @@ test.describe('loopbackLookup', () => {
       await lookedUp(PROBE, { family: 6 }),
       await lookedUp(PROBE, { all: true, family: 'IPv6' }),
       await lookedUp(PROBE, { all: true, family: 4 }),
+      await lookedUp(PROBE, { family: 'IPv4' }),
+      await lookedUp(PROBE, {}),
     ]).toEqual([
       { address: '127.0.0.1', family: 4 },
       { address: '::1', family: 6 },
       [{ address: '::1', family: 6 }],
       [{ address: '127.0.0.1', family: 4 }],
+      { address: '127.0.0.1', family: 4 },
+      // * of either family, the IPv4 loopback first
+      { address: '127.0.0.1', family: 4 },
     ]);
+
+    // a family the loopback has no address of answers none, as a resolver does
+    await expect(lookedUp(PROBE, { family: 5 })).rejects.toMatchObject({
+      code: 'ENOTFOUND',
+      message: 'no loopback address of family 5',
+    });
   });
 
   // spec 13.4
@@ -435,5 +507,116 @@ test.describe('loopbackLookup', () => {
 
       expect(loopbackFailureOf(fetchFailure, { host: PROBE })).toBe(fetchFailure);
     }
+  });
+
+  // spec 13.4; RFC 6066 §3
+  test('lays TLS over the winner under wss with the server name ws would set, and lets the winner go where TLS throws as it is laid', async () => {
+    // * the name each handshake sent, false for none, and each connection's close
+    const named: (string | false | null)[] = [];
+    const closes: Promise<unknown>[] = [];
+    const server = createTlsServer({ cert: TLS_FIXTURE.cert, key: TLS_FIXTURE.key }, (socket) => {
+      named.push(socket.servername);
+      socket.end();
+    });
+
+    server.on('connection', (socket: Socket) => {
+      closes.push(once(socket, 'close'));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    const { port } = server.address() as AddressInfo;
+    // what `ws` hands `createConnection` for a `wss` URL to a localhost name, and what it creates
+    const createdOf = (options: Record<string, unknown>) => {
+      return new Promise<Error | Socket>((resolve) => {
+        loopbackCreateConnection('localhost', { timeout: 5_000 })(
+          { defaultPort: 443, host: 'localhost', port, rejectUnauthorized: false, ...options },
+          (error, socket) => {
+            resolve(error ?? (socket as Socket));
+          }
+        );
+      });
+    };
+
+    try {
+      // the URL's name, a name given over it, and none for an IP literal
+      for (const options of [{}, { servername: 'bead.localhost' }, { host: '127.0.0.1' }]) {
+        const secured = (await createdOf(options)) as Socket;
+
+        // * ended by the server once its handshake read the name
+        secured.resume();
+        await once(secured, 'end');
+        secured.destroy();
+      }
+
+      // * a TLS option it cannot take: the connect failed, and the raced socket closed
+      const failure = await createdOf({ ciphers: 'none of them' });
+
+      await expect
+        .poll(() => {
+          return closes.length;
+        })
+        .toBe(4);
+      await Promise.all(closes);
+      expect([named, failure instanceof Error]).toEqual([
+        ['localhost', 'bead.localhost', false],
+        true,
+      ]);
+    } finally {
+      server.close();
+    }
+  });
+
+  // spec 13.4
+  test('hands the winner to undici’s own connector under https, and lets the winner go where that connector throws', async () => {
+    await using listener = await listenOn('127.0.0.1');
+    // * undici's connector, which notes what it is handed, and throws once told to
+    const handed: IUndiciConnectOptions[] = [];
+    let isThrowing = false;
+    const undici = {
+      buildConnector: (): UndiciConnector => {
+        return (options, callback) => {
+          handed.push(options);
+
+          if (isThrowing) {
+            throw new Error('no connector');
+          }
+
+          callback(null, options.httpSocket ?? null);
+        };
+      },
+    } as unknown as IUndici;
+    const connector = loopbackConnector(undici, {});
+    const connectedOf = (options: IUndiciConnectOptions) => {
+      return new Promise<Error | Socket | null>((resolve) => {
+        connector(options, (error, socket) => {
+          resolve(error ?? socket);
+        });
+      });
+    };
+    const port = String(listener.port);
+
+    // a host but a localhost name goes to undici's connector unchanged
+    const away = { hostname: 'example.test', port: '443', protocol: 'https:' };
+
+    expect([await connectedOf(away), handed]).toEqual([null, [away]]);
+
+    // * under https, the winner is the connector's socket to lay TLS over
+    const secured = (await connectedOf({ hostname: PROBE, port, protocol: 'https:' })) as Socket;
+
+    expect([secured.remoteAddress, handed[1]?.httpSocket === secured]).toEqual(['127.0.0.1', true]);
+    secured.destroy();
+
+    // in the clear, the winner is the connect's own, the connector asked nothing
+    const clear = (await connectedOf({ hostname: PROBE, port, protocol: 'http:' })) as Socket;
+
+    expect([clear.remoteAddress, handed.length]).toEqual(['127.0.0.1', 2]);
+    clear.destroy();
+
+    isThrowing = true;
+
+    const failure = await connectedOf({ hostname: PROBE, port, protocol: 'https:' });
+
+    expect([failure, handed[2]?.httpSocket?.destroyed]).toEqual([new Error('no connector'), true]);
   });
 });

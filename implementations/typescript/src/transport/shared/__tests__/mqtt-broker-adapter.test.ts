@@ -2676,6 +2676,36 @@ test.describe('createMqttBrokerAdapter', () => {
     asking.resolve(PASSWORD);
     await expect(askedStart).rejects.toThrow('the link of ada stopped as it started');
 
+    // * a localhost name's race of the loopback given up by its signal, by its stop, or by a signal
+    // aborted already: no socket of it left open (spec 13.4)
+    {
+      await using dropping = await startDropping();
+      const raced = createMqttBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        url: `mqtt://${PROBE}:${String(dropping.port)}`,
+      });
+      const racing = new AbortController();
+      const racingStart = failureOf(raced.start({ signal: racing.signal }));
+
+      racing.abort();
+      expect(await racingStart).toBeInstanceOf(CancelError);
+
+      const stoppedRace = failureOf(raced.start());
+
+      await raced.stop();
+      expect(await stoppedRace).toEqual(new GenericError('the link of ada stopped as it started'));
+      expect(await failureOf(raced.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+        CancelError
+      );
+      await sleep(50);
+      await expect
+        .poll(() => {
+          return dropping.open;
+        })
+        .toBe(0);
+    }
+
     const link = await linkUp({ adapter, script }, { properties: { receiveMaximum: 1 } });
     const first = adapter.publish({ payload: Uint8Array.of(1), topic: INBOX });
     const leaving = new AbortController();

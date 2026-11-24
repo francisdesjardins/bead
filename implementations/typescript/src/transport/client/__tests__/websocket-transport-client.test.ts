@@ -693,6 +693,27 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           expect(client.isClosed()).toBe(true);
           expect(client.socket).toBeNull();
           await allClosed();
+
+          // * and by a localhost name, its handshake reached over the loopback's race (spec 13.4)
+          const named = new AbortController();
+          const held = pendingHandshakes.length;
+          const connectingByName = client.connect({
+            host: 'localhost',
+            port: portOf(gatedServer),
+            signal: named.signal,
+            timeout: Infinity,
+          });
+
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(held + 1);
+          named.abort('why');
+
+          await expect(connectingByName).rejects.toBeInstanceOf(CancelError);
+          expect(client.isClosed()).toBe(true);
+          await allClosed();
         } finally {
           for (const done of pendingHandshakes) {
             done(false);

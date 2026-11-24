@@ -740,6 +740,24 @@ test.describe('createAmqpBrokerAdapter', () => {
     await inboxUp({ adapter, script });
     expect(adapter.isLinked).toBe(true);
     await adapter.stop();
+
+    // * stopped as it races a localhost name on the loopback: no socket of it left open (spec 13.4)
+    await using dropping = await startDropping();
+    const raced = createAmqpBrokerAdapter({
+      id: ID,
+      password: PASSWORD,
+      url: `amqp://${PROBE}:${String(dropping.port)}`,
+    });
+    const racing = settledOf(raced.start());
+
+    await raced.stop();
+    expect(await racing).toEqual(new GenericError('the link of ada stopped as it started'));
+    await sleep(50);
+    await expect
+      .poll(() => {
+        return dropping.open;
+      })
+      .toBe(0);
   });
 
   test('fails an inbox declaration left unanswered within connectTimeout and closes its connection without telling a loss', async () => {
@@ -2354,6 +2372,31 @@ test.describe('createAmqpBrokerAdapter', () => {
     await asked.stop();
     asking.resolve(PASSWORD);
     await expect(askedStart).rejects.toThrow('the link of ada stopped as it started');
+
+    // * a localhost name's race of the loopback given up by its signal, or by a signal aborted
+    // already: no socket of it left open (spec 13.4)
+    {
+      await using dropping = await startDropping();
+      const raced = createAmqpBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        url: `amqp://${PROBE}:${String(dropping.port)}`,
+      });
+      const racing = new AbortController();
+      const racingStart = settledOf(raced.start({ signal: racing.signal }));
+
+      racing.abort();
+      expect(await racingStart).toBeInstanceOf(CancelError);
+      expect(await settledOf(raced.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+        CancelError
+      );
+      await sleep(50);
+      await expect
+        .poll(() => {
+          return dropping.open;
+        })
+        .toBe(0);
+    }
 
     // * a name's subscription, its ATTACH held: its session ended, its link kept
     script.policy.attach = ({ address }) => {
