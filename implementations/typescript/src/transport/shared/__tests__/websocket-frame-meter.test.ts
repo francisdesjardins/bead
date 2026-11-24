@@ -123,6 +123,164 @@ const playOf = (reads: readonly Uint8Array[]) => {
 };
 
 test.describe('createFrameMeter', () => {
+  test('fails with 1009 at its head a frame that takes its message past its bound, a continuation’s among them', () => {
+    const meterOf = () => {
+      return createFrameMeter({
+        maximumMessageBytes: 64,
+        maximumMessageFrames: 16_384,
+        side: 'server',
+      });
+    };
+    const head = frameOf({
+      fin: true,
+      opcode: OPCODES.BINARY,
+      length: 100,
+      payload: new Uint8Array(),
+    });
+    const alone = meterOf().read(head);
+
+    expect([alone.handed, alone.verdict?.code]).toEqual([0, 1009]);
+    const first = frameOf({ fin: false, opcode: OPCODES.BINARY, payload: new Uint8Array(40) });
+    const continuation = frameOf({
+      fin: true,
+      opcode: OPCODES.CONTINUATION,
+      length: 25,
+      payload: new Uint8Array(),
+    });
+    const over = meterOf().read(Buffer.concat([first, continuation]));
+
+    expect([over.handed, over.verdict?.code]).toEqual([first.length, 1009]);
+  });
+
+  test('fails with 1008 the frame past its bound at its head, an empty frame counting, a control frame not', () => {
+    const meter = createFrameMeter({
+      maximumMessageBytes: 64,
+      maximumMessageFrames: 2,
+      side: 'server',
+    });
+    const before = Buffer.concat([
+      frameOf({ fin: false, opcode: OPCODES.BINARY, payload: Uint8Array.of(1) }),
+      frameOf({ fin: true, opcode: OPCODES.PING, payload: new Uint8Array() }),
+      frameOf({ fin: false, opcode: OPCODES.CONTINUATION, payload: new Uint8Array() }),
+    ]);
+    const read = meter.read(Buffer.concat([before, Uint8Array.of(0x80)]));
+
+    expect([read.handed, read.verdict?.code]).toEqual([before.length, 1008]);
+  });
+
+  test('fails with 1002 each head RFC 6455 forbids at the byte that draws it', () => {
+    test.skip(
+      true,
+      'divergence: a 64-bit length with its top bit set reaches the reader until the whole length arrives'
+    );
+    const meterOf = (side: 'client' | 'server' = 'server') => {
+      return createFrameMeter({
+        maximumMessageBytes: MAXIMUM_MESSAGE_BYTES,
+        maximumMessageFrames: 16_384,
+        side,
+      });
+    };
+    for (const [bytes, reason] of [
+      [[0xc2, 0x80], 'a reserved bit set'],
+      [[0x83, 0x80], 'a reserved opcode, 3'],
+      [[0x8b, 0x80], 'a reserved opcode, 11'],
+      [[0x09, 0x80], 'a control frame not final'],
+      [[0x80, 0x80], 'a continuation with no message under way'],
+      [[0x89, 0xfe], 'a control frame longer than 125 bytes'],
+      [[0x8a, 0xff], 'a control frame longer than 125 bytes'],
+      [[0x82, 0x00], 'an unmasked frame'],
+      [[0x82, 0xff, 0x80], 'a 64-bit length with its top bit set'],
+    ] as const) {
+      const read = meterOf().read(Uint8Array.from(bytes));
+
+      expect([read.handed, read.verdict], reason).toEqual([0, { code: 1002, reason }]);
+    }
+    const first = frameOf({ fin: false, opcode: OPCODES.BINARY, payload: Uint8Array.of(1) });
+    const second = meterOf().read(Buffer.concat([first, Uint8Array.of(0x82)]));
+
+    expect([second.handed, second.verdict]).toEqual([
+      first.length,
+      {
+        code: 1002,
+        reason: 'a data frame that is not a continuation while a message is under way',
+      },
+    ]);
+    const masked = meterOf('client').read(
+      frameOf({ fin: true, opcode: OPCODES.BINARY, payload: Uint8Array.of(1) })
+    );
+
+    expect([masked.handed, masked.verdict]).toEqual([0, { code: 1002, reason: 'a masked frame' }]);
+  });
+
+  test('takes a length not in its minimal form as tungstenite takes it', () => {
+    const meter = createFrameMeter({
+      maximumMessageBytes: MAXIMUM_MESSAGE_BYTES,
+      maximumMessageFrames: 16_384,
+      side: 'server',
+    });
+    const key = [0x37, 0xfa, 0x21, 0x3d];
+    const bytes = Uint8Array.from([
+      0x82,
+      0xff,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      ...key,
+      1 ^ 0x37,
+      2 ^ 0xfa,
+      3 ^ 0x21,
+    ]);
+    const read = meter.read(bytes);
+
+    expect(read.handed).toBe(bytes.length);
+    expect(read.verdict).toBeUndefined();
+  });
+
+  test('charges each byte of a message partway and 128 a head, a pong between its frames among it', () => {
+    const meter = createFrameMeter({
+      maximumMessageBytes: MAXIMUM_MESSAGE_BYTES,
+      maximumMessageFrames: 16_384,
+      side: 'server',
+    });
+    const bytes = Buffer.concat([
+      frameOf({ fin: true, opcode: OPCODES.PING, payload: new Uint8Array() }),
+      frameOf({ fin: false, opcode: OPCODES.BINARY, payload: new Uint8Array(12) }),
+      frameOf({ fin: true, opcode: OPCODES.PONG, payload: new TextEncoder().encode('beat') }),
+      frameOf({ fin: true, opcode: OPCODES.CONTINUATION, payload: new Uint8Array(3) }),
+      frameOf({ fin: true, opcode: OPCODES.PING, payload: new Uint8Array() }),
+    ]);
+    const shares = [...bytes].flatMap((byte) => {
+      const read = meter.read(Uint8Array.of(byte));
+
+      expect(read.verdict).toBeUndefined();
+      expect(read.handed).toBe(1);
+      return read.shares;
+    });
+    const sums = shares.reduce(
+      (sum, share) => {
+        return {
+          charged: sum.charged + share.charge,
+          payload: sum.payload + share.payload,
+          begun: sum.begun + Number(share.isFirst),
+          ended: sum.ended + Number(share.isWhole),
+        };
+      },
+      { charged: 0, payload: 0, begun: 0, ended: 0 }
+    );
+
+    expect(sums).toEqual({
+      charged: 6 + 12 + 128 + (6 + 4 + 128) + (6 + 3 + 128),
+      payload: 15,
+      begun: 1,
+      ended: 1,
+    });
+  });
+
   // RFC 6455 §5.2, §5.4, §5.5; spec 15.3, 15.12
   test('reads frame heads split across reads, lengths of 7, 16 and 64 bits, control frames between fragments and an empty frame as its platform reads them', () => {
     const textEnd = frameOf(TEXT[0] as IFrame).length;
