@@ -497,7 +497,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
+    public async Task Go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
     {
         Start(new RouterServerOptions
         {
@@ -563,7 +563,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
+    public async Task Refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
     {
         var reached = new List<string>();
 
@@ -632,7 +632,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+    public async Task Are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
     {
         Start();
         Router.RegisterResolver(new RawResolver(Echo with { ProcedureId = 9 }, (_) =>
@@ -659,7 +659,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_are_the_only_envelopes_answered_any_other_is_reported()
+    public async Task Are_the_only_envelopes_answered_any_other_is_reported()
     {
         Start();
 
@@ -748,7 +748,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_of_the_server_s_own_parity_or_on_a_subscription_s_call_id_are_reported_on_their_connection_and_taken_on_another()
+    public async Task Of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
     {
         Start();
         _transport.Open(First);
@@ -772,7 +772,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_whose_answer_s_session_cannot_be_told_are_answered_by_nothing_and_reported()
+    public async Task Whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported()
     {
         var failure = new InvalidOperationException("no session");
 
@@ -875,7 +875,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public void Requests_refuse_a_second_resolver_for_one_procedure()
+    public void Refuse_a_second_resolver_for_one_procedure()
     {
         Start();
 
@@ -921,7 +921,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connection_s_result_alone()
+    public async Task Go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connections_result_alone()
     {
         Start(new RouterServerOptions
         {
@@ -957,7 +957,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_name_their_connection_and_it_must_be_open_a_server_holds_no_subscription()
+    public async Task Name_their_connection_and_it_must_be_open_a_server_holds_no_subscription()
     {
         Start();
 
@@ -991,7 +991,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_reach_a_connection_that_spoke_before_the_router_saw_it_open()
+    public async Task Reach_a_connection_that_spoke_before_the_router_saw_it_open()
     {
         Start();
 
@@ -1008,7 +1008,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
+    public async Task Reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
     {
         Start();
         _transport.Open(First);
@@ -1064,7 +1064,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Its_own_requests_present_OPAQUE_when_they_ask_their_connection_s_session_as_sessionTokenOf_gives_it_and_fail_before_they_go_SESSION_REQUIRED_when_it_has_none()
+    public async Task Present_opaque_when_they_ask_their_connections_session_as_session_token_of_gives_it_and_fail_before_they_go_session_required_when_it_has_none()
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
         SessionToken? held = null;
@@ -1120,7 +1120,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_refuse_a_payload_too_large_here()
+    public async Task Refuse_a_payload_too_large_here()
     {
         Start();
         _transport.Open(First);
@@ -1833,7 +1833,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_call_that_holds_it_fails_and_hears_what_comes()
+    public async Task Takes_the_place_when_that_call_fails_and_hears_what_comes()
     {
         var news = StartHolding(Outcome.Fail);
 
@@ -1851,7 +1851,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_call_that_holds_it_is_cancelled()
+    public async Task Takes_the_place_when_that_call_is_cancelled()
     {
         StartHolding(Outcome.Cancel);
         await Settle();
@@ -1862,7 +1862,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_answer_of_the_call_that_holds_it_cannot_go_out()
+    public async Task Takes_the_place_when_the_answer_of_that_call_cannot_go_out()
     {
         StartHolding(Outcome.Answer);
         await Settle();
@@ -1875,7 +1875,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_stays_out_once_the_call_that_holds_its_place_is_answered_and_does_not_take_a_place_it_leaves_later()
+    public async Task Stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leaves_later()
     {
         StartHolding(Outcome.Answer);
         await Settle();
@@ -1894,7 +1894,7 @@ public sealed partial class RouterServerTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task A_waiting_subscription_takes_nothing_once_cancelled_or_unsubscribed_itself(bool isCancelled)
+    public async Task Takes_nothing_once_cancelled_or_unsubscribed_itself(bool isCancelled)
     {
         StartHolding(Outcome.Fail);
         await Settle();
@@ -1917,7 +1917,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over()
+    public async Task Waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over()
     {
         Procedure[] procedures = [News, Other];
 
@@ -1957,7 +1957,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_is_the_first_answered_one_answered_after_it_waits_for_nothing()
+    public async Task Is_the_first_answered_one_answered_after_it_waits_for_nothing()
     {
         StartHolding(Outcome.Fail);
         Deliver(First, SubscribingOf(5, "subscribe"));
@@ -1969,7 +1969,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_no_place_on_a_connection_that_closed_as_the_answer_of_the_call_that_holds_it_failed_to_go_out()
+    public async Task Takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_failed_to_go_out()
     {
         var sending = new TaskCompletionSource();
 
@@ -1992,7 +1992,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after()
+    public async Task Is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after()
     {
         StartHolding(Outcome.Fail);
         await Settle();
@@ -2026,7 +2026,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_callback_that_subscribes_as_the_router_is_disposed_hears_a_DisconnectException()
+    public async Task A_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect_error()
     {
         var thrown = new List<Exception>();
 
@@ -2233,7 +2233,7 @@ public sealed partial class RouterServerTests : IDisposable
 
     // debugging 5.1
     [Fact]
-    public async Task Tells_debug_each_envelope_with_its_connection_and_its_header_without_its_token()
+    public async Task Tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_without_its_token()
     {
         var seen = new List<(DebugDirection Direction, TracedEnvelope Envelope)>();
 
@@ -2404,7 +2404,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_paced_subscription_is_sent_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
+    public async Task Sends_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
     {
         var news = StartPaced();
 

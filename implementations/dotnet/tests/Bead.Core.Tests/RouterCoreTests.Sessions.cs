@@ -100,7 +100,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_of_none_or_OPAQUE_resolves_in_the_turn_it_came_the_call_s_session_handed_to_its_admission_then_to_its_resolver()
+    public async Task Of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_session_handed_to_its_admission_then_to_its_resolver()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var server = new Peer(RouterSide.Server) { Session = token };
@@ -171,7 +171,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_that_does_not_resolve_is_refused_SESSION_REQUIRED_whatever_its_procedure_requires_never_admitted_an_ELSEWHERE_as_one_that_came_without_none_resolving_to_none_runs_in_none()
+    public async Task That_does_not_resolve_is_refused_session_required_whatever_its_procedure_requires_never_admitted_an_elsewhere_as_one_that_came_without_none_resolving_to_none_runs_in_none()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var server = new Peer(RouterSide.Server) { Session = token, Schemes = [CredentialScheme.Opaque, CredentialScheme.Elsewhere] };
@@ -243,7 +243,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_whose_resolution_throws_or_rejects_or_promises_for_none_or_OPAQUE_is_answered_PROCEDURE_FAILED_and_reported_a_JWT_s_in_a_later_turn()
+    public async Task Whose_resolution_throws_or_rejects_or_promises_for_none_or_opaque_is_answered_procedure_failed_and_reported_a_jwts_in_a_later_turn()
     {
         // NONE and OPAQUE fail in this turn; both JWT failures follow in arrival order
         var mirrored = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
@@ -361,7 +361,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_whose_resolution_rejects_with_a_RefusalException_is_answered_CAPACITY_EXCEEDED_its_message_for_detail_and_reported_nowhere_a_FailureException_of_that_code_stays_PROCEDURE_FAILED_reported()
+    public async Task Whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_error_of_that_code_stays_procedure_failed_reported()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
         var resolver = server.Resolve();
@@ -474,7 +474,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_of_a_JWT_or_an_ELSEWHERE_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
+    public async Task Of_a_jwt_or_an_elsewhere_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
     {
         foreach (var (destinationId, transported) in new[] { (7u, "Bearer a.b.c"), (9u, "Bearer mF_9.B5f-4.1JqM") })
         {
@@ -696,7 +696,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_resolving_its_call_s_cancel_or_its_connection_s_close_tells_sessionOf_by_the_call_s_signal_and_what_it_settles_to_then_is_dropped()
+    public async Task Resolving_its_calls_cancel_or_its_connections_close_tells_session_of_by_the_calls_signal_and_what_it_settles_to_then_is_dropped()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
         var resolver = server.Resolve();
@@ -772,7 +772,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_credential_resolving_a_transfer_s_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
+    public async Task Resolving_a_transfers_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
     {
         foreach (var total in new[] { 100, 300 })
         {

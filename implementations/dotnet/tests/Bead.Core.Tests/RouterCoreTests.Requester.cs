@@ -252,7 +252,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Writes_the_destination_a_request_names_and_none_left_out()
+    public async Task Write_the_destination_they_name_and_none_left_out()
     {
         var client = new Peer(RouterSide.Client);
 
@@ -453,7 +453,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Rejects_with_a_DisconnectException_what_waits_on_one_connection_or_on_every_one()
+    public async Task Are_rejected_with_a_disconnect_error_those_of_one_connection_or_all()
     {
         var client = new Peer(RouterSide.Client);
         var gone = client.Core.Request(new byte[] { 1 }, CallOf("a", (Echo, TimeSpan.FromSeconds(5))));
@@ -478,7 +478,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task The_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfer_s_opening_no_byte_fails_it_before_it_goes_PAYLOAD_TOO_LARGE()
+    public async Task This_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfers_opening_no_byte_fails_it_before_it_goes_payload_too_large()
     {
         var client = new Peer(RouterSide.Client);
         var known = SessionToken.FromBytes(PatternOf(16));
@@ -547,7 +547,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task A_JWT_its_header_holds_whole_fails_its_call_before_it_goes_PAYLOAD_TOO_LARGE_once_a_transfer_s_header_would_pass_1020_bytes_and_goes_as_a_transfer_a_word_shorter()
+    public async Task A_jwt_its_header_holds_whole_fails_its_call_before_it_goes_payload_too_large_once_a_transfers_header_would_pass_1_020_bytes_and_goes_as_a_transfer_a_word_shorter()
     {
         // the default limits: a payload of 1 MiB passes an envelope of chunkBytes whole
         var client = new Peer(RouterSide.Client, RouterLimits.Default);
@@ -599,7 +599,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Hears_its_request_handed_to_the_transport_whole_or_its_transfer_s_opening_then_refused_by_it_and_nothing_of_one_never_handed()
+    public async Task Hear_their_request_handed_to_the_transport_whole_or_its_transfers_opening_then_refused_by_it_and_nothing_of_one_never_handed()
     {
         var client = new Peer(RouterSide.Client, Chunked with { MaximumPayloadBytes = 1_024 });
         var closed = new IOException("the socket is closed");
@@ -688,7 +688,7 @@ public sealed partial class RouterCoreTests
 
     // spec 10.4
     [Fact]
-    public async Task Cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
+    public async Task Cancel_a_request_that_times_out_before_its_caller_hears_of_it_so_a_call_made_again_goes_out_behind()
     {
         foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
         {
@@ -728,7 +728,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Drops_a_late_answer_while_its_call_id_is_reserved_then_reports_it()
+    public async Task Take_an_answer_too_late_in_silence_while_its_call_id_is_reserved_then_report_it()
     {
         var client = new Peer(RouterSide.Client);
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
@@ -747,7 +747,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Cancels_on_its_token_once_sent_throwing_its_own_reason_though_the_cancel_cannot_go_out()
+    public async Task Cancel_a_request_its_signal_gives_up_once_sent_rejecting_with_its_own_reason_though_the_cancel_fails()
     {
         var client = new Peer(RouterSide.Client);
         var refused = new IOException("the transport refused the cancel");
@@ -777,7 +777,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_no_cancel_for_a_call_answered_in_the_turn_its_token_is_cancelled_nor_reserves_its_call_id()
+    public async Task Send_no_cancel_for_a_call_answered_in_the_turn_its_signal_gives_it_up_nor_reserve_its_call_id()
     {
         var client = new Peer(RouterSide.Client);
 
@@ -812,7 +812,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserves_nothing()
+    public async Task Send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
     {
         var client = new Peer(RouterSide.Client);
         var refused = new IOException("the transport refused the request");
@@ -884,7 +884,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
+    public async Task Reserve_a_call_id_as_long_as_its_call_was_given_or_5s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
     {
         var recorded = new RequesterPeer(RequesterLimits);
         using var core = recorded.Core;
@@ -911,7 +911,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
+    public async Task Reserve_by_connection_and_forget_the_reservations_of_a_connection_or_of_every_one_as_they_go()
     {
         var client = new Peer(RouterSide.Client);
 
@@ -930,7 +930,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Drops_an_answer_that_does_not_read_on_a_call_id_reserved_and_reports_one_of_a_layout_to_come()
+    public async Task Take_an_answer_of_this_layout_that_does_not_read_on_a_call_id_reserved_in_silence_and_report_one_of_a_layout_to_come()
     {
         var client = new Peer(RouterSide.Client);
 
@@ -942,7 +942,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Receives_a_result_in_a_transfer_credited_as_it_comes_and_settles_its_call_once_whole()
+    public async Task Receive_a_result_in_a_transfer_credited_as_it_comes_and_settle_its_call_once_whole()
     {
         foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
         {
@@ -1013,7 +1013,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_result_s_transfer_the_peer_fails_giving_the_budget_back_and_drops_what_comes_after()
+    public async Task End_a_results_transfer_the_peer_fails_giving_the_budget_back_and_drop_what_comes_after()
     {
         // a budget two transfers share
         var peer = new Peer(RouterSide.Client, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200 });
@@ -1088,7 +1088,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_peer_keeps_its_call_abandoned_or_its_timeout_when_longer()
+    public async Task Reserve_the_call_id_of_a_result_it_received_in_part_as_long_as_the_peer_keeps_its_call_abandoned_or_its_timeout_when_longer()
     {
         foreach (var (ending, timeout, reservation) in new (string, int?, int)[]
         {
@@ -1203,7 +1203,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_a_request_as_a_transfer_its_opening_the_chunks_each_credit_lets_go_then_waits_on_its_answer()
+    public async Task Send_a_request_as_a_transfer_its_opening_the_chunks_each_credit_lets_go_then_wait_on_its_answer()
     {
         foreach (var total in new[] { 200, 300 })
         {
@@ -1241,7 +1241,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothing_more_of_it()
+    public async Task Stop_a_request_the_peer_answers_or_its_caller_gives_up_and_send_nothing_more_of_it()
     {
         foreach (var (ending, total, timeout, initialCredit, code, side) in new (string, int, int, int?, ushort, RouterSide)[]
         {
@@ -1307,7 +1307,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_request_whose_chunk_cannot_go_out_telling_the_peer_to_cancel_it()
+    public async Task End_a_request_whose_chunk_cannot_go_out_telling_the_peer_to_cancel_it()
     {
         var peer = new Peer(RouterSide.Client);
         var refused = new IOException("the transport refused the chunk");
@@ -1362,7 +1362,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Waits_on_a_request_s_own_timer_the_inactivity_while_it_goes_as_a_transfer_then_its_timeout_for_its_answer()
+    public async Task Wait_on_a_requests_own_timer_the_inactivity_while_it_goes_as_a_transfer_then_its_timeout_for_its_answer()
     {
         var peer = new Peer(RouterSide.Client);
         var asked = peer.Request(PatternOf(300), TimeSpan.FromSeconds(1));
@@ -1407,7 +1407,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sets_a_call_s_timer_going_again_as_the_bytes_of_its_result_come_and_not_for_bytes_it_has()
+    public async Task Set_a_calls_timer_going_again_as_the_bytes_of_its_result_come_and_not_for_bytes_it_has()
     {
         var recorded = new RequesterPeer(RequesterLimits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
         using var recordedCore = recorded.Core;
@@ -1465,7 +1465,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_request_goes()
+    public async Task Keep_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_request_goes()
     {
         foreach (var holdLastSend in new[] { false, true })
         {
@@ -1649,7 +1649,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant()
+    public async Task Count_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant()
     {
         var registry = new MetricsRegistry();
         var port = new CountedPort((RouterSide.Client, registry));
@@ -1721,7 +1721,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Says_whether_its_requests_open_a_subscription_and_whether_it_is_paced()
+    public async Task Say_whether_they_open_a_subscription_and_whether_it_is_paced()
     {
         var server = new Peer(RouterSide.Server);
 
@@ -1750,7 +1750,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Rejects_with_the_failure_the_peer_answers_as_its_side_or_through_a_relay_of_no_side_where_the_call_went()
+    public async Task Reject_with_the_failure_the_peer_answers_as_its_side_or_through_a_relay_of_no_side_where_the_call_went()
     {
         var server = new Peer(RouterSide.Server);
 
@@ -1799,7 +1799,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_fails_with()
+    public async Task Time_out_and_reject_never_throw_what_their_payload_or_the_transport_fails_with()
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default);
         var timing = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromMilliseconds(10));
@@ -1912,7 +1912,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Cancels_its_requests_by_their_token_at_once_drawing_nothing_or_once_sent_telling_the_peer()
+    public async Task Are_cancelled_by_their_signal_at_once_drawing_nothing_or_once_sent_telling_the_peer()
     {
         var server = new Peer(RouterSide.Server);
         var drawn = new List<uint>();
@@ -1957,7 +1957,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_no_cancel_for_a_request_whose_send_failed_whole_or_its_transfer_s_opening()
+    public async Task Send_no_cancel_for_a_request_whose_send_failed_whole_or_its_transfers_opening()
     {
         var server = new Peer(RouterSide.Server);
         var gone = new IOException("gone");
@@ -2013,7 +2013,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Draws_no_call_id_reserved_and_none_at_all_when_every_one_is()
+    public async Task Draw_no_call_id_reserved_and_none_at_all_when_every_one_is()
     {
         var drawn = new List<uint>();
 
@@ -2071,7 +2071,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Arms_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_handed_back_as_a_chunk_went()
+    public async Task Arm_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_handed_back_as_a_chunk_went()
     {
         var recorded = new RequesterPeer(RequesterLimits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
         using var core = recorded.Core;
@@ -2125,7 +2125,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Stops_a_call_s_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_process_waiting()
+    public async Task Stop_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_process_waiting()
     {
         var recorded = new RequesterPeer(RequesterLimits);
         using var core = recorded.Core;
@@ -2148,7 +2148,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_place_given_back_the_peer_told_its_call_id_reserved()
+    public async Task End_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_place_given_back_the_peer_told_its_call_id_reserved()
     {
         foreach (var ending in new[] { "cancel", "token", "timer" })
         {

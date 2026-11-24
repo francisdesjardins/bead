@@ -151,7 +151,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Counts_a_call_that_carries_no_series_under_OTHER_and_a_router_given_no_registry_counts_nothing()
+    public async Task Count_a_call_that_carries_no_series_under_other_and_a_router_given_no_registry_counts_nothing()
     {
         var registry = new MetricsRegistry();
         var counted = new CountedPort((RouterSide.Server, registry));
@@ -168,7 +168,7 @@ public sealed partial class RouterCoreTests
 
     // debugging 3.3, 3.4 and 3.5
     [Fact]
-    public async Task Reads_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
+    public async Task Read_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
     {
         var registry = new MetricsRegistry();
 

@@ -40,7 +40,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Announces_the_session_when_it_changes_and_only_then()
+    public async Task Announce_the_session_when_it_changes_and_only_then()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var other = SessionToken.FromBytes(PatternOf(17).AsSpan(1));
@@ -82,7 +82,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Announces_again_what_an_answer_that_did_not_go_out_announced()
+    public async Task Announce_again_what_an_answer_that_did_not_go_out_announced()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var gone = new IOException("gone");
@@ -116,7 +116,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Keeps_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in()
+    public async Task Keep_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var other = SessionToken.FromBytes(PatternOf(17).AsSpan(1));
@@ -174,7 +174,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Forgets_the_announcement_with_the_connection_even_with_an_answer_in_flight()
+    public async Task Forget_the_announcement_with_the_connection_even_with_an_answer_in_flight()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var held = new TaskCompletionSource();
@@ -218,7 +218,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Fails_the_answer_whose_session_cannot_be_told_and_announces_nothing_without_a_way_to()
+    public async Task Fail_the_answer_whose_session_cannot_be_told_and_announce_nothing_without_a_way_to()
     {
         var unknown = new InvalidOperationException("no session to tell");
         var server = new Peer(RouterSide.Server);
@@ -262,7 +262,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_a_payload_past_its_own_limit_and_an_envelope_past_its_own()
+    public async Task Refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own()
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64, MaximumPayloadBytes = 8, WindowBytes = 128 });
 
@@ -326,7 +326,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_a_notification_too_large_for_one_envelope_and_sends_one_that_fits()
+    public async Task Refuse_a_notification_too_large_for_one_envelope_and_send_one_that_fits()
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 });
 

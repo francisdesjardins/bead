@@ -20,7 +20,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.3.2
     [Fact]
-    public async Task Holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
+    public async Task Hold_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
     {
         var server = new Peer(RouterSide.Server);
         var small = Echo with { MaximumPayloadBytes = 8 };
@@ -94,7 +94,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Holds_a_procedure_whose_own_limit_is_larger_to_the_router_s_both_ways()
+    public async Task Hold_a_procedure_whose_own_limit_is_larger_to_the_router_s_both_ways()
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumPayloadBytes = 40 });
         var wide = Echo with { MaximumPayloadBytes = 1_024 };
@@ -118,7 +118,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_a_procedure_s_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge()
+    public async Task Refuse_a_procedure_s_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_take_its_edge()
     {
         var server = new Peer(RouterSide.Server);
         var drawn = new List<uint>();
@@ -157,7 +157,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
+    public async Task Send_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
     {
         // a request's header takes 12 bytes; a result's 8, and 20 more for an announcement it may carry
         var small = RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 };

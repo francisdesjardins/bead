@@ -1350,7 +1350,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Its_answers_name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record()
+    public async Task Name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record()
     {
         var server = new Peer(RouterSide.Server);
         var handler = new Held(server.Core);
@@ -1374,7 +1374,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Keeps_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it()
+    public async Task Keep_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it()
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default);
         var resolver = server.Resolve();
@@ -1433,7 +1433,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Tells_the_side_of_each_answer_before_it_goes_out_and_undoes_it_when_it_does_not_go_out()
+    public async Task Tell_the_side_of_each_answer_before_it_goes_out_and_undo_it_when_it_does_not_go_out()
     {
         var ordered = new Peer(RouterSide.Server);
         using var orderedCore = ordered.Core;
@@ -1491,7 +1491,7 @@ public sealed partial class RouterCoreTests
 
     // debugging 5.1
     [Fact]
-    public async Task Traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
+    public async Task Trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
     {
         var token = SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray());
         var server = new Peer(RouterSide.Server) { Session = token };
@@ -1572,7 +1572,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Takes_a_cancel_of_no_call_in_silence_offered_to_the_side_and_reports_one_of_its_own_parity()
+    public async Task Take_a_cancel_of_no_call_in_silence_offered_to_the_side_and_report_one_of_its_own_parity()
     {
         var server = new Peer(RouterSide.Server);
 
@@ -1589,7 +1589,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Cancels_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
+    public async Task Abort_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -1743,7 +1743,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reports_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drops_one_on_a_call_id_reserved_and_a_credit_in_silence()
+    public async Task Report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drop_one_on_a_call_id_reserved_and_a_credit_in_silence()
     {
         var server = new Peer(RouterSide.Server);
         var asking = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
@@ -1782,7 +1782,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Frees_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again()
+    public async Task Free_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again()
     {
         foreach (var message in new[] { "the transport is closing", "the transport refused the result" })
         {

@@ -41,7 +41,7 @@ public sealed class RouterLimitsTests
 
     [Theory]
     [MemberData(nameof(Broken))]
-    public void Refuses_limits_that_do_not_hold_together_each_by_its_own_rule(string words, RouterLimits limits)
+    public void Refuse_limits_that_do_not_hold_together_each_rule_by_its_own_failure(string words, RouterLimits limits)
     {
         ArgumentNullException.ThrowIfNull(limits);
         var failure = Assert.Throws<ArgumentException>(() =>

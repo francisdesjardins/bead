@@ -416,7 +416,7 @@ public sealed class TransferTests
     }
 
     [Fact]
-    public void Carries_100_KiB_through_envelopes_of_1024_bytes_and_a_window_of_8_KiB_a_few_credits_apart()
+    public void Carries_100_kib_through_envelopes_of_1_024_bytes_and_a_window_of_8_kib_a_few_credits_apart()
     {
         const int total = 102_400;
 
