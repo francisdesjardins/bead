@@ -112,6 +112,57 @@ test.describe('createHTTPTransportServer', () => {
     await tcpSocketsClosed();
   });
 
+  test('listens on the port it was asked for', async () => {
+    await using server = createHTTPTransportServer({ createServer });
+    const bound = await server.start({ address: host, port: 0 });
+
+    expect(bound.address).toBe(host);
+    expect(bound.port).not.toBe(0);
+    const socket = connectTcp(bound.port, host);
+    try {
+      await once(socket, 'connect');
+      expect(socket.remotePort).toBe(bound.port);
+      expect(server.isOpen()).toBe(true);
+    } finally {
+      socket.destroy();
+    }
+    await server.stop();
+  });
+
+  test('serves every address it binds by one configuration', async () => {
+    const ipv6 = await hasIPv6Loopback();
+    await using server = createHTTPTransportServer({ createServer, pathname: '/elsewhere' });
+    const { port } = await server.start({ findOpenPort: true });
+
+    for (const address of ipv6 ? ['127.0.0.1', '::1'] : ['127.0.0.1']) {
+      const authority = address.includes(':') ? `[${address}]` : address;
+      const response = await post(`http://${authority}:${String(port)}/bead`, {
+        headers: { host: 'localhost' },
+      });
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get(REFUSAL_HEADER)).toBe(HTTP_REFUSALS.PATH);
+      await response.arrayBuffer();
+    }
+    await server.stop();
+  });
+
+  test('listens on port 80 when its start names none and on the port it names otherwise', async () => {
+    for (const [options, expected] of [
+      [{}, 80],
+      [{ port: 8080 }, 8080],
+    ] as const) {
+      const fake = createFakeHTTPServer();
+      await using server = createHTTPTransportServer({ createServer: fake.createServer });
+      const starting = server.start({ address: host, ...options });
+
+      fake.listen();
+      await starting;
+      expect(fake.servers[0]?.listened).toEqual([expected, host]);
+      await server.stop();
+    }
+  });
+
   test('answers a request an answer comes for between its body’s end and its hand-on, never handing it on', async () => {
     test.skip(
       true,
