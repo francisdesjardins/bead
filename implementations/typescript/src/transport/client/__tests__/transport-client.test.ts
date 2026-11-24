@@ -323,7 +323,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(replacementCalls).toBe(1);
   });
 
-  test('rejects with a ProgrammerError when the transport was never connected', async () => {
+  test('refuses to reconnect a client never connected, leaving it uninitialized', async () => {
     const { client } = createStubClient();
     await expect(client.reconnect()).rejects.toBeInstanceOf(ProgrammerError);
     expect(client.isUninitialized()).toBe(true);
@@ -340,7 +340,7 @@ test.describe('createTransportClient #reconnect', () => {
     );
   });
 
-  test('rejects with a ProgrammerError while closing', async () => {
+  test('refuses to reconnect while a close is under way', async () => {
     const { client } = createStubClient();
 
     await client.connect(target);
@@ -351,7 +351,7 @@ test.describe('createTransportClient #reconnect', () => {
     );
   });
 
-  test('rejects with a ProgrammerError when already reconnecting, and leaves the first one alone', async () => {
+  test('refuses a second reconnection, leaving the first alone', async () => {
     const { client } = createStubClient({ failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
@@ -366,7 +366,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isOpen()).toBe(true);
   });
 
-  test('"connect" during the wait rejects with a ProgrammerError', async () => {
+  test('refuses a connect while it waits to attempt again', async () => {
     const { client } = createStubClient({ failures: 2 });
     const controller = new AbortController();
     const waiting = Promise.withResolvers<void>();
@@ -389,7 +389,7 @@ test.describe('createTransportClient #reconnect', () => {
     await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
   });
 
-  test('passes on what "tap" throws, ending CLOSED, with no attempt after it and no wait left armed', async () => {
+  test('passes on what its tap throws, ending closed, with no attempt after it and no wait left armed', async () => {
     const clock = createTestClock();
     const { calls, client } = createStubClient({ clock, failures: 2 });
     const failure = new Error('tap_error');
@@ -407,7 +407,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect([calls, delaysOn(clock)]).toEqual([['connect:1', 'connect:1'], []]);
   });
 
-  test('rejects with a ProgrammerError, ending CLOSED, when "delay" throws', async () => {
+  test('throws an InvalidOperationException, ending closed, when its delay throws', async () => {
     const { client } = createStubClient({ failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
@@ -423,7 +423,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isClosed()).toBe(true);
   });
 
-  test('emits "reconnect" once as it starts, open or closed, and not on a misuse', async () => {
+  test('raises reconnect once as it starts, open or closed, and not on a misuse', async () => {
     const { client } = createStubClient();
     let reconnects = 0;
 
@@ -452,7 +452,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isOpen()).toBe(true);
   });
 
-  test('waits its delay after each failed attempt on the clock its transport runs on, connecting once per attempt', async () => {
+  test('waits its delay after each failed attempt, connecting once per attempt', async () => {
     const clock = createTestClock();
     const { calls, client } = createStubClient({ clock, failures: 2 });
 
@@ -477,7 +477,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
   });
 
-  test('arms its wait before "tap" hears it, so a tap that moves the clock by the wait lets the next attempt follow with no other move', async () => {
+  test('arms its wait before its tap hears it, so a tap that moves the clock by the wait lets the next attempt follow with no other move', async () => {
     const clock = createTestClock();
     const { calls, client } = createStubClient({ clock, failures: 2 });
 
@@ -492,7 +492,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect([calls, client.isOpen()]).toEqual([['connect:1', 'connect:1', 'connect:1'], true]);
   });
 
-  test('tells "tap" the wait and the attempt that failed, and nothing when the first one succeeds', async () => {
+  test('tells its tap the wait and the attempt that failed, and nothing when the first succeeds', async () => {
     const taps: [number, number][] = [];
     const tap = (nextDelay: number, attempt: number) => {
       taps.push([nextDelay, attempt]);
@@ -531,7 +531,7 @@ test.describe('createTransportClient #reconnect', () => {
     ]);
   });
 
-  test('rejects with a ReconnectError carrying the last failure as cause, ending CLOSED', async () => {
+  test('throws a ReconnectException carrying the last failure, ending closed', async () => {
     const { calls, client } = createStubClient({ failures: 3 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
@@ -606,7 +606,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(calls).toHaveLength(1 + entry.RECONNECT_DEFAULTS.maximumAttempts);
   });
 
-  test('rejects with a CancelError, without waiting out the delay, when the signal aborts mid-wait', async () => {
+  test('throws an OperationCanceledException without waiting out its delay when cancelled mid-wait', async () => {
     const { calls, client } = createStubClient({ failures: 2 });
     const controller = new AbortController();
 
@@ -632,7 +632,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isClosed()).toBe(true);
   });
 
-  test('never attempts with a signal already aborted, and stops at the wait when "tap" aborts', async () => {
+  test('never attempts with a token cancelled already, and stops at the wait when its tap cancels', async () => {
     const opened = createStubClient();
     await opened.client.connect(target);
     await expect(
@@ -655,7 +655,7 @@ test.describe('createTransportClient #reconnect', () => {
     ).rejects.toMatchObject(RECONNECTION_CANCELLED);
     expect(failing.calls).toEqual(['connect:1', 'connect:1']);
   });
-  test('aborts the attempt in flight when the signal aborts', async () => {
+  test('cancels the attempt in flight when its token is cancelled', async () => {
     const { calls, client } = createStubClient({ hang: true });
     const controller = new AbortController();
 
@@ -675,7 +675,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isClosed()).toBe(true);
   });
 
-  test('does not keep the signal of a connect for its reconnections', async () => {
+  test('keeps no token of a connect for its reconnections', async () => {
     const { client } = createStubClient();
     const controller = new AbortController();
 
