@@ -1814,6 +1814,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal((405, HttpRefusals.Method), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
             Assert.Equal("GET, POST, DELETE", head.Headers.GetValueOrDefault("allow"));
         }
+        // ! a refusal is told once its answer is written, so the last may come after its head is read
+        await Until(() =>
+        {
+            return _refusals.Count == 5;
+        });
+
         Assert.Empty(_server.Clients);
         Assert.Equal(5, _refusals.Count);
         Assert.All(_refusals, (refusal) =>
@@ -2160,6 +2166,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             return length == CountedLength ? (length, 403, HttpRefusals.Host) : (length, 400, (string?)null);
         }), answers);
+
+        await Until(() =>
+        {
+            return !_refusals.IsEmpty;
+        });
+
         Assert.Single(_refusals);
     }
 
