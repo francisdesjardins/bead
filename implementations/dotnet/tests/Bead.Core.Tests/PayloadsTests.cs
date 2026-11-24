@@ -347,4 +347,88 @@ public sealed class PayloadsTests
 
         Assert.Equal("\"a\uFFFDb\"", Encoding.UTF8.GetString(Payloads.WriteJson(JsonSerializer.SerializeToElement("a\ud800b")).Span));
     }
+    [Fact]
+    public void Writes_a_json_value_in_its_canonical_form_and_a_type_through_it()
+    {
+        var value = JsonElement.Parse("""{"b":1,"a":[true,null,"x"]}""");
+        var written = PayloadCodecs.Json.Encode(value);
+
+        Assert.Equal("""{"a":[true,null,"x"],"b":1}""", Encoding.UTF8.GetString(written.Span));
+        Assert.Equal("""{"a":[true,null,"x"],"b":1}""", PayloadCodecs.Json.Decode(written).GetRawText());
+
+        var reading = new Reading { Name = "t", Value = 0.5 };
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var encoded = PayloadCodecs.Json.Encode(JsonSerializer.SerializeToElement(reading, options));
+
+        Assert.Equal("""{"name":"t","value":0.5}""", Encoding.UTF8.GetString(encoded.Span));
+        Assert.Equal(reading, PayloadCodecs.Json.Decode(encoded).Deserialize<Reading>(options));
+    }
+
+    private sealed record Reading
+    {
+        public required string Name { get; init; }
+
+        public required double Value { get; init; }
+    }
+
+    [Fact]
+    public void Refuses_what_it_does_not_read_each_in_its_own_words_with_a_syntax_error()
+    {
+        (byte[] Bytes, string Words)[] cases =
+        [
+            ([0x22, 0xff, 0x22], "not UTF-8"),
+            ([0xef, 0xbb, 0xbf, 0x31], "a byte order mark"),
+            (Encoding.UTF8.GetBytes(new string('[', 65) + new string(']', 65)), "nested past 64"),
+            ("""{"a":1,"a":2}"""u8.ToArray(), "a name twice"),
+            ("\"\\ud800\""u8.ToArray(), "a surrogate alone"),
+            ("{\"\\udc00\":1}"u8.ToArray(), "a surrogate alone"),
+            ("1E400"u8.ToArray(), "a number past a double"),
+        ];
+
+        foreach (var (bytes, words) in cases)
+        {
+            Assert.Equal(words, RefusalOf(() =>
+            {
+                return PayloadCodecs.Json.Decode(bytes);
+            }));
+        }
+
+        foreach (var text in new[] { "", "[1,]" })
+        {
+            var refused = Assert.Throws<FormatException>(() =>
+            {
+                return PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+            });
+
+            Assert.Equal("not JSON", refused.Message);
+            Assert.IsAssignableFrom<JsonException>(refused.InnerException);
+        }
+    }
+
+    [Fact]
+    public void Refuses_what_json_has_no_value_for_each_in_its_own_words_with_a_type_error()
+    {
+        Assert.Equal("no JSON value", RefusalOf(() =>
+        {
+            return PayloadCodecs.Json.Encode(default);
+        }));
+
+        foreach (var text in new[] { "1E400", "[-1E400]" })
+        {
+            Assert.Equal("not a finite number", RefusalOf(() =>
+            {
+                return PayloadCodecs.Json.Encode(JsonElement.Parse(text));
+            }));
+        }
+    }
+
+    [Fact]
+    public void Refuses_what_does_not_write_within_an_object_one_of_whose_names_may_be_an_array_index()
+    {
+        Assert.Equal("not a finite number", RefusalOf(() =>
+        {
+            return PayloadCodecs.Json.Encode(JsonElement.Parse("""{"1":1E400}"""));
+        }));
+    }
+
 }
