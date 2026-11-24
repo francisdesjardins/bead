@@ -1782,9 +1782,9 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Free_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again()
+    public async Task An_answer_whose_send_panics_fails_as_its_transports_throw_would_and_its_call_id_opens_again()
     {
-        foreach (var message in new[] { "the transport is closing", "the transport refused the result" })
+        foreach (var message in new[] { "the transport is closing", "the transport refused the result", "the transport breaks" })
         {
             var server = new Peer(RouterSide.Server);
             var resolver = server.Resolve();
@@ -1801,7 +1801,10 @@ public sealed partial class RouterCoreTests
             });
             Assert.Equal(message, refused.Message);
             await server.Deliver(new Envelope { Header = RequestOf(1), Payload = message == "the transport is closing" ? Array.Empty<byte>() : new byte[] { 2 } });
-            Assert.Equal(2, resolver.Requests.Count);
+            Assert.Equal([1u, 1u], resolver.Requests.Select((request) => { return request.Header.CallId; }));
+            await resolver.Answer(1, new byte[] { 2 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            Assert.Equal(new ResultHeader { CallId = 1 }, server.Sent[^1].Header);
+            Assert.Equal(new byte[] { 2 }, server.Sent[^1].Payload.ToArray());
             Assert.Empty(server.Reports);
         }
     }
