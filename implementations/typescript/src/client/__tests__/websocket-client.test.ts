@@ -223,6 +223,80 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       await allClosed();
     });
 
+    test('calls the server and reads its failures as the peer’s', async () => {
+      await using serving = createWebSocketServer({ transport: { WebSocketServer: WsServer } });
+      const json = {
+        encode: (value: unknown) => {
+          return encoder.encode(JSON.stringify(value));
+        },
+        decode: (bytes: Uint8Array): unknown => {
+          return JSON.parse(decoder.decode(bytes));
+        },
+      };
+      const echoing = { serviceId: 1, procedureId: 2, procedureName: 'echo', serviceRevision: 1 };
+      const failing = { ...echoing, procedureId: 8, procedureName: 'fail' };
+      serving.services.getRequestResolver(echoing, { serializer: json })((request, response) => {
+        return response(request.payload);
+      });
+      serving.services.getRequestResolver(failing, { serializer: json })((request, response) => {
+        expect(request.payload).toBe(null);
+        return response(null, {
+          code: 7,
+          detail: 'this procedure fails, on purpose',
+        });
+      });
+      const { port } = await serving.transport.start({ address: host, findOpenPort: true });
+      await using calling = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
+      await calling.connect({ host, port });
+
+      expect(await calling.services.getRequest(echoing, { serializer: json })({ a: 1 })()).toEqual({
+        a: 1,
+      });
+      const refused = calling.services.getRequest(failing, { serializer: json })(null)();
+      await expect(refused).rejects.toMatchObject({
+        code: 7,
+        detail: 'this procedure fails, on purpose',
+        origin: 'peer',
+        side: 'server',
+        scope: FailureScope.APPLICATION,
+        procedureAddress: { serviceId: 1, procedureId: 8 },
+      });
+    });
+
+    test('answers the server’s command over the socket', async () => {
+      await using serving = createWebSocketServer({ transport: { WebSocketServer: WsServer } });
+      const json = {
+        encode: (value: unknown) => {
+          return encoder.encode(JSON.stringify(value));
+        },
+        decode: (bytes: Uint8Array): unknown => {
+          return JSON.parse(decoder.decode(bytes));
+        },
+      };
+      const asking = { serviceId: 1, procedureId: 9, procedureName: 'ask', serviceRevision: 1 };
+      const clock = { ...asking, procedureId: 10, procedureName: 'clock' };
+      const command = serving.services.getCommand(clock, { serializer: json });
+      serving.services.getRequestResolver(asking, { serializer: json })(
+        async (request, response) => {
+          expect(request.payload).toBe(null);
+          const answer = await command('What time is it where you are?')({
+            connectionHandle: request.connectionHandle,
+            timeout: 10_000,
+          });
+          return response(answer);
+        }
+      );
+      const { port } = await serving.transport.start({ address: host, findOpenPort: true });
+      await using calling = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
+      calling.services.getCommandResolver(clock, { serializer: json })((request, response) => {
+        expect(request.payload).toBe('What time is it where you are?');
+        return response('noon');
+      });
+      await calling.connect({ host, port });
+
+      expect(await calling.services.getRequest(asking, { serializer: json })(null)()).toBe('noon');
+    });
+
     test('runs its router on its transport’s clock, which times a request out', async () => {
       const clock = createTestClock();
       await using timed = createWebSocketClient({
