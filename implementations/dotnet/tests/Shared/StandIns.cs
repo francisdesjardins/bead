@@ -124,8 +124,10 @@ internal sealed class StandInResolver : IDisposable
 
 /// <summary>
 /// A proxy that stands in for the platform's, <see cref="HttpClient.DefaultProxy"/>, until disposed:
-/// every destination it is asked about goes to a listener of its own on 127.0.0.1, which records
-/// what each connection sends first.
+/// every destination of the tests' own it is asked about goes to a listener of its own on 127.0.0.1,
+/// which records what each connection sends first. The tests' own destinations are an address or a
+/// special-use name (RFC 6761: <c>localhost</c>, <c>.localhost</c>, <c>.test</c>); any other goes
+/// direct, unrecorded.
 /// </summary>
 internal sealed class StandInProxy : IAsyncDisposable
 {
@@ -165,6 +167,11 @@ internal sealed class StandInProxy : IAsyncDisposable
 
         public Uri? GetProxy(Uri destination)
         {
+            if (!IsTheTests(destination))
+            {
+                return null;
+            }
+
             Asked.Enqueue(destination);
 
             return new Uri($"http://127.0.0.1:{listener.Port}");
@@ -172,7 +179,23 @@ internal sealed class StandInProxy : IAsyncDisposable
 
         public bool IsBypassed(Uri host)
         {
-            return false;
+            return !IsTheTests(host);
+        }
+
+        // ! the proxy is the process's: the test platform's own traffic, its telemetry say, asks it
+        // too, and recorded it would read as a test's connect
+        private static bool IsTheTests(Uri destination)
+        {
+            var host = destination.IdnHost;
+
+            if (destination.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
+            {
+                return true;
+            }
+
+            return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".test", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
