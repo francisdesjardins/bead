@@ -106,7 +106,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a WebSocket message held partway to a budget and a rate, its frames read at their heads, sections
   15.3 and 15.12.
 
-**Version: 0.17.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.18.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

@@ -1,7 +1,7 @@
 transport.on('refusal', ({ address, authority, origin, port, reason, status }) => {
   // une page d'un autre site, par rebinding DNS, écrit :
-  // refused 403 host-refused: authority "rebind.example:8080",
-  //   origin "http://rebind.example:8080", from 127.0.0.1:53114
+  // refusé 403 host-refused : autorité "rebind.example:8080",
+  //   origine "http://rebind.example:8080", de 127.0.0.1:53114
   console.warn(
     `refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, ` +
       `origine ${JSON.stringify(origin)}, de ${address}:${port}`

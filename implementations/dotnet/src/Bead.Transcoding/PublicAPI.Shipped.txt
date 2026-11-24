@@ -190,17 +190,10 @@ Bead.Transcoding.JsonToken.Text.get -> string!
 Bead.Transcoding.JsonToken.Text.init -> void
 Bead.Transcoding.OwnFailure
 Bead.Transcoding.OwnFailure.Closed = 1 -> Bead.Transcoding.OwnFailure
-Bead.Transcoding.OwnFailure.Failed = 5 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Failed = 4 -> Bead.Transcoding.OwnFailure
 Bead.Transcoding.OwnFailure.Jwt = 3 -> Bead.Transcoding.OwnFailure
-Bead.Transcoding.OwnFailure.Scheme = 4 -> Bead.Transcoding.OwnFailure
 Bead.Transcoding.OwnFailure.Timeout = 0 -> Bead.Transcoding.OwnFailure
 Bead.Transcoding.OwnFailure.Unwritable = 2 -> Bead.Transcoding.OwnFailure
-Bead.Transcoding.OwnProblemOptions
-Bead.Transcoding.OwnProblemOptions.<Clone>$() -> Bead.Transcoding.OwnProblemOptions!
-Bead.Transcoding.OwnProblemOptions.Challenge.get -> string?
-Bead.Transcoding.OwnProblemOptions.Challenge.init -> void
-Bead.Transcoding.OwnProblemOptions.Equals(Bead.Transcoding.OwnProblemOptions? other) -> bool
-Bead.Transcoding.OwnProblemOptions.OwnProblemOptions() -> void
 Bead.Transcoding.ProblemContext
 Bead.Transcoding.ProblemContext.<Clone>$() -> Bead.Transcoding.ProblemContext!
 Bead.Transcoding.ProblemContext.Arose.get -> Bead.Transcoding.FailureArising
@@ -277,9 +270,6 @@ override Bead.Transcoding.JsonFormExceptionOptions.ToString() -> string!
 override Bead.Transcoding.JsonToken.Equals(object? obj) -> bool
 override Bead.Transcoding.JsonToken.GetHashCode() -> int
 override Bead.Transcoding.JsonToken.ToString() -> string!
-override Bead.Transcoding.OwnProblemOptions.Equals(object? obj) -> bool
-override Bead.Transcoding.OwnProblemOptions.GetHashCode() -> int
-override Bead.Transcoding.OwnProblemOptions.ToString() -> string!
 override Bead.Transcoding.ProblemContext.Equals(object? obj) -> bool
 override Bead.Transcoding.ProblemContext.GetHashCode() -> int
 override Bead.Transcoding.ProblemContext.ToString() -> string!
@@ -308,7 +298,7 @@ static Bead.Transcoding.HttpPayload.Text.get -> Bead.Transcoding.HttpPayload!
 static Bead.Transcoding.HttpProblem.operator !=(Bead.Transcoding.HttpProblem? left, Bead.Transcoding.HttpProblem? right) -> bool
 static Bead.Transcoding.HttpProblem.operator ==(Bead.Transcoding.HttpProblem? left, Bead.Transcoding.HttpProblem? right) -> bool
 static Bead.Transcoding.HttpProblems.Of(Bead.Failure! failure, Bead.Transcoding.ProblemContext! context) -> Bead.Transcoding.HttpProblem!
-static Bead.Transcoding.HttpProblems.Own(Bead.Transcoding.OwnFailure failure, string! detail, Bead.Transcoding.OwnProblemOptions? options = null) -> Bead.Transcoding.HttpProblem!
+static Bead.Transcoding.HttpProblems.Own(Bead.Transcoding.OwnFailure failure, string! detail) -> Bead.Transcoding.HttpProblem!
 static Bead.Transcoding.HttpProblems.PhraseOf(int status) -> string!
 static Bead.Transcoding.HttpProblems.Refusal(int status, string! detail) -> System.ReadOnlyMemory<byte>
 static Bead.Transcoding.HttpProblems.StatusOf(ushort code, Bead.Transcoding.ProblemContext! context) -> int
@@ -326,8 +316,6 @@ static Bead.Transcoding.JsonFormExceptionOptions.operator !=(Bead.Transcoding.Js
 static Bead.Transcoding.JsonFormExceptionOptions.operator ==(Bead.Transcoding.JsonFormExceptionOptions? left, Bead.Transcoding.JsonFormExceptionOptions? right) -> bool
 static Bead.Transcoding.JsonToken.operator !=(Bead.Transcoding.JsonToken? left, Bead.Transcoding.JsonToken? right) -> bool
 static Bead.Transcoding.JsonToken.operator ==(Bead.Transcoding.JsonToken? left, Bead.Transcoding.JsonToken? right) -> bool
-static Bead.Transcoding.OwnProblemOptions.operator !=(Bead.Transcoding.OwnProblemOptions? left, Bead.Transcoding.OwnProblemOptions? right) -> bool
-static Bead.Transcoding.OwnProblemOptions.operator ==(Bead.Transcoding.OwnProblemOptions? left, Bead.Transcoding.OwnProblemOptions? right) -> bool
 static Bead.Transcoding.ProblemContext.operator !=(Bead.Transcoding.ProblemContext? left, Bead.Transcoding.ProblemContext? right) -> bool
 static Bead.Transcoding.ProblemContext.operator ==(Bead.Transcoding.ProblemContext? left, Bead.Transcoding.ProblemContext? right) -> bool
 static Bead.Transcoding.RequestPlace.operator !=(Bead.Transcoding.RequestPlace? left, Bead.Transcoding.RequestPlace? right) -> bool

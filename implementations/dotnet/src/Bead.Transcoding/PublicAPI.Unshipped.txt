@@ -1,17 +1,1 @@
 #nullable enable
-*REMOVED*Bead.Transcoding.OwnFailure.Failed = 5 -> Bead.Transcoding.OwnFailure
-*REMOVED*Bead.Transcoding.OwnFailure.Scheme = 4 -> Bead.Transcoding.OwnFailure
-*REMOVED*Bead.Transcoding.OwnProblemOptions
-*REMOVED*Bead.Transcoding.OwnProblemOptions.<Clone>$() -> Bead.Transcoding.OwnProblemOptions!
-*REMOVED*Bead.Transcoding.OwnProblemOptions.Challenge.get -> string?
-*REMOVED*Bead.Transcoding.OwnProblemOptions.Challenge.init -> void
-*REMOVED*Bead.Transcoding.OwnProblemOptions.Equals(Bead.Transcoding.OwnProblemOptions? other) -> bool
-*REMOVED*Bead.Transcoding.OwnProblemOptions.OwnProblemOptions() -> void
-*REMOVED*override Bead.Transcoding.OwnProblemOptions.Equals(object? obj) -> bool
-*REMOVED*override Bead.Transcoding.OwnProblemOptions.GetHashCode() -> int
-*REMOVED*override Bead.Transcoding.OwnProblemOptions.ToString() -> string!
-*REMOVED*static Bead.Transcoding.HttpProblems.Own(Bead.Transcoding.OwnFailure failure, string! detail, Bead.Transcoding.OwnProblemOptions? options = null) -> Bead.Transcoding.HttpProblem!
-*REMOVED*static Bead.Transcoding.OwnProblemOptions.operator !=(Bead.Transcoding.OwnProblemOptions? left, Bead.Transcoding.OwnProblemOptions? right) -> bool
-*REMOVED*static Bead.Transcoding.OwnProblemOptions.operator ==(Bead.Transcoding.OwnProblemOptions? left, Bead.Transcoding.OwnProblemOptions? right) -> bool
-Bead.Transcoding.OwnFailure.Failed = 4 -> Bead.Transcoding.OwnFailure
-static Bead.Transcoding.HttpProblems.Own(Bead.Transcoding.OwnFailure failure, string! detail) -> Bead.Transcoding.HttpProblem!

@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-24
+
 ### Added
 
 - beadc's image is published on GitHub's container registry at each release,
@@ -21,8 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.18.0 (`spec-v0.18.0`), and the transcoding's companion, `spec/transcoding.md`,
+  to 0.8.0 (`transcoding-v0.8.0`); `spec/debugging.md` stays 0.11.1.
+
 - The workflow that implements a settled design is `bead-implement-every-side`, and it runs the
   Rust side by default, beside the spec, TypeScript and C#.
+
+- The documents are brought to 0.17.0: the records, the matrix and the READMEs state the client's
+  loopback, the read-ahead and `Content-Length` bounds and the WebSocket message's budget and rate
+  as what holds, and a step over HTTP/2 in the conformance files as ahead.
 
 - The guides for teams take beadc's published image: getting started verifies 0.16.0's with `gh
   attestation verify` and `cosign verify`, pins it by its digest and builds its scenario with it,
@@ -41,7 +50,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The support matrix gains an open row, `The platform's proxy, for a host off the machine`: the C#
   side's handlers read `HttpClient.DefaultProxy`, Node's global dialers the environment's proxy
   under `NODE_USE_ENV_PROXY`, MQTT.js the SOCKS proxy `MQTTJS_SOCKS_PROXY` names, and the Rust side
-  none. `UNTESTED_OPEN` is 45.
+  none. `UNTESTED_OPEN` is 42.
 - Spec 15.12: over HTTP/1, a server holds no more of a socket than a bound of its own of what it
   read behind the answer under way, and past it reads nothing more of that socket until the answers
   ahead end, keeping it. Each request pipelined is answered in its turn, however many come in one
@@ -104,6 +113,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transport and its gateway. It now answers 400 unmarked and closes (spec 15.7, 15.12; RFC 9112
   §7.1). A case of each conformance file plays a size past 2⁶⁴ − 1, and `spec/transcoding.json`'s
   exchanges can expect a socket's end.
+- The Rust side's JSON form read an `Any` whose type URL names its type with a leading dot,
+  `…/.google.protobuf.Any`, which the TypeScript and C# sides refuse, and wrote it back otherwise.
+  It now names a type by its whole name alone, on reading and writing, and refuses that `Any` as an
+  `Any` of a type its definitions do not hold.
 
 ### Security
 
@@ -3630,7 +3643,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.16.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.17.0...develop
+[0.17.0]: https://github.com/francisdesjardins/bead/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/francisdesjardins/bead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/francisdesjardins/bead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/francisdesjardins/bead/compare/v0.13.0...v0.14.0

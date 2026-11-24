@@ -1763,7 +1763,7 @@ footer {
   <main id="main" tabindex="-1">
 <div class="opening">
   <header class="hero">
-    <p class="eyebrow">bead 0.16.0 · spec 0.17.0 · layouts 0xA1 and 0xB1</p>
+    <p class="eyebrow">bead 0.17.0 · spec 0.18.0 · layouts 0xA1 and 0xB1</p>
     <h1>Bead</h1>
     <p class="lede">
       One typed contract for teams that call each other in TypeScript, C# and Rust, from a browser,
@@ -1773,8 +1773,8 @@ footer {
       A service is declared once, in a <code>.proto</code>. <code>beadc</code> generates its typed
       server and client in each language. A gateway each side offers answers the same procedures in
       HTTP and JSON, for the teams that do not speak Bead. A specification holds the sides to one
-      behaviour: each plays its conformance files, the Rust side the part it reaches, and the
-      support matrix lists each place where they still differ.
+      behaviour, and each plays its conformance files. The Rust side has their AMQP 1.0 cases
+      ahead, with its binding. The support matrix lists each place where the sides still differ.
     </p>
   </header>
   <section id="statut" class="status">
@@ -1795,9 +1795,9 @@ footer {
       the repository’s gates: the other implementations, the generator, much of what has changed on
       the TypeScript side since, and many of the spec’s readings of standards. Those readings and
       each language’s idioms were checked by the tests, the design rounds and the agents’
-      reviews. No one with the
-      knowledge to judge them has reviewed Bead’s core, its security or its reading of the standards
-      it follows; a team that takes it reviews it as its own code.
+      reviews. Bead’s core, its security and its reading of the standards it follows have been
+      reviewed by no one with the knowledge to judge them; a team that takes it reviews it as its
+      own code.
     </p>
     <p id="methode">
       On <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>, its author
@@ -1904,8 +1904,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>A broker is one more transport</strong
-      ><span>Over MQTT 5, and over AMQP 1.0 on the TypeScript and C# sides, both ends keep the API
-        they have over a WebSocket.</span>
+      ><span>Over MQTT 5 on every side, and over AMQP 1.0 on RabbitMQ 4 for the TypeScript and C#
+        sides, both ends keep the API they have over a WebSocket.</span>
     </li>
     <li>
       <strong>One credit paces a subscription as it paces a transfer</strong
@@ -1914,14 +1914,14 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>The spec’s conformance files are its executable form</strong
-      ><span>Each side plays those files, not a copy of its own, and the Rust side plays the part it
-        reaches.</span>
+      ><span>Each side plays those files, not a copy of its own. The Rust side has their AMQP 1.0
+        cases ahead, with its binding.</span>
     </li>
   </ul>
   <p class="space">
     The architecture guide sets Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: its
+    Its table quotes or sums up the other three projects’ own pages. What Bead lacks beside them: its
     packages are unpublished, and it speaks three languages.
   </p>
 </section>
@@ -1987,12 +1987,12 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <p>
     A companion of the specification, <code>spec/transcoding.md</code>, describes it under its own
-    version, 0.7.0. The gateway listens on its own port,
+    version, 0.8.0. The gateway listens on its own port,
     <code>localhost</code> by default, or mounts into the application’s web server.
   </p>
   <p>
-    What the wire can do and a gateway does not carry is listed, not hidden: a connection’s
-    session, a command and a stream’s window, each a row of the support matrix’s
+    A connection’s session, a command and a stream’s window are carried by the wire and not by a
+    gateway. Each is a row of the support matrix’s
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/support.md#leveled-down">“Leveled down”</a> (the companion’s §2.5,
     §2.6 and §8.8). A stream’s resumption has its row there too (§8.3): Server-Sent Events offer
     it, and a Bead subscription keeps no notification past its end.
@@ -2049,12 +2049,13 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <h3 id="transcodage-echecs">A failure, a problem</h3>
   <p>
-    Each failure answers an RFC 9457 problem, <code>application/problem+json</code>.
-    <code>code</code> and <code>scope</code> carry what the wire carries, and <code>detail</code>
-    the failure’s detail. The status depends on where the code arose: what the caller can fix
-    gives a 4xx, what happens between the gateway and its server a 5xx.
+    The gateway answers each failure with an RFC 9457 problem,
+    <code>application/problem+json</code>. <code>code</code> and <code>scope</code> carry what the
+    wire carries, and <code>detail</code> the failure’s detail. The status depends on where the
+    failure arose: what the caller can mend gives a 4xx, and what it cannot, in the server, in the
+    gateway or between them, a 5xx.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, and what is said only between the gateway and its server</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">431</td><td>a JWT past 1004 bytes, under bearer-jwt</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED; what is said only between the gateway and its server; a protocol code the specification does not name; the gateway’s own configuration; a result its JSON form cannot hold, or what no gate foresaw</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST, or the exchange’s connection closed before its answer; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
   <p class="space">
     A <code>PAYLOAD_INVALID</code> gives a 422 whose <code>errors</code> place each violation:
     <code>pointer</code> into the body, or <code>parameter</code> for a variable of the path or of
@@ -2218,15 +2219,16 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <p class="gist">
     The three sides answer to one specification, and to the conformance files that are its
     executable form: every unit of the spec is cited by a file, or carries the reason none does.
-    Each side plays those files from <code>spec/</code>, the Rust side the part it reaches, and the
-    three call each other in CI. Where they still differ, each difference is a row of the support
-    matrix, with the test that shows it.
+    Each side plays those files from <code>spec/</code>, and the three call each other in CI. The
+    Rust side has the files’ AMQP 1.0 cases ahead, with its binding. Where the sides still differ,
+    each difference is a row of the support matrix, with the test that shows it.
   </p>
   <p>
-    TypeScript and C# are at behavioural parity. The Rust side has the parts below, and what it
+    TypeScript and C# are at behavioural parity, but for the C# side’s core in a page and in a
+    worker, ahead with its Web Worker transport. The Rust side has the parts below, and what it
     lacks is ahead.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined; a Web Worker ahead, with its core in a page</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined; AMQP 1.0 and a Web Worker ahead</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     Parity holds down to the field. Where one platform cannot do what another can, the difference
     either stays between the sides or is leveled, every side keeping to what that platform can. A
@@ -2238,7 +2240,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <p>
     The sides also measure themselves. TypeScript and C# measure the same layers in the same
     units: the envelope’s codec, a JSON payload, protobuf’s JSON mapping, an <code>echo</code> over
-    HTTP, over WebSocket and in memory, paced notifications and a 20 MiB transfer. Rust measures its
+    HTTP, over WebSocket and in memory, paced notifications and a 20 MiB echo. Rust measures its
     codec, its JSON mapping and its <code>echo</code> in memory; its layers on the loopback are
     ahead. On each release’s branch,
     CI measures each side against the last release. It runs both trees in turn on one machine and
@@ -2537,7 +2539,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// served at /metrics, the text Prometheus reads, and a Grafana behind it</span>
+<span class="tok-comment">// served at /metrics, in the text Prometheus reads</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -2653,8 +2655,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       session. It plays the part of a session cookie, tied to its connection.
     </li>
     <li>
-      <strong><code>JWT</code></strong>: a signed access token, which each server verifies on the
-      spot, with the keys its application gives it.
+      <strong><code>JWT</code></strong>: a signed access token, which each server verifies itself,
+      with the keys or the key set its application gives it.
     </li>
     <li>
       <strong><code>ELSEWHERE</code></strong>: the credential travels in the transport, and the
@@ -2741,8 +2743,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more" id="securite-relais">
     <summary>A relay</summary>
     <p>
-      A relay terminates each leg and forwards a JWT as it is to the destination of its audience,
-      which verifies it. By default it refuses a call with no credential, or with OPAQUE, so as not to lend its own
+      A relay terminates each leg and forwards a bearer credential as it is to the destination the
+      requester chooses, which verifies it. By default it refuses a call with no credential, or with OPAQUE, so as not to lend its own
       session to any requester. <a href="#relais">Relays</a> details it all.
     </p>
   </details>
@@ -3134,8 +3136,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p>
     On the TypeScript side, the requester receives a <code>FailureError</code>:
     <code>isProtocol</code> tests a code of the protocol. A procedure’s own failure is tested by the
-    catalogue beadc generates from the <code>.proto</code>, here <code>EchoFailures.is</code>,
-    which also checks that the failure comes from that service. The C# side’s
+    catalogue beadc generates from the <code>.proto</code>, here <code>EchoFailures.is</code>.
+    This test also checks that the failure comes from that service. The C# side’s
     <code>FailureException</code> and the Rust side’s <code>Failure</code> ask the same.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
@@ -3230,7 +3232,8 @@ message CountDownRequest {
       string’s pattern; an enum’s defined values; a list’s and a map’s rules; and
       <code>oneof</code>. It refuses any other rule with <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL
       and a pattern of bytes among them. It ignores none: a rule written and not played would let
-      through what a protovalidate server refuses.
+      through what a protovalidate server refuses. Bead judges requests alone, so rules on a message
+      no request reaches draw a warning, <code>VALIDATE_RULES_UNPLAYED</code>.
       <a href="#suite">Rules in CEL are ahead, then the rest of the rules it refuses.</a>
     </p>
     <p>
@@ -3281,20 +3284,21 @@ message CountDownRequest {
   <h3 id="abonnements-rythme">At the client’s pace</h3>
   <p>
     With PACED beside SUBSCRIPTION, the server sends only the notifications the client has
-    granted. The client grants as its callbacks finish, an asynchronous one once its work is done.
-    With a window of one, it grants the next notification once they are done with the previous
-    one. With a wider window, it grants as far as the window reaches past what they finished, and
+    granted. The client grants as its callbacks finish. An asynchronous callback finishes once its
+    work is done. With a window of one, the client grants the next notification once its callbacks
+    are done with the previous one. With a wider window, it grants as far as the window reaches past what they finished, and
     grants again at half the window. It grants with a CREDIT that carries PACED.
     That credit counts notifications, as RSocket’s <code>REQUEST_N</code> does. But it is absolute,
     as a transfer’s credit is.
   </p>
   <p>
     Past its credit, a notification waits in a queue. The server can give it a key. A notification
-    of the same key replaces the one waiting, so an entity’s state keeps only its latest value:
-    forty-five changes to an article, while a callback fetches its data, arrive as two
-    notifications. Without a key, every event is kept, in order. A full queue, 64 notifications or
-    1 MiB by default, ends the subscription with <code>CAPACITY_EXCEEDED</code>. Nothing is lost in
-    silence: the client subscribes again and reads the state anew.
+    of the same key replaces the one waiting, so an entity’s state keeps only its latest value. If
+    an article changes forty-five times while a callback fetches its data, the client receives two
+    notifications: the first change, then the last. Without a key, every event is kept, in order. A
+    full queue, 64 notifications or 1 MiB by default, ends the subscription with
+    <code>CAPACITY_EXCEEDED</code>. Nothing is lost in silence: the client’s application subscribes
+    again and reads the state anew.
   </p>
   <figure class="figure">
     <figcaption>A paced subscription, its callback fetching</figcaption>
@@ -3674,8 +3678,7 @@ message CountDownRequest {
     </table>
   </div>
   <p class="space">
-    Bead’s gateway answers these two codes with 503 and 502, as an HTTP gateway does. gRPC’s retry
-    rules turn on the same difference: whether the procedure may have run.
+    Bead’s gateway answers these two codes with 503 and 502, as an HTTP gateway does.
   </p>
   <details class="more">
     <summary>What a relay does not do, and what its requesters share</summary>
@@ -3707,7 +3710,7 @@ message CountDownRequest {
     <code>POST</code> carries an envelope (§15.4 to §15.12).
   </p>
   <p>
-    Where its platform lets it, each end of a WebSocket sends a PING on a connection silent for
+    Where its platform lets it, each end of a WebSocket sends a ping on a connection silent for
     30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
     The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455), one past <code>maximumMessageFrames</code> with 1008, and a frame RFC 6455 forbids with 1002. A side reads each frame’s head where its platform lets it, and judges it there.
@@ -3721,9 +3724,10 @@ message CountDownRequest {
     callId, at the prefix’s fixed offsets, to hand each answer to its request’s exchange.
   </p>
   <p>
-    The server marks each of its refusals in the <code>bead-refusal</code> field, and only a marked
-    refusal fails the send beyond doubt: nothing was tried. Any other status, a gateway’s 502 for
-    instance, may have come after the request ran, and counts as an exchange lost. A relay thus
+    The transport marks each refusal of its own in the <code>bead-refusal</code> field, and only a
+    marked refusal fails the send beyond doubt: nothing was tried. Any other status but a 2xx, a
+    gateway’s 502 for instance, may have come after the request ran, and counts as an exchange
+    lost. A relay thus
     always tells <code>DESTINATION_UNREACHABLE</code> from <code>DESTINATION_LOST</code>. A client
     follows no redirect: it would carry the connection’s token where no one judged it.
   </p>
@@ -3736,7 +3740,7 @@ message CountDownRequest {
   <p>
     A notification, a command or a relayed request has no exchange to go to. They wait, numbered,
     in the connection’s outbox. The client listens with a <code>GET /bead</code> the server holds
-    until something arrives, 30 s at most. The server then reports a batch, each envelope preceded
+    until something arrives, 30 s at most. The server then brings back a batch, each envelope preceded
     by its length on 4 bytes. The next listen acknowledges what was heard by its
     <code>bead-after</code> field, and the rest comes again.
   </p>
@@ -3748,7 +3752,7 @@ message CountDownRequest {
   </p>
   <figure class="figure">
     <figcaption>A long poll: a batch, its acknowledgement, then nothing</figcaption>
-    <div class="figure-scroll" tabindex="0"><svg id="d-listen-en" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 631.5 655" role="graphics-document document" aria-roledescription="sequence" width="632" height="655" style="--w:632px"><g><line id="actor11" x1="405" y1="65" x2="405" y2="2000" class="actor-line 200" stroke-width="0.5px" name="S" data-et="life-line" data-id="S" style="stroke:var(--diagram-edge)"></line><g id="root-11" data-et="participant" data-type="participant" data-id="S"><rect x="330" y="0" width="150" height="65" name="S" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="405" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="405" dy="0">Server</tspan></text></g></g><g><line id="actor10" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-10" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-listen-en{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-listen-en .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-listen-en .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-listen-en .error-icon{fill:var(--diagram-surface);}#d-listen-en .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-listen-en .edge-thickness-normal{stroke-width:1px;}#d-listen-en .edge-thickness-thick{stroke-width:3.5px;}#d-listen-en .edge-pattern-solid{stroke-dasharray:0;}#d-listen-en .edge-thickness-invisible{stroke-width:0;fill:none;}#d-listen-en .edge-pattern-dashed{stroke-dasharray:3;}#d-listen-en .edge-pattern-dotted{stroke-dasharray:2;}#d-listen-en .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .marker.cross{stroke:var(--diagram-edge);}#d-listen-en svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-listen-en p{margin:0;}#d-listen-en .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-listen-en text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .actor-line{stroke:var(--diagram-edge);}#d-listen-en .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-listen-en .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-listen-en .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-listen-en [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .sequenceNumber{fill:var(--diagram-surface);}#d-listen-en [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-listen-en [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .messageText{fill:var(--diagram-ink);stroke:none;}#d-listen-en .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-listen-en .labelText,#d-listen-en .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopText,#d-listen-en .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .sectionTitle,#d-listen-en .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-listen-en .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-listen-en .noteText,#d-listen-en .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .actorPopupMenu{position:absolute;}#d-listen-en .actor-man circle,#d-listen-en line{fill:var(--diagram-actor);stroke-width:2px;}#d-listen-en .node .neo-node{stroke:var(--diagram-node-line);}#d-listen-en [data-look="neo"].swimlane.cluster rect{filter:none;}#d-listen-en [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-listen-en [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-listen-en :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-listen-en-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-listen-en-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-listen-en-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-listen-en-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-listen-en-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-listen-en-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-listen-en-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i3"><rect x="330" y="273" width="150" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="278" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">nothing to report:</tspan></text><text x="405" y="299" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">the listen is held</tspan></text></g><g data-et="note" data-id="i4"><rect x="315" y="345" width="180" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="350" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">a NOTIFICATION, no. 1,</tspan></text><text x="405" y="371" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">enters the outbox</tspan></text></g><g data-et="note" data-id="i7"><rect x="278.5" y="542" width="253" height="41" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="547" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">no. 1 is acknowledged, forgotten</tspan></text></g><text x="239" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">POST · bead-listen ?1</text><line x1="76" y1="117" x2="401" y2="117" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="132" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">201 · bead-connection-token,</text><text x="242" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-listen ?1</text><line x1="404" y1="190" x2="79" y2="190" class="messageLine1" data-et="message" data-id="i1" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="205" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 0</text><text x="239" y="226" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="263" x2="401" y2="263" class="messageLine0" data-et="message" data-id="i2" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="422" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">200 · a batch, from no. 1</text><line x1="404" y1="459" x2="79" y2="459" class="messageLine1" data-et="message" data-id="i5" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="474" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 1</text><text x="239" y="495" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="532" x2="401" y2="532" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="598" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">204 · nothing, at the end of the wait</text><line x1="404" y1="635" x2="79" y2="635" class="messageLine1" data-et="message" data-id="i8" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
+    <div class="figure-scroll" tabindex="0"><svg id="d-listen-en" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 631.5 655" role="graphics-document document" aria-roledescription="sequence" width="632" height="655" style="--w:632px"><g><line id="actor1" x1="405" y1="65" x2="405" y2="2000" class="actor-line 200" stroke-width="0.5px" name="S" data-et="life-line" data-id="S" style="stroke:var(--diagram-edge)"></line><g id="root-1" data-et="participant" data-type="participant" data-id="S"><rect x="330" y="0" width="150" height="65" name="S" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="405" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="405" dy="0">Server</tspan></text></g></g><g><line id="actor0" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-0" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-listen-en{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-listen-en .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-listen-en .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-listen-en .error-icon{fill:var(--diagram-surface);}#d-listen-en .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-listen-en .edge-thickness-normal{stroke-width:1px;}#d-listen-en .edge-thickness-thick{stroke-width:3.5px;}#d-listen-en .edge-pattern-solid{stroke-dasharray:0;}#d-listen-en .edge-thickness-invisible{stroke-width:0;fill:none;}#d-listen-en .edge-pattern-dashed{stroke-dasharray:3;}#d-listen-en .edge-pattern-dotted{stroke-dasharray:2;}#d-listen-en .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .marker.cross{stroke:var(--diagram-edge);}#d-listen-en svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-listen-en p{margin:0;}#d-listen-en .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-listen-en text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .actor-line{stroke:var(--diagram-edge);}#d-listen-en .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-listen-en .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-listen-en .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-listen-en [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .sequenceNumber{fill:var(--diagram-surface);}#d-listen-en [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-listen-en [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .messageText{fill:var(--diagram-ink);stroke:none;}#d-listen-en .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-listen-en .labelText,#d-listen-en .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopText,#d-listen-en .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .sectionTitle,#d-listen-en .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-listen-en .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-listen-en .noteText,#d-listen-en .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .actorPopupMenu{position:absolute;}#d-listen-en .actor-man circle,#d-listen-en line{fill:var(--diagram-actor);stroke-width:2px;}#d-listen-en .node .neo-node{stroke:var(--diagram-node-line);}#d-listen-en [data-look="neo"].swimlane.cluster rect{filter:none;}#d-listen-en [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-listen-en [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-listen-en :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-listen-en-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-listen-en-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-listen-en-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-listen-en-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-listen-en-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-listen-en-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-listen-en-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i3"><rect x="314.5" y="273" width="181" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="278" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">nothing to bring back:</tspan></text><text x="405" y="299" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">the listen is held</tspan></text></g><g data-et="note" data-id="i4"><rect x="315" y="345" width="180" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="350" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">a NOTIFICATION, no. 1,</tspan></text><text x="405" y="371" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">enters the outbox</tspan></text></g><g data-et="note" data-id="i7"><rect x="278.5" y="542" width="253" height="41" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="547" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">no. 1 is acknowledged, forgotten</tspan></text></g><text x="239" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">POST · bead-listen ?1</text><line x1="76" y1="117" x2="401" y2="117" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="132" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">201 · bead-connection-token,</text><text x="242" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-listen ?1</text><line x1="404" y1="190" x2="79" y2="190" class="messageLine1" data-et="message" data-id="i1" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="205" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 0</text><text x="239" y="226" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="263" x2="401" y2="263" class="messageLine0" data-et="message" data-id="i2" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="422" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">200 · a batch, from no. 1</text><line x1="404" y1="459" x2="79" y2="459" class="messageLine1" data-et="message" data-id="i5" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="474" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 1</text><text x="239" y="495" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="532" x2="401" y2="532" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="598" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">204 · nothing, at the end of the wait</text><line x1="404" y1="635" x2="79" y2="635" class="messageLine1" data-et="message" data-id="i8" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
   </figure>
   <p class="space">
     A client that does not listen receives no subscription, no command and no relayed request. HTTP
@@ -3758,8 +3762,8 @@ message CountDownRequest {
   <details class="more">
     <summary>A request’s timeouts, and WebSocket’s handshake</summary>
     <p>
-      A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the server
-      answers 408, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
+      A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the HTTP server
+      answers 408 before the transport reads anything, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
       receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
       or a byte past ASCII, is refused before anything else, 400 unmarked over HTTP/1.1 (§15.12).
     </p>
@@ -3925,9 +3929,9 @@ offerHello(server);
         hook.</span>
     </li>
     <li>
-      <strong>More conformance</strong
-      ><span>The client part over HTTP and WebSocket, a relay across languages, and one corpus read
-        alike by every side’s parsers.</span>
+      <strong>More shared tests</strong
+      ><span>The transports’ client part of the conformance, over HTTP and WebSocket, a relay across
+        languages in the interop, and one corpus read alike by every side’s parsers.</span>
     </li>
     <li>
       <strong>A connection’s age</strong
@@ -4064,7 +4068,7 @@ offerHello(server);
   <main id="main" tabindex="-1">
 <div class="opening">
   <header class="hero">
-    <p class="eyebrow">bead 0.16.0 · spécification 0.17.0 · dispositions 0xA1 et 0xB1</p>
+    <p class="eyebrow">bead 0.17.0 · spécification 0.18.0 · dispositions 0xA1 et 0xB1</p>
     <h1>Bead</h1>
     <p class="lede">
       Un contrat typé pour les équipes qui s’appellent en TypeScript, en C# et en Rust, depuis un
@@ -4074,9 +4078,9 @@ offerHello(server);
       Un service se déclare une fois, dans un <code>.proto</code>. <code>beadc</code> en génère le
       serveur et le client typés dans chaque langage. Une passerelle qu’offre chaque côté sert les
       mêmes procédures en HTTP et en JSON, pour les équipes qui ne parlent pas Bead. Une
-      spécification tient les côtés à un même comportement : chacun joue ses fichiers de
-      conformance, le côté Rust la part qu’il atteint, et la matrice de support liste chaque endroit
-      où ils diffèrent encore.
+      spécification tient les côtés à un même comportement, et chacun joue ses fichiers de
+      conformance. Le côté Rust en a les cas d’AMQP 1.0 à venir, avec sa liaison. La matrice de
+      support liste chaque endroit où les côtés diffèrent encore.
     </p>
   </header>
   <section id="statut" class="status">
@@ -4097,9 +4101,9 @@ offerHello(server);
       écrite par des agents d’IA sous les portes du dépôt : les autres implantations, le
       générateur, une grande partie de ce qui a changé depuis du côté TypeScript, et bien des
       lectures que la spécification fait des normes. Ces lectures et les idiomes de chaque langage
-      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
-      sa sécurité ni sa lecture des normes qu’il suit ; une équipe qui le reprend le revoit comme son
-      propre code.
+      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Le cœur de
+      Bead, sa sécurité et sa lecture des normes qu’il suit n’ont été revus par personne qui ait les
+      connaissances pour en juger ; une équipe qui le reprend le revoit comme son propre code.
     </p>
     <p id="methode">
       Sur <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>, son auteur
@@ -4215,8 +4219,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>Un courtier est un transport de plus</strong
-      ><span>Sur MQTT 5, et sur AMQP 1.0 côtés TypeScript et C#, les deux bouts gardent l’API qu’ils
-        ont sur un WebSocket.</span>
+      ><span>Sur MQTT 5 de tous les côtés, et sur AMQP 1.0 avec RabbitMQ 4 côtés TypeScript et C#,
+        les deux bouts gardent l’API qu’ils ont sur un WebSocket.</span>
     </li>
     <li>
       <strong>Un même crédit cadence un abonnement comme un transfert</strong
@@ -4225,14 +4229,14 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>Les fichiers de conformance sont la forme exécutable de la spécification</strong
-      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui, et le côté Rust en joue la
-        part qu’il atteint.</span>
+      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui. Le côté Rust en a les cas
+        d’AMQP 1.0 à venir, avec sa liaison.</span>
     </li>
   </ul>
   <p class="space">
     Le guide d’architecture place Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
-    Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
+    Son tableau cite ou résume les pages propres aux trois autres projets. Ce qui manque à Bead à côté
     d’eux : ses paquets ne sont pas publiés, et il parle trois langages.
   </p>
 </section>
@@ -4299,12 +4303,12 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <p>
     Un compagnon de la spécification, <code>spec/transcoding.md</code>, la décrit sous sa propre
-    version, 0.7.0. La passerelle écoute sur son propre port,
+    version, 0.8.0. La passerelle écoute sur son propre port,
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <p>
-    Ce que le fil peut et qu’une passerelle ne porte pas est listé, pas caché : la session d’une
-    connexion, une commande et la fenêtre d’un flux, chacune une ligne du registre
+    La session d’une connexion, une commande et la fenêtre d’un flux sont portées par le fil et non
+    par une passerelle. Chacune est une ligne du registre
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/support.md#leveled-down">« Leveled down »</a> de la matrice (§2.5,
     §2.6 et §8.8 du compagnon). La reprise d’un flux y a aussi sa ligne (§8.3) : les Server-Sent
     Events l’offrent, et un abonnement Bead ne garde aucune notification après sa fin.
@@ -4358,17 +4362,18 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>raw</code> en <code>application/octet-stream</code>. Les bibliothèques protobuf courantes
     ne s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, de
     chaque côté. Il écrit une seule forme : aucun blanc, les membres dans l’ordre des numéros de
-    champ, les entrées d’une map triées. Dans la CI, la suite de conformité de protobuf joue ce
+    champ, les entrées d’une map triées. Dans la CI, la suite de conformance de protobuf joue ce
     mapping de chaque côté par ses tests JSON, et le codec de chaque côté par ses tests binaires.
   </p>
   <h3 id="transcodage-echecs">Un échec, un problème</h3>
   <p>
-    Chaque échec répond un problème de la RFC 9457, <code>application/problem+json</code>.
-    <code>code</code> et <code>scope</code> portent ce que le fil porte, et <code>detail</code> le
-    détail de l’échec. Le statut dépend de là où le code est né : ce que l’appelant peut réparer
-    donne un 4xx, ce qui se passe entre la passerelle et son serveur un 5xx.
+    La passerelle répond à chaque échec par un problème de la RFC 9457,
+    <code>application/problem+json</code>. <code>code</code> et <code>scope</code> portent ce que le
+    fil porte, et <code>detail</code> le détail de l’échec. Le statut dépend de là où l’échec est
+    né : ce que l’appelant peut réparer donne un 4xx, et ce qu’il ne peut pas réparer, dans le
+    serveur, dans la passerelle ou entre les deux, un 5xx.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">431</td><td>un JWT de plus de 1004 octets, sous bearer-jwt</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED ; ce qui ne se dit qu’entre la passerelle et son serveur ; un code de protocole que la spécification ne nomme pas ; la configuration de la passerelle elle-même ; un résultat que sa forme JSON ne peut tenir, ou ce qu’aucune porte n’a prévu</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST, ou la connexion de l’échange fermée avant sa réponse ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
   <p class="space">
     Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
     <code>pointer</code> dans le corps, ou <code>parameter</code> pour une variable du chemin ou de
@@ -4536,15 +4541,16 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     Les trois côtés répondent à une même spécification, et aux fichiers de conformance qui en sont
     la forme exécutable : chaque unité de la spécification est citée par un fichier, ou porte la
     raison pour laquelle aucun ne la cite. Chaque côté joue ces fichiers depuis <code>spec/</code>,
-    le côté Rust la part qu’il atteint, et les trois s’appellent les uns les autres dans la CI. Là
-    où ils diffèrent encore, chaque écart est une ligne de la matrice de support, avec le test qui le
-    montre.
+    et les trois s’appellent les uns les autres dans la CI. Le côté Rust en a les cas d’AMQP 1.0 à
+    venir, avec sa liaison. Là où les côtés diffèrent encore, chaque écart est une ligne de la
+    matrice de support, avec le test qui le montre.
   </p>
   <p>
-    TypeScript et C# sont à parité de comportement. Le côté Rust a les parties ci-dessous, et ce
-    qui lui manque est à venir.
+    TypeScript et C# sont à parité de comportement, sauf le cœur du côté C# dans une page et dans un
+    worker, à venir avec son transport Web Worker. Le côté Rust a les parties ci-dessous, et ce qui
+    lui manque est à venir.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints ; un Web Worker à venir, avec son cœur dans une page</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints ; AMQP 1.0 et un Web Worker à venir</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     La parité tient jusqu’au champ. Là où une plateforme ne peut pas ce qu’une autre peut, l’écart
     reste entre les côtés ou il est nivelé, tous les côtés s’en tenant à ce que cette plateforme
@@ -4557,7 +4563,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     Les côtés se mesurent aussi. TypeScript et C# mesurent les mêmes couches dans les mêmes
     unités : le codec de l’enveloppe, une charge JSON, le mapping JSON de protobuf, un
     <code>echo</code> sur HTTP, sur WebSocket et en mémoire, des notifications cadencées et un
-    transfert de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
+    écho de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
     mémoire ; ses couches sur la boucle locale sont à venir. Sur la
     branche de chaque sortie, la CI mesure chaque côté contre la sortie précédente. Elle fait
     tourner les deux arbres tour à tour sur une même machine et les compare. Une régression est lue
@@ -4874,7 +4880,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// servi à /metrics, le texte que lit Prometheus, et un Grafana derrière lui</span>
+<span class="tok-comment">// servi à /metrics, dans le texte que lit Prometheus</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -4991,8 +4997,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       ouvert la session. Il tient le rôle d’un cookie de session, lié à sa connexion.
     </li>
     <li>
-      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie sur
-      place, avec les clés que son application lui donne.
+      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie
+      lui-même, avec les clés ou le jeu de clés que son application lui donne.
     </li>
     <li>
       <strong><code>ELSEWHERE</code></strong> : le justificatif voyage dans le transport, et le
@@ -5082,8 +5088,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more" id="securite-relais">
     <summary>Un relais</summary>
     <p>
-      Un relais termine chaque jambe et fait suivre un JWT tel quel à la destination de son
-      audience, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
+      Un relais termine chaque jambe et fait suivre un justificatif porteur tel quel à la
+      destination que choisit le demandeur, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
       sa propre session à n’importe quel demandeur. <a href="#relais">Les relais</a> détaillent le
       tout.
     </p>
@@ -5129,8 +5135,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
   <span class="tok-comment">// une page d'un autre site, par rebinding DNS, écrit :</span>
-  <span class="tok-comment">// refused 403 host-refused: authority "rebind.example:8080",</span>
-  <span class="tok-comment">//   origin "http://rebind.example:8080", from 127.0.0.1:53114</span>
+  <span class="tok-comment">// refusé 403 host-refused : autorité "rebind.example:8080",</span>
+  <span class="tok-comment">//   origine "http://rebind.example:8080", de 127.0.0.1:53114</span>
   console.warn(
     <span class="tok-string">`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, `</span> +
       <span class="tok-string">`origine ${JSON.stringify(origin)}, de ${address}:${port}`</span>
@@ -5152,7 +5158,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <span class="tok-string">'accessRefused'</span>,
   ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
     <span class="tok-comment">// un JWT expiré écrit :</span>
-    <span class="tok-comment">// refused credential 32 exp: scheme 2, 1/4, from 203.0.113.7:53114</span>
+    <span class="tok-comment">// refusé credential 32 exp : schéma 2, 1/4, de 203.0.113.7:53114</span>
     console.warn(
       <span class="tok-string">`refusé ${stage} ${code} ${reason ?? ''} : schéma ${credentialScheme}, `</span> +
         <span class="tok-string">`${serviceId}/${procedureId}, de ${address}:${port}`</span>
@@ -5481,8 +5487,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
     teste un code du protocole. Un échec propre à la procédure se teste par le catalogue que beadc
-    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>, qui vérifie aussi que
-    l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
+    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>. Ce test vérifie aussi
+    que l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
     <code>Failure</code> du côté Rust posent les mêmes questions.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
@@ -5578,7 +5584,8 @@ message CountDownRequest {
       définies d’une énumération ; les règles d’une liste et d’une map ; et le <code>oneof</code>.
       Il refuse toute autre règle avec <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL et le motif
       d’octets parmi elles. Il n’en ignore aucune : une règle écrite et non jouée laisserait passer
-      ce qu’un serveur protovalidate refuse.
+      ce qu’un serveur protovalidate refuse. Bead ne juge que les requêtes : les règles d’un message
+      qu’aucune requête n’atteint valent un avertissement, <code>VALIDATE_RULES_UNPLAYED</code>.
       <a href="#suite">Les règles en CEL sont à venir, puis le reste des règles qu’il refuse.</a>
     </p>
     <p>
@@ -5630,9 +5637,9 @@ message CountDownRequest {
   <h3 id="abonnements-rythme">Au rythme du client</h3>
   <p>
     Avec PACED à côté de SUBSCRIPTION, le serveur n’envoie que les notifications que le client a
-    accordées. Le client accorde à mesure que ses rappels finissent, un rappel asynchrone une fois
-    son travail fini. Avec une fenêtre d’une notification, il accorde la suivante quand ils ont
-    fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
+    accordées. Le client accorde à mesure que ses rappels finissent. Un rappel asynchrone finit une
+    fois son travail fait. Avec une fenêtre d’une notification, le client accorde la suivante quand
+    ses rappels ont fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
     porte au-delà de ce qu’ils ont fini, et accorde de nouveau à la moitié de la fenêtre. Il
     accorde par un CREDIT qui porte PACED. Ce crédit compte des notifications, comme le
     <code>REQUEST_N</code> de RSocket. Mais il est absolu, comme le crédit d’un transfert.
@@ -5640,11 +5647,11 @@ message CountDownRequest {
   <p>
     Au-delà de son crédit, une notification attend dans une file. Le serveur peut lui donner une
     clé. Une notification de même clé remplace celle qui attend, et l’état d’une entité ne garde
-    ainsi que sa dernière valeur : quarante-cinq changements d’un article, pendant qu’un rappel va
-    chercher ses données, arrivent en deux notifications. Sans clé, chaque événement est gardé,
-    dans l’ordre. Une file pleine, 64 notifications ou 1 Mio par défaut, termine l’abonnement par
-    <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en silence : le client se réabonne et relit
-    l’état.
+    ainsi que sa dernière valeur. Si un article change quarante-cinq fois pendant qu’un rappel va
+    chercher ses données, le client reçoit deux notifications : le premier changement, puis le
+    dernier. Sans clé, chaque événement est gardé, dans l’ordre. Une file pleine, 64 notifications
+    ou 1 Mio par défaut, termine l’abonnement par <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en
+    silence : l’application du client se réabonne et relit l’état.
   </p>
   <figure class="figure">
     <figcaption>Un abonnement cadencé, son rappel qui va chercher</figcaption>
@@ -6037,8 +6044,7 @@ message CountDownRequest {
     </table>
   </div>
   <p class="space">
-    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP. Les règles
-    de reprise de gRPC reposent sur la même différence : si la procédure a pu tourner.
+    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP.
   </p>
   <details class="more">
     <summary>Ce qu’un relais ne fait pas, et ce que ses demandeurs partagent</summary>
@@ -6072,10 +6078,10 @@ message CountDownRequest {
     <code>POST</code> porte une enveloppe (§15.4 à §15.12).
   </p>
   <p>
-    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un PING sur une connexion
-    restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
+    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un ping sur une connexion
+    restée silencieuse 30 s, et la coupe si aucun pong ne lui fait écho. Un pair parti
     sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
-    page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
+    page ou de Node, n’en envoie aucun, et les pings du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455), un message au-delà de <code>maximumMessageFrames</code> avec 1008, et une trame que la RFC 6455 interdit avec 1002. Chaque bout lit la tête de chaque trame là où sa plateforme le permet, et la juge là.
   </p>
   <p>
@@ -6087,10 +6093,10 @@ message CountDownRequest {
     pour remettre chaque réponse à l’échange de sa requête.
   </p>
   <p>
-    Le serveur marque chacun de ses refus dans le champ <code>bead-refusal</code>, et seul un refus
-    marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut, le 502 d’une
-    passerelle par exemple, a pu venir après que la requête a tourné, et compte comme un échange
-    perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
+    Le transport marque chacun de ses propres refus dans le champ <code>bead-refusal</code>, et seul
+    un refus marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut qu’un
+    2xx, le 502 d’une passerelle par exemple, a pu venir après que la requête a tourné, et compte
+    comme un échange perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
     <code>DESTINATION_LOST</code>. Un client ne suit aucune redirection : elle porterait le jeton de
     la connexion là où personne ne l’a jugé.
   </p>
@@ -6127,7 +6133,7 @@ message CountDownRequest {
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur répond 408, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
       reste, 400 non marqué sur HTTP/1.1 (§15.12).
@@ -6301,9 +6307,10 @@ offerHello(server);
         DevTools.</span>
     </li>
     <li>
-      <strong>Plus de conformance</strong
-      ><span>La partie client sur HTTP et WebSocket, un relais entre langages, et un même corpus lu
-        pareil par les analyseurs de chaque côté.</span>
+      <strong>Plus de tests partagés</strong
+      ><span>La partie client des transports dans la conformance, sur HTTP et WebSocket, un relais
+        entre langages dans l’interop, et un même corpus lu pareil par les analyseurs de chaque
+        côté.</span>
     </li>
     <li>
       <strong>L’âge d’une connexion</strong
