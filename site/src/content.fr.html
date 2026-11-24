@@ -28,11 +28,12 @@
       si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
-      Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
-      du reste a été écrite par des agents d’IA sous les portes du dépôt : les autres implantations,
-      le générateur, et bien des lectures que la spécification fait des normes. Les idiomes des
-      autres langages, et ces lectures, ont été vérifiés par les tests, les rondes de conception et
-      les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
+      Les idées, les valeurs du projet, la conception du protocole et les décisions sont de son
+      auteur, ainsi que les premières versions du côté TypeScript. Une bonne part du code a été
+      écrite par des agents d’IA sous les portes du dépôt : les autres implantations, le
+      générateur, une grande partie de ce qui a changé depuis du côté TypeScript, et bien des
+      lectures que la spécification fait des normes. Ces lectures et les idiomes de chaque langage
+      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
       sa sécurité ni sa lecture des normes qu’il suit ; une équipe qui le reprend le revoit comme son
       propre code.
     </p>
@@ -1207,9 +1208,10 @@
   <h3 id="echecs-code">Côté code</h3>
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
-    teste un code du protocole, <code>isApplication</code> un code de la procédure. La
-    <code>FailureException</code> du côté C# et la <code>Failure</code> du côté Rust posent les
-    mêmes questions.
+    teste un code du protocole. Un échec propre à la procédure se teste par le catalogue que beadc
+    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>, qui vérifie aussi que
+    l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
+    <code>Failure</code> du côté Rust posent les mêmes questions.
   </p>
   {{code of="failure"}}
 </section>

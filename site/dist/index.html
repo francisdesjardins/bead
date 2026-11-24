@@ -1790,10 +1790,12 @@ footer {
       a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
-      The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
-      written by AI agents under the repository’s gates: the other implementations, the generator,
-      and many of the spec’s readings of standards. The idioms of the other languages, and those
-      readings, were checked by the tests, the design rounds and the agents’ reviews. No one with the
+      The ideas, the project’s values, the protocol’s design and the decisions are its author’s, and
+      so are the TypeScript side’s first versions. Much of the code was written by AI agents under
+      the repository’s gates: the other implementations, the generator, much of what has changed on
+      the TypeScript side since, and many of the spec’s readings of standards. Those readings and
+      each language’s idioms were checked by the tests, the design rounds and the agents’
+      reviews. No one with the
       knowledge to judge them has reviewed Bead’s core, its security or its reading of the standards
       it follows; a team that takes it reviews it as its own code.
     </p>
@@ -2424,7 +2426,7 @@ disallowed-types = [
       A failure arrives as <code>error</code>, a <code>FailureError</code> that says who raised it
       and where. A notification heard is a single step in, with no options and no duration.
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo(''): the server answers the procedure's failure 21</span>
+    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo(''): the server answers the procedure's failure EMPTY_TEXT, code 21</span>
 FailureError {
   code: <span class="tok-number">21</span>,
   detail: <span class="tok-string">'nothing to echo'</span>,
@@ -2535,7 +2537,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// at /metrics, for Prometheus, and a Grafana behind it</span>
+<span class="tok-comment">// served at /metrics, the text Prometheus reads, and a Grafana behind it</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -2783,8 +2785,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       counts.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused: authority "rebind.example:8080", origin "http://rebind.example:8080",</span>
-  <span class="tok-comment">// from 127.0.0.1:53114</span>
+  <span class="tok-comment">// a page of another site, by DNS rebinding, prints:</span>
+  <span class="tok-comment">// refused 403 host-refused: authority "rebind.example:8080",</span>
+  <span class="tok-comment">//   origin "http://rebind.example:8080", from 127.0.0.1:53114</span>
   console.warn(
     <span class="tok-string">`refused ${status} ${reason}: authority ${JSON.stringify(authority)}, `</span> +
       <span class="tok-string">`origin ${JSON.stringify(origin)}, from ${address}:${port}`</span>
@@ -2804,8 +2807,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
   <span class="tok-string">'accessRefused'</span>,
   ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-    <span class="tok-comment">// credential 32 exp: an expired JWT, scheme 2, service 1, procedure 4,</span>
-    <span class="tok-comment">// from 203.0.113.7:53114</span>
+    <span class="tok-comment">// an expired JWT prints:</span>
+    <span class="tok-comment">// refused credential 32 exp: scheme 2, 1/4, from 203.0.113.7:53114</span>
     console.warn(
       <span class="tok-string">`refused ${stage} ${code} ${reason ?? ''}: scheme ${credentialScheme}, `</span> +
         <span class="tok-string">`${serviceId}/${procedureId}, from ${address}:${port}`</span>
@@ -3130,25 +3133,29 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="echecs-code">In the code</h3>
   <p>
     On the TypeScript side, the requester receives a <code>FailureError</code>:
-    <code>isProtocol</code> tests a code of the protocol, <code>isApplication</code> a code of the
-    procedure. The C# side’s <code>FailureException</code> and the Rust side’s <code>Failure</code>
-    ask the same.
+    <code>isProtocol</code> tests a code of the protocol. A procedure’s own failure is tested by the
+    catalogue beadc generates from the <code>.proto</code>, here <code>EchoFailures.is</code>,
+    which also checks that the failure comes from that service. The C# side’s
+    <code>FailureException</code> and the Rust side’s <code>Failure</code> ask the same.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
 <span class="tok-keyword">import</span> { violationsOf } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/service'</span>;
+<span class="tok-keyword">import</span> { EchoFailures } <span class="tok-keyword">from</span> <span class="tok-string">'../gen/echo/v1/echo_bead.ts'</span>;
 
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
-
-  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
-    <span class="tok-comment">// the procedure's own code 21: it refuses an empty text</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    <span class="tok-comment">// the protocol's code 32: open a session, or renew its credential, then call again</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    <span class="tok-comment">// code 52: each violation names its field and its rule, more counts those left out</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
+  <span class="tok-keyword">if</span> (EchoFailures.is(reason, <span class="tok-string">'EMPTY_TEXT'</span>)) {
+    <span class="tok-comment">// the procedure refuses an empty text: ask for one</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (!(reason <span class="tok-keyword">instanceof</span> FailureError)) {
+    <span class="tok-keyword">throw</span> reason;
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    <span class="tok-comment">// open a session, or renew its credential, then call again</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    <span class="tok-comment">// each violation names its field and its rule; more counts those left out</span>
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+  } <span class="tok-keyword">else</span> {
+    <span class="tok-keyword">throw</span> reason;
   }
 }</code></pre>
 </section>
@@ -3811,7 +3818,7 @@ offerHello(server);
 
 <span class="tok-keyword">await</span> memory.start();
 <span class="tok-keyword">await</span> webSocket.start({ port: <span class="tok-number">8080</span> });
-<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost: both loopbacks</span></code></pre>
+<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost by default: 127.0.0.1 and ::1</span></code></pre>
 </section>
 
 <section id="courtier">
@@ -4085,11 +4092,12 @@ offerHello(server);
       si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
-      Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
-      du reste a été écrite par des agents d’IA sous les portes du dépôt : les autres implantations,
-      le générateur, et bien des lectures que la spécification fait des normes. Les idiomes des
-      autres langages, et ces lectures, ont été vérifiés par les tests, les rondes de conception et
-      les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
+      Les idées, les valeurs du projet, la conception du protocole et les décisions sont de son
+      auteur, ainsi que les premières versions du côté TypeScript. Une bonne part du code a été
+      écrite par des agents d’IA sous les portes du dépôt : les autres implantations, le
+      générateur, une grande partie de ce qui a changé depuis du côté TypeScript, et bien des
+      lectures que la spécification fait des normes. Ces lectures et les idiomes de chaque langage
+      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
       sa sécurité ni sa lecture des normes qu’il suit ; une équipe qui le reprend le revoit comme son
       propre code.
     </p>
@@ -4755,7 +4763,7 @@ disallowed-types = [
       Un échec arrive en <code>error</code>, une <code>FailureError</code> qui dit qui l’a levé et
       où. Une notification entendue n’est qu’une étape qui entre, sans options ni durée.
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo('') : le serveur répond l'échec 21 de la procédure</span>
+    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo('') : le serveur répond l'échec EMPTY_TEXT de la procédure, code 21</span>
 FailureError {
   code: <span class="tok-number">21</span>,
   detail: <span class="tok-string">'nothing to echo'</span>,
@@ -4866,7 +4874,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// à /metrics, pour Prometheus, et un Grafana derrière lui</span>
+<span class="tok-comment">// servi à /metrics, le texte que lit Prometheus, et un Grafana derrière lui</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -5120,8 +5128,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <code>unnamedProxies</code>.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused : autorité "rebind.example:8080", origine "http://rebind.example:8080",</span>
-  <span class="tok-comment">// de 127.0.0.1:53114</span>
+  <span class="tok-comment">// une page d'un autre site, par rebinding DNS, écrit :</span>
+  <span class="tok-comment">// refused 403 host-refused: authority "rebind.example:8080",</span>
+  <span class="tok-comment">//   origin "http://rebind.example:8080", from 127.0.0.1:53114</span>
   console.warn(
     <span class="tok-string">`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, `</span> +
       <span class="tok-string">`origine ${JSON.stringify(origin)}, de ${address}:${port}`</span>
@@ -5142,8 +5151,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
   <span class="tok-string">'accessRefused'</span>,
   ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-    <span class="tok-comment">// credential 32 exp : un JWT expiré, schéma 2, service 1, procédure 4,</span>
-    <span class="tok-comment">// de 203.0.113.7:53114</span>
+    <span class="tok-comment">// un JWT expiré écrit :</span>
+    <span class="tok-comment">// refused credential 32 exp: scheme 2, 1/4, from 203.0.113.7:53114</span>
     console.warn(
       <span class="tok-string">`refusé ${stage} ${code} ${reason ?? ''} : schéma ${credentialScheme}, `</span> +
         <span class="tok-string">`${serviceId}/${procedureId}, de ${address}:${port}`</span>
@@ -5471,27 +5480,29 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="echecs-code">Côté code</h3>
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
-    teste un code du protocole, <code>isApplication</code> un code de la procédure. La
-    <code>FailureException</code> du côté C# et la <code>Failure</code> du côté Rust posent les
-    mêmes questions.
+    teste un code du protocole. Un échec propre à la procédure se teste par le catalogue que beadc
+    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>, qui vérifie aussi que
+    l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
+    <code>Failure</code> du côté Rust posent les mêmes questions.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
 <span class="tok-keyword">import</span> { violationsOf } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/service'</span>;
+<span class="tok-keyword">import</span> { EchoFailures } <span class="tok-keyword">from</span> <span class="tok-string">'../gen/echo/v1/echo_bead.ts'</span>;
 
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
-
-  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
-    <span class="tok-comment">// le code 21 de la procédure elle-même : elle refuse un texte vide</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    <span class="tok-comment">// le code 32 du protocole : ouvrir une session, ou renouveler son justificatif,</span>
-    <span class="tok-comment">// puis rappeler</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    <span class="tok-comment">// le code 52 : chaque violation nomme son champ et sa règle,</span>
-    <span class="tok-comment">// more compte celles laissées de côté</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
+  <span class="tok-keyword">if</span> (EchoFailures.is(reason, <span class="tok-string">'EMPTY_TEXT'</span>)) {
+    <span class="tok-comment">// la procédure refuse un texte vide : en demander un</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (!(reason <span class="tok-keyword">instanceof</span> FailureError)) {
+    <span class="tok-keyword">throw</span> reason;
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    <span class="tok-comment">// ouvrir une session, ou renouveler son justificatif, puis rappeler</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    <span class="tok-comment">// chaque violation nomme son champ et sa règle ; more compte celles laissées de côté</span>
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+  } <span class="tok-keyword">else</span> {
+    <span class="tok-keyword">throw</span> reason;
   }
 }</code></pre>
 </section>
@@ -6180,7 +6191,7 @@ offerHello(server);
 
 <span class="tok-keyword">await</span> memory.start();
 <span class="tok-keyword">await</span> webSocket.start({ port: <span class="tok-number">8080</span> });
-<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost : les deux boucles locales</span></code></pre>
+<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost par défaut : 127.0.0.1 et ::1</span></code></pre>
 </section>
 
 <section id="courtier">

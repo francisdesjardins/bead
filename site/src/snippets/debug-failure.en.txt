@@ -1,4 +1,4 @@
-// echo(''): the server answers the procedure's failure 21
+// echo(''): the server answers the procedure's failure EMPTY_TEXT, code 21
 FailureError {
   code: 21,
   detail: 'nothing to echo',

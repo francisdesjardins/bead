@@ -27,10 +27,12 @@
       a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
-      The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
-      written by AI agents under the repository’s gates: the other implementations, the generator,
-      and many of the spec’s readings of standards. The idioms of the other languages, and those
-      readings, were checked by the tests, the design rounds and the agents’ reviews. No one with the
+      The ideas, the project’s values, the protocol’s design and the decisions are its author’s, and
+      so are the TypeScript side’s first versions. Much of the code was written by AI agents under
+      the repository’s gates: the other implementations, the generator, much of what has changed on
+      the TypeScript side since, and many of the spec’s readings of standards. Those readings and
+      each language’s idioms were checked by the tests, the design rounds and the agents’
+      reviews. No one with the
       knowledge to judge them has reviewed Bead’s core, its security or its reading of the standards
       it follows; a team that takes it reviews it as its own code.
     </p>
@@ -1160,9 +1162,10 @@
   <h3 id="echecs-code">In the code</h3>
   <p>
     On the TypeScript side, the requester receives a <code>FailureError</code>:
-    <code>isProtocol</code> tests a code of the protocol, <code>isApplication</code> a code of the
-    procedure. The C# side’s <code>FailureException</code> and the Rust side’s <code>Failure</code>
-    ask the same.
+    <code>isProtocol</code> tests a code of the protocol. A procedure’s own failure is tested by the
+    catalogue beadc generates from the <code>.proto</code>, here <code>EchoFailures.is</code>,
+    which also checks that the failure comes from that service. The C# side’s
+    <code>FailureException</code> and the Rust side’s <code>Failure</code> ask the same.
   </p>
   {{code of="failure"}}
 </section>
