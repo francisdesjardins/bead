@@ -9,6 +9,21 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class HeartbeatTests
 {
+    [Fact]
+    public void Takes_a_duration_a_timer_holds_or_never_for_none_and_refuses_zero_and_one_past_the_longest_timer()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(20), Clocks.AssertHeld(("a heartbeat", "Heartbeat"), TimeSpan.FromMilliseconds(20)));
+        Assert.Equal(Timeout.InfiniteTimeSpan, Clocks.AssertHeld(("a heartbeat", "Heartbeat"), Timeout.InfiniteTimeSpan));
+        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(2_147_483_648) })
+        {
+            var failure = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return Clocks.AssertHeld(("a heartbeat", "Heartbeat"), heartbeat);
+            });
+            Assert.Equal("Heartbeat", failure.ParamName);
+        }
+    }
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static CancellationToken Cancelled
