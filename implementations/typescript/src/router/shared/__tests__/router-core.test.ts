@@ -6052,3 +6052,258 @@ test.describe('createRouterCore', () => {
     });
   });
 });
+
+// The linked cores share a clock; each send reaches its peer in a microtask.
+const createCoreLink = (lastCallId?: number) => {
+  const clock = createTestClock();
+  const callIds: number[] = [];
+  const received: Uint8Array[] = [];
+  const reported: Error[] = [];
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const ids = { echo: 1, fail: 2, slow: 3, cancellations: 4 };
+  type Name = keyof typeof ids;
+  const procedureOf = (name: Name): IProcedure => {
+    return { serviceId: 1, procedureId: ids[name], procedureName: name, serviceRevision: 1 };
+  };
+  const common = {
+    activity: noop,
+    isTracing: () => {
+      return false;
+    },
+    pause: noop,
+    report: (error: Error) => {
+      reported.push(error);
+    },
+    resume: noop,
+    trace: noop,
+  };
+  const client: IRouterCore<'server'> = createRouterCore(
+    {
+      ...common,
+      failures: CLIENT_FAILURES,
+      send: ({ data }) => {
+        queueMicrotask(() => {
+          received.push(data);
+          server.receive(data, 'a');
+        });
+        return Promise.resolve();
+      },
+    },
+    { clock, lastCallId }
+  );
+  const server: IRouterCore<'a'> = createRouterCore(
+    {
+      ...common,
+      failures: SERVER_FAILURES,
+      send: ({ data }) => {
+        queueMicrotask(() => {
+          client.receive(data, 'server');
+        });
+        return Promise.resolve();
+      },
+    },
+    { clock }
+  );
+  let cancellations = 0;
+
+  for (const name of Object.keys(ids) as Name[]) {
+    server.registerResolver(
+      Object.assign(async (props: IRequestResolverProps<'a'>) => {
+        if (name === 'slow') {
+          await new Promise<void>((resolve) => {
+            props.signal.addEventListener(
+              'abort',
+              () => {
+                cancellations += 1;
+                resolve();
+              },
+              { once: true }
+            );
+          });
+          return;
+        }
+
+        if (name === 'fail') {
+          await server.respond(
+            {
+              failure: {
+                code: 7,
+                scope: FailureScope.APPLICATION,
+                detail: 'this procedure fails, on purpose',
+              },
+            },
+            props
+          );
+          return;
+        }
+
+        await server.respond(
+          {
+            payload:
+              name === 'cancellations' ? encoder.encode(String(cancellations)) : props.payload,
+          },
+          props
+        );
+      }, procedureOf(name))
+    );
+  }
+
+  const call = (
+    name: Name,
+    given?: {
+      payload?: Uint8Array;
+      timeout?: number;
+      signal?: AbortSignal;
+      maximumPayloadBytes?: number;
+    }
+  ) => {
+    return client.request(
+      given?.payload ?? encoder.encode(name === 'slow' ? '{"milliseconds":3600000}' : 'null'),
+      {
+        connectionHandle: 'server',
+        onCallId: (callId) => {
+          callIds.push(callId);
+        },
+        options: { timeout: given?.timeout ?? 5_000, signal: given?.signal },
+        procedure: { ...procedureOf(name), maximumPayloadBytes: given?.maximumPayloadBytes },
+      }
+    );
+  };
+
+  return {
+    call,
+    callIds,
+    client,
+    clock,
+    received,
+    reported,
+    textOf: (bytes: Uint8Array) => {
+      return decoder.decode(bytes);
+    },
+    [Symbol.dispose]: () => {
+      client[Symbol.dispose]();
+      server[Symbol.dispose]();
+    },
+  };
+};
+
+test.describe('a linked client and server core', () => {
+  test('requests and resolves with the result', async () => {
+    using link = createCoreLink();
+    const payload = new TextEncoder().encode('{"a":1}');
+    const result = await link.call('echo', { payload });
+
+    expect(result.payload).toEqual(payload);
+    expect(result.header.callId).toBe(1);
+    expect(link.reported).toEqual([]);
+  });
+
+  test('throws the failure the peer answered with, saying it raised it', async () => {
+    using link = createCoreLink();
+    const failure = await link.call('fail').catch((reason: unknown) => {
+      return reason;
+    });
+
+    expect(failure).toBeInstanceOf(FailureError);
+    expect(failure).toMatchObject({
+      code: 7,
+      scope: FailureScope.APPLICATION,
+      origin: 'peer',
+      side: 'server',
+      procedureAddress: { serviceId: 1, procedureId: 2 },
+      detail: 'this procedure fails, on purpose',
+      message:
+        'server application failure 7 (service 1, procedure 2): this procedure fails, on purpose',
+    });
+  });
+
+  test('times out, cancels its call and reserves its call id as long as it was given', async () => {
+    using link = createCoreLink(3);
+    const slow = link.call('slow', { timeout: 1_000 });
+    const timedOut = expect(slow).rejects.toBeInstanceOf(TimeoutError);
+
+    await sleep(0);
+    await link.clock.tickAsync(1_000);
+    await timedOut;
+    expect(link.textOf((await link.call('cancellations')).payload)).toBe('1');
+    await link.call('echo');
+    expect(link.callIds).toEqual([1, 3, 3]);
+    await link.clock.tickAsync(1_000);
+    await link.call('echo');
+    expect(link.callIds).toEqual([1, 3, 3, 1]);
+  });
+
+  test('cancels its call once its token is cancelled after it went out', async () => {
+    using link = createCoreLink();
+    const cancelling = new AbortController();
+    const slow = link.call('slow', { signal: cancelling.signal });
+    const cancelled = expect(slow).rejects.toBeInstanceOf(CancelError);
+
+    await sleep(0);
+    cancelling.abort();
+    await cancelled;
+    expect(link.callIds).toEqual([1]);
+    expect(link.textOf((await link.call('cancellations')).payload)).toBe('1');
+  });
+
+  test('draws nothing for a token cancelled already', async () => {
+    using link = createCoreLink();
+
+    await expect(link.call('echo', { signal: AbortSignal.abort() })).rejects.toBeInstanceOf(
+      CancelError
+    );
+    expect(link.callIds).toEqual([]);
+    expect(link.received).toEqual([]);
+  });
+
+  test('is CAPACITY_EXCEEDED once every call id is in use', async () => {
+    using link = createCoreLink(1);
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toBeInstanceOf(DisconnectError);
+
+    await expect(link.call('echo')).rejects.toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      origin: 'local',
+    });
+    link[Symbol.dispose]();
+    await stopped;
+  });
+
+  test('rejects what waits on a connection that closed', async () => {
+    using link = createCoreLink();
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toThrow(
+      new DisconnectError('the connection closed before the answer')
+    );
+
+    link.client.rejectPending('the connection closed before the answer', 'server');
+    await stopped;
+  });
+
+  test('rejects what waits once disposed and sends nothing more', async () => {
+    using link = createCoreLink();
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toBeInstanceOf(DisconnectError);
+
+    await sleep(0);
+    link.client[Symbol.dispose]();
+    await stopped;
+    const received = link.received.length;
+
+    await expect(link.call('echo')).rejects.toBeInstanceOf(DisconnectError);
+    await sleep(0);
+    expect(link.received).toHaveLength(received);
+  });
+
+  test('refuses a payload past its procedure’s limit before it sends or tells its call id', async () => {
+    using link = createCoreLink();
+
+    await expect(
+      link.call('echo', { payload: new TextEncoder().encode('"too long"'), maximumPayloadBytes: 4 })
+    ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+    expect(link.callIds).toEqual([]);
+    await sleep(0);
+    expect(link.received).toEqual([]);
+  });
+});
