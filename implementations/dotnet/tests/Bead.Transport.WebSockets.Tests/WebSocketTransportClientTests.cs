@@ -4380,6 +4380,29 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_socket_threw_when_the_server_is_gone()
     {
+        var offered = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reentered = false;
+        _client.Close += (_, _) =>
+        {
+            if (!reentered)
+            {
+                reentered = true;
+                offered.TrySetResult(_client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            }
+        };
+        await _client.Connect(Target with { CancellationToken = Cancelled });
+        await Next(_connections);
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        var reconnecting = await offered.Task.WaitAsync(Patience, Cancelled);
+        var failure = await Assert.ThrowsAsync<ReconnectException>(() => { return reconnecting.WaitAsync(Patience, Cancelled); });
+
+        Assert.IsType<WebSocketException>(failure.InnerException);
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone()
+    {
         using var refused = new ClosedPort();
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
