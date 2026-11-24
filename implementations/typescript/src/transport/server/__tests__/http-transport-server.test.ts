@@ -2796,6 +2796,66 @@ test.describe('createHTTPTransportServer, its edges', () => {
     socket.destroy();
   });
 
+  // spec 15.12: a listen's answer frees its place even when the read stop hides its client's close
+  test('frees a listen within maximumWait once its client leaves with requests pipelined past the read stop', async () => {
+    const clock = createTestClock();
+    await using started = await startTransport({ clock, maximumWait: 1_000 });
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(listenOf(connectionToken, 60_000), 'latin1');
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['listens'];
+        })
+        .toBe(1);
+      expect(
+        clock.armed.some(({ delay }) => {
+          return delay === 1_000;
+        })
+      ).toBe(true);
+
+      const taken = await takenUntilStalled(
+        socket,
+        `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000)
+      );
+
+      expect(taken.octets).toBeLessThan(MOST_TAKEN);
+      expect(read.isClosed).toBe(false);
+      socket.destroy();
+      clock.tick(1_000);
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['listens'];
+        })
+        .toBe(0);
+
+      const gauges = started.server.gauges();
+
+      expect([
+        gauges.counts['connections'],
+        gauges.counts['waitingExchanges'],
+        gauges.counts['bodyBytes'],
+      ]).toEqual([1, 0, 0]);
+      expect(gauges.anomalies).toEqual([]);
+      const next = await fetch(started.url, {
+        headers: {
+          [CONNECTION_TOKEN_HEADER]: connectionToken,
+          [AFTER_HEADER]: '0',
+          [WAIT_HEADER]: '0',
+        },
+      });
+
+      expect(next.status).toBe(204);
+      await started.server.stop();
+      expect(started.server.gauges().counts['connections']).toBe(0);
+    } finally {
+      socket.destroy();
+    }
+  });
+
   // spec 15.12; RFC 9112 §9.3
   test('answers every request pipelined behind a held listen in its turn once the listen ends, and keeps its socket', async () => {
     await using started = await startTransport();
