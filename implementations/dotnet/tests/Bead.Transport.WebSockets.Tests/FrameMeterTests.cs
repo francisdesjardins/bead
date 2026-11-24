@@ -236,6 +236,54 @@ public sealed class FrameMeterTests
 
     // definition
 
+    // spec 15.3, 15.12
+    [Fact]
+    public void Charges_a_frame_s_head_once_whole_so_a_head_that_draws_a_verdict_charges_nothing_and_a_cast_off_at_an_earlier_byte_wins_over_it()
+    {
+        // * a head split across reads charges nothing until its last byte: then its bytes and 128
+        var budget = new MessageBudget(long.MaxValue);
+        var meter = MeterOf(budget);
+        var frame = FrameOf((0x02, PayloadOf(12), false));
+
+        Assert.Equal(3, meter.Read(frame.AsSpan(0, 3)));
+        Assert.Equal(0, budget.Charged);
+        Assert.Equal(3, meter.Read(frame.AsSpan(3, 3)));
+        Assert.Equal(6 + FrameMeter.PerFrame, budget.Charged);
+        Assert.Equal(12, meter.Read(frame.AsSpan(6)));
+        Assert.Equal(6 + 12 + FrameMeter.PerFrame, budget.Charged);
+
+        // * 364 octets charge 500, the budget's whole; a ping's head written in a 16-bit length draws
+        // 1002 at its second byte, never whole, and charges nothing, in one read or cut at its first
+        // byte: 1002, not 1013
+        var charged = FrameOf((0x02, PayloadOf(364), false));
+        byte[] edge = [.. charged, 0x89, 0x80 | 126, 0x00, 0x7E, .. Key];
+
+        foreach (var cut in new[] { edge.Length, charged.Length + 1 })
+        {
+            var edgeMeter = MeterOf(new MessageBudget(500));
+
+            // what came before the ping's head handed on, its first byte too where it came alone
+            Assert.Equal((cut, cut == edge.Length ? charged.Length : cut), (cut, edgeMeter.Read(edge.AsSpan(0, cut))));
+
+            if (cut < edge.Length)
+            {
+                Assert.Equal(0, edgeMeter.Read(edge.AsSpan(cut)));
+            }
+
+            Assert.Equal((cut, WebSocketCloseStatus.ProtocolError), (cut, edgeMeter.Verdict?.Code));
+        }
+
+        // * 464 octets charge 600, past 500, then a head of a reserved opcode in the same read: the
+        // cast-off at the earlier byte wins, 1013, and nothing of the read is handed on
+        var castOff = new MessageBudget(500);
+        var castMeter = MeterOf(castOff);
+        byte[] past = [.. FrameOf((0x02, PayloadOf(464), false)), .. FrameOf((0x83, [0x78], false))];
+
+        Assert.Equal(0, castMeter.Read(past));
+        Assert.Equal(FrameVerdict.TryAgainLater, castMeter.Verdict?.Code);
+        Assert.Equal(0, castOff.Charged);
+    }
+
     // spec 15.3, 15.12; RFC 6455 §5.2
     [Fact]
     public async Task Reads_frame_heads_split_across_reads_lengths_of_7_16_and_64_bits_control_frames_between_fragments_and_an_empty_frame_as_its_platform_reads_them()

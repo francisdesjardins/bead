@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -10,8 +11,10 @@ namespace Bead.Transport.WebSockets;
 /// which reads on to its peer's Close (RFC 6455 §7.1.1). Each read of its socket's stream waits at
 /// it, a server's and a client's, so a read already pending as the pause comes reads nothing more
 /// of its peer, and its socket's end lets every wait go, so a paused connection ends at once. It
-/// takes its own lock alone, never held as it settles a wait. Each read goes through its meter
-/// (decision 0056) before .NET's reader sees it.
+/// takes its own lock alone, never held as it settles a wait. Each read of its socket's stream fills
+/// a buffer of its own, up to <see cref="ServerBounds.GateReadBytes"/>, which goes through its meter
+/// (decision 0056) at once, all that read brought, before .NET's reader is served from it. Once its
+/// socket ended while its router paused it, its meter ends, and what it reads goes unmetered.
 /// </summary>
 internal sealed class ReadGate
 {
@@ -62,12 +65,21 @@ internal sealed class ReadGate
     /// <summary>Shuts it, its router behind; nothing once it opened for good. Idempotent.</summary>
     public void Pause()
     {
+        bool isDropped;
+
         lock (_lock)
         {
             if (!_isReadingOn)
             {
                 _isPaused = true;
             }
+
+            isDropped = _isEnded && _isPaused;
+        }
+
+        if (isDropped)
+        {
+            Unmetered();
         }
     }
 
@@ -120,18 +132,33 @@ internal sealed class ReadGate
     {
         TaskCompletionSource? resumed;
         TaskCompletionSource? readable;
+        bool isDropped;
 
         lock (_lock)
         {
             _isEnded = true;
+            isDropped = _isPaused;
             resumed = _resumed;
             readable = _readable;
             _resumed = null;
             _readable = null;
         }
 
+        if (isDropped)
+        {
+            Unmetered();
+        }
+
         resumed?.TrySetResult();
         readable?.TrySetResult();
+    }
+
+    // ! its socket ended while its router paused it: what it held goes with its connection, its
+    // charge released, and what it reads after is dropped unmetered, as the other sides drop it,
+    // charging no other connection's cast-off
+    private void Unmetered()
+    {
+        Meter?.End();
     }
 
     /// <summary>
@@ -384,6 +411,14 @@ internal sealed class ReadGate
         private readonly Stream _inner;
         private readonly ReadGate _gate;
 
+        // what its last read of its socket brought and its meter handed on, rented until served: from
+        // _at to _end; and whether a verdict cut that read, what came before it served first. Its
+        // reader's alone: .NET reads one read at a time
+        private byte[]? _held;
+        private int _at;
+        private int _end;
+        private bool _isCut;
+
         public GatedStream(Stream inner, ReadGate gate)
         {
             _inner = inner;
@@ -455,14 +490,17 @@ internal sealed class ReadGate
             return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
         }
 
-        // * each read waits at its gate, then goes through its meter: what came before a verdict is
-        // handed on, and the verdict told at the next read; from a verdict on, nothing is
+        // * each read waits at its gate, then is served from what its last read of its socket
+        // brought, or reads its socket again into a buffer of its own, which goes through its meter
+        // whole: what came before a verdict is served, and the verdict told once it is; from a
+        // verdict on, nothing is
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             var meter = _gate.Meter;
 
-            if (meter?.Verdict is not null)
+            if (meter?.Verdict is not null && !(_isCut && _at < _end))
             {
+                Let();
                 meter.Tell();
 
                 return await Drain(cancellationToken);
@@ -485,23 +523,97 @@ internal sealed class ReadGate
                 }
             }
 
-            var read = await _inner.ReadAsync(buffer, cancellationToken);
-
-            if (meter is null || read == 0)
+            if (meter is null)
             {
-                return read;
+                return await _inner.ReadAsync(buffer, cancellationToken);
             }
 
-            var handed = meter.Read(buffer.Span[..read]);
-
-            if (meter.Verdict is null || handed > 0)
+            if (_at == _end)
             {
-                return handed;
+                if (buffer.IsEmpty)
+                {
+                    return await _inner.ReadAsync(buffer, cancellationToken);
+                }
+
+                if (await Fill(meter, cancellationToken) == 0)
+                {
+                    return 0;
+                }
+
+                // a verdict at the read's first byte: nothing of it served
+                if (_at == _end)
+                {
+                    meter.Tell();
+
+                    return await Drain(cancellationToken);
+                }
             }
 
-            meter.Tell();
+            var count = Math.Min(buffer.Length, _end - _at);
 
-            return await Drain(cancellationToken);
+            _held.AsSpan(_at, count).CopyTo(buffer.Span);
+            _at += count;
+
+            if (_at == _end)
+            {
+                Let();
+            }
+
+            return count;
+        }
+
+        // * its socket read once into a buffer rented once bytes are there, so a connection waiting
+        // on its peer holds none, and all that read brought metered at once: how many bytes it
+        // brought, what its meter handed on held from its start
+        private async Task<int> Fill(FrameMeter meter, CancellationToken cancellationToken)
+        {
+            _ = await _inner.ReadAsync(Memory<byte>.Empty, cancellationToken);
+
+            _held = ArrayPool<byte>.Shared.Rent(ServerBounds.GateReadBytes);
+
+            int read;
+
+            try
+            {
+                read = await _inner.ReadAsync(_held.AsMemory(0, ServerBounds.GateReadBytes), cancellationToken);
+            }
+            catch
+            {
+                Let();
+
+                throw;
+            }
+
+            if (read == 0)
+            {
+                Let();
+
+                return 0;
+            }
+
+            _at = 0;
+            _end = meter.Read(_held.AsSpan(0, read));
+            _isCut = meter.Verdict is not null;
+
+            if (_end == 0)
+            {
+                Let();
+            }
+
+            return read;
+        }
+
+        // its buffer returned, once what it held was served or dropped
+        private void Let()
+        {
+            if (_held is not null)
+            {
+                ArrayPool<byte>.Shared.Return(_held);
+                _held = null;
+            }
+
+            _at = 0;
+            _end = 0;
         }
 
         // ! once a verdict failed its connection, what comes is read and dropped, parsed by none,

@@ -154,9 +154,14 @@ with another code. The C# and Rust clients take the meter, since their streams a
 A page's `WebSocket` and Node's global one fail a message as their platform does. The Rust side
 splits a data frame past 64 KiB into frames of 64 KiB at most before tungstenite reads it, as §5.4
 lets an intermediary, so a head reserves 64 KiB at most; the C# side replaces a writer grown past
-its read buffer once its message is whole. Each side holds the meter to its platform's reader with
-a differential fuzz target, `websocket-frames`: the same bytes fed to both agree on each frame's
-bounds, on each message's end, and on whether the stream fails and at which frame.
+its read buffer once its message is whole. The C# side's gate reads its socket into a buffer of its
+own of 64 KiB, rented once bytes are there, and charges all that read brought at once, as the
+TypeScript side charges a read and the Rust side a region. Below a paused connection's gate,
+Kestrel's socket transport reads 64 KiB more at most, its `MaxReadBufferSize`, which nothing
+charges; once that socket ended while paused, what the gate reads is dropped unmetered. Each side
+holds the meter to its platform's reader with a differential fuzz target, `websocket-frames`: the
+same bytes fed to both agree on each frame's bounds, on each message's end, and on whether the
+stream fails and at which frame.
 
 ### A budget bounds the memory
 

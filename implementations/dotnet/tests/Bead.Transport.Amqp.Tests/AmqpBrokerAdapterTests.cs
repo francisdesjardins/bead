@@ -364,6 +364,57 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
+    // spec 13.4
+    [Fact]
+    public async Task Connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+    {
+        using var resolver = new StandInResolver();
+
+        foreach (var host in new[] { "127.0.0.1.", "127.1" })
+        {
+            await using var listener = new HeadListener();
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { ConnectTimeout = TimeSpan.FromSeconds(1), Uri = new Uri($"amqp://{host}:{listener.Port}") };
+            });
+
+            // * its protocol header reaches the listener on 127.0.0.1, which answers nothing; judged on
+            // the loopback, as it is named
+            await FailureOf(() =>
+            {
+                return adapter.Start();
+            });
+
+            Assert.All(await listener.Next(), (header) =>
+            {
+                Assert.StartsWith("AMQP", header, StringComparison.Ordinal);
+            });
+            Assert.True(adapter.IsSecure);
+        }
+
+        Assert.Empty(resolver.Asked);
+    }
+
+    // spec 13.4; RFC 3696 §2
+    [Fact]
+    public void Refuses_a_host_the_URL_Standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+    {
+        using var resolver = new StandInResolver();
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri("amqp://foo.123:5672") });
+        });
+
+        Assert.Equal("foo.123 is no host a URL can name", refused.Message);
+
+        // ! .NET's Uri, which the options take, refuses a percent-escaped host as it parses it
+        Assert.Throws<UriFormatException>(() =>
+        {
+            return new Uri("amqp://x%20.localhost:5672");
+        });
+        Assert.Empty(resolver.Asked);
+    }
+
     [Fact]
     public async Task Fails_its_start_over_TLS_where_its_broker_s_certificate_chains_to_no_authority_it_trusts()
     {
@@ -3464,6 +3515,14 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(
             (true, true, true, true, false, false),
             (IsSecure("amqps://broker.example"), IsSecure("amqp://127.0.0.1:5672"), IsSecure("amqp://localhost"), IsSecure("amqp://[::1]:5672"), IsSecure("amqp://broker.example"), IsSecure("amqp://10.0.0.1")));
+        Assert.Equal((true, true), (IsSecure("amqp://LOCALHOST:5672"), IsSecure("amqp://127.1:5672")));
+
+        // ! .NET's Uri, which the options take, refuses a percent-escaped host as it parses it, so
+        // none reaches the adapter to be read decoded (docs/support.md)
+        Assert.Throws<UriFormatException>(() =>
+        {
+            return new Uri("amqp://local%68ost:5672");
+        });
 
         // ! a WebSocket or another scheme is no AMQP 1.0 leg
         Assert.Throws<ArgumentException>(() =>

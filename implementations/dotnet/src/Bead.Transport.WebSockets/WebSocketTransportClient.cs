@@ -352,8 +352,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="ArgumentOutOfRangeException"/> for a timeout
     /// <see cref="WebSocketTransportClientConnectOptions.Timeout"/> does not take, zero among them, and with an
     /// <see cref="ArgumentException"/> for a credential <see cref="WebSocketTransportClientConnectOptions.Credential"/>
-    /// does not take, each of which leaves the state, and the target a reconnection replays, as they
-    /// were; with an <see cref="InvalidOperationException"/> unless
+    /// does not take, and with a <see cref="ConnectException"/> for a host the URL Standard's host
+    /// parser fails on, before any socket opens, each of which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
@@ -730,11 +731,24 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
-    // ws://host:port/pathname, or wss://; an IPv6 literal bracketed, or its colons would read as the
-    // port's
+    // the host a connect dials, read once as the URL Standard reads it, an IPv6 literal bracketed
+    // (spec 13.4): one that parser fails on is a ConnectException, before anything moves
+    private static string DialedHostOf(WebSocketTransportClientConnectOptions options)
+    {
+        try
+        {
+            return TransportSecurity.DialedHost(options.Host);
+        }
+        catch (ArgumentException reason)
+        {
+            throw new ConnectException(reason.Message, reason);
+        }
+    }
+
+    // ws://host:port/pathname, or wss://, its host the one it dials
     private static Uri UriOf(WebSocketTransportClientConnectOptions options)
     {
-        var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
+        var host = DialedHostOf(options);
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "wss" : "ws")}://{host}:{options.Port}{path}");
@@ -934,6 +948,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     {
         ArgumentNullException.ThrowIfNull(given);
         AssertCredential(given);
+        _ = DialedHostOf(given);
 
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with

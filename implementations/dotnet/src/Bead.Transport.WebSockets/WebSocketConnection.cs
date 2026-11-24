@@ -371,6 +371,15 @@ internal sealed class WebSocketConnection
             return;
         }
 
+        // * a verdict drawn behind the message its router paused on fails it at once (spec 15.3): its
+        // close goes, its gate opens for good, and what the pause holds is dropped
+        if (_read.Meter is { Verdict: not null } meter)
+        {
+            meter.Tell();
+
+            return;
+        }
+
         _read.Meter?.Hold();
 
         try

@@ -197,6 +197,19 @@ internal static partial class Exchanges
                     var on = step.GetProperty("on").GetString()!;
                     var opened = sockets[on];
 
+                    // * its socket's end, its server's FIN or its reset, and nothing more on it
+                    if (expect.TryGetProperty("end", out _))
+                    {
+                        var past = await opened.Reader.UntilEnd().WaitAsync(Patience);
+
+                        if (past.Length > 0)
+                        {
+                            parted.Add($"exchanges: {name}: {past.Length} octets past its responses, then its end");
+                        }
+
+                        continue;
+                    }
+
                     // * the next response, in the order of the requests written on its socket
                     if (!opened.Methods.TryDequeue(out var method))
                     {
@@ -397,6 +410,24 @@ internal static partial class Exchanges
     internal sealed class Reader(Socket socket)
     {
         private readonly List<byte> _came = [];
+
+        // what comes past the responses read, until its socket ends, a reset ending it as its end does
+        public async Task<byte[]> UntilEnd()
+        {
+            try
+            {
+                while (await Fill())
+                {
+                    // to its end
+                }
+            }
+            catch (SocketException)
+            {
+                // its reset
+            }
+
+            return Take(_came.Count);
+        }
 
         public async Task<(int Status, Dictionary<string, string> Fields)> ReadHead()
         {

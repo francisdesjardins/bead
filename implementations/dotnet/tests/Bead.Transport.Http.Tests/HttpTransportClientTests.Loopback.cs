@@ -1,5 +1,11 @@
+using System.Collections.Concurrent;
+using System.Net;
 using System.Threading.Channels;
 using Bead.Tests;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -95,6 +101,121 @@ public sealed partial class HttpTransportClientTests
             Assert.Contains(LoopbackFailures.Sentence, refused.Message, StringComparison.Ordinal);
             Assert.Equal(ReadyState.Closed, client.ReadyState);
             Assert.Empty(resolver.Asked);
+        }
+
+        // spec 13.4
+        [Fact]
+        public async Task Connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+        {
+            using var resolver = new StandInResolver();
+
+            foreach (var host in new[] { "127.0.0.1.", "127.1" })
+            {
+                await using var listener = new HeadListener();
+                await using var client = new HttpTransportClient(NotListening);
+
+                // * it reaches the listener on 127.0.0.1, which answers nothing
+                await Assert.ThrowsAnyAsync<Exception>(() =>
+                {
+                    return client.Connect(new HttpTransportClientConnectOptions { Host = host, Port = listener.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+
+                Assert.All(await listener.Next(), (head) =>
+                {
+                    Assert.Contains($"Host: 127.0.0.1:{listener.Port}\r\n", head, StringComparison.Ordinal);
+                });
+            }
+
+            Assert.Empty(resolver.Asked);
+        }
+
+        // spec 13.4; RFC 3696 §2
+        [Fact]
+        public async Task Refuses_a_host_the_URL_Standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+        {
+            using var resolver = new StandInResolver();
+            await using var proxy = new StandInProxy();
+
+            foreach (var host in new[] { "foo.123", "x%20.localhost" })
+            {
+                await using var client = new HttpTransportClient(NotListening);
+                var refused = await Assert.ThrowsAsync<ConnectException>(() =>
+                {
+                    return client.Connect(new HttpTransportClientConnectOptions { Host = host, Port = 9, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                });
+
+                Assert.Equal($"{host} is no host a URL can name", refused.Message);
+                Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+            }
+
+            Assert.Empty(resolver.Asked);
+            Assert.Empty(proxy.Asked);
+            Assert.Empty(proxy.Listener.Heads);
+        }
+
+        // spec 13.4; RFC 7301
+        [Fact]
+        public async Task Negotiates_the_HTTP_version_with_a_localhost_name_that_it_negotiates_with_127_0_0_1()
+        {
+            // * a server that offers h2 and http/1.1 by ALPN, its certificate naming both, which tells
+            // each request's name, method and version
+            var versions = new ConcurrentQueue<(string Named, string Request)>();
+            using var certificate = Pki.Serving("server");
+            var builder = WebApplication.CreateSlimBuilder();
+
+            builder.Logging.ClearProviders();
+            builder.WebHost.ConfigureKestrel((kestrel) =>
+            {
+                kestrel.Listen(IPAddress.Loopback, 0, (listen) =>
+                {
+                    listen.Protocols = HttpProtocols.Http1AndHttp2;
+                    listen.UseHttps(certificate);
+                });
+            });
+
+            await using var application = builder.Build();
+
+            application.Run(async (context) =>
+            {
+                var isConnect = !context.Request.Headers.ContainsKey(HttpTransport.ConnectionTokenHeader);
+
+                versions.Enqueue((context.Request.Host.Host, $"{context.Request.Method} {context.Request.Protocol}"));
+                await context.Request.Body.CopyToAsync(Stream.Null, Cancelled);
+                context.Response.StatusCode = isConnect && context.Request.Method == "POST" ? 201 : 204;
+
+                if (isConnect)
+                {
+                    context.Response.Headers[HttpTransport.ConnectionTokenHeader] = new string('T', 22);
+                }
+            });
+            await application.StartAsync(Cancelled);
+
+            var port = new Uri(application.Urls.First()).Port;
+
+            foreach (var named in new[] { "127.0.0.1", "localhost" })
+            {
+                await using var client = new HttpTransportClient(NotListening with { Tls = new TlsOptions { Authorities = Pki.Read("root.pem") } });
+
+                await client.Connect(new HttpTransportClientConnectOptions { Host = named, Port = port, Secured = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+            }
+
+            await application.StopAsync(Cancelled);
+
+            // * the same requests in the same version under either name
+            string[] RequestsOf(string named)
+            {
+                return [.. versions.Where((each) =>
+                {
+                    return each.Named == named;
+                }).Select((each) =>
+                {
+                    return each.Request;
+                }).Order(StringComparer.Ordinal)];
+            }
+
+            Assert.NotEmpty(RequestsOf("127.0.0.1"));
+            Assert.Equal(RequestsOf("127.0.0.1"), RequestsOf("localhost"));
         }
 
         // spec 13.4, 15.39

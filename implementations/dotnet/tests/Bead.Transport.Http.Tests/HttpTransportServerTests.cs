@@ -1963,6 +1963,33 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_refusals);
     }
 
+    // spec 15.7, 15.12; RFC 9112 §7.1; docs/support.md, a chunk size past 2³¹ − 1 over HTTP/1.1
+    [Fact]
+    public async Task Answers_400_unmarked_and_closes_a_chunk_size_past_what_Kestrel_holds()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+
+        // * 2³¹, past the int Kestrel holds a chunk size in, on an exchange of a connection drawn,
+        // never the 200 Kestrel writes of a request left unanswered
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write([.. Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nTransfer-Encoding: chunked\r\n\r\n80000000\r\n"), .. new byte[12]]);
+
+        var (head, answered) = await wire.Read();
+
+        Assert.Equal((400, false, "close"), (head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), head.Headers["connection"]));
+        Assert.Empty(answered);
+        Assert.True(await wire.IsClosed());
+
+        // nothing handed on, the connection drawn lost with its exchange, as a framing Kestrel fails
+        // loses it, and nothing told
+        Assert.Empty(_messages);
+        Assert.Empty(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
     // spec 15.12; RFC 9112 §6.1
     [Fact]
     public async Task Refuses_400_unmarked_a_request_whose_Transfer_Encoding_lists_a_coding_before_its_chunked_in_one_line_or_two_before_its_host_is_judged_and_closes_its_connection_before_a_request_pipelined_behind_it_is_read()

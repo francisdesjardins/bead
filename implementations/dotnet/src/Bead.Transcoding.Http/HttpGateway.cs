@@ -864,6 +864,13 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             return (null, new Refused(reason.StatusCode, "", "") { IsHttp = true });
         }
+        catch (IOException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            // ! a framing Kestrel fails as an I/O fault with its client still there, a chunk size past
+            // what it holds, an int's: refused 400 as HTTP refuses it (RFC 9112 §7.1), never the 200
+            // Kestrel writes of a request left unanswered (spec 15.12)
+            return (null, new Refused(StatusCodes.Status400BadRequest, "", "") { IsHttp = true });
+        }
         finally
         {
             rate?.Dispose();
