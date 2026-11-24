@@ -2168,6 +2168,70 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Single(_refusals);
     }
 
+    // A CANCEL in one chunk, followed by a canary: each platform's outcome is a support matrix row.
+    private async Task PlatformFramingOf((string Coding, string Size, string Ending) framing, bool isTaken)
+    {
+        var (connectionToken, _) = await Connect();
+        var seen = _messages.Count;
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, 5);
+        var head = string.Join(framing.Ending, "POST /bead HTTP/1.1", $"Host: {Host}", $"Content-Type: {HttpTransport.MediaType}", $"{HttpTransport.ConnectionTokenHeader}: {connectionToken}", $"Transfer-Encoding: {framing.Coding}", "", "");
+        using var wire = await Wire.Open(_port);
+
+        await wire.Write([.. Encoding.ASCII.GetBytes($"{head}{framing.Size}\r\n"), .. cancel, .. Encoding.ASCII.GetBytes($"\r\n0\r\n\r\nGET /other HTTP/1.1\r\nHost: {Host}\r\nConnection: close\r\n\r\n")]);
+        var (first, body) = await wire.Read();
+
+        Assert.Equal(isTaken ? 204 : 400, first.Status);
+        Assert.Empty(body);
+        Assert.False(first.Headers.ContainsKey(HttpTransport.RefusalHeader));
+        if (isTaken)
+        {
+            var (canary, _) = await wire.Read();
+
+            Assert.Equal(404, canary.Status);
+            Assert.Equal(HttpRefusals.Path, canary.Headers[HttpTransport.RefusalHeader]);
+            Assert.Equal(seen + 1, _messages.Count);
+            Assert.Equal(cancel, _messages.Last().Bytes);
+        }
+        else
+        {
+            Assert.Equal("close", first.Headers["connection"]);
+            Assert.Equal(seen, _messages.Count);
+        }
+
+        Assert.True(await wire.IsClosed(), "the canary or the parser closes its socket");
+    }
+
+    [Fact]
+    public async Task Shows_how_the_platform_reads_chunked_with_trailing_space_and_tab()
+    {
+        await Start();
+        await PlatformFramingOf(("chunked \t", "8", "\r\n"), true);
+    }
+
+    [Fact]
+    public async Task Shows_how_the_platform_reads_a_chunk_extension_after_whitespace()
+    {
+        await Start();
+        await PlatformFramingOf(("chunked", "8 ;name", "\r\n"), false);
+    }
+
+    [Fact]
+    public async Task Shows_how_the_platform_reads_leading_zeros_in_a_nine_digit_chunk_size()
+    {
+        await Start();
+        foreach (var size in (string[])["00000008", "000000008", "0000000008", "0000000000000000000008"])
+        {
+            await PlatformFramingOf(("chunked", size, "\r\n"), size.Length == 8);
+        }
+    }
+
+    [Fact]
+    public async Task Shows_how_the_platform_reads_bare_LF_head_lines()
+    {
+        await Start();
+        await PlatformFramingOf(("chunked", "8", "\n"), true);
+    }
+
     // spec 15.12; RFC 9112 §9.3
     [Fact]
     public async Task Stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_socket()
