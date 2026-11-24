@@ -97,6 +97,58 @@ public sealed partial class RouterCoreTests
             RefusalsOf(server.Sent));
         Assert.Equal(0, resolver.Admitted);
         Assert.Empty(server.Resolved);
+
+        foreach (var sourceOrder in new[] { false, true })
+        {
+            var opaque = new Peer(RouterSide.Server);
+            using var opaqueCore = opaque.Core;
+            var checking = new Held(opaqueCore) { Procedure = Echo with { ServiceId = 2 } };
+
+            opaqueCore.RegisterResolver(checking);
+
+            foreach (var (id, credential) in new[]
+            {
+                (1u, Credential.Jwt("a.b.c")),
+                (3u, Credential.Elsewhere()),
+                (5u, Credential.Of((CredentialScheme)0xffff, [1, 2])),
+            })
+            {
+                await opaque.Deliver(new Envelope { Header = RequestOf(id) with { ServiceId = 2, Credential = credential } });
+            }
+
+            var routes = sourceOrder
+                ? new[] { (7u, (ushort)2, (ushort)99), (11u, (ushort)2, (ushort)1), (9u, (ushort)9, (ushort)1) }
+                : [(11u, (ushort)2, (ushort)1), (7u, (ushort)2, (ushort)99), (9u, (ushort)9, (ushort)1)];
+
+            foreach (var (id, serviceId, procedureId) in routes)
+            {
+                await opaque.Deliver(new Envelope
+                {
+                    Header = RequestOf(id) with
+                    {
+                        ServiceId = serviceId,
+                        ProcedureId = procedureId,
+                        Credential = Credential.Of((CredentialScheme)7, id == 11 ? [1, 2] : []),
+                    },
+                });
+            }
+
+            var route = (7u, ProtocolCode.ProcedureUnknown, "no procedure 99 in service 2");
+            var future = (11u, ProtocolCode.CredentialUnsupported, "OPAQUE");
+
+            Assert.Equal(
+                new[]
+                {
+                    (1u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
+                    (3u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
+                    (5u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
+                }.Concat(sourceOrder ? [route, future] : [future, route]).Append((9u, ProtocolCode.ServiceUnknown, "no service 9")),
+                RefusalsOf(opaque.Sent));
+            Assert.Equal(0, checking.Admitted);
+            Assert.Empty(checking.Requests);
+            Assert.Empty(opaque.Resolved);
+            Assert.Empty(opaque.Reports);
+        }
     }
 
     [Fact]
