@@ -8,6 +8,35 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterCoreTests
 {
+    [Fact]
+    public async Task Sends_a_call_on_a_call_id_of_its_side_settles_it_with_the_answer_paired_to_it_and_hands_its_port_an_answer_no_call_waits_on()
+    {
+        var peer = new Peer(RouterSide.Server);
+        using var core = peer.Core;
+        var asked = peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
+        var id = await peer.CallIdOf(asked);
+        var unpaired = new Envelope { Header = new FailureHeader { CallId = id + 2 }, Failure = Failure.OfProtocol(ProtocolCode.ProcedureFailed) };
+
+        Assert.Equal(0u, id % 2);
+        Assert.Equal(1, core.Gauges().Counts["pendingCalls"]);
+        Assert.Equal([Handle], peer.SentOn);
+        await peer.Deliver(unpaired);
+        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(peer.Reports)));
+        Assert.Equal(1, core.Gauges().Counts["pendingCalls"]);
+        core.Reserve(new CallAddress(id + 2, Handle), TimeSpan.FromMilliseconds(30));
+        await peer.Deliver(unpaired);
+        Assert.Single(peer.Reports);
+        Assert.Equal(1, core.Gauges().Counts["reservedCallIds"]);
+        await peer.Advance(TimeSpan.FromMilliseconds(30));
+        Assert.Equal(0, core.Gauges().Counts["reservedCallIds"]);
+        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = id }, Payload = new byte[] { 7 } });
+        Assert.Equal(new byte[] { 7 }, (await asked.WaitAsync(Patience, TestContext.Current.CancellationToken)).Payload.ToArray());
+        await peer.Deliver(ResultOf(id));
+        Assert.Equal([(ushort)ProtocolCode.CallUnknown, (ushort)ProtocolCode.CallUnknown], peer.Reports.Select(CodeOf));
+        Assert.Equal([Handle, Handle], peer.ReportedOn);
+        Assert.Equal(0, core.Gauges().Counts["pendingCalls"]);
+    }
+
     // a requester's clock keeps every timer and its disposal, as the TypeScript clock does
     internal sealed class RequesterClock : FakeTimeProvider
     {
