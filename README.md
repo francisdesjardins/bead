@@ -194,13 +194,13 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, Node without dependencies
+tools/                        repository checks, a feature's finish, the release, the coverage report, bench-release.mjs, bench-compare.mjs and fuzz.mjs, the brokers' fixtures, mqtt-broker.mjs, amqp-broker.mjs and broker-fixture.mjs, verify-image.mjs, which runs a document's verify block for beadc's image, Node without dependencies
   fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
   protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
 .githooks/                    the repository checks before each commit, opt-in
 .github/
-  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release; image.yml, beadc's image at each release
+  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release; image.yml, beadc's image at each release; guides.yml, the getting-started guide's verify block
   dependabot.yml              the dependencies' updates, every week, grouped
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
 ```
@@ -1192,16 +1192,18 @@ node tools/release.mjs tag                     # spec-v…, debugging-v… and t
 git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml   # only if tag took one out
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 gh run list --workflow image.yml --limit 1     # beadc's image, published from v0.2.0
-gh workflow run image.yml --ref develop -f tag=v0.2.0   # only if no run started
+gh workflow run image.yml --ref v0.2.0         # on the tag, only if no run started
 ```
 
 The tag `v*` starts [`image.yml`](.github/workflows/image.yml), which publishes beadc's image under
 the release's version, attested and signed ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)); GitHub starts no run when more than three tags
-are pushed at once, and the release then dispatches it.
+are pushed at once, and the release then dispatches it on the tag.
 
-Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
-Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
-image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
+Before `prepare`, the release moves by hand the pins of beadc's image and its lint: the Dockerfile
+frontend's and the Node base's (`NODE_DIGEST`) digests in `builder/Dockerfile` and shellcheck's
+image's in `ci.yml`, each to its tag's current digest, on which CI then builds and tests the image;
+and in `image.yml`, buildx's version and BuildKit's image, by its version and its digest, to those
+GitHub's runners hold.
 `prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
 tells a document's new version and its tag, the spec's or a companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule

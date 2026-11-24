@@ -12,10 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc's image is published on GitHub's container registry at each release,
   `ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and linux/arm64, by
   `.github/workflows/image.yml`: each platform built natively and tested, its index attested by
-  GitHub and signed keylessly by cosign. A team verifies it with `gh attestation verify` and `cosign
-  verify` and pins it by its digest in `BEADC_IMAGE`; the wrappers pull it by version. 0.16.0's
-  image is published by hand, from its tag. The packages stay unpublished, and the options keep
-  58500 (decision 0055).
+  GitHub and signed keylessly by cosign. Each image is built, attested and signed on its release's
+  tag, its provenance naming the tag and its commit, and the release's run verifies it as the README
+  tells a reader to; 0.16.0's alone was dispatched from develop, which built its tag. A team
+  verifies it with `gh attestation verify` and `cosign verify` and pins it by its digest in
+  `BEADC_IMAGE`; the wrappers pull it by version. The packages stay unpublished, and the options
+  keep 58500 (decision 0055).
 
 ### Changed
 
