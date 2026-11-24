@@ -968,6 +968,11 @@ fn refuses_a_value_its_field_s_type_holds_none_of_each_by_its_reason() {
         ),
         (
             EDGES,
+            "{\"any\":{\"@type\":\"type.googleapis.com/.google.protobuf.Any\"}}",
+            "an Any of a type its definitions do not hold",
+        ),
+        (
+            EDGES,
             "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Duration\",\"seconds\":1}}",
             "an Any of a well-known type whose members are not its value alone",
         ),
