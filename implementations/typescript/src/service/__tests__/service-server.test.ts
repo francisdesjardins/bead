@@ -607,6 +607,49 @@ test.describe('createServiceServer', () => {
   });
 
   // spec 18.2
+  test('fails a command whose rule throws as it judges, with that throw, before anything goes', async () => {
+    await using connected = await connectWorker();
+    const broken = new Error('this rule fails to judge, on purpose');
+    const procedures = Object.freeze({
+      shout: commandOf({
+        admission: 'none',
+        failures: {},
+        procedure: { procedureId: 3, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
+        request: PAYLOAD_CODECS.text,
+        result: PAYLOAD_CODECS.text,
+        validate: () => {
+          throw broken;
+        },
+      }),
+    });
+    const validating = createServiceServer(procedures, { validates: true });
+    const client = createServiceClient(procedures, connected.client);
+    const heard: unknown[] = [];
+    const serverReports: unknown[] = [];
+    const clientReports: unknown[] = [];
+
+    connected.server.router.on('error', (error) => {
+      serverReports.push(error);
+    });
+    connected.client.router.on('error', (error) => {
+      clientReports.push(error);
+    });
+    client.on('shout', (request, response) => {
+      heard.push(request.payload);
+
+      return response(request.payload);
+    });
+    validating.offer(connected.server);
+
+    await expect(
+      validating.command.shout('hi')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).rejects.toBe(broken);
+    expect(heard).toEqual([]);
+    expect(serverReports).toEqual([]);
+    expect(clientReports).toEqual([]);
+  });
+
+  // spec 18.2
   test('fails a command whose rule panics as it judges, with that panic, before anything goes', async () => {
     await using connected = await connectWorker();
     const broken = new Error('this rule fails to judge, on purpose first');
