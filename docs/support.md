@@ -320,7 +320,7 @@ that a test of each side does:
   and a result's opening past its call's limit (spec 12.3, item 2),
   `router/shared/__tests__/router-requester.test.ts`
   (`its own requests`,
-  `reject a result whose transfer is past the payload’s limit, and cancel its call`) and
+  `rejects a result whose transfer is past the payload’s limit, and cancels its call`) and
   `Bead.Core.Tests/RouterCoreTests.Requester.cs`
   (`Rejects_a_result_whose_transfer_is_past_the_payload_s_limit_and_cancels_its_call`);
 - the in-memory transport and the joined transport (spec 15.13, 15.14), which the transports' file,
