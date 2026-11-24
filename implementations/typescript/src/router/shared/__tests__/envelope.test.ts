@@ -56,16 +56,18 @@ test.describe.configure({ retries: 0 });
 
 test.describe('readEnvelope and writeEnvelope', () => {
   for (const { bytes, chunkBytes, envelope, name } of VECTORS.envelopes) {
-    test(`reads ${name}, and writes it back`, () => {
-      const expected = envelopeOf(envelope);
+    test.describe(name, () => {
+      test('reads an envelope and writes it back', () => {
+        const expected = envelopeOf(envelope);
 
-      expect(
-        readEnvelope(fromHexadecimal(bytes), {
-          ...limits,
-          ...(chunkBytes === undefined ? {} : { chunkBytes }),
-        })
-      ).toEqual(expected);
-      expect(writeEnvelope(expected as OutgoingEnvelope)).toEqual(fromHexadecimal(bytes));
+        expect(
+          readEnvelope(fromHexadecimal(bytes), {
+            ...limits,
+            ...(chunkBytes === undefined ? {} : { chunkBytes }),
+          })
+        ).toEqual(expected);
+        expect(writeEnvelope(expected as OutgoingEnvelope)).toEqual(fromHexadecimal(bytes));
+      });
     });
   }
 
@@ -77,21 +79,23 @@ test.describe('readEnvelope and writeEnvelope', () => {
     maximumEnvelopeBytes,
     name,
   } of VECTORS.envelopeRefusals) {
-    test(`refuses ${name}`, () => {
-      expect(
-        failureOf(() => {
-          return readEnvelope(fromHexadecimal(bytes), {
-            ...limits,
-            ...(chunkBytes === undefined ? {} : { chunkBytes }),
-            ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
-          });
-        })
-      ).toMatchObject({
-        code,
-        origin: 'local',
-        scope: FailureScope.PROTOCOL,
-        side: 'server',
-        ...(detail === undefined ? {} : { detail }),
+    test.describe(name, () => {
+      test('refuses an envelope', () => {
+        expect(
+          failureOf(() => {
+            return readEnvelope(fromHexadecimal(bytes), {
+              ...limits,
+              ...(chunkBytes === undefined ? {} : { chunkBytes }),
+              ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
+            });
+          })
+        ).toMatchObject({
+          code,
+          origin: 'local',
+          scope: FailureScope.PROTOCOL,
+          side: 'server',
+          ...(detail === undefined ? {} : { detail }),
+        });
       });
     });
   }
@@ -234,20 +238,24 @@ test.describe('readFailure', () => {
   const options = { failures: SERVER_FAILURES };
 
   for (const { failure, maximumDetailBytes, name, record } of VECTORS.failures) {
-    test(`reads ${name}`, () => {
-      expect(readFailure(fromHexadecimal(record), { ...options, maximumDetailBytes })).toEqual(
-        failure
-      );
+    test.describe(name, () => {
+      test('reads a failure', () => {
+        expect(readFailure(fromHexadecimal(record), { ...options, maximumDetailBytes })).toEqual(
+          failure
+        );
+      });
     });
   }
 
   for (const { code, name, record } of VECTORS.failureRefusals) {
-    test(`refuses ${name}`, () => {
-      expect(
-        failureOf(() => {
-          return readFailure(fromHexadecimal(record), options);
-        })
-      ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
+    test.describe(name, () => {
+      test('refuses a failure', () => {
+        expect(
+          failureOf(() => {
+            return readFailure(fromHexadecimal(record), options);
+          })
+        ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
+      });
     });
   }
 

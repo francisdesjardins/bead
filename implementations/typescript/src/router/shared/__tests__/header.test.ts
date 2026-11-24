@@ -78,16 +78,18 @@ test.describe('writeHeader and readHeader', () => {
   });
 
   for (const { bytes, header, name } of VECTORS.headers) {
-    test(`reads ${name}, and writes it back`, () => {
-      const expected = fromHexadecimal(bytes);
-      const written = new Uint8Array(expected.length);
+    test.describe(name, () => {
+      test('reads a header and writes it back', () => {
+        const expected = fromHexadecimal(bytes);
+        const written = new Uint8Array(expected.length);
 
-      expect(writeHeader(header, written)).toBe(expected.length);
-      expect(written).toEqual(expected);
-      expect(headerBytesOf(header)).toBe(expected.length);
-      expect(readHeader(expected, SERVER_FAILURES)).toEqual({
-        header,
-        headerBytes: expected.length,
+        expect(writeHeader(header, written)).toBe(expected.length);
+        expect(written).toEqual(expected);
+        expect(headerBytesOf(header)).toBe(expected.length);
+        expect(readHeader(expected, SERVER_FAILURES)).toEqual({
+          header,
+          headerBytes: expected.length,
+        });
       });
     });
   }
@@ -496,35 +498,41 @@ test.describe('writeHeader', () => {
 
 test.describe('readPrefix', () => {
   for (const { bytes, name, prefix } of VECTORS.prefixes) {
-    test(`reads ${name}`, () => {
-      expect(readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES)).toEqual(prefix);
+    test.describe(name, () => {
+      test('reads the prefix of any layout', () => {
+        expect(readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES)).toEqual(prefix);
+      });
     });
   }
 
   for (const { bytes, code, name } of VECTORS.prefixRefusals) {
-    test(`refuses ${name}`, () => {
-      const failure = failureOf(() => {
-        return readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES);
-      });
+    test.describe(name, () => {
+      test('refuses a prefix', () => {
+        const failure = failureOf(() => {
+          return readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES);
+        });
 
-      expect(failure.code).toBe(code);
-      expect(failure.side).toBe('client');
+        expect(failure.code).toBe(code);
+        expect(failure.side).toBe('client');
+      });
     });
   }
 });
 
 test.describe('readHeader', () => {
   for (const { bytes, header, name, side } of VECTORS.reads) {
-    test(`reads ${name}`, () => {
-      const read = readHeader(
-        fromHexadecimal(bytes),
-        side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES
-      );
+    test.describe(name, () => {
+      test('reads what a writer need not write', () => {
+        const read = readHeader(
+          fromHexadecimal(bytes),
+          side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES
+        );
 
-      expect(read).toEqual(
-        // * the bytes the header took as it was read, which a writer may write fewer of
-        header === null ? undefined : { header, headerBytes: fromHexadecimal(bytes).length }
-      );
+        expect(read).toEqual(
+          // * the bytes the header took as it was read, which a writer may write fewer of
+          header === null ? undefined : { header, headerBytes: fromHexadecimal(bytes).length }
+        );
+      });
     });
   }
 
@@ -532,21 +540,23 @@ test.describe('readHeader', () => {
     ...VECTORS.prefixRefusals,
     ...VECTORS.headerRefusals,
   ]) {
-    test(`refuses ${name}`, () => {
-      const failure = failureOf(() => {
-        return readHeader(fromHexadecimal(bytes), SERVER_FAILURES);
-      });
+    test.describe(name, () => {
+      test('refuses a header', () => {
+        const failure = failureOf(() => {
+          return readHeader(fromHexadecimal(bytes), SERVER_FAILURES);
+        });
 
-      expect(failure).toMatchObject({
-        code,
-        origin: 'local',
-        scope: FailureScope.PROTOCOL,
-        side: 'server',
-      });
+        expect(failure).toMatchObject({
+          code,
+          origin: 'local',
+          scope: FailureScope.PROTOCOL,
+          side: 'server',
+        });
 
-      if (detail !== undefined) {
-        expect(failure.detail).toBe(detail);
-      }
+        if (detail !== undefined) {
+          expect(failure.detail).toBe(detail);
+        }
+      });
     });
   }
 
