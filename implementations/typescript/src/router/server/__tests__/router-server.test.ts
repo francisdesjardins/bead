@@ -654,7 +654,7 @@ test.describe('createRouterServer', () => {
     expect(router.notifications.subscriptions()).toEqual([]);
   });
 
-  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+  test('runs on its transport’s clock and refuses another', () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
     using onItsTransport = createRouterServer(
