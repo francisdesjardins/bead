@@ -162,6 +162,29 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('bounds the DELETE of its disconnect on the real clock, never on the one it is given', async () => {
+  test.setTimeout(DISCONNECT_TIMEOUT * 4);
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+  const connecting = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await connecting;
+  const began = performance.now();
+  const disconnecting = client.disconnect();
+
+  await clock.tickAsync(86_400_000);
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 100);
+  });
+  expect(client.isClosing()).toBe(true);
+  await disconnecting;
+  expect(performance.now() - began).toBeGreaterThanOrEqual(4_500);
+  expect(performance.now() - began).toBeLessThan(10_000);
+  expect(client.isClosed()).toBe(true);
+});
+
 test('refuses a connect while open, reaching no server', async () => {
   const { client, fake } = await connectFake();
   await using _held = client;
@@ -2223,6 +2246,40 @@ test.describe('createHTTPTransportClient, listening', () => {
         [[false, false]],
         { last: 'DELETE', listens: 3 },
       ]);
+    }
+  });
+
+  test('times its inactivity on a timer, never on its clock, whether the clock leaps or stands still', async () => {
+    for (const { leap, timeout } of [
+      { leap: 3_600_000, timeout: 40 },
+      { leap: 0, timeout: 700 },
+    ]) {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      let wall = clock.Date.now();
+      clock.Date.now = () => {
+        wall += leap;
+        return wall;
+      };
+      const fetch = losingFetch();
+      await using client = createHTTPTransportClient({
+        clock,
+        fetch: fetch.fetch,
+        inactivityTimeout: timeout,
+      });
+      const closes = closesOf(client);
+
+      await client.connect({ host, port: 80 });
+      await clock.tickAsync(timeout - 1);
+      expect(client.isOpen()).toBe(true);
+      if (leap !== 0) {
+        expect(methodsOf(fetch).listens).toBe(2);
+      }
+      await clock.tickAsync(1);
+      expect(closes).toEqual([[false, false]]);
+      expect(methodsOf(fetch).last).toBe('DELETE');
+      if (leap !== 0) {
+        expect(methodsOf(fetch).listens).toBe(3);
+      }
     }
   });
 
