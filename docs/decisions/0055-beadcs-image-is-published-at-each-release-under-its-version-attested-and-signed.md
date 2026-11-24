@@ -93,7 +93,9 @@ crates.io packages stay unpublished, as
 release's tag, and refuses a tag that names another: one product version, as 0008 states. A
 version's image is pushed once: the workflow refuses a version unless the registry says it is not
 there, at the start and again before its push. The one index it admits there is the run's own, of
-exactly the digests it built, which a failed job run again finds. No other tag is pushed.
+exactly the digests it built, which a failed job run again finds. No other version tag is pushed;
+the attestation and the signature are referrers, which GHCR, answering no referrers API, keeps
+under the tag `sha256-<index digest>`, the fallback of OCI 1.1's distribution specification.
 
 **Each platform is built natively, and tested before it is pushed.** On `ubuntu-26.04` and
 `ubuntu-26.04-arm`, from the tag's commit, checked out and asserted, the Dockerfile's test stage
