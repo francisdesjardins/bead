@@ -7,6 +7,41 @@ namespace Bead.Tests;
 public sealed partial class RouterCoreTests
 {
     [Fact]
+    public void Places_a_payload_whole_up_to_its_envelope_as_a_transfer_past_it_and_refuses_one_past_its_limit_a_procedures_held_within_the_routers()
+    {
+        var limits = RouterLimits.Default with { BufferedBytesBudget = 1_024, MaximumPayloadBytes = 1_024, ChunkBytes = 64, MaximumEnvelopeBytes = 64, WindowBytes = 128 };
+        var placement = new RouterCore.PayloadPlacement(limits.Validate());
+        var header = RequestOf(1);
+        var whole = placement.WholeBytes - EnvelopeCodec.HeaderBytesOf(header);
+
+        Assert.Equal(64, placement.WholeBytes);
+        Assert.Equal((null, null), placement.TransferOf(new byte[whole], (header, 1_024)));
+
+        var (transfer, refusal) = placement.TransferOf(new byte[whole + 1], (header, 1_024));
+
+        Assert.Null(refusal);
+        Assert.NotNull(transfer);
+        Assert.Equal(whole + 1, transfer.Total);
+
+        var (oversized, failure) = placement.TransferOf(new byte[9], (header, 8));
+
+        Assert.Null(oversized);
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload is 8 bytes at most, not 9"), failure);
+        Assert.Equal([8, 1_024, 1_024], new int?[] { 8, 4_096, null }.Select(placement.PayloadLimitOf));
+        Assert.Same(RouterLimits.Default, RouterLimits.Default.Validate());
+
+        foreach (var maximum in new[] { 1, 8 })
+        {
+            Assert.Equal(maximum, (RouterLimits.Default with { MaximumPayloadBytes = maximum }).Validate().MaximumPayloadBytes);
+        }
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return (RouterLimits.Default with { MaximumPayloadBytes = 0 }).Validate();
+        });
+    }
+
+    [Fact]
     public async Task Writes_1_byte_for_a_procedure_s_maximumPayloadBytes_of_1()
     {
         var server = new Peer(RouterSide.Server);
