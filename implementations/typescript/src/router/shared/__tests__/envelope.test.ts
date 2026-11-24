@@ -283,6 +283,21 @@ test.describe('readFailure', () => {
 });
 
 test.describe('writeFailure', () => {
+  test('writes the relays and the scope of an application failure', () => {
+    expect(writeFailure({ code: 21, relays: 2, scope: FailureScope.APPLICATION })).toEqual(
+      Uint8Array.of(0, 21, 2, 1)
+    );
+
+    for (const relays of [0, 1, 255]) {
+      const crossed = writeFailure({ code: 19, relays, scope: FailureScope.PROTOCOL });
+
+      expect(crossed[2]).toBe(relays);
+      expect(readFailure(crossed, { failures: SERVER_FAILURES }).relays).toBe(relays);
+    }
+
+    expect(writeFailure({ code: 19, scope: FailureScope.PROTOCOL })[2]).toBe(0);
+  });
+
   test('refuses a code that is not an integer from 1 to 65535, or a scope that is neither', () => {
     for (const code of [0, 65_536, 1.5, -1, Number.NaN]) {
       expect(() => {
