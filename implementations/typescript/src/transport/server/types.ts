@@ -625,14 +625,15 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
    */
   maximumUnsentBytes?: number | undefined;
   /**
-   * The bytes the server holds of messages partway, across its connections (spec 15.12): each byte
-   * of a message, from its first frame's head to its last frame's end, heads, masks and the control
-   * frames between its frames among it, is charged as it is read, never as a head announces it, and
-   * each frame 128 more once its head is whole; a message's charge is released once it is whole, or
-   * once its connection fails. A charge that would pass it casts off as few connections as fit it,
-   * those whose message is past `bodyGracePeriod` first, then the one whose message holds the most,
-   * then the one whose message began first, the newcomer only when it comes first: each fails with
-   * 1013, reported on `error` naming it, its close unclean. What a server holds of a message may
+   * The bytes the server holds of messages partway, across its connections (spec 15.12): each
+   * payload byte of a message, from its first frame's head to its last frame's end, the control
+   * frames' between its frames among it, is charged as it is read, and each head, a control frame's
+   * included, once it is whole, its bytes and 128 more, never what it announces; a message's charge
+   * is released once it is whole, or once its connection fails. A charge decides byte by byte: the
+   * byte that would pass it casts off the connection whose message holds the most, its own sum
+   * counting that byte, then, among equal sums, the one whose message began first, its own only
+   * when it comes first, until the charge fits: each fails with 1013, reported on `error` naming it,
+   * its close unclean. What a server holds of a message may
    * pass its charge, up to twice it, a buffer growing by doubling. It holds where `ws`'s
    * `WebSocketServer` hands the transport the raw socket of each upgrade, as Node's own upgrade
    * does. A whole number above 0. Defaults to {@link MESSAGE_BYTES_BUDGET}; its gauge is

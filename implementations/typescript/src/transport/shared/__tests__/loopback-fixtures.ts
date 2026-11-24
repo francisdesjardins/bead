@@ -140,6 +140,29 @@ export const replaceResolver = (answer: string = ELSEWHERE): Disposable & { aske
 };
 
 /**
+ * Node's own `dns.lookup` watched, until disposed: every name it is asked for noted, then handed on
+ * to it, so that a host the URL Standard reads as an address is seen to ask no resolver.
+ */
+export const watchResolver = (): Disposable & { asked: string[] } => {
+  const dns = process.getBuiltinModule('node:dns') as unknown as IDnsLike;
+  const { lookup } = dns;
+  const asked: string[] = [];
+
+  // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own shape, which Node calls
+  dns.lookup = (hostname, options, callback) => {
+    asked.push(hostname);
+    lookup(hostname, options, callback);
+  };
+
+  return {
+    asked,
+    [Symbol.dispose]: () => {
+      dns.lookup = lookup;
+    },
+  };
+};
+
+/**
  * A Node where the package undici does not resolve, until disposed: its module resolution, which
  * `process.getBuiltinModule('node:module')` reaches, finds none.
  */

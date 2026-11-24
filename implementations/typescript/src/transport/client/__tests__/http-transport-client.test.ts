@@ -1,5 +1,6 @@
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, request as requestHTTP, type Server } from 'node:http';
+import { createSecureServer } from 'node:http2';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import {
@@ -62,6 +63,7 @@ import {
   startDropping,
   startHeard,
   startPlatformProxy,
+  watchResolver,
   withoutUndici,
 } from '../../shared/__tests__/loopback-fixtures';
 
@@ -3598,6 +3600,88 @@ test.describe('createHTTPTransportClient, on the loopback', () => {
       ['POST', `${PROBE}:${String(server.port)}`, undefined],
       ['POST', `${PROBE}:${String(server.port)}`, BEARER],
     ]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    await using server = await startDrawing();
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      await exchangeWith({ host: written, port: server.port });
+    }
+
+    expect(resolver.asked).toEqual([]);
+    expect(
+      new Set(
+        server.heard.map(({ host: named }) => {
+          return named;
+        })
+      )
+    ).toEqual(new Set([`127.0.0.1:${String(server.port)}`]));
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', async () => {
+    using resolver = watchResolver();
+
+    for (const written of ['foo.123', 'x%20.localhost']) {
+      await using client = createHTTPTransportClient({ isListening: false });
+      const refused = await settledOf(() => {
+        return client.connect({ host: written, port: 1 });
+      });
+
+      expect([refused instanceof ConnectError, (refused as Error).message]).toEqual([
+        true,
+        `${written} is no host a URL can name`,
+      ]);
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; RFC 7301
+  test('negotiates the HTTP version with a localhost name that it negotiates with 127.0.0.1', async () => {
+    // * a server that offers h2 and http/1.1 by ALPN, its certificate naming both
+    const versions: string[] = [];
+    const server = createSecureServer(
+      { allowHTTP1: true, cert: PKI.server, key: PKI.serverKey },
+      (request, response) => {
+        const isConnect = request.headers[CONNECTION_TOKEN_HEADER] === undefined;
+
+        versions.push(`${request.method} ${request.httpVersion}`);
+        request.resume();
+        response.writeHead(
+          isConnect && request.method === 'POST' ? 201 : 204,
+          isConnect ? { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } : {}
+        );
+        response.end();
+      }
+    );
+
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    try {
+      for (const named of ['127.0.0.1', 'localhost']) {
+        await using client = createHTTPTransportClient({
+          isListening: false,
+          tls: { authorities: PKI.root },
+        });
+
+        await client.connect({
+          host: named,
+          port: (server.address() as AddressInfo).port,
+          secured: true,
+        });
+        await client.disconnect({ isQuick: true });
+      }
+
+      expect(versions.slice(0, 1)).toEqual(['POST 2.0']);
+      expect(new Set(versions)).toEqual(new Set(['POST 2.0', 'DELETE 2.0']));
+    } finally {
+      server.close();
+    }
   });
 
   test('sends nothing through the platform’s proxy to a host on the loopback', async () => {

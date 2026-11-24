@@ -137,8 +137,6 @@ export const START_DEFAULTS = Object.freeze({
 // what reads one connection's raw socket below `ws`: its frame meter, its share of the budget and
 // its rate's clock
 interface IMetered {
-  /** Its message partway is past its grace, on its rate's clock. */
-  isPastGrace(): boolean;
   /** Its router paused it: its rate's clock stops. */
   pause(): void;
   /** Its socket is read again: its rate's clock runs on. */
@@ -597,18 +595,10 @@ export const createWebSocketTransportServer = (
           (due as { unref?: () => unknown }).unref?.();
         };
 
-        const isPastGrace = (): boolean => {
-          return (
-            began !== undefined &&
-            (pausedAt ?? timers.performance.now()) - began > rate.bodyGracePeriod
-          );
-        };
-
         const holder = budget.holderOf({
           castOff: () => {
             failWith(1013, overBudget);
           },
-          isPastGrace,
         });
 
         const stop = (): void => {
@@ -630,7 +620,8 @@ export const createWebSocketTransportServer = (
           let isCastOff = false;
 
           // * each message's share charged in the order the read brought it, one whole released
-          // at once
+          // at once; those before a verdict's frame charged first, so a cast-off at an earlier
+          // byte wins over the verdict (spec 15.3, 15.12)
           for (const share of shares) {
             if (share.isFirst) {
               began = timers.performance.now();
@@ -658,10 +649,10 @@ export const createWebSocketTransportServer = (
             reader.call(raw, handed === chunk.length ? chunk : chunk.subarray(0, handed));
           }
 
-          if (verdict !== undefined) {
-            failWith(verdict.code, whyOf(verdict));
-          } else if (isCastOff) {
+          if (isCastOff) {
             failWith(1013, overBudget);
+          } else if (verdict !== undefined) {
+            failWith(verdict.code, whyOf(verdict));
           } else if (meter.isEnded) {
             // the peer's close read: `ws` reads nothing past it, and the connection closes
             stop();
@@ -671,7 +662,6 @@ export const createWebSocketTransportServer = (
         });
 
         return {
-          isPastGrace,
           pause: () => {
             if (began !== undefined && pausedAt === undefined) {
               pausedAt = timers.performance.now();

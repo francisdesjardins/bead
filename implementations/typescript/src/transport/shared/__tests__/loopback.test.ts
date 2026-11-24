@@ -1,20 +1,32 @@
-import { once } from 'node:events';
-import { type AddressInfo, connect, createServer, type Server, type Socket } from 'node:net';
+import { EventEmitter, once } from 'node:events';
+import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
+import { createClock } from '@sinonjs/fake-timers';
 import {
+  isConnectFailure,
   isLocalhostName,
   LOOPBACK_ATTEMPT_DELAY,
-  loopbackConnectOptions,
   loopbackFailureOf,
   loopbackLookup,
+  raceLoopback,
 } from '../loopback';
 import { closedPort, PROBE, replaceResolver } from './loopback-fixtures';
 
+// interfaces
+
+// a socket of the test's, which an attempt hands the race: it connects or fails as the test says,
+// and notes whether the race destroyed it
+interface IHeldSocket extends EventEmitter {
+  readonly address: string;
+  destroyed: boolean;
+  destroy(): IHeldSocket;
+}
+
 // helpers
 
-/** A listener on `address` and a free port, which notes each connection it accepts. */
-const listenOn = async (address: string) => {
+/** A listener on `address` and `port`, any when none, which notes each connection it accepts. */
+const listenOn = async (address: string, port = 0) => {
   const accepted: string[] = [];
   const sockets = new Set<Socket>();
   const server: Server = createServer((socket) => {
@@ -23,7 +35,7 @@ const listenOn = async (address: string) => {
     socket.end();
   });
 
-  server.listen(0, address);
+  server.listen(port, address);
   await once(server, 'listening');
 
   return {
@@ -43,18 +55,18 @@ const listenOn = async (address: string) => {
   };
 };
 
-/** `net.connect` to `host` and `port` with what `loopbackConnectOptions` gives: the address reached, or the error. */
-const connectOf = (host: string, port: number): Promise<{ address: string } | Error> => {
-  return new Promise((resolve) => {
-    const socket = connect({ host, port, ...loopbackConnectOptions(host) }, () => {
-      resolve({ address: socket.remoteAddress ?? '' });
-      socket.destroy();
-    });
+/** A race of `port` on the loopback, as a localhost name connects: the address reached, or the error. */
+const connectOf = async (port: number): Promise<{ address: string } | Error> => {
+  try {
+    const socket = await raceLoopback(port, { timeout: 5_000 });
+    const address = socket.remoteAddress ?? '';
 
-    socket.on('error', (error) => {
-      resolve(error);
-    });
-  });
+    socket.destroy();
+
+    return { address };
+  } catch (reason) {
+    return reason as Error;
+  }
 };
 
 /** What `loopbackLookup` answers `hostname` with, asked with `options`. */
@@ -67,6 +79,82 @@ const lookedUp = (hostname: string, options: { all?: boolean; family?: number | 
   })();
 };
 
+/** A socket of the test's to `address`, which connects or fails as the test says. */
+const heldSocketOf = (address: string): IHeldSocket => {
+  const socket = Object.assign(new EventEmitter(), {
+    address,
+    destroy: () => {
+      socket.destroyed = true;
+
+      return socket;
+    },
+    destroyed: false,
+  });
+
+  return socket;
+};
+
+/**
+ * A race of the loopback on a clock of the test's, each attempt a socket of the test's it notes,
+ * with the time it began; given up by `signal` or at `timeout`, never by default.
+ */
+const heldRaceOf = ({ signal, timeout = Infinity }: { signal?: AbortSignal; timeout?: number }) => {
+  const clock = createClock();
+  const attempts: { at: number; socket: IHeldSocket }[] = [];
+  const outcome = raceLoopback(4_242, {
+    attempt: (address) => {
+      const socket = heldSocketOf(address);
+
+      attempts.push({ at: clock.now, socket });
+
+      return socket as unknown as Socket;
+    },
+    clock,
+    signal,
+    timeout,
+  }).then(
+    (socket) => {
+      return { address: (socket as unknown as IHeldSocket).address };
+    },
+    (reason: unknown) => {
+      return reason;
+    }
+  );
+  // the attempt to `address`, once it began
+  const attemptOf = (address: string): IHeldSocket => {
+    const found = attempts.find(({ socket }) => {
+      return socket.address === address;
+    });
+
+    if (found === undefined) {
+      throw new Error(`no attempt to ${address}`);
+    }
+
+    return found.socket;
+  };
+  // each attempt's address and the time it began, then whether the race destroyed it
+  const begunOf = () => {
+    return attempts.map(({ at, socket }) => {
+      return [socket.address, at];
+    });
+  };
+  const destroyedOf = () => {
+    return attempts.map(({ socket }) => {
+      return [socket.address, socket.destroyed];
+    });
+  };
+
+  return { attemptOf, begunOf, clock, destroyedOf, outcome };
+};
+
+// a connect refused, as Node fails one
+const refusedOf = (address: string): Error => {
+  return Object.assign(new Error(`connect ECONNREFUSED ${address}:4242`), {
+    code: 'ECONNREFUSED',
+    syscall: 'connect',
+  });
+};
+
 // definition
 
 test.describe('loopbackLookup', () => {
@@ -76,25 +164,207 @@ test.describe('loopbackLookup', () => {
     using resolver = replaceResolver();
 
     for (const host of [PROBE, 'localhost', 'A.LocalHost']) {
-      expect(await connectOf(host, listener.port)).toEqual({ address: '127.0.0.1' });
+      expect([host, isLocalhostName(host), await connectOf(listener.port)]).toEqual([
+        host,
+        true,
+        { address: '127.0.0.1' },
+      ]);
     }
 
     expect([resolver.asked, listener.accepted.length]).toEqual([[], 3]);
   });
 
-  // spec 13.4, RFC 8305
+  // spec 13.4, RFC 8305 §5, RFC 6724 §2.1
   test('tries the IPv4 loopback first for a localhost name, then the IPv6 one an attempt delay after', async () => {
-    expect(await lookedUp(PROBE, { all: true })).toEqual([
-      { address: '127.0.0.1', family: 4 },
-      { address: '::1', family: 6 },
+    // * a listener on each, on one port: the IPv4 one is reached, and the IPv6 one never is
+    await using ipv4 = await listenOn('127.0.0.1');
+    let ipv6: Awaited<ReturnType<typeof listenOn>> | undefined;
+
+    try {
+      ipv6 = await listenOn('::1', ipv4.port);
+    } catch {
+      // a machine without the IPv6 loopback
+    }
+
+    try {
+      expect(await connectOf(ipv4.port)).toEqual({ address: '127.0.0.1' });
+      await new Promise((resolve) => {
+        setTimeout(resolve, LOOPBACK_ATTEMPT_DELAY + 50);
+      });
+      expect([ipv4.accepted.length, ipv6?.accepted.length ?? 0]).toEqual([1, 0]);
+    } finally {
+      await ipv6?.[Symbol.asyncDispose]();
+    }
+
+    // the IPv6 attempt begins 250 ms after the IPv4 one, which has not connected
+    const race = heldRaceOf({});
+
+    await race.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY);
+    expect([race.begunOf(), LOOPBACK_ATTEMPT_DELAY]).toEqual([
+      [
+        ['127.0.0.1', 0],
+        ['::1', 250],
+      ],
+      250,
     ]);
-    expect(await lookedUp(PROBE, {})).toEqual({ address: '127.0.0.1', family: 4 });
-    expect(loopbackConnectOptions(PROBE)).toEqual({
-      autoSelectFamily: true,
-      autoSelectFamilyAttemptTimeout: LOOPBACK_ATTEMPT_DELAY,
-      lookup: loopbackLookup,
-    });
-    expect(LOOPBACK_ATTEMPT_DELAY).toBe(250);
+    race.attemptOf('127.0.0.1').emit('connect');
+    expect(await race.outcome).toEqual({ address: '127.0.0.1' });
+  });
+
+  // spec 13.4, RFC 8305 §5
+  test('connects by the next family 250 ms after an attempt that has not connected', async () => {
+    const race = heldRaceOf({});
+
+    await race.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY - 1);
+    expect(race.begunOf()).toEqual([['127.0.0.1', 0]]);
+
+    await race.clock.tickAsync(1);
+    race.attemptOf('::1').emit('connect');
+
+    expect(await race.outcome).toEqual({ address: '::1' });
+    expect(race.destroyedOf()).toEqual([
+      ['127.0.0.1', true],
+      ['::1', false],
+    ]);
+
+    // * an attempt that fails starts the next at once, the delay not waited
+    const failing = heldRaceOf({});
+
+    failing.attemptOf('127.0.0.1').emit('error', refusedOf('127.0.0.1'));
+    failing.attemptOf('::1').emit('connect');
+    expect([await failing.outcome, failing.begunOf()]).toEqual([
+      { address: '::1' },
+      [
+        ['127.0.0.1', 0],
+        ['::1', 0],
+      ],
+    ]);
+  });
+
+  // spec 13.4, RFC 8305 §5
+  test('cancels the attempts left once one connects', async () => {
+    // both begun: the one that connects wins, the other pending is destroyed
+    const both = heldRaceOf({});
+
+    await both.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY);
+    both.attemptOf('::1').emit('connect');
+    expect([await both.outcome, both.destroyedOf()]).toEqual([
+      { address: '::1' },
+      [
+        ['127.0.0.1', true],
+        ['::1', false],
+      ],
+    ]);
+
+    // the first connected within its delay: the next never begins
+    const first = heldRaceOf({});
+
+    first.attemptOf('127.0.0.1').emit('connect');
+    await first.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY * 4);
+    expect([await first.outcome, first.begunOf(), first.clock.countTimers()]).toEqual([
+      { address: '127.0.0.1' },
+      [['127.0.0.1', 0]],
+      0,
+    ]);
+  });
+
+  // spec 13.4, RFC 8305 §5
+  test('keeps an attempt that has not connected by its delay while the next one starts, the first to connect winning and the other closed', async () => {
+    const race = heldRaceOf({});
+
+    // * the IPv4 attempt held past its delay: kept as the IPv6 one begins
+    await race.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY);
+    expect(race.destroyedOf()).toEqual([
+      ['127.0.0.1', false],
+      ['::1', false],
+    ]);
+
+    race.attemptOf('127.0.0.1').emit('connect');
+    expect(await race.outcome).toEqual({ address: '127.0.0.1' });
+    expect(race.destroyedOf()).toEqual([
+      ['127.0.0.1', false],
+      ['::1', true],
+    ]);
+
+    // the other connecting after it is closed, and its error after throws nothing
+    race.attemptOf('::1').emit('connect');
+    race.attemptOf('::1').emit('error', refusedOf('::1'));
+    expect(race.attemptOf('::1').destroyed).toBe(true);
+  });
+
+  // spec 13.4, RFC 8305 §5
+  test('ends every attempt, leaving no socket, once its connect is given up', async () => {
+    // at its timeout: each attempt still open ended, and counted as a connect that timed out
+    const timed = heldRaceOf({ timeout: 1_000 });
+
+    await timed.clock.tickAsync(1_000);
+
+    const failure = (await timed.outcome) as AggregateError;
+
+    expect([
+      failure instanceof AggregateError,
+      isConnectFailure(failure),
+      failure.errors.map(({ code, message }: Error & { code?: string }) => {
+        return [code, message];
+      }),
+      timed.destroyedOf(),
+      timed.clock.countTimers(),
+    ]).toEqual([
+      true,
+      true,
+      [
+        ['ETIMEDOUT', 'connect ETIMEDOUT 127.0.0.1:4242'],
+        ['ETIMEDOUT', 'connect ETIMEDOUT ::1:4242'],
+      ],
+      [
+        ['127.0.0.1', true],
+        ['::1', true],
+      ],
+      0,
+    ]);
+
+    // at its signal: each attempt ended, the signal's reason its own, and a late connect closed
+    const controller = new AbortController();
+    const reason = new Error('given up');
+    const aborted = heldRaceOf({ signal: controller.signal });
+
+    controller.abort(reason);
+    expect([await aborted.outcome, aborted.destroyedOf(), aborted.clock.countTimers()]).toEqual([
+      reason,
+      [['127.0.0.1', true]],
+      0,
+    ]);
+    await aborted.clock.tickAsync(LOOPBACK_ATTEMPT_DELAY);
+    aborted.attemptOf('127.0.0.1').emit('connect');
+    expect(aborted.begunOf()).toEqual([['127.0.0.1', 0]]);
+
+    // every attempt failed: their errors in one, a connect failure
+    const refused = heldRaceOf({});
+
+    refused.attemptOf('127.0.0.1').emit('error', refusedOf('127.0.0.1'));
+    refused.attemptOf('::1').emit('error', refusedOf('::1'));
+
+    const both = (await refused.outcome) as AggregateError;
+
+    expect([isConnectFailure(both), both.message, refused.clock.countTimers()]).toEqual([
+      true,
+      'connect ECONNREFUSED 127.0.0.1:4242; connect ECONNREFUSED ::1:4242',
+      0,
+    ]);
+  });
+
+  // spec 13.4: Node's event loop held past the attempt delay as the race begins
+  test('connects to a server on 127.0.0.1 alone with its event loop held past the attempt delay', async () => {
+    await using listener = await listenOn('127.0.0.1');
+    const pending = connectOf(listener.port);
+    const until = performance.now() + LOOPBACK_ATTEMPT_DELAY + 100;
+
+    // * the loop held at once, so the IPv6 attempt's timer is due before the IPv4 one is read
+    while (performance.now() < until) {
+      // held
+    }
+
+    expect(await pending).toEqual({ address: '127.0.0.1' });
   });
 
   // spec 13.4
@@ -102,11 +372,7 @@ test.describe('loopbackLookup', () => {
     using resolver = replaceResolver();
 
     for (const host of ['localhost.', 'a.localhost.', 'localhost.example', '127.0.0.1', '::1']) {
-      expect([host, isLocalhostName(host), loopbackConnectOptions(host)]).toEqual([
-        host,
-        false,
-        {},
-      ]);
+      expect([host, isLocalhostName(host)]).toEqual([host, false]);
     }
 
     // * handed on to Node's own lookup, which the replaced resolver answers
@@ -134,7 +400,7 @@ test.describe('loopbackLookup', () => {
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
     await using closed = await closedPort();
     using resolver = replaceResolver();
-    const failure = await connectOf(PROBE, closed.port);
+    const failure = await connectOf(closed.port);
     // * as a fetch fails on it: a TypeError, the socket's error its cause
     const fetchFailure = new TypeError('fetch failed', { cause: failure });
     const said = loopbackFailureOf(fetchFailure, { host: PROBE }) as TypeError;

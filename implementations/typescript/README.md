@@ -76,11 +76,11 @@ ends its writing once its close is written; the client leaves its frames to `ws`
 
 A server holds each message partway, from the first byte of its first frame's head to the last byte
 of its last frame, to a budget and a rate (spec 15.12). Every byte it reads of one is charged to
-`messageBytesBudget`, 268,435,456 bytes across its connections, as it comes, its frames' heads and
-the control frames between them among it, and 128 more for each head; never what a head announces.
-A charge that would pass the budget casts off with 1013 as few connections as fit it: those whose
-message is past `bodyGracePeriod` first, then the one whose message holds the most, the newcomer
-only when it comes first. A message that brings its payload slower than
+`messageBytesBudget`, 268,435,456 bytes across its connections, as it comes, the control frames
+between its frames among it, and each frame's head once whole, its bytes and 128 more; never what a
+head announces. A charge decides byte by byte: the byte that would pass the budget casts off with
+1013 the connection whose message holds the most, its own sum counting that byte, then, among equal
+sums, the one whose message began first, its own only when it comes first. A message that brings its payload slower than
 `minimumBodyBytesPerSecond`, 240 bytes a second, once `bodyGracePeriod`, 5 seconds, passed since its
 first byte fails with 1008, on the server's clock, the time its router holds the connection paused
 not counted. Each is reported on `error`, naming its bound, and its gauge is `messageBytes`. The
@@ -208,8 +208,11 @@ machine.
 
 A client connects a host it judges on the loopback to the loopback itself, through no proxy (spec
 13.4, decision 0054). It connects `localhost` and a name in `.localhost` to `127.0.0.1`, then to
-`::1` 250 ms later or as soon as the first fails, as RFC 8305 races a name's families, and asks no
-resolver. Its request names the host as its URL does, in its `Host` and in its TLS server name. A
+`::1` 250 ms later or as soon as the first fails, as RFC 8305 §5 races its attempts, each kept until
+one connects, a connect given up ending them all, and asks no resolver. It reads a host once, as the
+WHATWG URL Standard reads a special scheme's host whatever its URL's scheme: `127.0.0.1.` and `127.1`
+connect to `127.0.0.1`, and a host the parser fails on, `foo.123` say, is refused before any socket
+opens. Its request names the host as its URL serializes it, in its `Host` and in its TLS server name. A
 connect that fails says where it went: "…; api.localhost names the loopback: connected to 127.0.0.1
 and ::1, no resolver asked". In Node, a `ws` given, the MQTT 5 adapter and the AMQP 1.0 adapter
 connect so; the MQTT 5 adapter then goes through no SOCKS proxy that `MQTTJS_SOCKS_PROXY` names.

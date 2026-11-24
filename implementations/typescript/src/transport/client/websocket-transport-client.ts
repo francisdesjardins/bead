@@ -33,12 +33,13 @@ import { noop } from '../shared/noop';
 import {
   createUndiciDialer,
   isConnectFailure,
+  isLocalhostName,
   type IUndiciDrawn,
-  loopbackConnectOptions,
+  loopbackCreateConnection,
   loopbackSentenceOf,
   watchedOf,
 } from '../shared/loopback';
-import { isLoopbackUrl, isSecureUrl } from '../shared/secure';
+import { isLoopbackUrl, isSecureUrl, urlHostOf } from '../shared/secure';
 import { assertTls, isNode, NO_TLS_IN_A_PAGE, nodeTlsOf, tlsOf } from '../shared/tls';
 import {
   getReadyState,
@@ -387,7 +388,10 @@ export const createWebSocketTransportClient = (
             );
           }
 
-          if (!isSecureUrl(urlOf({ ...CONNECT_DEFAULTS, ...connectOptions }))) {
+          const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
+
+          // * a host no URL can name is its connect's to refuse, before any socket opens
+          if (urlHostOf(url) !== undefined && !isSecureUrl(url)) {
             throw new ProgrammerError(
               'a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback'
             );
@@ -416,6 +420,9 @@ export const createWebSocketTransportClient = (
           } = { ...CONNECT_DEFAULTS, ...connectOptions };
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
           const isThroughUndici = isDefault && isNode() && isLoopbackUrl(url);
+          // * what bounds a localhost name's race below `ws`, which hands it no signal and no
+          // timeout: this connect's deadline, and its signal or the attempt's end, whichever first
+          const deadline = client.clock.performance.now() + timeout;
           // what the attempt's credential provider is told to give up by, the attempt settled; whether
           // a dispose ended it; whether its socket closed before its connect ended, and the end its
           // connect still tells then, a reconnection's attempt telling none as it closes
@@ -453,6 +460,13 @@ export const createWebSocketTransportClient = (
                   reject(reason);
                 };
 
+                // * read once as the URL Standard reads it: a host it fails on opens no socket
+                if (urlHostOf(url) === undefined) {
+                  reject(new ConnectError(`${host} is no host a URL can name`));
+
+                  return undefined;
+                }
+
                 // ! no `followRedirects`: a 3xx answered to the upgrade fails it, its status named,
                 // since a redirect would carry it where its credential and its security were not
                 // judged (spec 15.6); an empty credential is none, as the server reads an empty field
@@ -488,7 +502,20 @@ export const createWebSocketTransportClient = (
                               // alone (RFC 7692)
                               perMessageDeflate: false,
                               ...(url.startsWith('wss:') ? nodeTls : {}),
-                              ...(isWsShaped(WebSocket) ? loopbackConnectOptions(host) : {}),
+                              ...(isWsShaped(WebSocket) && isLocalhostName(host)
+                                ? {
+                                    createConnection: loopbackCreateConnection(host, {
+                                      signal: AbortSignal.any([
+                                        attempt.controller.signal,
+                                        ...(signal === undefined ? [] : [signal]),
+                                      ]),
+                                      timeout: Math.max(
+                                        1,
+                                        deadline - client.clock.performance.now()
+                                      ),
+                                    }),
+                                  }
+                                : {}),
                               ...(written === undefined
                                 ? {}
                                 : { headers: { authorization: written } }),
