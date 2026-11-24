@@ -23,6 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.18.0 (`spec-v0.18.0`), and the transcoding's companion, `spec/transcoding.md`,
+  to 0.8.0 (`transcoding-v0.8.0`); `spec/debugging.md` stays 0.11.1.
+
 - The workflow that implements a settled design is `bead-implement-every-side`, and it runs the
   Rust side by default, beside the spec, TypeScript and C#.
 
