@@ -2,7 +2,7 @@
 //! clients, the browsers and the C# side's `HappyEyeballs` do: the name resolved in the platform's
 //! order (RFC 6724), the address families interleaved, the first family the first answer's (§4);
 //! an attempt started every 250 milliseconds on the platform's clock, or at once when one fails,
-//! until one connects (§5); the first connected kept, and the attempts left dropped, a socket one of
+//! until one connects; the first connected kept, and the attempts left dropped, a socket one of
 //! them connects after closed with it. A connect that tries each address in turn waits out the
 //! refusal of a loopback family a server does not listen on, two seconds on Windows, before it
 //! tries the other.

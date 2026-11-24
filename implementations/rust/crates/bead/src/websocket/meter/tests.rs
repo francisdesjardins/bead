@@ -11,6 +11,7 @@ use tungstenite::protocol::{Message as Received, Role, WebSocket};
 use super::*;
 use crate::clock::SystemClock;
 use crate::testing::patience;
+use crate::websocket::budget::{MessageBounds, MessageBudget};
 
 const PATIENCE: core::time::Duration = core::time::Duration::from_secs(10);
 
@@ -530,4 +531,96 @@ async fn hands_what_precedes_a_verdict_in_one_read_then_tells_its_reader_and_dro
         .unwrap();
 
     assert_eq!(&read[..came], &[0xFF, 0xFF], "raw, parsed by none");
+}
+
+// a server's metering, its holding the one connection of a budget of `budget` bytes
+fn holding_metering(budget: u64) -> (Metering, Arc<MessageBudget>) {
+    let clock: crate::clock::SharedClock = Arc::new(SystemClock::current().unwrap());
+    let budget = MessageBudget::new(MessageBounds {
+        message_bytes_budget: budget,
+        minimum_body_bytes_per_second: 240,
+        body_grace_period: core::time::Duration::from_secs(5),
+        clock: Arc::clone(&clock),
+    });
+    let metering = Metering {
+        read: Vec::new(),
+        reads: Reads::new(clock),
+        frames: FrameMeterOptions::new(true),
+        holding: Some(budget.holding()),
+        is_upgrading: false,
+    };
+
+    (metering, budget)
+}
+
+// spec 15.3 and 15.12.19
+#[tokio::test]
+async fn charges_a_frame_s_head_once_whole_so_a_head_that_draws_a_verdict_charges_nothing_and_a_cast_off_at_an_earlier_byte_wins_over_it()
+ {
+    // * a head given a byte at a time: nothing charged until its last, then its bytes and 128
+    let mut meter = server_meter();
+    let frame = masked(BINARY, (&[0; 300], false));
+    let charges: Vec<u64> = (0..8)
+        .map(|at| meter.step(&frame[at..=at]).charge)
+        .collect();
+
+    assert_eq!(
+        charges,
+        [0, 0, 0, 0, 0, 0, 0, 8 + 128],
+        "at its last byte alone"
+    );
+
+    // a ping whose 7 bits say 126 between its frames: judged at its second byte, charged nothing
+    let first = meter.step(&frame[8..]);
+    let ping = meter.step(&[0x89]);
+    let judged = meter.step(&[0x80 | 0x7E]);
+
+    assert_eq!(first.charge, 300, "the payload as it came");
+    assert_eq!(
+        (ping.charge, judged.charge),
+        (0, 0),
+        "the judged head's bytes"
+    );
+    assert_eq!(
+        judged.handed,
+        Handed::Verdict(protocol("a control frame longer than 125 bytes")),
+        "1002"
+    );
+
+    // * what a read brought before a judged head is charged first: 600 bytes then a head of
+    // opcode 3, whole or partway, are cast off; exactly 500 then a ping of 126 fail with 1002
+    let whole = masked(BINARY, (&[0x78; 600 - 8 - 128], true));
+    let partway = masked(BINARY, (&[0x78; 600 - 8 - 128], false));
+    let edge = masked(BINARY, (&[0x78; 500 - 8 - 128], false));
+    let plays = [
+        ("whole", whole, vec![0x83, 0x80], Verdict::CastOff(500)),
+        ("partway", partway, vec![0x83, 0x80], Verdict::CastOff(500)),
+        (
+            "edge",
+            edge,
+            vec![0x89, 0x80 | 0x7E],
+            Verdict::Head(protocol("a control frame longer than 125 bytes")),
+        ),
+    ];
+
+    for (name, mut written, judged, verdict) in plays {
+        let (socket, mut peer) = tokio::io::duplex(1 << 16);
+        let (metering, budget) = holding_metering(500);
+        let mut meter = Meter::new(socket, metering);
+        let mut read = vec![0_u8; 4_096];
+
+        written.extend(judged);
+        peer.write_all(&written).await.unwrap();
+
+        loop {
+            match patience(PATIENCE, meter.read(&mut read)).await.unwrap() {
+                Ok(0) => panic!("{name}: its end, not its verdict"),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        assert_eq!(meter.verdict(), Some(&verdict), "{name}");
+        assert_eq!(budget.held(), 0, "{name}: its charge released");
+    }
 }

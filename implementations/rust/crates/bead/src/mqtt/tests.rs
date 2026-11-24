@@ -553,6 +553,64 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     );
 }
 
+// spec 13.4
+#[tokio::test]
+async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+ {
+    for (scheme, host, path) in [
+        ("mqtt", "127.0.0.1.", ""),
+        ("mqtt", "127.1", ""),
+        ("ws", "127.0.0.1.", "/mqtt"),
+        ("ws", "127.1", "/mqtt"),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let adapter = resolving_adapter(&format!("{scheme}://{host}:{port}{path}"), &asked);
+        let starting = adapter.start(BrokerStart::default());
+        let (mut socket, _) = within(listener.accept()).await.unwrap();
+        let mut read = vec![0_u8; 256];
+        let count = within(socket.read(&mut read)).await.unwrap();
+        let head = String::from_utf8_lossy(&read[..count]).into_owned();
+
+        drop(socket);
+        within(adapter.stop()).await;
+        drop(starting);
+
+        if scheme == "ws" {
+            assert!(
+                head.contains(&format!("Host: 127.0.0.1:{port}\r\n")),
+                "{scheme}://{host}: named 127.0.0.1: {head}"
+            );
+        } else {
+            assert_eq!(read.first(), Some(&0x10), "{scheme}://{host}: a CONNECT");
+        }
+
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{scheme}://{host}: none asked"
+        );
+    }
+}
+
+// spec 13.4
+#[tokio::test]
+async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+ {
+    for url in [
+        "mqtt://foo.123:1883",
+        "mqtts://foo.123",
+        "ws://x%20.localhost:9001/mqtt",
+        "mqtt://x%20.localhost",
+    ] {
+        assert!(
+            MqttBrokerAdapter::new(&MqttBrokerAdapterOptions::new(url, ID)).is_err(),
+            "{url}: refused as it is built"
+        );
+    }
+}
+
 #[tokio::test]
 async fn fails_its_start_over_tls_where_its_brokers_certificate_chains_to_no_authority_it_trusts() {
     let secured_options = MqttScriptOptions {
@@ -4606,11 +4664,14 @@ async fn is_secure_over_mqtts_and_wss_and_over_mqtt_and_ws_to_the_loopback_alone
             "mqtt://127.0.0.1:1883",
             "ws://localhost:9001/mqtt",
             "mqtt://[::1]:1883",
+            "mqtt://LOCALHOST:1883",
+            "mqtt://127.1:1883",
+            "ws://local%68ost:9001/mqtt",
             "mqtt://broker.example:1883",
             "ws://broker.example/mqtt",
         ]
         .map(secure_of),
-        [true, true, true, true, true, false, false],
+        [true, true, true, true, true, true, true, true, false, false],
         "secure"
     );
 

@@ -414,6 +414,8 @@ enum Step {
     Command(Option<Command>),
     Written(Result<u64, WsError>),
     Read(Option<Result<Message, WsError>>),
+    // its meter's verdict, drawn behind a message its router paused on
+    Judged(Verdict),
     Drained(bool),
     TimedOut,
 }
@@ -585,13 +587,19 @@ impl<S: Wire> Connection<S> {
                 }
             }
             // * no message read while its router paused it but once this side closes, which
-            // reads on to its peer's close (spec 15.12); its socket's end, seen without reading
-            // it, ends it at once, what it held dropped with it
-            Closing::No if self.shared.paused.load(Ordering::SeqCst) => self
-                .socket
-                .get_ref()
-                .poll_ended(context)
-                .map(|()| Step::Read(None)),
+            // reads on to its peer's close (spec 15.12); a verdict its meter drew behind the
+            // message paused on fails it at once (spec 15.3), and its socket's end, seen without
+            // reading it, ends it at once, what it held dropped with it
+            Closing::No if self.shared.paused.load(Ordering::SeqCst) => {
+                if let Some(verdict) = self.socket.get_ref().verdict() {
+                    return Poll::Ready(Step::Judged(verdict.clone()));
+                }
+
+                self.socket
+                    .get_ref()
+                    .poll_ended(context)
+                    .map(|()| Step::Read(None))
+            }
             Closing::No | Closing::ByUs => Pin::new(&mut self.socket)
                 .poll_next(context)
                 .map(Step::Read),
@@ -669,6 +677,7 @@ impl<S: Wire> Connection<S> {
                 self.shared.unsent.store(0, Ordering::SeqCst);
             }
             Step::Read(read) => self.read(read, hooks),
+            Step::Judged(verdict) => self.fail(failed_of(verdict)),
             Step::Drained(true) => {}
             Step::Drained(false) => self.is_done = true,
             Step::TimedOut => {
