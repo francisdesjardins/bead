@@ -1830,7 +1830,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Drops_a_connection_that_never_answers_its_close_once_the_timeout_passed_telling_no_error()
+    public async Task Drops_a_connection_that_never_answers_its_close_once_close_timeout_has_passed_telling_no_error()
     {
         await Start(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) });
 
@@ -3308,7 +3308,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does()
+    public async Task Pings_each_connection_silent_for_its_heartbeat_with_data_of_its_own_keeps_one_that_echoes_it_and_drops_one_that_left_it_unanswered_or_could_not_be_sent_one()
     {
         // a beat of a second: the peer that answers has that long for its pong, which a loaded runner
         // may take more than half a second to send
@@ -3316,19 +3316,27 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
         // the first reads nothing, so it answers no ping; the second, always reading, answers each
         var told = Told();
-        var (silent, silentHandle) = await Connect();
+        var (silent, silentStream, silentHandle) = await Raw();
         var (answering, answeringHandle) = await Connect();
+        await using var transport = new WebSocketTransportClient();
+        await transport.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
+        var transportHandle = await Next(_connections);
 
         using (silent)
         using (answering)
         {
             var reading = answering.ReceiveAsync(new byte[16], Cancelled);
 
+            var ping = await FrameFrom(silentStream);
+            Assert.Equal(0x9, ping?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 1], ping!.Value.Payload);
+
             Assert.Equal((false, silentHandle), await Next(_closes, Patience));
             // a few beats more, and the one that answers is still there
             await Task.Delay(3_000, Cancelled);
 
-            Assert.Equal([answeringHandle], _server.ConnectionHandles);
+            Assert.Equal(new[] { answeringHandle, transportHandle }.Order(StringComparer.Ordinal), _server.ConnectionHandles.Order(StringComparer.Ordinal));
+            Assert.Equal(ReadyState.Open, transport.ReadyState);
             Assert.True(_closes.Reader.Count == 0);
             Assert.False(reading.IsCompleted);
             // a peer the heartbeat dropped, gone without a word, is no error on its connection
@@ -3510,7 +3518,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.3
     [Fact]
-    public async Task Pings_with_8_bytes_of_a_count_from_1_new_at_each_ping_and_drops_a_peer_that_answers_with_an_empty_pong_or_an_earlier_ping_s_echo()
+    public async Task Takes_only_the_pong_that_echoes_its_ping_8_bytes_of_a_count_from_1_never_an_empty_one_another_s_or_an_earlier_ping_s()
     {
         await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(200) });
 
@@ -3530,6 +3538,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal(0x9, ping?.Opcode);
             Assert.Equal([0, 0, 0, 0, 0, 0, 0, 2], ping!.Value.Payload);
             await stream.WriteAsync(PongOf([]), Cancelled);
+            await stream.WriteAsync(PongOf("other"u8.ToArray()), Cancelled);
             await stream.WriteAsync(PongOf(first), Cancelled);
             Assert.Null(await FrameFrom(stream));
             Assert.Equal((false, connectionHandle), await Next(_closes));
