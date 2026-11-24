@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The guides for teams pin 0.17.0 and its image, their scenario built and run again against its
+  runtimes: getting started says how a client in Node connects by `localhost` and what the
+  WebSocket server bounds, and the recipes tell the closes those bounds make and read the
+  transport's `messageBytes` gauge.
+
 ## [0.17.0] - 2026-11-24
 
 ### Added
