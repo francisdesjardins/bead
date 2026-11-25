@@ -106,12 +106,12 @@ const DENIED = [
 ];
 
 // the sha256 of each script the page holds inline, as a policy names it: the language, then the
-// theme, before the first paint, and the page's own at the end of the body; the JSON its heads are
-// in runs nothing
+// theme, before the first paint, and the page's own and the mascot's module at the end of the body;
+// the JSON its heads are in runs nothing
 export const inlineScriptHashes = (html) => {
   // a parser reads a CRLF as an LF before a script's text is hashed
   const read = html.replaceAll('\r\n', '\n');
-  return [...read.matchAll(/<script>([\s\S]*?)<\/script>/gu)].map(([, text]) => {
+  return [...read.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/gu)].map(([, text]) => {
     return `'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`;
   });
 };

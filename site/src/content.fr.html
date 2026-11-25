@@ -56,7 +56,7 @@
   </div>
 </div>
 
-<section id="essentiel" data-toc="Bead en un exemple">
+<section id="essentiel" data-toc="Bead en un exemple" data-bead-face="happy">
   <h2>Bead en un exemple</h2>
   <p class="gist">
     Bead est un protocole binaire pour les appels entre un client et un serveur. Une requête
@@ -384,7 +384,7 @@
   </p>
 </section>
 
-<section id="transports" data-toc="Les transports">
+<section id="transports" data-toc="Les transports" data-bead-face="listening">
   <h2 id="transports-h">Les transports</h2>
   <p class="gist">
     Les deux bouts gardent la même API, quel que soit ce qui porte les enveloppes, si bien qu’une
@@ -398,7 +398,7 @@
   </p>
 </section>
 
-<section id="implantations" data-toc="Le même comportement de chaque côté">
+<section id="implantations" data-toc="Le même comportement de chaque côté" data-bead-face="focused">
   <h2 id="implantations-h">Le même comportement de chaque côté</h2>
   <p class="gist">
     Les trois côtés répondent à une même spécification, et aux fichiers de conformance qui en sont
@@ -667,7 +667,7 @@
   </details>
 </section>
 
-<section id="securite" data-toc="La sécurité">
+<section id="securite" data-toc="La sécurité" data-bead-face="surprised">
   <h2 id="securite-h">La sécurité, simplement</h2>
   <p class="gist">
     Un serveur Bead se garde par six portes, de la plus extérieure à la plus intérieure. Chaque
@@ -966,7 +966,7 @@
   </p>
 </section>
 
-<section id="protocole" data-toc="Les choix de Bead" data-part="Le protocole en détail">
+<section id="protocole" data-toc="Les choix de Bead" data-part="Le protocole en détail" data-bead-face="focused">
   <h2 id="protocole-h">Le protocole en détail</h2>
   <p class="gist">
     Pour qui implante un côté, en audite un, ou veut les octets. Chaque section suit la
@@ -1036,7 +1036,7 @@
   </p>
 </section>
 
-<section id="enveloppe" data-toc="L’enveloppe">
+<section id="enveloppe" data-toc="L’enveloppe" data-bead-face="focused">
   <h2 id="enveloppe-h">L’enveloppe</h2>
   <p class="gist">
     Chaque enveloppe commence par le même préfixe de 8 octets. Le genre et les drapeaux y ajoutent
@@ -1176,7 +1176,7 @@
   </figure>
 </section>
 
-<section id="echecs" data-toc="Les échecs">
+<section id="echecs" data-toc="Les échecs" data-bead-face="surprised">
   <h2 id="echecs-h">Un échec voyage une fois</h2>
   <p class="gist">
     Un échec est la charge d’une FAILURE, et nulle part ailleurs. Il tient un code sur 2 octets, le
@@ -1218,7 +1218,7 @@
   {{code of="failure"}}
 </section>
 
-<section id="porte" data-toc="Ce qui ne se lit pas">
+<section id="porte" data-toc="Ce qui ne se lit pas" data-bead-face="surprised">
   <h2 id="porte-h">Ce qui ne se lit pas</h2>
   <p class="gist">
     Une enveloppe illisible n’a pas de callId sûr. Y répondre au hasard pourrait régler l’appel de
@@ -1238,7 +1238,7 @@
   </figure>
 </section>
 
-<section id="regles" data-toc="Les règles d’une charge">
+<section id="regles" data-toc="Les règles d’une charge" data-bead-face="focused">
   <h2 id="regles-h">Les règles d’une charge</h2>
   <p class="gist">
     Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
@@ -1769,7 +1769,7 @@
   </details>
 </section>
 
-<section id="http" data-toc="Sur HTTP">
+<section id="http" data-toc="Sur HTTP" data-bead-face="listening">
   <h2 id="http-h">Sur HTTP</h2>
   <p class="gist">
     Sur WebSocket, chaque enveloppe est un message binaire, dans les deux sens. HTTP sert là où
@@ -1849,7 +1849,7 @@
   </details>
 </section>
 
-<section id="memoire" data-toc="En mémoire">
+<section id="memoire" data-toc="En mémoire" data-bead-face="listening">
   <h2 id="memoire-h">En mémoire, et plusieurs transports</h2>
   <p class="gist">
     Le transport en mémoire joint le routeur d’un client et celui d’un serveur dans un même
@@ -1880,7 +1880,7 @@
   {{code of="joined"}}
 </section>
 
-<section id="courtier" data-toc="Sur un courtier">
+<section id="courtier" data-toc="Sur un courtier" data-bead-face="listening">
   <h2 id="courtier-h">Sur un courtier</h2>
   <p class="gist">
     Un courtier de publication-abonnement à sujets est un transport de plus, et Bead n’y devient
@@ -1950,7 +1950,7 @@
   </details>
 </section>
 
-<section id="suite" data-toc="Ce qui vient" data-part="">
+<section id="suite" data-toc="Ce qui vient" data-part="" data-bead-face="serene">
   <h2 id="suite-h">Ce qui vient</h2>
   <p class="gist">
     Les quatre premiers viennent dans cet ordre, les autres sans ordre fixé.
