@@ -701,7 +701,9 @@ public sealed class SessionManager<TData> : IDisposable
     }
 
     // a timer that fires the session as it is then, not as it was when the timer was set; its
-    // callers hold that the connection has a session, or is given one once it is armed
+    // callers hold that the connection has a session, or is given one once it is armed, and arm it
+    // under the gate. One that a touch replaced, or a stop stopped, as it fired reaches nothing
+    // (spec 13.7)
     private ITimer? ArmOf(string connectionHandle, (TimeSpan Timeout, bool IsConnection) timer)
     {
         if (timer.Timeout == Timeout.InfiniteTimeSpan)
@@ -709,13 +711,24 @@ public sealed class SessionManager<TData> : IDisposable
             return null;
         }
 
-        return _clock.CreateTimer(
+        ITimer? armed = null;
+
+        armed = _clock.CreateTimer(
             (_) =>
             {
                 Session<TData>? reached;
 
                 lock (_gate)
                 {
+                    var (connection, session) = _timers.GetValueOrDefault(connectionHandle);
+
+                    // ! read under the gate it was armed and placed under, so it is the timer its
+                    // connection holds, or one replaced already
+                    if (armed is null || !ReferenceEquals(timer.IsConnection ? connection : session, armed))
+                    {
+                        return;
+                    }
+
                     reached = StoredOf(connectionHandle);
                 }
 
@@ -736,5 +749,7 @@ public sealed class SessionManager<TData> : IDisposable
             null,
             timer.Timeout,
             Timeout.InfiniteTimeSpan);
+
+        return armed;
     }
 }

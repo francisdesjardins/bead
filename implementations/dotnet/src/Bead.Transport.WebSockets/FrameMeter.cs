@@ -420,14 +420,14 @@ internal sealed class FrameMeter
                 }
             }
         }
+        else if (_headCount == 3 && _lengthEnd == 10 && (octet & 0x80) != 0)
+        {
+            // a 64-bit length's top bit is judged at its first byte, the head's third (RFC 6455 §5.2)
+            return FrameVerdict.Forbidden("a 64-bit length with its top bit set");
+        }
         else if (_headCount == _lengthEnd)
         {
             var length = _head.AsSpan(2, _lengthEnd - 2);
-
-            if (length.Length == 8 && (length[0] & 0x80) != 0)
-            {
-                return FrameVerdict.Forbidden("a 64-bit length with its top bit set");
-            }
 
             // a data frame's length not in its minimal form is taken, as ws, .NET and tungstenite take it
             _length = length.Length == 2 ? BinaryPrimitives.ReadUInt16BigEndian(length) : (long)BinaryPrimitives.ReadUInt64BigEndian(length);

@@ -3076,6 +3076,47 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
     }
 
+    // spec 15.26, 15.33
+    [Fact]
+    public async Task Asks_its_password_provider_outside_the_call_to_start_before_the_start_settles()
+    {
+        // whether the application's call to start runs, as each ask of its provider saw it on its own
+        // thread
+        using var isCalling = new ThreadLocal<bool>();
+        var asked = new ConcurrentQueue<bool>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    asked.Enqueue(isCalling.Value);
+
+                    return ValueTask.FromResult(Password);
+                },
+            };
+        });
+        Task starting;
+
+        isCalling.Value = true;
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            isCalling.Value = false;
+        }
+
+        await _script.Connection();
+        await starting.WaitAsync(Patience, Cancelled);
+
+        // read once the start settled: a provider not asked yet would pass a read before it
+        Assert.Equal([false], asked);
+        await adapter.Stop();
+    }
+
     [Fact]
     public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
     {

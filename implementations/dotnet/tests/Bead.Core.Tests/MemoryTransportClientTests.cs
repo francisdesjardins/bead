@@ -1872,7 +1872,7 @@ public sealed class MemoryTransportClientTests
         Assert.Equal(handle, Assert.Single(server.Clients).ConnectionHandle);
     }
 
-    [Fact(Skip = "divergence: the reconnection settles before its pre-open message listener cancels it")]
+    [Fact]
     public async Task Disconnects_and_rejects_with_a_cancel_error_when_the_signal_aborts_after_the_connect_resolved()
     {
         var scheduler = new SerialScheduler();

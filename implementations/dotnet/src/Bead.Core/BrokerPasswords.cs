@@ -113,16 +113,7 @@ internal static class BrokerPasswords
     // what a provider's call gives, a throw as it is called among its failures; a late failure observed
     private static Task<string> Called((Func<CancellationToken, ValueTask<string>> Provider, CancellationToken Token) call)
     {
-        Task<string> called;
-
-        try
-        {
-            called = call.Provider(call.Token).AsTask();
-        }
-        catch (Exception reason)
-        {
-            called = Task.FromException<string>(reason);
-        }
+        var called = Calling(call);
 
         _ = called.ContinueWith(
             (ended) =>
@@ -134,6 +125,15 @@ internal static class BrokerPasswords
             TaskScheduler.Default);
 
         return called;
+    }
+
+    // * a provider is asked outside its application's call that starts the link, never within it
+    // (spec 15.26); a throw as it is called fails the task as a later failure does
+    private static async Task<string> Calling((Func<CancellationToken, ValueTask<string>> Provider, CancellationToken Token) call)
+    {
+        await Task.Yield();
+
+        return await call.Provider(call.Token);
     }
 }
 

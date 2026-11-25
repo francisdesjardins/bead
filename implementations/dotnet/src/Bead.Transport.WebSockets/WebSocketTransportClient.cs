@@ -903,6 +903,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     try
                     {
+                        // * asked outside its application's call that starts the connect, never within
+                        // it (spec 15.2)
+                        await Task.Yield();
                         answer.TrySetResult(await provider(tokens.Provider).ConfigureAwait(false));
                     }
                     catch (Exception reason)

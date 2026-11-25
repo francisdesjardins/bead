@@ -767,23 +767,39 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
-    [Fact(Skip = "divergence: the credential provider runs synchronously before Connect returns")]
-    public async Task Defers_its_credential_provider_until_after_connect_returns()
+    // spec 15.2
+    [Fact]
+    public async Task Asks_its_credential_provider_outside_the_call_to_connect_before_the_connect_settles()
     {
-        var called = false;
-        var connecting = _client.Connect(Target with
-        {
-            CancellationToken = Cancelled,
-            CredentialProvider = (_) =>
-            {
-                called = true;
-                return ValueTask.FromResult(Bearer);
-            },
-        });
+        // whether the application's call to connect runs, as each ask of its provider saw it on its
+        // own thread
+        using var isCalling = new ThreadLocal<bool>();
+        var asked = new ConcurrentQueue<bool>();
+        Task connecting;
 
-        Assert.False(called);
+        isCalling.Value = true;
+        try
+        {
+            connecting = _client.Connect(Target with
+            {
+                CancellationToken = Cancelled,
+                CredentialProvider = (_) =>
+                {
+                    asked.Enqueue(isCalling.Value);
+
+                    return ValueTask.FromResult(Bearer);
+                },
+            });
+        }
+        finally
+        {
+            isCalling.Value = false;
+        }
+
         await connecting.WaitAsync(Patience, Cancelled);
-        Assert.True(called);
+
+        // read once the connect settled: a provider not asked yet would pass a read before it
+        Assert.Equal([false], asked);
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
 

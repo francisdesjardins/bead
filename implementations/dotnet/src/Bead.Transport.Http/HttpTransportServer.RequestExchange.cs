@@ -380,7 +380,20 @@ public sealed partial class HttpTransportServer
 
             try
             {
-                handOff = await _port.HandOn((connection, waiting, handed));
+                var handing = _port.HandOn((connection, waiting, handed));
+
+                // ! a request held at its gate whose answer comes as it waits: answered now, and
+                // never handed on, the resume finding it answered (spec 15.12)
+                if (kind == EnvelopeKind.Request && !handing.IsCompleted)
+                {
+                    var first = await Task.WhenAny(handing, waiting.Ended.Task);
+
+                    handOff = first == handing ? await handing : HandOff.Answered;
+                }
+                else
+                {
+                    handOff = await handing;
+                }
             }
             finally
             {

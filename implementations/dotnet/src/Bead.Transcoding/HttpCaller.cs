@@ -434,7 +434,18 @@ public sealed class HttpCaller : IDisposable
                     return Read<TResult>(payload, Utf8.GetBytes(text));
                 }
 
-                var raw = Convert.FromBase64String(text);
+                // * a string that is no base64, or one whose canonical form does not give it back, is not
+                // standard padded base64 (RFC 4648 §4)
+                byte[] raw;
+
+                try
+                {
+                    raw = Convert.FromBase64String(text);
+                }
+                catch (FormatException cause)
+                {
+                    throw LocalFailure(ProtocolCode.PayloadUndecodable, "an HTTP raw event holds standard padded base64", new FailureExceptionOptions { Cause = cause });
+                }
 
                 if (Convert.ToBase64String(raw) != text)
                 {

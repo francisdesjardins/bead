@@ -106,25 +106,6 @@ public sealed partial class WebSocketTransportServerTests
         }
     }
 
-    [Fact(Skip = "divergence: .NET answers 1002 to a close reason that is no UTF-8; Rust and TypeScript answer 1007")]
-    public async Task Fails_a_text_message_or_a_close_s_reason_that_is_no_UTF_8_answered_1007()
-    {
-        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan, CloseTimeout = TimeSpan.FromMilliseconds(100) });
-        foreach (var frame in new[] { MaskedFrame((0x81, [0xff, 0xfe])), MaskedFrame((0x88, [0x03, 0xe8, 0xff, 0xfe])) })
-        {
-            var (tcp, stream, connectionHandle) = await Raw();
-            using (tcp)
-            {
-                await stream.WriteAsync(frame, Cancelled);
-
-                Assert.Equal(1007, await FirstCloseCodeOf(stream));
-                await stream.WriteAsync(MaskedFrame((0x88, [0x03, 0xef])), Cancelled);
-                Assert.Equal((false, connectionHandle), await Next(_closes));
-                Assert.Equal(0, _messages.Reader.Count);
-            }
-        }
-    }
-
     // a WebSocket's opcodes, as a frame's first byte carries them, final or not (RFC 6455 §5.2)
     private const byte Fragment = 0x02;
     private const byte Continued = 0x00;

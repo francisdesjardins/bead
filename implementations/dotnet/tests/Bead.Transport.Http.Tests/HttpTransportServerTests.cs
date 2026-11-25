@@ -4480,7 +4480,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     // an answer between a request's body read whole and its hand-on, on another thread, which the
     // TypeScript side's one turn leaves no room for: written, its request never handed on
     [Fact]
-    public async Task Answers_a_request_an_answer_comes_for_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
+    public async Task Answers_a_request_an_answer_comes_for_from_another_thread_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
     {
         await Start();
 
@@ -4501,6 +4501,40 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(200, (int)answered.StatusCode);
         Assert.Equal(result, await BytesOf(answered));
         await sent!.WaitAsync(Patience, Cancelled);
+        Assert.Empty(_messages);
+        Assert.Equal(0L, Count("waitingExchanges"));
+    }
+
+    // spec 15.12
+    [Fact]
+    public async Task Answers_a_request_an_answer_comes_for_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var result = EnvelopeOf(EnvelopeKind.Result, (1, 4));
+
+        // its body read whole, held at its connection's gate
+        _server.Pause(connectionHandle);
+
+        var asking = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1 && Count("waitingExchanges") == 1;
+        });
+        await _server.Send(new TransportMessage(result, false), connectionHandle).WaitAsync(Patience, Cancelled);
+
+        using var answered = await asking.WaitAsync(Patience, Cancelled);
+
+        // * answered as it waited
+        Assert.Equal(200, (int)answered.StatusCode);
+        Assert.Equal(result, await BytesOf(answered));
+
+        _server.Resume(connectionHandle);
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        // * never handed on
         Assert.Empty(_messages);
         Assert.Equal(0L, Count("waitingExchanges"));
     }

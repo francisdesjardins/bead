@@ -103,7 +103,7 @@ public sealed partial class HttpTransportServerTests
         Assert.Equal(answer, await BytesOf(asked));
     }
 
-    [Fact(Skip = "divergence: HTTP/2 sessions with no preface or no head stay open past HeadersTimeout")]
+    [Fact(Skip = "divergence: work ahead, docs/support.md's row An idle connection's close: one idle bound over HTTP/1.1 and HTTP/2")]
     public async Task Ends_an_HTTP_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
     {
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
