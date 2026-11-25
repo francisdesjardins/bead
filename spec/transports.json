@@ -2,11 +2,11 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory, over MQTT 5 or over AMQP 1.0, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
-    "A step is what the test does — send, behind, close, until, wait — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the HTTP exchange it names, which a send opened: it never opens a socket. A behind is never awaited: the next step starts as it is written, the player writing it from a task of its own, without waiting for its socket to take it. Each of its heads is whole, of no HEAD and no CONNECT, and carries no upgrade or expect, so that each response is framed by its status and its fields alone (RFC 9112, section 6.3); one behind writes 65,536 octets at most, each value put in counted as 128, within what a host's socket takes, since a case holds a server's outcome, never what it reads ahead. On a socket its server ended, a behind writes what the platform takes, and a write refused fails no step.",
+    "A step is what the test does — send, behind, close, until, wait — or what the server under test does next — expect, report, reported. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the HTTP exchange it names, which a send opened: it never opens a socket. A behind is never awaited: the next step starts as it is written, the player writing it from a task of its own, without waiting for its socket to take it. Each of its heads is whole, of no HEAD and no CONNECT, and carries no upgrade or expect, so that each response is framed by its status and its fields alone (RFC 9112, section 6.3); one behind writes 65,536 octets at most, each value put in counted as 128, within what a host's socket takes, since a case holds a server's outcome, never what it reads ahead. On a socket its server ended, a behind writes what the platform takes, and a write refused fails no step.",
     "expect reads the next response on the exchange it names, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). On an exchange a behind wrote on, each told is the next refusal told on it, in order. A response is read by its content-length, or de-chunked, as responses checks every reader, several on one socket among them, each read whole after the one before. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). No expect of an exchange a behind wrote on is orLost or told null: a refusal told names its socket, not its request, so neither could be matched to one response. An expect of end, once its responses were read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12), and that nothing came past those responses. The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload, and, where given, its length, the one its head announces, past the payload, which alone follows the head; or close and its code; every frame masked, as a client's is, and the frames of one send written in one write. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, and after is the soonest what it reads may come, each in milliseconds from its step's start. stop stops the server under test. wait waits that many milliseconds on the real clock, in a case marked realTime. A case marked realTime plays on the real clock what no clock given reaches.",
-    "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value: over WebSocket, messageBytes is what its server holds of messages partway against messageBytesBudget, what their frames bring from a message's first head to the end of its last frame, each byte of payload as it is read, control frames' between them among it, and each frame's head once whole, its bytes and 128 more, a charge of n deciding as n charges of one (spec 15.12). report is the next thing the server reports to its application, as in conversations.json.",
-    "Before each send, behind and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
+    "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value: over WebSocket, messageBytes is what its server holds of messages partway against messageBytesBudget, what their frames bring from a message's first head to the end of its last frame, each byte of payload as it is read, control frames' between them among it, and each frame's head once whole, its bytes and 128 more, a charge of n deciding as n charges of one (spec 15.12). report is the next thing the server reports to its application, as in conversations.json. reported, over WebSocket, reads an error its transport reported of its own (spec 15.1), as over a broker, its message holding each of the words given: the first one it reported of the connection of the exchange on names, or, where on is absent, the next of any connection.",
+    "Before each send, behind and close, and at the end, the server reported nothing, over WebSocket its transport's own errors among it, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, behind, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
     "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
@@ -2225,6 +2225,7 @@
     {
       "name": "a server given no hosts takes localhost, a name under .localhost and an IP literal, on any port or none, and refuses any other host 403, marked, a page that rebinds its name among them",
       "clauses": [
+        "13.4.1",
         "15.6.5",
         "15.12"
       ],
@@ -2349,6 +2350,30 @@
             }
           },
           "on": "final"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: a.localhost.\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "a.localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "dotted"
         },
         {
           "send": {
@@ -3717,6 +3742,202 @@
             "end": true
           },
           "on": "long"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length is 2⁶⁴ − 2 or 2⁶⁴ − 1 is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "differs": [
+        {
+          "row": "A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 18446744073709551614\r\n\r\n"
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "edge"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 18446744073709551615\r\n\r\n"
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "top"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Transfer-Encoding names chunked in any ASCII case is read so: a Chunked exchange is answered 204, Chunked and CHUNKED are judged on to their host, and gzip, CHUNKED is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: Chunked\r\nconnection: close\r\n\r\n",
+            "body": "38 0D 0A A1 16 00 02  00 00 00 05 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "framed"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "framed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: Chunked\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "mixed"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "mixed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: CHUNKED\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "upper"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "upper"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: gzip, CHUNKED\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "coded"
         }
       ]
     },
@@ -14865,6 +15086,13 @@
             "close": 1009
           },
           "on": "socket"
+        },
+        {
+          "reported": [
+            "maximumMessageBytes",
+            "64 bytes"
+          ],
+          "on": "socket"
         }
       ]
     },
@@ -14917,6 +15145,13 @@
           "on": "first"
         },
         {
+          "reported": [
+            "maximumMessageBytes",
+            "64 bytes"
+          ],
+          "on": "first"
+        },
+        {
           "send": {
             "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
           },
@@ -14954,6 +15189,13 @@
           "expect": {
             "close": 1009
           },
+          "on": "second"
+        },
+        {
+          "reported": [
+            "maximumMessageBytes",
+            "64 bytes"
+          ],
           "on": "second"
         },
         {
@@ -14997,6 +15239,13 @@
           "expect": {
             "close": 1009
           },
+          "on": "third"
+        },
+        {
+          "reported": [
+            "maximumMessageBytes",
+            "64 bytes"
+          ],
           "on": "third"
         }
       ]
@@ -15117,6 +15366,13 @@
           "expect": {
             "close": 1008
           },
+          "on": "past"
+        },
+        {
+          "reported": [
+            "maximumMessageFrames",
+            "4 frames"
+          ],
           "on": "past"
         }
       ]
@@ -16441,6 +16697,14 @@
             "close": 1008
           },
           "on": "socket"
+        },
+        {
+          "reported": [
+            "minimumBodyBytesPerSecond",
+            "240 bytes",
+            "bodyGracePeriod"
+          ],
+          "on": "socket"
         }
       ]
     },
@@ -16493,6 +16757,13 @@
           "expect": {
             "close": 1008
           },
+          "on": "socket"
+        },
+        {
+          "reported": [
+            "minimumBodyBytesPerSecond",
+            "240 bytes"
+          ],
           "on": "socket"
         }
       ]
@@ -16629,6 +16900,13 @@
           "on": "ada"
         },
         {
+          "reported": [
+            "messageBytesBudget",
+            "500 bytes"
+          ],
+          "on": "ada"
+        },
+        {
           "until": {
             "gauge": "messageBytes",
             "is": 320
@@ -16650,6 +16928,13 @@
           "expect": {
             "close": 1013
           },
+          "on": "dave"
+        },
+        {
+          "reported": [
+            "messageBytesBudget",
+            "500 bytes"
+          ],
           "on": "dave"
         },
         {
@@ -16773,6 +17058,13 @@
           "on": "x"
         },
         {
+          "reported": [
+            "messageBytesBudget",
+            "1000 bytes"
+          ],
+          "on": "x"
+        },
+        {
           "until": {
             "gauge": "messageBytes",
             "is": 650
@@ -16860,9 +17152,23 @@
           "on": "p"
         },
         {
+          "reported": [
+            "messageBytesBudget",
+            "2000 bytes"
+          ],
+          "on": "p"
+        },
+        {
           "expect": {
             "close": 1013
           },
+          "on": "a"
+        },
+        {
+          "reported": [
+            "messageBytesBudget",
+            "2000 bytes"
+          ],
           "on": "a"
         },
         {
@@ -16925,6 +17231,13 @@
           "on": "whole"
         },
         {
+          "reported": [
+            "messageBytesBudget",
+            "500 bytes"
+          ],
+          "on": "whole"
+        },
+        {
           "until": {
             "gauge": "messageBytes",
             "is": 0
@@ -16967,6 +17280,13 @@
           "expect": {
             "close": 1013
           },
+          "on": "partway"
+        },
+        {
+          "reported": [
+            "messageBytesBudget",
+            "500 bytes"
+          ],
           "on": "partway"
         },
         {
@@ -17013,6 +17333,10 @@
           "expect": {
             "close": 1002
           },
+          "on": "edge"
+        },
+        {
+          "reported": [],
           "on": "edge"
         },
         {
@@ -17153,6 +17477,10 @@
             "close": 1002
           },
           "on": "socket"
+        },
+        {
+          "reported": [],
+          "on": "socket"
         }
       ]
     },
@@ -17195,6 +17523,10 @@
           "expect": {
             "close": 1007
           },
+          "on": "socket"
+        },
+        {
+          "reported": [],
           "on": "socket"
         }
       ]
@@ -18184,6 +18516,58 @@
             "end": true
           },
           "on": "long"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 18446744073709551614\r\n\r\n"
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "edge"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 18446744073709551615\r\n\r\n"
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "top"
         }
       ]
     },
@@ -18672,6 +19056,101 @@
             }
           },
           "on": "empty"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Transfer-Encoding names its codings in any ASCII case is read so: Chunked and CHUNKED are judged on to its host, and gzip, CHUNKED is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: Chunked\r\n\r\n"
+          },
+          "on": "mixed"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "mixed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: CHUNKED\r\n\r\n"
+          },
+          "on": "upper"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "upper"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: gzip, CHUNKED\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "coded"
         }
       ]
     },
@@ -19965,6 +20444,7 @@
     {
       "name": "a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
+        "13.4.1",
         "15.2",
         "15.2.2",
         "15.6.5",
@@ -20113,6 +20593,32 @@
             }
           },
           "on": "final"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a.localhost.\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "a.localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "dotted"
         },
         {
           "send": {
@@ -29503,7 +30009,7 @@
       "name": "a client whose acceptor's ACCEPT is not marked secure is not secure, though its own leg is",
       "clauses": [
         "15.22",
-        "13.4"
+        "13.4.1"
       ],
       "transport": "broker",
       "role": "client",
@@ -36795,7 +37301,7 @@
       "name": "a client whose acceptor's ACCEPT is not marked secure is not secure, though its own leg is",
       "clauses": [
         "15.22",
-        "13.4",
+        "13.4.1",
         "15.30",
         "15.30.1"
       ],
@@ -43867,7 +44373,7 @@
       "name": "a client whose acceptor's ACCEPT is not marked secure is not secure, though its own leg is",
       "clauses": [
         "15.22",
-        "13.4",
+        "13.4.1",
         "15.37",
         "15.37.1"
       ],

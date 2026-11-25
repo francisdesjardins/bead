@@ -47,6 +47,7 @@ import { fitThreadLabels } from './views/thread';
 import { timelineViewOf } from './views/timeline';
 import { type IExchange, wireViewOf } from './views/wire';
 import { bytesOfContent, isBeadType, readBody } from './wire';
+import { drawFace } from '../skin/mascot';
 
 // types
 
@@ -508,6 +509,7 @@ export const startPanel = (host: IPanelHost): void => {
     shown.empty.replaceChildren(
       make('div', {
         children: [
+          drawFace('listening'),
           make('h2', { text: 'No Bead client on this page yet.' }),
           make('ul', {
             children: [

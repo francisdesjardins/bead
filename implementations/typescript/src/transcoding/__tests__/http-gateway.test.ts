@@ -3068,6 +3068,54 @@ test('resets over HTTP/2 the stream of a request carrying a connection, or a te 
   expect(await bookOverHTTP2(port, { te: 'trailers' })).toBe(200);
 });
 
+// spec 15.12; transcoding 10.1
+test('resets over HTTP/2 the stream of a request whose Content-Length names one number twice', async () => {
+  await using fixture = await startSecureTranscoding();
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (_, handle) => {
+    drawn.push(handle);
+  });
+
+  for (const lengths of [
+    ['0', '0'],
+    ['0', '00'],
+  ]) {
+    const fields = lengths.map((length) => {
+      return ['content-length', length] as const;
+    });
+
+    expect(await rawResetOverHTTP2(fixture.port, fields, ECHO_OVER_HTTP2)).toBe(
+      http2Constants.NGHTTP2_PROTOCOL_ERROR
+    );
+  }
+
+  expect(drawn).toEqual([]);
+  expect(await bookOverHTTP2(fixture.port, { 'content-length': '0' })).toBe(200);
+});
+
+// spec 15.12; transcoding 10.1; RFC 9110 §8.6
+test('resets over HTTP/2 the stream of a request whose Content-Length passes 2⁶³ − 1', async () => {
+  await using fixture = await startSecureTranscoding();
+  const drawn: string[] = [];
+
+  fixture.memory.on('connection', (_, handle) => {
+    drawn.push(handle);
+  });
+
+  for (const length of ['9223372036854775808', '9'.repeat(19), '00009223372036854775808']) {
+    // * its body never comes: the gateway judges the length without an END_STREAM mismatch
+    expect(
+      await rawResetOverHTTP2(fixture.port, [['content-length', length]], {
+        ...ECHO_OVER_HTTP2,
+        isOpen: true,
+      })
+    ).toBe(http2Constants.NGHTTP2_PROTOCOL_ERROR);
+  }
+
+  expect(drawn).toEqual([]);
+});
+
 test('refuses a route off its template’s grammar, and listens once', async () => {
   await using fixture = await startTranscoding();
   const echo = HTTP_ROUTES.find((init) => {

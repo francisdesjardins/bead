@@ -45,6 +45,7 @@ import {
   WIRE,
 } from './src/data.mjs';
 import { tokensOf } from '../implementations/typescript/demo/highlight.ts';
+import { FACE_NAMES } from '../implementations/typescript/skin/mascot.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -53,6 +54,8 @@ const SRC = join(HERE, 'src');
 // links too: the page's styles come on top of them, and the not-found page's own; and beside them
 // the theme's script, which the demo loads too
 const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
+// Bead's skin: the mascot, which the demo and the DevTools panel bundle, and the page inlines
+const SKIN = join(ROOT, 'implementations', 'typescript', 'skin');
 const STACK = [
   'tokens.system.css',
   'tokens.skin.base.css',
@@ -879,10 +882,10 @@ const contentFillers = (language, { known, ids }) => {
   };
 };
 
-// a section the contents name: `<section id="…" class="…" data-toc="…" data-part="…">`, its class
-// and its part optional
+// a section the contents name: `<section id="…" class="…" data-toc="…" data-part="…"
+// data-bead-face="…">`, its class, its part and the mascot's face optional
 const ENTRY =
-  /<section id="([\w-]+)"((?: class="[^"]*")?) data-toc="([^"]+)"(?: data-part="([^"]*)")?>/gu;
+  /<section id="([\w-]+)"((?: class="[^"]*")?) data-toc="([^"]+)"(?: data-part="([^"]*)")?((?: data-bead-face="[^"]*")?)>/gu;
 
 // ! the table of contents, from each section's id and its `data-toc`, which it then drops: a link
 // each, in the page's order, and a part, which a section's `data-part` opens under its name, its
@@ -907,13 +910,17 @@ export const contentsOf = (content) => {
   if (open) {
     items += '</ol></li>';
   }
-  const stripped = content.replace(ENTRY, (_entry, id, classes) => {
-    return `<section id="${id}"${classes}>`;
+  const stripped = content.replace(ENTRY, (_entry, id, classes, _label, _part, face) => {
+    const named = face.slice(' data-bead-face="'.length, -1);
+    if (face !== '' && !FACE_NAMES.includes(named)) {
+      throw new Error(`build: section ${id} has the face ${named}, which the mascot has not`);
+    }
+    return `<section id="${id}"${classes}${face}>`;
   });
   const left = stripped.match(/\sdata-(?:toc|part)=/u);
   if (left !== null) {
     throw new Error(
-      'build: a data-toc or a data-part the contents did not take: write <section id="…" class="…" data-toc="…" data-part="…">, its class and its part optional'
+      'build: a data-toc or a data-part the contents did not take: write <section id="…" class="…" data-toc="…" data-part="…" data-bead-face="…">, its class, its part and its face optional'
     );
   }
   return { items, content: stripped };
@@ -927,8 +934,9 @@ const STRINGS = Object.freeze({
       'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports, its MQTT 5 binding, its HTTP/JSON gateway and beadc’s Rust target.',
     skip: 'Skip to the content',
     contents: 'Contents',
-    menu: 'Open the contents',
-    menuClose: 'Close the contents',
+    // the section read, which the bar's button names, the contents it opens before it
+    reading: 'Contents:',
+    language: 'Language',
     home: '#top',
     top: 'Bead, to the top of the page',
     demo: 'Demo',
@@ -944,8 +952,8 @@ const STRINGS = Object.freeze({
       'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5, sa passerelle HTTP/JSON et la cible Rust de beadc.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
-    menu: 'Ouvrir le sommaire',
-    menuClose: 'Fermer le sommaire',
+    reading: `Sommaire${NARROW}:`,
+    language: 'Langue',
     home: '#top',
     top: 'Bead, en haut de la page',
     demo: 'Démo',
@@ -997,6 +1005,13 @@ const pageOf = (language, { strings, content: filled }) => {
     other: () => {
       return other;
     },
+    // * the language of the page marked among the two its contents' foot offers
+    'current-en': raw(() => {
+      return language === 'en' ? ' aria-current="true"' : '';
+    }),
+    'current-fr': raw(() => {
+      return language === 'fr' ? ' aria-current="true"' : '';
+    }),
     toc: raw(() => {
       return items;
     }),
@@ -1047,6 +1062,9 @@ const mainContentOf = (language, known) => {
 // one document of both languages in the shell: English in the page, French in a template the page
 // swaps in, each language's head and canonical address in the JSON beside the script
 const documentOf = ({ address, strings, contents }) => {
+  const hasMascot = Object.values(contents).some((content) => {
+    return facesOf(content) !== '';
+  });
   const heads = Object.fromEntries(
     LANGUAGES.map((language) => {
       return [
@@ -1083,6 +1101,14 @@ const documentOf = ({ address, strings, contents }) => {
     'page-script': raw(() => {
       return read(join(SRC, 'page.js')).trim();
     }),
+    mascot: raw(() => {
+      // * the mascot as the demo and the panel have it, one module, mounted on the page's sections;
+      // a document whose sections give it no face has none
+      if (!hasMascot) {
+        return '';
+      }
+      return `    <script type="module">\n${read(join(SKIN, 'mascot.js')).trim()}\n\nmountMascot();\n    </script>`;
+    }),
     heads: raw(() => {
       return JSON.stringify(heads).replaceAll('<', '\\u003c');
     }),
@@ -1104,6 +1130,15 @@ const documentOf = ({ address, strings, contents }) => {
   });
 };
 
+// the faces a content gives the mascot, each section's that has one, in the page's order
+export const facesOf = (content) => {
+  return [...content.matchAll(/<section id="([\w-]+)"[^>]* data-bead-face="([^"]*)"/gu)]
+    .map(([, id, face]) => {
+      return `${id}=${face}`;
+    })
+    .join(' ');
+};
+
 export const build = () => {
   const refusals = tableRefusals();
   if (refusals.length > 0) {
@@ -1116,15 +1151,23 @@ export const build = () => {
     );
   }
   const known = facts();
-  return documentOf({
-    address: ADDRESS,
-    strings: STRINGS,
-    contents: Object.fromEntries(
-      LANGUAGES.map((language) => {
-        return [language, mainContentOf(language, known)];
-      })
-    ),
+  const contents = Object.fromEntries(
+    LANGUAGES.map((language) => {
+      return [language, mainContentOf(language, known)];
+    })
+  );
+  // ! the mascot reads both languages alike: each marks the same sections with the same faces
+  const [first, ...others] = LANGUAGES.map((language) => {
+    return facesOf(contents[language]);
   });
+  if (
+    others.some((faces) => {
+      return faces !== first;
+    })
+  ) {
+    throw new Error('build: the languages mark their sections with the mascot’s faces apart');
+  }
+  return documentOf({ address: ADDRESS, strings: STRINGS, contents });
 };
 
 // ── The privacy policy ────────────────────────────────────────────────────────

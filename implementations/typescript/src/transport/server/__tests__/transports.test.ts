@@ -177,6 +177,8 @@ interface IStep {
   expect?: IExpectation | IHeardExpectation;
   on?: string;
   report?: number | 'exception';
+  /** The words the next error its transport reported of the connection named holds. */
+  reported?: string[];
   send?: IMessage | IRequest;
   stop?: true;
   until?: { gauge: string; is: number } | { timer: number };
@@ -291,6 +293,12 @@ interface IReport {
   connectionHandle: TransportServerConnectionHandle | undefined;
 }
 
+/** What the server's transport reported of its own, and the connection it came with. */
+interface ITransportError {
+  connectionHandle: TransportServerConnectionHandle | '';
+  message: string;
+}
+
 // types
 
 /** A server of the interop service, whichever its transport, as a case plays it. */
@@ -396,6 +404,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
   'expect',
   'on',
   'report',
+  'reported',
   'send',
   'stop',
   'until',
@@ -837,10 +846,13 @@ const serverOf = (
 };
 
 /**
- * Offers the interop service on `server`, starts it on a free port, and records what it reports
- * and each refusal its transport tells.
+ * Offers the interop service on `server`, starts it on a free port, and records what it reports,
+ * each refusal its transport tells, each error its transport reports of its own, and the port each
+ * connection's peer came from, taken as it opens, while its transport holds it.
  */
 const serve = async (server: ServerUnderTest) => {
+  const errors: ITransportError[] = [];
+  const peerPorts = new Map<ITransportError['connectionHandle'], number>();
   const refusals: ITransportServerRefusal[] = [];
   const reports: IReport[] = [];
 
@@ -853,11 +865,25 @@ const serve = async (server: ServerUnderTest) => {
   server.transport.on('refusal', (refusal) => {
     refusals.push(refusal);
   });
+  server.transport.on('error', (error, connectionHandle) => {
+    errors.push({ connectionHandle, message: error.message });
+  });
+  // * told once the connection is registered, so `clients` holds it; a failed one is gone from it
+  // by the time its error is told
+  server.transport.on('connection', (...[, connectionHandle]) => {
+    const held = server.transport.clients.find((client) => {
+      return client.connectionHandle === connectionHandle;
+    });
+
+    if (held !== undefined) {
+      peerPorts.set(connectionHandle, held.port);
+    }
+  });
   offerInterop(server);
 
   const { port } = await server.transport.start({ address: HOST, findOpenPort: true });
 
-  return { port, refusals, reports };
+  return { errors, peerPorts, port, refusals, reports };
 };
 
 /** A refusal told, in a case's terms: `null` for none, and its port as the socket's it came from. */
@@ -2023,7 +2049,7 @@ test.describe('the transports', () => {
       // a ping's among them, stay on the real clock
       const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
       const server = serverOf(testCase, clock);
-      const { port, refusals, reports } = await serve(server);
+      const { errors, peerPorts, port, refusals, reports } = await serve(server);
       const exchanges = new Map<string, IExchange>();
       const values = new Map([['host', `${HOST}:${String(port)}`]]);
       let isStopped = false;
@@ -2051,10 +2077,34 @@ test.describe('the transports', () => {
         return held.connectionHandle;
       };
       // what the server reported, or told of a refusal, that its case did not expect: nothing,
-      // between steps
+      // between steps, over WebSocket its transport's own errors among it
       const expectNothingReported = (when: string): void => {
         expect(reports, when).toEqual([]);
         expect(refusals, `${when}: the refusals told`).toEqual([]);
+
+        if (transport === 'websocket') {
+          expect(
+            errors.map(({ message }) => {
+              return message;
+            }),
+            `${when}: what the transport reported`
+          ).toEqual([]);
+        }
+      };
+      // whether an error the transport reported is of the connection of the exchange `on` names,
+      // by the port its socket came from; any connection's where it names none
+      const isReportedOf = (
+        on: string | undefined,
+        at: string
+      ): ((error: ITransportError) => boolean) => {
+        const localPort = on === undefined ? undefined : exchangeOf(on, at).localPort;
+
+        return ({ connectionHandle }) => {
+          return (
+            on === undefined ||
+            (localPort !== undefined && peerPorts.get(connectionHandle) === localPort)
+          );
+        };
       };
 
       try {
@@ -2180,6 +2230,28 @@ test.describe('the transports', () => {
               expect(report?.connectionHandle, `${at}: the report's connection`).toBe(
                 handleOf(step.on, at)
               );
+            }
+          }
+
+          // * the first error of that connection, wherever it stands in the queue: one of another
+          // connection may come before it
+          if (step.reported !== undefined) {
+            const isOf = isReportedOf(step.on, at);
+
+            await pollWithinPatience(() => {
+              return errors.some(isOf);
+            });
+
+            const found = errors.findIndex(isOf);
+            const [reported] = found === -1 ? [] : errors.splice(found, 1);
+
+            expect(
+              reported?.message,
+              `${at}: what the transport reported of ${step.on ?? 'any connection'}, among ${JSON.stringify(errors)}`
+            ).toBeDefined();
+
+            for (const word of step.reported) {
+              expect(reported?.message, `${at}: what the transport reported`).toContain(word);
             }
           }
 

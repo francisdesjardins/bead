@@ -1523,6 +1523,108 @@ async fn answers_431_unmarked_a_content_length_of_2_64_2_or_2_64_1_by_its_number
     started.stop().await;
 }
 
+// the field value, chunk size line and head line ending of a platform framing probe
+struct PlatformFraming<'a> {
+    coding: &'a str,
+    size: &'a str,
+    ending: &'a str,
+}
+
+// A CANCEL in one chunk, followed by a canary: hyper takes each framing variant as one body.
+async fn platform_framing_of(
+    PlatformFraming {
+        coding,
+        size,
+        ending,
+    }: PlatformFraming<'_>,
+) {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let (_, token) = connect(&started).await;
+    let cancel = envelope_of(CANCEL, (5, 0));
+    let head = [
+        "POST /bead HTTP/1.1".to_owned(),
+        format!("Host: {HOST}:{port}"),
+        format!("Content-Type: {BEAD_MEDIA_TYPE}"),
+        format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+        format!("Transfer-Encoding: {coding}"),
+        String::new(),
+        String::new(),
+    ]
+    .join(ending);
+    let mut octets = format!("{head}{size}\r\n").into_bytes();
+
+    octets.extend_from_slice(&cancel);
+    octets.extend_from_slice(b"\r\n0\r\n\r\n");
+    octets.extend_from_slice(head_of(("GET", "/other"), (port, &["Connection: close"])).as_bytes());
+    let mut socket = RawSocket::on(port).await;
+
+    socket.write(&octets).await.unwrap();
+    let first = socket.response(PATIENCE).await.unwrap();
+
+    assert_eq!(first.head.status, 204);
+    assert_eq!(first.body, Vec::<u8>::new());
+    assert!(!first.head.fields.contains_key(REFUSAL_HEADER));
+    socket.next();
+    let canary = socket.response(PATIENCE).await.unwrap();
+
+    assert_eq!(canary.head.status, 404);
+    assert_eq!(canary.head.fields[REFUSAL_HEADER], HTTP_REFUSALS.path);
+    assert!(socket.ended(PATIENCE).await);
+    let messages = started.recorder.messages(1).await;
+
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].0.data.as_ref(), cancel);
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn shows_how_the_platform_reads_chunked_with_trailing_space_and_tab() {
+    platform_framing_of(PlatformFraming {
+        coding: "chunked \t",
+        size: "8",
+        ending: "\r\n",
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn shows_how_the_platform_reads_a_chunk_extension_after_whitespace() {
+    platform_framing_of(PlatformFraming {
+        coding: "chunked",
+        size: "8 ;name",
+        ending: "\r\n",
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn shows_how_the_platform_reads_leading_zeros_in_a_nine_digit_chunk_size() {
+    for size in [
+        "00000008",
+        "000000008",
+        "0000000008",
+        "0000000000000000000008",
+    ] {
+        platform_framing_of(PlatformFraming {
+            coding: "chunked",
+            size,
+            ending: "\r\n",
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn shows_how_the_platform_reads_bare_lf_head_lines() {
+    platform_framing_of(PlatformFraming {
+        coding: "chunked",
+        size: "8",
+        ending: "\n",
+    })
+    .await;
+}
+
 // what a server that stops reading takes at most of what one socket pipelines: its platform's
 // buffers and the loopback's are far below it
 const MOST_TAKEN: usize = 64 * 1024 * 1024;
@@ -1610,6 +1712,95 @@ async fn stops_reading_requests_pipelined_behind_a_held_listen_and_keeps_its_soc
     assert!(is_kept(&mut socket).await, "its socket kept");
     connect(&started).await;
     started.stop().await;
+}
+
+// spec 15.12: a listen's answer frees its place even when the read stop hides its client's close
+#[tokio::test]
+async fn frees_a_listen_within_maximum_wait_once_its_client_leaves_with_requests_pipelined_past_the_read_stop()
+ {
+    use tokio::io::AsyncWriteExt as _;
+
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started(&HttpTransportServerOptions {
+        clock: Some(Arc::<SteppingClock>::clone(&clock)),
+        maximum_wait: Some(Duration::from_secs(1)),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = &drawn.head.fields[CONNECTION_TOKEN_HEADER];
+    let mut socket = TcpStream::connect((HOST, port)).await.unwrap();
+
+    socket
+        .write_all(
+            head_of(
+                ("GET", "/bead"),
+                (
+                    port,
+                    &[
+                        &format!("{CONNECTION_TOKEN_HEADER}: {token}"),
+                        &format!("{AFTER_HEADER}: 0"),
+                        &format!("{WAIT_HEADER}: 60000"),
+                    ],
+                ),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    until(|| started.server.gauges().unwrap().counts["listens"] == 1).await;
+    assert!(
+        clock.dues().contains(&Duration::from_secs(1)),
+        "maximumWait bounds its wait"
+    );
+    let batch =
+        core::iter::repeat_n(head_of(("GET", "/other"), (port, &[])), 1_000).collect::<String>();
+    let octets = taken(&mut socket, batch.as_bytes()).await;
+
+    assert!(
+        octets < MOST_TAKEN,
+        "{octets} octets taken before the read stop"
+    );
+    assert!(
+        is_kept(&mut socket).await,
+        "the held listen keeps its socket"
+    );
+    drop(socket);
+    clock.advance(Duration::from_secs(1)).await;
+    until(|| started.server.gauges().unwrap().counts["listens"] == 0).await;
+
+    let gauges = started.server.gauges().unwrap();
+
+    assert_eq!(
+        (
+            gauges.counts["connections"],
+            gauges.counts["waitingExchanges"],
+            gauges.counts["bodyBytes"]
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(gauges.anomalies, Vec::<String>::new());
+    assert_eq!(
+        listen_of(port, (token, (Some("0"), Some("0"))))
+            .await
+            .response(PATIENCE)
+            .await
+            .unwrap()
+            .head
+            .status,
+        204,
+        "a listen's place is available on the kept Bead connection"
+    );
+    started.stop().await;
+    assert_eq!(started.server.gauges().unwrap().counts["connections"], 0);
 }
 
 // spec 15.12; RFC 9112 §9.3

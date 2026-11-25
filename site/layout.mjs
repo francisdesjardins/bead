@@ -5,10 +5,12 @@
 // wide desktop, in both languages and both themes; no page wider than a phone; every control a
 // finger reaches 44 px on a coarse pointer; every block of code at 13 px; no name of code in a table,
 // which scrolls sideways, split inside its word on a phone; the keyboard's focus shown
-// on the bar's tools and the menu's links; the menu opened, closed by Escape and the focus given
-// back; the page's contents in their two parts, each part's name above its links, every link
-// landing on a section in the page's order; and the theme the page keeps, set before the first
-// paint.
+// on the bar's tools, the menu's links and its languages; the menu opened, closed by Escape and the
+// focus given back; the bar's button named by the section read, Bead's name above the first; the
+// language in the contents' foot on a phone, the bar's two letters past it; the page's contents in their two parts, each part's name above its links, every link
+// landing on a section in the page's order; the mascot, the bar's own mark on a phone, its face in
+// a marked section alone, and beside the text on a wide desktop, the mark plain; and the theme the
+// page keeps, set before the first paint.
 //
 //   node layout.mjs                       every check, in Playwright's own Chromium
 //   node layout.mjs --chromium <path>     the Chromium to drive
@@ -336,7 +338,6 @@ const holdFocus = async ({ browser, address, language, faults }) => {
       '.topbar .brand',
       '[data-action="menu"]',
       '.topbar .demo',
-      '[data-action="language"]',
       '[data-action="theme"]',
     ]) {
       if ((await outlineByTabOf(page, tool)) === 'none') {
@@ -348,6 +349,15 @@ const holdFocus = async ({ browser, address, language, faults }) => {
     await page.keyboard.press('Enter');
     if ((await outlineByTabOf(page, '.toc a')) === 'none') {
       faults.push(`the page's menu, ${language}: no focus shown on its links`);
+    }
+    if ((await outlineByTabOf(page, '.toc-languages a')) === 'none') {
+      faults.push(`the page's menu, ${language}: no focus shown on its languages`);
+    }
+    // * past a phone, the language is the bar's tool
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.goto(`${address}?lng=${language}`);
+    if ((await outlineByTabOf(page, '.tools [data-action="language"]')) === 'none') {
+      faults.push(`the page, ${language}: no focus shown on the language`);
     }
     await page.goto(`${address}nowhere`);
     if ((await outlineByTabOf(page, '.topbar .brand')) === 'none') {
@@ -381,7 +391,7 @@ const contentsFaultsOf = (page) => {
     }
     const sections = [...document.querySelectorAll('main section[id]')];
     let last = -1;
-    for (const link of document.querySelectorAll('.toc a')) {
+    for (const link of document.querySelectorAll('.toc ol a')) {
       const at = sections.findIndex((section) => {
         return `#${section.id}` === link.getAttribute('href');
       });
@@ -458,6 +468,147 @@ const holdTheme = async ({ browser, address, faults }) => {
   }
 };
 
+// the mascot, one at a time: on a phone, the bar's own mark, its face shown in a marked section
+// alone and no other drawing in the bar; beside the text on a wide desktop, the bar's mark plain
+const holdMascot = async ({ browser, address, language, faults }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const label = `the mascot, ${language}`;
+  try {
+    const page = await context.newPage();
+    await page.goto(`${address}?lng=${language}`);
+    await page.waitForFunction(() => {
+      return document.querySelector('.topbar .bead-mark') !== null;
+    });
+    const read = () => {
+      return page.evaluate(() => {
+        const mark = document.querySelector('.topbar .bead-mark');
+        const button = document.querySelector('.bead-mascot');
+        return {
+          shown: mark?.hasAttribute('data-face-shown') ?? false,
+          face: mark?.getAttribute('data-face') ?? null,
+          drawings: document.querySelectorAll('.topbar svg').length,
+          button: button !== null && button.checkVisibility(),
+          bar: document.querySelector('.topbar').getBoundingClientRect().height,
+        };
+      });
+    };
+    const outside = await read();
+    if (outside.shown) {
+      faults.push(`${label}, 390 px: a face on the mark outside every marked section`);
+    }
+    if (outside.drawings !== 1 || outside.button) {
+      faults.push(`${label}, 390 px: a second mascot beside the bar's mark`);
+    }
+    if (outside.bar !== BAR) {
+      faults.push(`${label}, 390 px: the bar ${outside.bar} px tall with the mark`);
+    }
+    await page.evaluate(() => {
+      const section = document.getElementById('securite');
+      const box = section.getBoundingClientRect();
+      window.scrollTo({
+        top: window.scrollY + box.top + box.height / 2 - innerHeight / 2,
+        behavior: 'instant',
+      });
+    });
+    try {
+      await page.waitForFunction(
+        () => {
+          const mark = document.querySelector('.topbar .bead-mark');
+          return (
+            mark?.hasAttribute('data-face-shown') && mark.getAttribute('data-face') === 'surprised'
+          );
+        },
+        null,
+        { timeout: 2000 }
+      );
+    } catch {
+      const inside = await read();
+      faults.push(
+        `${label}, 390 px: in the security section, the mark shows ${inside.shown ? inside.face : 'no face'}`
+      );
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    try {
+      await page.waitForFunction(
+        () => {
+          const button = document.querySelector('.bead-mascot');
+          return (
+            document.querySelector('.topbar .bead-mark') === null &&
+            button !== null &&
+            !button.hidden
+          );
+        },
+        null,
+        { timeout: 2000 }
+      );
+    } catch {
+      faults.push(`${label}, 1440 px: the bar's mark not plain, or no mascot beside the text`);
+    }
+  } finally {
+    await context.close();
+  }
+};
+
+// the bar's button, where the contents are a sheet: Bead's name above the first section, then the
+// section read; the sheet's foot, both languages written out, the page's own marked; and the
+// language the bar's tool, by its two letters, where the contents are a column
+const holdReading = async ({ browser, address, language, faults }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const label = `the bar's section, ${language}`;
+  try {
+    const page = await context.newPage();
+    await page.goto(`${address}?lng=${language}`);
+    const read = () => {
+      return page.evaluate(() => {
+        return document.querySelector('[data-reading]').textContent;
+      });
+    };
+    if ((await read()) !== 'Bead') {
+      faults.push(`${label}: reads ${await read()} above the first section`);
+    }
+    const expected = await page.evaluate(() => {
+      const section = document.getElementById('securite');
+      window.scrollTo({
+        top: window.scrollY + section.getBoundingClientRect().top - 60,
+        behavior: 'instant',
+      });
+      return document.querySelector('.toc ol a[href="#securite"]').textContent;
+    });
+    try {
+      await page.waitForFunction(
+        (title) => {
+          return document.querySelector('[data-reading]').textContent === title;
+        },
+        expected,
+        { timeout: 2000 }
+      );
+    } catch {
+      faults.push(`${label}: reads ${await read()} in the section ${expected}`);
+    }
+    const foot = await page.evaluate(() => {
+      return [...document.querySelectorAll('.toc-languages a')].map((link) => {
+        return `${link.textContent}${link.hasAttribute('aria-current') ? '*' : ''}`;
+      });
+    });
+    const marked = language === 'en' ? ['English*', 'Français'] : ['English', 'Français*'];
+    if (foot.join(' ') !== marked.join(' ')) {
+      faults.push(`${label}: the contents' foot offers ${foot.join(' ')}`);
+    }
+    if (await page.locator('.tools [data-action="language"]').isVisible()) {
+      faults.push(`${label}: the language in the bar beside the contents' sheet`);
+    }
+    await page.setViewportSize({ width: 1200, height: 800 });
+    const tool = (
+      await page.locator('.tools [data-action="language"] [aria-hidden="true"]').innerText()
+    ).trim();
+    if (tool !== (language === 'en' ? 'FR' : 'EN')) {
+      faults.push(`${label}, 1200 px: the language reads ${tool}`);
+    }
+  } finally {
+    await context.close();
+  }
+};
+
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 const main = async () => {
@@ -502,6 +653,8 @@ const main = async () => {
       }
       await holdFocus({ browser, address, language, faults });
       await holdContents({ browser, address, language, faults });
+      await holdMascot({ browser, address, language, faults });
+      await holdReading({ browser, address, language, faults });
     }
     await holdTheme({ browser, address, faults });
   } finally {

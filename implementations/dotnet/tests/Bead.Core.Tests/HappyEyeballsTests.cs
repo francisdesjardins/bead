@@ -185,7 +185,7 @@ public sealed class HappyEyeballsTests
         Assert.Equal((SocketError.ConnectionRefused, SocketError.HostNotFound), (refused.SocketErrorCode, unknown.SocketErrorCode));
     }
 
-    // spec 13.4; RFC 8305 §5
+    // spec 13.4.2; RFC 8305 §5
     [Fact]
     public async Task Keeps_an_attempt_that_has_not_connected_by_its_delay_while_the_next_one_starts_the_first_to_connect_winning_and_the_other_closed()
     {
@@ -261,7 +261,7 @@ public sealed class HappyEyeballsTests
         });
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Ends_every_attempt_leaving_no_socket_once_its_connect_is_given_up()
     {
@@ -343,7 +343,7 @@ public sealed class HappyEyeballsTests
         });
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing()
     {
@@ -369,7 +369,7 @@ public sealed class HappyEyeballsTests
         Assert.Empty(asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Tries_the_IPv4_loopback_first_for_a_localhost_name_then_the_IPv6_one_an_attempt_delay_after()
     {
@@ -420,7 +420,7 @@ public sealed class HappyEyeballsTests
         });
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them()
     {
@@ -445,7 +445,7 @@ public sealed class HappyEyeballsTests
         Assert.Equal(names, asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
     {

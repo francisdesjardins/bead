@@ -87,14 +87,22 @@
     return found;
   };
 
+  // the section read, marked in the contents and named by the bar's button: its entry's words, or
+  // Bead's name above the first section. ! The button's name changes and nothing announces it
   const mark = () => {
     const section = current();
-    for (const link of page.querySelectorAll('.toc a')) {
+    let named = 'Bead';
+    for (const link of page.querySelectorAll('.toc ol a')) {
       if (section !== null && link.getAttribute('href') === `#${section.id}`) {
         link.setAttribute('aria-current', 'location');
+        named = link.textContent;
       } else {
         link.removeAttribute('aria-current');
       }
+    }
+    const reading = page.querySelector('[data-reading]');
+    if (reading !== null && reading.textContent !== named) {
+      reading.textContent = named;
     }
   };
 
@@ -119,7 +127,6 @@
     const button = page.querySelector('[data-action="menu"]');
     root.toggleAttribute('data-menu-open', open);
     button.setAttribute('aria-expanded', String(open));
-    button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
   const settle = () => {
@@ -137,7 +144,14 @@
         menu(!root.hasAttribute('data-menu-open'));
       } else if (action === 'language') {
         event.preventDefault();
-        const next = shown() === 'en' ? 'fr' : 'en';
+        const next = control.getAttribute('data-lang') ?? (shown() === 'en' ? 'fr' : 'en');
+        // the contents' foot offers the page's own language too: chosen, it only closes them
+        if (next === shown()) {
+          menu(false);
+          page.querySelector('[data-action="menu"]').focus();
+          return;
+        }
+        const fromContents = control.closest('.toc') !== null;
         // the section being read stays where it was on the screen
         const reading = current();
         const before = reading === null ? 0 : reading.getBoundingClientRect().top;
@@ -156,7 +170,10 @@
           const again = document.getElementById(reading.id);
           window.scrollBy({ top: again.getBoundingClientRect().top - before, behavior: 'instant' });
         }
-        page.querySelector('[data-action="language"]').focus();
+        // the focus where the choice was made: the bar's tool, or, the contents closed, their button
+        page
+          .querySelector(fromContents ? '[data-action="menu"]' : '.tools [data-action="language"]')
+          .focus();
       }
       return;
     }

@@ -37,6 +37,7 @@ import { mountPackages } from './packages';
 import { mountScenes } from './scenes';
 import { mountSides } from './sides';
 import { mountStrip } from './strip';
+import { mountMascot } from '../skin/mascot';
 // ! types alone: the module itself is loaded apart, over MQTT 5 alone
 import type { clientOverMqtt, IMqttReach } from './over-mqtt';
 import { mountSignUp } from './sign-up';
@@ -944,11 +945,19 @@ services.getCommandResolver(CALLS.clock.procedure, { serializer: answererOf(CALL
   }
 );
 
+// * Bead's mascot, in the bar: its face follows the scene read, and a call's end shows on it
+const mascot = mountMascot({ sections: 'main .scene > section' });
+
 services.on('debug', (error, info) => {
   const { duration } = info;
 
   if (READ_NAMES.includes(info.procedureName)) {
     return;
+  }
+
+  // a request answered, or refused, the reads of each second aside
+  if (info.type === 'request' && (error !== null || duration !== undefined)) {
+    mascot.react(error === null ? 'happy' : 'surprised');
   }
 
   log(

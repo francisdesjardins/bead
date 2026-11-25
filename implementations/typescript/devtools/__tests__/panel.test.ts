@@ -711,6 +711,26 @@ test.describe('the panel', () => {
     expect((await fakeOf(page)).reloads).toBe(1);
   });
 
+  test('shows Bead’s mascot listening, still, while no client announced itself, and lets it go as the first one does', async ({
+    page,
+  }) => {
+    await openPanel(page);
+
+    const calls = page.locator('#empty svg.bead-moon');
+
+    await expect(calls).toHaveAttribute('data-face', 'listening');
+    await expect(calls).toHaveAttribute('aria-hidden', 'true'); // still: nothing on the panel moves it, nor any button of its own
+    expect(await page.locator('.bead-mascot').count()).toBe(0);
+
+    await page.click('[data-tab="metrics"]');
+    await expect(page.locator('#metrics svg.bead-moon')).toHaveAttribute('data-face', 'listening');
+
+    await deliver(page, { sources: [{ id: 1, protocol: 1, side: 'client' }], type: 'sources' });
+    await expect(page.locator('#metrics svg.bead-moon')).toHaveCount(0);
+    await page.click('[data-tab="calls"]');
+    await expect(calls).toHaveCount(0);
+  });
+
   test('opens filter syntax without changing the filter, dismisses it, and keeps it inside a narrow panel', async ({
     page,
   }) => {

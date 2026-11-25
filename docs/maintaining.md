@@ -20,8 +20,10 @@ repeating it. Commands run from the repository's root unless a step names a fold
 
 ## The gates
 
-Each gate is a command that fails. CI runs every job on every push and pull request, and `ci-ok`
-stands for all of them ([CI](../README.md#ci), [`ci.yml`](../.github/workflows/ci.yml)).
+Each gate is a command that fails. CI runs the jobs a change reaches: on a feature branch and a pull
+request into `develop`, those `tools/ci-scope.mjs` maps its changed paths to; on `develop`, `main`,
+a release or a hotfix branch and by hand, every job. `ci-ok` stands for all of them
+([CI](../README.md#ci), [`ci.yml`](../.github/workflows/ci.yml)).
 
 | Gate                     | Command                                                                                                            | What it refuses                                                                                                                               | CI job                         |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
@@ -36,7 +38,7 @@ stands for all of them ([CI](../README.md#ci), [`ci.yml`](../.github/workflows/c
 | Versions                 | `node tools/check-versions.mjs`                                                                                    | versions that disagree; a released CHANGELOG section changed; on a release branch, a version its changes owe and did not get                  | `commits`                      |
 | The root's tools         | `node --test "tools/__tests__/*.test.mjs"`                                                                         | a root tool that fails its own tests                                                                                                          | `commits`                      |
 | Supply chain             | the last three steps of the `commits` job in `ci.yml`, a `grep` then two scanners by Docker                        | an action not pinned by its commit's full sha; a known advisory in a lockfile (OSV-Scanner); a Semgrep finding                                | `commits`                      |
-| Format                   | `node tools/check-format.mjs`                                                                                      | a root file off the TypeScript side's formatter; it needs `yarn install` in `implementations/typescript`                                      | `typescript`                   |
+| Format                   | `node tools/check-format.mjs`                                                                                      | a root file off the TypeScript side's formatter; it needs `yarn install` in `implementations/typescript`                                      | `commits`                      |
 | Conformance files        | the eleven generators, `git diff --exit-code -- spec`, then `python spec/check.py`                                 | a conformance file its generator does not write byte for byte; a unit whose text moved unacknowledged; a count or a schema that does not hold | `spec`                         |
 | Generated code           | `node builder/src/cli.ts generate --check`, `node tools/check-validations.mjs`, `node tools/check-transcoding.mjs` | an interop, a validator or a route table that is not what beadc writes; they need `builder/` installed                                        | `builder`                      |
 | Rust descriptor set      | `node tools/check-protobuf.mjs`, from `implementations/rust`; `--write` writes it                                  | a `tests.binpb` of `bead-protobuf` that is not what protoc writes at its pin                                                                  | `rust`                         |
@@ -54,18 +56,16 @@ Each side's own gates and suites are its section of the README: [TypeScript](../
 
 ### The order before a push
 
-1. The `commits` job's checks, which need Node alone: commits, links, cited tests, details, the
-   page and its deploy's tests, names, durations, twins, versions, the root's tools' tests.
-   `check-citations.mjs` and `check-details.mjs` read the files git lists, so a new file counts once
-   it is tracked (`git add -N <file>`).
-2. `node tools/check-format.mjs`.
-3. When `spec/` moved, or a side's harness that plays it: the generators, the diff and
-   `python spec/check.py`.
-4. Each side that changed, from its own folder, as its README section says: its checks, then its
-   whole suite. When a transport or the interop moved, the interop both ways; when a broker's
-   adapter moved, its suites under `tools/mqtt-broker.mjs run --` or `tools/amqp-broker.mjs run --`.
-5. The builder's and the examples' gates when `builder/`, `beadc.yaml` or `examples/` moved.
-6. Push, then follow the run (below).
+1. `node tools/ci-scope.mjs --local`, which prints the commands of the jobs the branch's changes
+   reach, against its merge base with `origin/develop`, the working tree included: the `commits`
+   job's checks first, then each job's, each from its folder. `check-citations.mjs` and
+   `check-details.mjs` read the files git lists, so a new file counts once it is tracked
+   (`git add -N <file>`).
+2. Run them in their order; `--gates` leaves out the whole suites, for a branch that leaves them to
+   CI.
+3. Push, then follow the run (below).
+
+A merge into `develop` and a release run everything: `node tools/ci-scope.mjs --local --all`.
 
 ## The workflows, by hand
 
@@ -132,9 +132,9 @@ By hand, on the design's feature branch:
 2. Each side, in its own folder, with its tests. A test on one side has its twin on the others,
    named by the same sentence: `Underscored_sentence` in C#, `snake_case_sentence` in Rust. Run
    the tests of what changes while working, then the side's checks and its whole suite.
-3. The integration: the generators again, with nothing more moving; every gate, in the order
-   above; the interop both ways; each side's coverage held to its floor; the brokers' suites where
-   an adapter moved.
+3. The integration: the generators again, with nothing more moving; every command
+   `node tools/ci-scope.mjs --local` prints, in the order above, each side's coverage held to its
+   floor and the brokers' suites among them; the interop both ways.
 4. The commits, each a slice with a Conventional Commit subject, each one building and passing the
    fast gates. A feature branch may also leave the whole suites to CI: push it and follow its run.
 

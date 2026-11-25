@@ -867,66 +867,68 @@ transport is to carry beside it. Any other — an `ELSEWHERE` that gives nothing
 with no token, a scheme to come — is the application's fault, refused before the call starts and
 not counted (`debugging.md` 9.3), and no failure: nothing was asked of its transport.
 
-A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
-as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
-credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
-the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
-a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket, in
-memory or over a broker (sections 15.9, 15.2, 15.13, 15.22) — and for one that presents a `JWT` or
-an `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential
-crosses only TLS off the machine
-([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a dialer the client
-does not own sends a `localhost` name elsewhere (below). A transport is judged by what it is given,
-never by what a name resolves to. It is secure under TLS, its scheme `wss` or `https`; on the
-loopback: a client by the host it names in its URL — `localhost` or a name that ends in
-`.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
-`[::1]` in a URL — as the
-[WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
-the W3C's Secure Contexts reads an origin, and as
-[Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy, its condition that the user agent keep such a name on the loopback met by
-every dialer the client owns (below); a server by the address it listens on (section 15.12), in
-127.0.0.0/8, `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an
-in-memory transport or a router called in process. A broker's transport is secure while its own leg
-and its peer's are (section 15.22). Every client reads a host alike, once, as that parser reads a
-special scheme's host whatever its URL's scheme, `mqtt` and `amqp` among them, and judges, connects
-and names the host it read: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on
-the loopback, connected to 127.0.0.1 and named so, and ask no resolver. A host it fails on, one
-followed by a space among them, is refused before any socket opens: by a broker adapter or a caller
-as it is built, by a transport client at its connect. Nor is `localhost.` on the loopback, nor a
-name that ends in `.localhost.`, which it keeps as given. These two are Bead's departures from
-Secure Contexts, which takes both: every server refuses them, since it compares a host as it comes
-(section 15.12), and a client and a server read one set of names. Any other host leaves the machine
-in the clear. A server cannot tell what stands in front of it: its application MAY say so, and is
-then believed whatever the server listens on — TLS terminated before it, which makes it secure, or
-a proxy that serves the network in the clear, which leaves it in the clear.
+1. A client fails a call before it goes, and a server a command alike, with
+   `DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry (section 14.3):
+   nothing was tried, and its credential stays. It does so for a call that presents `ELSEWHERE` over
+   a transport that cannot carry the credential it presents — a WebSocket whose upgrade carried
+   other bytes, or none (section 15.2), a Web Worker, whose messages carry an envelope alone, a
+   server's over HTTP, over a WebSocket, in memory or over a broker (sections 15.9, 15.2, 15.13,
+   15.22) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that leaves the
+   machine in the clear, since a bearer credential crosses only TLS off the machine
+   ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), but where a dialer the
+   client does not own sends a `localhost` name elsewhere (item 2). A transport is judged by what it
+   is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or `https`;
+   on the loopback: a client by the host it names in its URL — `localhost` or a name that ends in
+   `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
+   `[::1]` in a URL — as the
+   [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
+   the W3C's Secure Contexts reads an origin, and as
+   [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
+   potentially trustworthy, its condition that the user agent keep such a name on the loopback met
+   by every dialer the client owns (item 2); a server by the address it listens on (section 15.12),
+   in 127.0.0.0/8, `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker,
+   an in-memory transport or a router called in process. A broker's transport is secure while its
+   own leg and its peer's are (section 15.22). Every client reads a host alike, once, as that parser
+   reads a special scheme's host whatever its URL's scheme, `mqtt` and `amqp` among them, and
+   judges, connects and names the host it read: `127.0.0.1.` and `127.1`, which the parser reads as
+   127.0.0.1, are on the loopback, connected to 127.0.0.1 and named so, and ask no resolver. A host
+   it fails on, one followed by a space among them, is refused before any socket opens: by a broker
+   adapter or a caller as it is built, by a transport client at its connect. Nor is `localhost.` on
+   the loopback, nor a name that ends in `.localhost.`, which it keeps as given. These two are
+   Bead's departures from Secure Contexts, which takes both: every server refuses them, since it
+   compares a host as it comes (section 15.12), and a client and a server read one set of names. Any
+   other host leaves the machine in the clear. A server cannot tell what stands in front of it: its
+   application MAY say so, and is then believed whatever the server listens on — TLS terminated
+   before it, which makes it secure, or a proxy that serves the network in the clear, which leaves
+   it in the clear.
 
-A client connects a host it judges on the loopback to the loopback itself, through no proxy, its
-own or its platform's. It connects `localhost` and a name that ends in `.localhost` to `127.0.0.1`
-and `::1`, and asks no resolver.
-[draft-ietf-dnsop-let-localhost-be-localhost-02](https://datatracker.ietf.org/doc/html/draft-ietf-dnsop-let-localhost-be-localhost-02#section-3)
-asks this of application software that makes a security decision on such a name (section 3,
-item 2). That draft has expired; its rules are the ones by which Secure Contexts conditions its
-trust in such a name. [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets
-application software treat the name so (item 2). A client races the two addresses as
-[RFC 8305 §5](https://www.rfc-editor.org/rfc/rfc8305#section-5) races its attempts: `127.0.0.1`
-at once, then `::1` 250 ms later, or at once when the attempt before it fails, which is Bead's
-own; each attempt is kept until one connects, the first connected kept and the other closed. A
-connect given up ends every attempt. `127.0.0.1` goes first, since a server on its defaults listens
-there (section 15.12), where
-[RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
-first. Its request names the host as its URL serializes it, in its `Host` and in its TLS server
-name, whatever its scheme. A connect whose every attempt failed says that it went to the loopback
-and asked no resolver. No option points such a name elsewhere: a host off the machine is named by
-its own name or address.
+2. A client connects a host it judges on the loopback to the loopback itself, through no proxy, its
+   own or its platform's. It connects `localhost` and a name that ends in `.localhost` to
+   `127.0.0.1` and `::1`, and asks no resolver.
+   [draft-ietf-dnsop-let-localhost-be-localhost-02](https://datatracker.ietf.org/doc/html/draft-ietf-dnsop-let-localhost-be-localhost-02#section-3)
+   asks this of application software that makes a security decision on such a name (section 3,
+   item 2). That draft has expired; its rules are the ones by which Secure Contexts conditions its
+   trust in such a name. [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) lets
+   application software treat the name so (item 2). A client races the two addresses as
+   [RFC 8305 §5](https://www.rfc-editor.org/rfc/rfc8305#section-5) races its attempts: `127.0.0.1`
+   at once, then `::1` 250 ms later, or at once when the attempt before it fails, which is Bead's
+   own; each attempt is kept until one connects, the first connected kept and the other closed. A
+   connect given up ends every attempt. `127.0.0.1` goes first, since a server on its defaults
+   listens there (section 15.12), where
+   [RFC 6724 §2.1](https://www.rfc-editor.org/rfc/rfc6724#section-2.1)'s default policy puts `::1`
+   first. Its request names the host as its URL serializes it, in its `Host` and in its TLS server
+   name, whatever its scheme. A connect whose every attempt failed says that it went to the loopback
+   and asked no resolver. No option points such a name elsewhere: a host off the machine is named by
+   its own name or address.
 
-A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
-`localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps
-such a name on the loopback. Such a dialer is one its application gives it, a page's, which its user
-agent connects, or its platform's own, which a side takes where it has not built one of its own
-([`docs/support.md`](../docs/support.md), "Differences"). There, a resolver that sends a name under
-`.localhost` on to its DNS server, as glibc's and musl's do, a proxy, or a user agent that does not
-follow the draft's rules takes a credential judged secure wherever it answers, in the clear.
+   A client connects so over every dialer it owns. Over a dialer it does not own, it judges a
+   `localhost` name by the name alone, as the draft's section 5.1 allows where the environment keeps
+   such a name on the loopback. Such a dialer is one its application gives it, a page's, which its
+   user agent connects, or its platform's own, which a side takes where it has not built one of its
+   own ([`docs/support.md`](../docs/support.md), "Differences"). There, a resolver that sends a name
+   under `.localhost` on to its DNS server, as glibc's and musl's do, a proxy, or a user agent that
+   does not follow the draft's rules takes a credential judged secure wherever it answers, in the
+   clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -1467,8 +1469,10 @@ WebSocket's address in this order, and answers the first that applies:
    not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a list of distinct
    tokens, that carries more than one `Authorization` field line, which is no list to combine
    ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or that has content, a
-   `Content-Length` past 0 or a `Transfer-Encoding`
-   ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)).
+   `Content-Length` past 0 or a `Transfer-Encoding`: an upgrade is a `GET`
+   ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)), whose content RFC 9110
+   gives no meaning and which might lead a server to refuse it
+   ([RFC 9110 §9.3.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.1)).
 7. An upgrade that carries an `Origin` neither its own nor among those it takes is then refused 403,
    `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
    by; no same-origin policy guards an upgrade, and a page of any origin may ask for one
@@ -1862,18 +1866,23 @@ section 15.3 says, reported naming the bound and its value. What a side holds of
 its charge, up to twice it where a side's buffer grows by doubling, and by what its platform reads
 below a pause, a bound of the platform's ([`docs/support.md`](../docs/support.md), "Differences").
 
-Over HTTP/1, a server holds no more of a socket than a bound of its own of what it read behind the
-answer under way and has not served, its platform's
-([`docs/support.md`](../docs/support.md), "Differences"), as
-[RFC 9110 §17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5) has a recipient limit what
-it processes. Past it, it reads nothing more of that socket until the answers ahead end, and keeps
-it: each request a client pipelines is answered in its turn, however many come in one write, the
-client paced meanwhile by its transport's window
-([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)), as a paused
-connection's peer is. A server learns its client went by the end of the socket it reads, and, once
-it reads nothing more of the socket, by a write that fails: a listen's answer, held no longer than
-`maximumWait`, or a stream's heartbeat or event (section 8.7 of `transcoding.md`); never by a
-close it has not read.
+Over HTTP/1, a server holds no more of a socket than a fixed bound of its own or its platform's of
+what it read behind the answer under way and has not served, never what its memory allows, which
+[`docs/support.md`](../docs/support.md), "Differences", names for each side, as
+[RFC 9110 §17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5) has a recipient limit what it
+processes. Past it, it reads nothing more of that socket until what it holds falls to a threshold of
+its own. It keeps the socket: each request a client pipelines is answered in its turn, however many
+come in one write, the client paced meanwhile by its transport's window
+([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)), as a paused connection's
+peer is. One side destroys a socket past a bound of what it holds across its sockets, and one
+platform's HTTP resets a socket whose head it parsed in part past `headersTimeout`
+(`docs/support.md`, "Differences"). A server learns its client went by the end of the socket it
+reads, and, once it reads nothing more of the socket, by a write that fails: a listen's answer, held
+no longer than `maximumWait`; a request's answer, held no longer than `exchangeTimeout`; a gateway
+call's answer, held no longer than its `timeout` (section 9.2 of `transcoding.md`); or a stream's
+heartbeat or event (section 8.7 of `transcoding.md`). It never learns it by a close it has not read.
+An answer whose time is without end, on a socket its server reads nothing more of, so outlives a
+client gone unseen.
 
 A request names its authority by its target when the target is in absolute-form, the `Host`
 beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over
@@ -1965,69 +1974,78 @@ unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields eve
 path carries, and its stream reset `PROTOCOL_ERROR` over HTTP/2, a stream error
 ([RFC 9113 §5.4.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.2)), before anything else of
 the request is judged. That is a `Content-Length` that is not digits alone
-([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), an empty one among them,
-or one that names two numbers, in one line or across its lines. A sign before its digits, `+0` or
-`-0`, is no digit: one platform's HTTP reads it as the number it writes, and serves the request
-(`docs/support.md`, "Differences"). So is one that names one number more than once, `0, 0` or `0`
-in two lines, which RFC 9110 §8.6 lets a recipient either refuse or read as that number: every side
-refuses it, since not every platform's HTTP can read it (`docs/support.md`, "Leveled down").
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), an empty one among them, or
+one that names two numbers, in one line or across its lines. So is one that names one number more
+than once, `0, 0` or `0` in two lines, which RFC 9110 §8.6 lets a recipient either refuse or read as
+that number: every side refuses it, since not every platform's HTTP can read it (`docs/support.md`,
+"Leveled down"). A sign before its digits, `+0` or `-0`, is no digit: one platform's HTTP reads it
+as the number it writes, and serves the request (`docs/support.md`, "Differences").
 
 A request's `Content-Length` whose number passes 2⁶³ − 1, the largest signed 64-bit count, is
 answered alike: 400 unmarked over HTTP/1.1 and at a WebSocket's address, with none of the fields
 every response on the path carries, its connection closed once answered, and its stream reset
 `PROTOCOL_ERROR` over HTTP/2. It is judged before anything else of the request, whether a
 `Transfer-Encoding` comes beside it or not. Its number is its digits' decimal value, and its leading
-zeros count for nothing ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)):
-2⁶³ − 1 written in 23 digits is a length, and 2⁶³ so written is not. RFC 9110 §8.6 holds any such
-number valid and has a recipient guard against its overflow. A server may refuse content too large
-to process ([§17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5)), 413
-([§15.5.14](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.14)). Every side answers it as
+zeros count for nothing ([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)): 2⁶³ −
+1 written in 23 digits is a length, and 2⁶³ so written is not. RFC 9110 §8.6 holds any such number
+valid and has a recipient guard against its overflow, and
+[§17.5](https://www.rfc-editor.org/rfc/rfc9110#section-17.5) lets a server reject content too large,
+413 ([§15.5.14](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.14)). Every side answers it as
 HTTP's own all the same, since not every platform's HTTP lets a server read such a request
-(`docs/support.md`, "Leveled down").
+(`docs/support.md`, "Leveled down"). Three platforms answer otherwise (`docs/support.md`,
+"Differences"). One's HTTP/1.1 answers 2⁶⁴ − 2 and 2⁶⁴ − 1 with 431
+([RFC 6585 §5](https://www.rfc-editor.org/rfc/rfc6585#section-5)). One's HTTP/2 ends the session
+past 2⁶³ − 1, `GOAWAY` `PROTOCOL_ERROR`, as
+[RFC 9113 §5.4.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.1) lets an endpoint treat a
+stream error. And one's HTTP/2 resets the stream of a `Content-Length` of more than 19 digits
+whatever its number, so 2⁶³ − 1 so written is no length there.
 
-A request that carries a `Content-Length` beside a `Transfer-Encoding`, in either order and
-whatever its `Content-Length` holds, is answered alike, 400 unmarked over HTTP/1.1 and at a
-WebSocket's address, before anything else of it is judged, and its connection closes once
-answered: [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) asks that such a
-message be handled as an error, and [§6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1)
-lets a server refuse it and requires the close. So is a request whose `Transfer-Encoding` does not
-end in `chunked`, a `Content-Length` beside it or none, which
-[RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) item 4 makes HTTP's own
-refusal. So is a request whose `Transfer-Encoding` lists anything after its first `chunked`, in one
-line or across its lines. Another `chunked` is one a sender never applies
-([RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1)), and a recipient cannot
-tell whether a body that names it twice was coded twice. An empty element after it, which
-[RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2) has a recipient
-ignore, is refused alike, since not every platform's HTTP takes it (`docs/support.md`, "Leveled
-down"). So is a request whose `Transfer-Encoding` lists a coding before its `chunked`,
-`gzip, chunked` among them, in one line or across its lines. A server decodes no transfer coding
-but `chunked`, and would hand on a body still coded. An empty element before `chunked` is no
-coding, and is ignored ([RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2)).
+A request that carries a `Content-Length` beside a `Transfer-Encoding`, in either order and whatever
+its `Content-Length` holds, is answered alike, 400 unmarked over HTTP/1.1 and at a WebSocket's
+address, before anything else of it is judged, and its connection closes once answered:
+[RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) asks that such a message be
+handled as an error, and [§6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) lets a server
+refuse it and requires the close. So is a request whose `Transfer-Encoding` does not end in
+`chunked`, a `Content-Length` beside it or none, which
+[RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3) item 4 makes HTTP's own refusal.
+A coding's name is compared in any ASCII case
+([RFC 9112 §7](https://www.rfc-editor.org/rfc/rfc9112#section-7)): `Chunked` and `CHUNKED` are
+`chunked`, and `gzip, CHUNKED` lists a coding before its `chunked`. So is a request whose
+`Transfer-Encoding` lists anything after its first `chunked`, in one line or across its lines.
+Another `chunked` is one a sender never applies
+([RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1)), and a recipient cannot tell
+whether a body that names it twice was coded twice. An empty element after it, which
+[RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2) has a recipient ignore,
+is refused alike, since not every platform's HTTP takes it (`docs/support.md`, "Leveled down"). So
+is a request whose `Transfer-Encoding` lists a coding before its `chunked`, `gzip, chunked` among
+them, in one line or across its lines. A server decodes no transfer coding but `chunked`, and would
+hand on a body still coded. An empty element before `chunked` is no coding, and is ignored
+([RFC 9110 §5.6.1.2](https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2)).
 [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server answer a transfer
 coding it does not understand 501. A 501 is heuristically cacheable
 ([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), where a refusal of
 HTTP's own carries no `cache-control`, and not every platform's HTTP lets a server see a
 `Content-Length` beside such a field (`docs/support.md`, "Leveled down"). So every side refuses it
 400, as it refuses a final coding other than `chunked`. So is an HTTP/1.0 request that carries a
-`Transfer-Encoding`.
-[RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a server treat its framing
-as faulty and close its connection, since its sender may have passed on a chunked body it never
-decoded. A server may refuse it all the same, and the refusal reads none of that body. One
-platform's HTTP/1.1 reads a `Content-Length` beside a `Transfer-Encoding` by its
-`Transfer-Encoding` alone and closes, as §6.1 also allows (`docs/support.md`, "Differences").
+`Transfer-Encoding`. [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112#section-6.1) has a
+server treat its framing as faulty and close its connection, since its sender may have passed on a
+chunked body it never decoded. Every side answers it 400 unmarked, as it refuses a final coding
+other than `chunked`, and reads none of that body. One platform's HTTP/1.1 reads a `Content-Length`
+beside a `Transfer-Encoding` by its `Transfer-Encoding` alone and closes, as §6.1 also allows
+(`docs/support.md`, "Differences").
 
 Over HTTP/2, a request that carries a connection-specific field is malformed
 ([RFC 9113 §8.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.2)): a `connection`, a
-`proxy-connection`, a `keep-alive`, a `transfer-encoding`, a `content-length` beside it or none,
-or an `upgrade`, and a `te` whose value is not `trailers`. Its stream is reset `PROTOCOL_ERROR`, a
-stream error ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), before
-anything else of the request is judged. One platform's HTTP/2 ends the session of a `connection`
-or of such a `te` instead, `GOAWAY` `PROTOCOL_ERROR`, as
-[§5.4.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.1) lets an endpoint treat a stream
-error (`docs/support.md`, "Differences"). A `te` is compared as it comes: `trailers` in lower
-case is the one value taken.
-[RFC 9110 §10.1.4](https://www.rfc-editor.org/rfc/rfc9110#section-10.1.4) reads it in any case,
-and not every platform's HTTP/2 does (`docs/support.md`, "Leveled down").
+`proxy-connection`, a `keep-alive`, a `transfer-encoding`, whether a `content-length` comes beside
+it or not, or an `upgrade`, and a `te` whose value is not `trailers`. Its stream is reset
+`PROTOCOL_ERROR`, a stream error
+([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), before anything else of
+the request is judged. One platform's HTTP/2 ends the session of a `connection` or of such a `te`
+instead, `GOAWAY` `PROTOCOL_ERROR`, as
+[§5.4.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.4.1) lets an endpoint treat a stream error
+(`docs/support.md`, "Differences"). A `te` is compared as it comes: `trailers` in lower case is the
+one value taken. [RFC 9110 §10.1.4](https://www.rfc-editor.org/rfc/rfc9110#section-10.1.4) reads it
+in any case, and not every platform's HTTP/2 does (`docs/support.md`, "Leveled down").
 
 A request's field in more than one field line is read with its lines joined in their order by
 `, `, as [RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3) lets a recipient
