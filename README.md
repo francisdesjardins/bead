@@ -1267,14 +1267,16 @@ extension following the demo's client over it); `amqp` (on the runner's host, a 
 its digest, its heartbeat lowered, and a password and TLS certificates drawn for the run, with
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
-AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and
-`gateway` each alone, `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's
-target with `transcoding`, the documentation, a build on the default features alone,
-the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
-descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
+AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux
+and Windows (on Linux, the toolchain its file pins, format, a build on the default features alone,
+the interop's server and its trials' test binary built and handed on, and cargo-deny; on Windows,
+the tests), with three jobs beside it on Linux: `rust-lints` (clippy, the core's library linted
+with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and `gateway` each alone,
+`bead-protobuf`'s with `transcoding`, the core's clippy for the browser's target with
+`transcoding`, and the documentation), `rust-coverage` (the tests under coverage, `bead-house`'s
 holding each library crate's public surface to its list among them, lines and regions held to the
-side's floor, and the fuzz targets built on the nightly pinned by its date; on Windows, the tests); `interop-rust` (in the
+side's floor, and the tests' descriptor set held to what protoc writes at its pin) and `rust-fuzz`
+(the fuzz targets built on the nightly pinned by its date); `interop-rust` (in the
 Playwright image, once `rust` ends, with no Rust toolchain and `BEAD_INTEROP_REQUIRED=1`: the Rust
 client against each side's server, the TypeScript and C# clients against the Rust server, and a page
 of another origin in Chromium against every HTTP server, the Rust one among them); `builder`

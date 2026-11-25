@@ -419,18 +419,14 @@ jobs:
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
-  # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's library linted with no feature, with each socket transport's alone, with its MQTT 5
-  # binding's alone and with its gateway's two, and bead-protobuf's with its JSON mapping's alone,
-  # the core's lints on the browser's WebAssembly target, its transcoding among them, its
-  # documentation, a build on the default features alone, where what the test kit alone reaches is
-  # left out, its dependencies' advisories, licences, bans and sources, then its tests, bead-house's
-  # holding each library crate's public surface to its list, and its conformance players under
-  # coverage, lines and regions on the pinned stable, held to the side's floor in
-  # tools/coverage-floors.json; and its fuzz targets built on the nightly pinned by its date, never
-  # run. On Linux too, the interop's server and its trials' test binary, built once and handed to
-  # the interop-rust job. On Windows, its tests alone, as the user's MSVC toolchain builds them. The
-  # registry and the target are cached by the lock and the toolchain; every build is `--locked`.
+  # an error by its .cargo/config.toml, `[build] warnings = "deny"`. On Linux, its format, a build
+  # on the default features alone, where what the test kit alone reaches is left out, the interop's
+  # server and its trials' test binary, built once and handed to the interop-rust job, and its
+  # dependencies' advisories, licences, bans and sources; on Windows, its tests alone, as the user's
+  # MSVC toolchain builds them. Its lints and its documentation are rust-lints', its tests under
+  # coverage rust-coverage's, and its fuzz targets rust-fuzz's, each beside this job. The registry
+  # and the target are cached by the lock and the toolchain, each job's under a key of its own;
+  # every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
     needs: scope
@@ -448,14 +444,12 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
-      # ! the nightly of the fuzz build alone, by its date: tools/fuzz.mjs's RUST_NIGHTLY names the
-      # same, and both move together, by hand
-      NIGHTLY: nightly-2026-10-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # 1.99.1, its components, clippy, rustfmt and llvm-tools, and its target
       # wasm32-unknown-unknown, as rust-toolchain.toml names them
       - run: rustup toolchain install
+      # ! the key the mqtt job restores on Linux: the debug build and the interop's server it reuses
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -465,46 +459,13 @@ jobs:
           restore-keys: rust-${{ matrix.os }}-
       - if: matrix.os == 'windows-2025'
         run: cargo test --workspace --all-features --locked
-      # cargo-deny's and cargo-llvm-cov's prebuilt releases, each checked by its SHA-256 against
-      # the action's manifest
+      # cargo-deny's prebuilt release, checked by its SHA-256 against the action's manifest
       - if: matrix.os == 'ubuntu-26.04'
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
-          tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.1
+          tool: cargo-deny@0.20.2
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo fmt --all -- --check
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy --workspace --all-targets --all-features --locked
-      # each member on its default features too, where what a feature alone builds is left out
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy --workspace --all-targets --locked
-      # the core's library linted with no feature, then with each socket transport's alone, with
-      # its MQTT 5 binding's alone, and with its gateway's routes alone, then its gateway whole, and
-      # bead-protobuf's with its JSON mapping alone, so that each builds on its own (decisions 0049,
-      # 0050, 0052)
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
-      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
-      # by its features, its transcoding among them, no socket, which mio refuses there, nor its
-      # gateway, which listens on one: what it links builds there, its spawning and its time through
-      # crate::platform and the clock alone; getrandom's backend for the target is
-      # .cargo/config.toml's
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo build --workspace --locked
@@ -544,52 +505,139 @@ jobs:
         run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
-      # the tests under instrumentation, every test binary's profile merged into one LLVM export,
+
+  # The Rust side's lints, by its workspace's `[lints]` table: clippy over every member and target
+  # with every feature, then on each member's default features; the core's library with no
+  # feature, then with each socket transport's alone, with its MQTT 5 binding's alone, and with its
+  # gateway's routes alone, then its gateway whole, and bead-protobuf's with its JSON mapping alone,
+  # so that each builds on its own (decisions 0049, 0050, 0052); the core on the browser's
+  # WebAssembly; then its documentation.
+  rust-lints:
+    name: Rust's lints
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: implementations/rust
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 1.99.1, its components and its target wasm32-unknown-unknown, as rust-toolchain.toml names
+      # them
+      - run: rustup toolchain install
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/target
+          key: rust-lints-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-lints-ubuntu-26.04-
+      - run: cargo clippy --workspace --all-targets --all-features --locked
+      # each member on its default features too, where what a feature alone builds is left out
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+      - run: cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+      - run: cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
+      # by its features, its transcoding among them, no socket, which mio refuses there, nor its
+      # gateway, which listens on one: what it links builds there, its spawning and its time through
+      # crate::platform and the clock alone; getrandom's backend for the target is
+      # .cargo/config.toml's
+      - run: cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
+      - run: cargo doc --workspace --no-deps --all-features --locked
+
+  # The Rust side's tests under instrumentation, bead-house's holding each library crate's public
+  # surface to its list and the conformance players among them, every test binary's profile merged
+  # into one LLVM export: lines and regions on the pinned stable, held to the side's floor in
+  # tools/coverage-floors.json. Then the tests' descriptor set, held to what protoc writes at its
+  # pin.
+  rust-coverage:
+    name: Rust's coverage
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: implementations/rust
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install
+      # the instrumented build, under target/llvm-cov-target
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/target
+          key: rust-coverage-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-coverage-ubuntu-26.04-
+      # cargo-llvm-cov's prebuilt release, checked by its SHA-256 against the action's manifest
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-llvm-cov@0.9.1
       # the unit tests, a module's tests.rs and its tests/ folder, the test kit, the code beadc
-      # writes, under a generated/ folder, and the goldens' crate that compiles it left out; then
-      # what they ran held to the Rust side's floor
-      - if: matrix.os == 'ubuntu-26.04'
-        run: >-
+      # writes, under a generated/ folder, and the goldens' crate that compiles it left out of the
+      # export
+      - run: >-
           cargo llvm-cov --workspace --all-features --locked --json --summary-only
           --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$'
           --output-path coverage/rust.json
-      - if: matrix.os == 'ubuntu-26.04'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # the set the tests' proto messages are generated from, as protoc writes it at its pin, which
-      # builder/tools/fetch-protoc.mjs fetches and checks by its sha256
-      - if: matrix.os == 'ubuntu-26.04'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: builder/.protoc
-          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
-      - if: matrix.os == 'ubuntu-26.04'
-        name: The tests' descriptor set
-        run: node tools/check-protobuf.mjs
-      - if: matrix.os == 'ubuntu-26.04'
-        name: Coverage, held to its floor
+      - name: Coverage, held to its floor
         run: >-
           node ../../tools/coverage-report.mjs coverage/rust.json
           --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src
           --floor rust --summary "$GITHUB_STEP_SUMMARY"
       # the export, kept with the run where it failed, the floor among it: a green run's figures are
       # its summary's
-      - if: ${{ failure() && matrix.os == 'ubuntu-26.04' }}
+      - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-rust
           path: implementations/rust/coverage/rust.json
           retention-days: 14
-      # the fuzz targets, built on the nightly their sanitizer needs, never run: cargo-fuzz from its
-      # source on crates.io, by its lock, since the action's manifest has no prebuilt release of it
-      - if: matrix.os == 'ubuntu-26.04'
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo +"$NIGHTLY" install cargo-fuzz --version 0.13.2 --locked
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo +"$NIGHTLY" fuzz build
+      # the set the tests' proto messages are generated from, as protoc writes it at its pin, which
+      # builder/tools/fetch-protoc.mjs fetches and checks by its sha256
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      - name: The tests' descriptor set
+        run: node tools/check-protobuf.mjs
+
+  # The Rust side's fuzz targets, built on the nightly their sanitizer needs, never run: cargo-fuzz
+  # from its source on crates.io, by its lock, since install-action's manifest has no prebuilt
+  # release of it. The targets' workspace is their own, its target uncached.
+  rust-fuzz:
+    name: Rust's fuzz targets
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
         working-directory: implementations/rust/fuzz
+    env:
+      CARGO_TERM_COLOR: always
+      # ! the nightly of the fuzz build alone, by its date: tools/fuzz.mjs's RUST_NIGHTLY names the
+      # same, and both move together, by hand
+      NIGHTLY: nightly-2026-10-27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - run: cargo +"$NIGHTLY" install cargo-fuzz --version 0.13.2 --locked
+      - run: cargo +"$NIGHTLY" fuzz build
         env:
           # a newer compiler's warnings are no gate of the pinned one's
           CARGO_BUILD_WARNINGS: warn
@@ -1479,6 +1527,9 @@ jobs:
         typescript-coverage,
         dotnet,
         rust,
+        rust-lints,
+        rust-coverage,
+        rust-fuzz,
         interop-rust,
         mqtt,
         amqp,
