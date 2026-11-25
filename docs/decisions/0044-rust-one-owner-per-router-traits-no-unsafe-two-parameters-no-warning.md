@@ -507,7 +507,8 @@ refusal: answered `PROCEDURE_FAILED` with no detail and reported, as every side 
 throws other than its refusal (spec 9.0, 17.2). Its panic as it reads a result fails the call here,
 undecodable; as it writes, the call fails with its throw and nothing goes. A rule's panic is its
 error: at a resolver, answered `PROCEDURE_FAILED` and reported `a rule panicked: …`; at a requester,
-its call failed before anything goes. A hook's panic fails its own call; a `send`'s is the
+its call failed before anything goes. A hook's panic fails its own call, and cancels it
+once its request went (spec 10.1), its hook told nothing more; a `send`'s is the
 transport's error, the send undone and reported, as the other sides' writers take a `send` that
 throws. **A panic past those sites**, within a turn — a custom clock's, say — leaves the owner's
 state half changed with nothing to undo it: the owner ends at once, each call it waits on failed

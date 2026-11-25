@@ -499,10 +499,13 @@ connection closed, or once a new request opened its call id again, the answer MU
 would settle a call it does not belong to.
 
 9.5. A resolver that fails before it answers MUST still answer, with `PROCEDURE_FAILED`, so its
-requester does not wait out its timeout. A payload its procedure cannot read (section 17) is
-answered with `PAYLOAD_UNDECODABLE`, and one that reads and breaks its procedure's rules
-(section 18) with `PAYLOAD_INVALID`, before the resolver sees either. A procedure's own failure is
-an application failure, with a code from 1 to 65,535 of the procedure's own numbering.
+requester does not wait out its timeout. A resolver that throws as it is called fails as one whose
+failure comes later: its failure is reported, and answered, in a later turn than that call, so
+resolvers that fail are reported in the order their failures come. A payload its procedure cannot
+read (section 17) is answered with `PAYLOAD_UNDECODABLE`, and one that reads and breaks its
+procedure's rules (section 18) with `PAYLOAD_INVALID`, before the resolver sees either. A
+procedure's own failure is an application failure, with a code from 1 to 65,535 of the procedure's
+own numbering.
 
 9.6. What does not read goes through one gate. A side MUST:
 
@@ -1427,14 +1430,15 @@ HTTP connection carries a credential per `POST`, so its connect's is read by no 
 a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
 a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
 `DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
-given, and none otherwise. It asks for one credential at a time of each source, a provider known
-by its reference: an attempt whose source's earlier ask is unsettled waits for it, within its own
-time (section 15.15), then asks anew, that earlier answer serving no later attempt; another source
-is asked at once; an ask that never settles holds every later attempt that would ask its source,
-so a provider honours the signal it is asked with; it fails that upgrade before it goes for one that
-is no field value, as section 15.5 says, and for one over a WebSocket that leaves the machine in the
-clear (section 13.4), its upgrade being where it would cross. No server reads a credential from its
-target's query, which logs keep
+given, and none otherwise. A client asks its credential's provider outside its application's call
+that starts the connect, never within it. It asks for one credential at a time of each source, a
+provider known by its reference: an attempt whose source's earlier ask is unsettled waits for it,
+within its own time (section 15.15), then asks anew, that earlier answer serving no later attempt;
+another source is asked at once; an ask that never settles holds every later attempt that would ask
+its source, so a provider honours the signal it is asked with; it fails that upgrade before it goes
+for one that is no field value, as section 15.5 says, and for one over a WebSocket that leaves the
+machine in the clear (section 13.4), its upgrade being where it would cross. No server reads a
+credential from its target's query, which logs keep
 ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from a cookie, which a page's
 browser sends on its own, or from a subprotocol. A client writes no `Origin` on its upgrade: a
 page's browser writes its own, which the server judges (step 7). A server judges a request at its
@@ -1507,12 +1511,13 @@ end — frames each counting, an empty one among them, fails it with 1008
 [RFC 6455 §5.2](https://www.rfc-editor.org/rfc/rfc6455#section-5.2), §5.4 or §5.5 fails it
 with 1002, but for a data frame's length not in its minimal form, which a side takes as every
 platform's reader takes it. A control frame's length is read in its 7 bits alone, so one written in
-a longer form fails with 1002 whatever its value (§5.2, §5.5). Each closes the connection and is
-reported as a 1009 is. What a read brings before the frame so judged is read as it would be, and
-charged (section 15.12); nothing from that frame on is. A verdict drawn behind what a read handed
-on takes effect once that is read, even while its router pauses the connection: what the pause
-holds is dropped, as on any failure. A page's `WebSocket` fails a message as its browser does. A
-text message that is not UTF-8 fails the connection with 1007
+a longer form fails with 1002 whatever its value (§5.2, §5.5). Each such verdict is drawn at the
+byte that breaks its head: a 64-bit length's top bit at that length's first byte. Each closes the
+connection and is reported as a 1009 is. What a read brings before the frame so judged is read as
+it would be, and charged (section 15.12); nothing from that frame on is. A verdict drawn behind
+what a read handed on takes effect once that is read, even while its router pauses the connection:
+what the pause holds is dropped, as on any failure. A page's `WebSocket` fails a message as its
+browser does. A text message that is not UTF-8 fails the connection with 1007
 ([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
 (section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
@@ -1814,7 +1819,8 @@ that stops. So, beyond one read of its socket or one batch, no connection's enve
 more than these bounds of another's on a transport that hands many in one step, and a peer over a
 socket is paced by its transport's own window
 ([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)); over HTTP, a paused
-connection's bodies hold `bodyBytesBudget` until handed on, as a slow body holds it.
+connection's bodies hold `bodyBytesBudget` until handed on, as a slow body holds it. A request held
+so, whose exchange an answer ends before its hand-on, is answered with it and never handed on.
 
 A request whose head does not come whole within `headersTimeout` is answered 408, as HTTP answers
 it, unmarked, its connection closed
@@ -2181,12 +2187,14 @@ browser, a client of another library, or one over a dialer it does not own.
 connect draws a connection on its server's side, its handle's type `MEMORY` (section 15.1), handed
 with the address and the port its client gave as it connected, or `local` and none. Each envelope
 is copied as it is sent, and handed on whole, once, in the order it was sent, in a later turn than
-its send, never within it. It carries the credential a client hands with a request beside it, any
-field value (section 15.5), and none toward a client: a server's command that presents `ELSEWHERE`
-over it fails before it goes, `DESTINATION_UNREACHABLE` (section 13.4). It never leaves the
-process, so both its ends are secure. It carries transfers under its routers' limits, and holds no
-bound, heartbeat or timeout of its own. Either end closes a connection, its other end told in a
-later turn, the close clean at the end that closed it. A server's transport that stops closes every
+its send, never within it. What its server sends as it draws a connection is handed on once that
+connection opens, before its connect settles, unless its router paused the connection, which holds
+it (section 15.12). It carries the credential a client hands with a request beside it, any field
+value (section 15.5), and none toward a client: a server's command that presents `ELSEWHERE` over it
+fails before it goes, `DESTINATION_UNREACHABLE` (section 13.4). It never leaves the process, so both
+its ends are secure. It carries transfers under its routers' limits, and holds no bound, heartbeat
+or timeout of its own. Either end closes a connection, its other end told in a later turn, the close
+clean at the end that closed it. A server's transport that stops closes every
 connection it holds and takes no connect; a client's connect then fails before anything goes.
 
 ### Joined
@@ -2513,15 +2521,16 @@ outcome came, a SUBSCRIBE or a PUBLISH of QoS 1 sent, or a PUBLISH of QoS 0 not 
 (section 15.28), loses its link, no DISCONNECT, since what was asked may take effect yet, and what
 else that link awaits fails with it; a publication given up while it waits on the Receive Maximum
 leaves unsent, its link kept. Its password is one its adapter is given, or one a provider it is
-given answers, asked anew at each link's start before its network connection opens, under that
-start's signal and its stop, and within the same `connectTimeout`: an ask that outlives it, or that
-a stop meets, fails that start whether or not its provider hears its signal, a later answer serving
-nothing, and its provider's signal is aborted once that start ends, linked or not. A password is
-UTF-8 text, never empty and holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled
-down"): its adapter is refused as it is built given one that is not, a password and a provider both,
-or either beside a TLS client certificate, and its start fails on a provider's answer that is not.
-Its Keep Alive in force is the shorter of its CONNECT's Keep Alive and its CONNACK's Server Keep
-Alive, its CONNECT's where its CONNACK names none or 0: a client may send a PINGREQ at any time, and
+given answers, asked anew at each link's start, outside its application's call to start, before its
+network connection opens, under that start's signal and its stop, and within the same
+`connectTimeout`: an ask that outlives it, or that a stop meets, fails that start whether or not its
+provider hears its signal, a later answer serving nothing, and its provider's signal is aborted once
+that start ends, linked or not. A password is UTF-8 text, never empty and holding no NUL
+([`docs/support.md`](../docs/support.md), "Leveled down"): its adapter is refused as it is built
+given one that is not, a password and a provider both, or either beside a TLS client certificate,
+and its start fails on a provider's answer that is not. Its Keep Alive in force is the shorter of
+its CONNECT's Keep Alive and its CONNACK's Server Keep Alive, its CONNECT's where its CONNACK names
+none or 0: a client may send a PINGREQ at any time, and
 one that sends within the shorter never passes the Server Keep Alive it uses ([MQTT-3.1.2-21],
 [MQTT-3.2.2-21],
 [MQTT 5.0 §3.1.2.10](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). It sends a
