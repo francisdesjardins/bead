@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1215,25 +1216,36 @@ async fn bounds_an_unresponsive_websocket_handshake_by_cancellation_timeout_and_
     }
 }
 
-// spec 15.15
-#[tokio::test]
-async fn defers_its_credential_provider_until_after_connect_returns() {
+// spec 15.2: on threads of their own, the provider is asked outside the application's call to
+// connect, which a mark of that call's own thread shows
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_its_credential_provider_outside_the_call_to_connect_before_the_connect_settles() {
+    thread_local! {
+        // whether the application's call to connect runs on this thread
+        static IS_CALLING: Cell<bool> = const { Cell::new(false) };
+    }
+
     let server = hearing(None).await;
     let client = client();
-    let called = Arc::new(AtomicBool::new(false));
-    let calling = Arc::clone(&called);
+    let asked: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let asking = Arc::clone(&asked);
+
+    IS_CALLING.set(true);
+
     let connecting = client.connect(&WebSocketTransportClientConnectOptions {
         credential_provider: Some(Arc::new(move |_signal| {
-            calling.store(true, Ordering::SeqCst);
+            locked(&asking).push(IS_CALLING.get());
 
             Box::pin(async { Ok(BEARER.to_owned()) })
         })),
         ..to(server.port)
     });
 
-    assert!(!called.load(Ordering::SeqCst), "not called within connect");
+    IS_CALLING.set(false);
     settled(connecting).await.unwrap();
-    assert!(called.load(Ordering::SeqCst), "called");
+
+    // read once the connect settled: a provider not asked yet would pass a read before it
+    assert_eq!(*locked(&asked), [false], "asked once, outside");
     assert!(is_state(&client, ReadyState::Open), "open");
     client.dispose();
 }

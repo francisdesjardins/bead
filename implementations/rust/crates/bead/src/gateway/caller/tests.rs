@@ -957,6 +957,9 @@ async fn reads_raw_event_data_in_standard_padded_base64_alone_and_bounds_each_ev
     let scripted = Scripted::new(vec![
         stream_answer_of("event: result\ndata: \"AAE=\"\n\ndata: \"AAE\"\n\n"),
         stream_answer_of("event: result\ndata: \"%%\"\n\n"),
+        stream_answer_of("event: result\ndata: \"AAF=\"\n\n"),
+        stream_answer_of("event: result\ndata: \"A AE=\"\n\n"),
+        stream_answer_of("event: result\ndata: \"AA-_\"\n\n"),
         stream_answer_of(
             "event: result\ndata: \"AAE=\"\n\ndata: \"0123456789012345678901234567\"\n\n",
         ),
@@ -991,13 +994,18 @@ async fn reads_raw_event_data_in_standard_padded_base64_alone_and_bounds_each_ev
         "base64 not in its standard padded form"
     );
 
-    let malformed = read(subscriber.call(&Bytes::new(), &options)).await;
+    // * what is no base64, base64 of nonzero unused bits, of a space, or of the URL's alphabet:
+    // none in its standard padded form
+    for refused in ["%%", "AAF=", "A AE=", "AA-_"] {
+        let malformed = read(subscriber.call(&Bytes::new(), &options)).await;
 
-    assert_eq!(
-        failure_of_error(malformed[0].clone().expect_err("no base64")).detail(),
-        UNDECODABLE,
-        "what is no base64"
-    );
+        assert_eq!(malformed.len(), 1, "{refused}: its failure alone");
+        assert_eq!(
+            failure_of_error(malformed[0].clone().expect_err("no padded base64")).detail(),
+            "an HTTP raw event holds standard padded base64",
+            "{refused}"
+        );
+    }
 
     let large = read(subscriber.call(&Bytes::new(), &options)).await;
 

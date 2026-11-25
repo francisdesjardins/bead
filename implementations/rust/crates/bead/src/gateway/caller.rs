@@ -918,28 +918,6 @@ fn value_of<C: PayloadCodec>(
     Ok(value)
 }
 
-// whether `text` is base64 a forgiving reader takes (the HTML Standard's forgiving-base64 decode),
-// though not in its standard padded form
-fn is_forgiving_base64(text: &str) -> bool {
-    let mut kept: Vec<u8> = text
-        .bytes()
-        .filter(|byte| !matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' '))
-        .collect();
-
-    if kept.len().is_multiple_of(4) {
-        for _ in 0..2 {
-            if kept.last() == Some(&b'=') {
-                kept.pop();
-            }
-        }
-    }
-
-    kept.len() % 4 != 1
-        && kept
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/')
-}
-
 // an event's value: a `text` or `raw` payload's data one JSON string, its text or its bytes in
 // base64; any other's its JSON text (transcoding 12.5)
 fn event_value_of<C: PayloadCodec>(
@@ -961,14 +939,12 @@ fn event_value_of<C: PayloadCodec>(
                 return value_of(codec, (payload, Bytes::from(text)));
             }
 
-            match bytes_of_base64(&text) {
-                Some(raw) => value_of(codec, (payload, Bytes::from(raw))),
-                None if is_forgiving_base64(&text) => Err(undecodable(
-                    "an HTTP raw event holds standard padded base64",
-                    None,
-                )),
-                None => Err(undecodable(UNDECODABLE, None)),
-            }
+            // * any text but standard padded base64 (RFC 4648 §4) fails alike
+            let raw = bytes_of_base64(&text).ok_or_else(|| {
+                undecodable("an HTTP raw event holds standard padded base64", None)
+            })?;
+
+            value_of(codec, (payload, Bytes::from(raw)))
         }
         HttpPayload::Json | HttpPayload::Message(_) => {
             value_of(codec, (payload, Bytes::from(data)))

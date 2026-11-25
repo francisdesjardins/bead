@@ -6,14 +6,16 @@
 use core::fmt;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use bytes::Bytes;
+use tokio_util::sync::CancellationToken;
 
 use super::server::{first, request_of};
 use super::{Handed, Scripted, answer, keeping, locked, request_of as call_of, result_of};
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
+use crate::constants::EnvelopeKind;
 use crate::errors::CallError;
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::types::{RouterAnswer, RouterError, RouterRequest};
@@ -51,11 +53,26 @@ fn call(scripted: &Scripted) -> crate::router::server::Call {
 }
 
 // decision 0044: a hook is the application's code its router calls within its turn; what it panics
-// fails its own call, as a hook that throws rejects its call on the TypeScript side, and nothing
-// of it goes out
+// fails its own call, as a hook that throws rejects its call on the TypeScript side: a call-id hook's
+// before anything of it goes, a hand-off hook's as a timeout ends its call, the peer told to cancel
+// it; a hook is told its send refused only while its call waits
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a twin plays its sentence whole, as the other sides' twins do"
+)]
 async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next() {
     let scripted = Scripted::new();
+    let pending = async || {
+        scripted
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts
+            .get("pendingCalls")
+            .copied()
+    };
     let broken = call_with(&scripted, |request| {
         request.on_call_id = Some(Box::new(|_call_id| {
             panic!("this hook breaks, on purpose");
@@ -73,9 +90,13 @@ async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
         scripted.transport.envelopes().is_empty(),
         "nothing of it went out"
     );
+    assert_eq!(pending().await, Some(0), "nothing of the call is kept");
 
+    let told: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let telling = Arc::clone(&told);
     let handed = call_with(&scripted, |request| {
-        request.on_sent = Some(Box::new(|_is_sent| {
+        request.on_sent = Some(Box::new(move |is_sent| {
+            locked(&telling).push(is_sent);
             panic!("this hook breaks too");
         }));
     });
@@ -87,6 +108,90 @@ async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
         "other: a hook panicked: this hook breaks too",
         "a call whose hand-off hook panics fails alike"
     );
+
+    let (kind, call_id) = scripted.transport.calls()[0];
+
+    assert_eq!(
+        scripted.transport.calls(),
+        [(kind, call_id), (EnvelopeKind::Cancel, call_id)],
+        "gone out, then ended by its hook as a timeout ends it: the peer told to cancel it"
+    );
+    assert_eq!(kind, EnvelopeKind::Request);
+    assert_eq!(*locked(&told), [true]);
+    assert_eq!(pending().await, Some(0), "the call forgotten");
+
+    // a hook that panics as its transport then refuses the send: told nothing more, the call failed
+    // by the hook's panic
+    let released = CancellationToken::new();
+
+    scripted.transport.send_as(Sending::Waiting {
+        released: released.clone(),
+        outcome: Err(RouterError::Other(Arc::new(std::io::Error::other(
+            "the transport refuses it",
+        )))),
+    });
+    locked(&told).clear();
+
+    let telling = Arc::clone(&told);
+    let transport = Arc::clone(&scripted.transport);
+    let refused = call_with(&scripted, |request| {
+        request.on_sent = Some(Box::new(move |is_sent| {
+            locked(&telling).push(is_sent);
+            // the request's send held, to be refused; the cancel's taken
+            transport.send_as(Sending::Taken);
+            panic!("this hook breaks, on purpose");
+        }));
+    });
+
+    scripted.settle().await;
+
+    let (_, call_id) = scripted.transport.calls()[2];
+
+    assert_eq!(
+        scripted.transport.calls()[2..],
+        [
+            (EnvelopeKind::Request, call_id),
+            (EnvelopeKind::Cancel, call_id)
+        ],
+        "gone out, then cancelled"
+    );
+
+    released.cancel();
+    scripted.settle().await;
+
+    assert_eq!(*locked(&told), [true], "told nothing more");
+    assert_eq!(
+        said(&super::answered(refused).await),
+        "other: a hook panicked: this hook breaks, on purpose",
+        "the call failed by the hook's panic"
+    );
+
+    // a hook told its send refused while its call waits, that panics: its panic is the call's
+    // failure
+    scripted
+        .transport
+        .send_as(Sending::Rejected("the transport refuses it".to_owned()));
+    locked(&told).clear();
+
+    let telling = Arc::clone(&told);
+    let thrown = call_with(&scripted, |request| {
+        request.on_sent = Some(Box::new(move |is_sent| {
+            locked(&telling).push(is_sent);
+
+            assert!(is_sent, "this hook breaks, on purpose");
+        }));
+    });
+
+    scripted.settle().await;
+
+    assert_eq!(
+        said(&super::answered(thrown).await),
+        "other: a hook panicked: this hook breaks, on purpose",
+        "the hook's panic is the call's failure"
+    );
+    assert_eq!(*locked(&told), [true, false]);
+
+    scripted.transport.send_as(Sending::Taken);
 
     let next = call(&scripted);
 
@@ -101,7 +206,11 @@ async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
         "answered",
         "the router answers the next"
     );
-    assert!(scripted.codes().is_empty(), "nothing reported");
+    assert!(
+        scripted.codes().is_empty(),
+        "nothing reported: {:?}",
+        scripted.codes()
+    );
 }
 
 // spec 15.1, decision 0044: a send that panics is the transport's throw, as the other sides'
@@ -277,7 +386,7 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
         Arc::<ScriptedClient>::clone(&transport);
     let router =
         RouterClient::new(carried, &RouterClientOptions::default()).expect("a router built");
-    let reported: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let reported: Arc<Mutex<Vec<String>>> = Arc::default();
     let hearing = Arc::clone(&reported);
 
     router.on_error(Arc::new(move |error: &RouterError| {

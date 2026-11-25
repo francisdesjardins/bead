@@ -3,6 +3,7 @@
 //! `BEAD_MQTT_URL` names. The TypeScript side's `createMqttBrokerAdapter` tests and the C# side's
 //! `MqttBrokerAdapterTests` play the same sentences.
 
+use core::cell::Cell;
 use core::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -2876,7 +2877,7 @@ async fn hands_each_message_on_before_its_puback_which_goes_once_it_is_settled_a
         },
         "its PUBACK of 0x00"
     );
-    until(|| adapter.unsettled() == 0).await;
+    // read once the broker holds the PUBACK, which its owner writes after it lowered the count
     assert_eq!(adapter.unsettled(), 0, "settled");
     rest(Duration::from_millis(50)).await;
     assert_eq!(link.of(Kind::Puback).len(), 1, "once");
@@ -2892,6 +2893,46 @@ async fn hands_each_message_on_before_its_puback_which_goes_once_it_is_settled_a
     heard.messages()[1].settle();
     assert_eq!(heard.messages()[1].payload().as_ref(), [8], "its payload");
     assert_eq!(adapter.unsettled(), 0, "nothing to acknowledge");
+    adapter.stop().await;
+}
+
+// spec 15.29, decision 0044: a settle offers its PUBACK to its owner, which writes every write of
+// a link; the count falls in that owner's turn, so a read in the settle's own turn still counts it,
+// where the other sides read 0 (a platform row of the support matrix)
+#[tokio::test]
+async fn reads_one_unsettled_in_its_settle_s_own_turn_and_none_once_its_owner_wrote_the_puback() {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+    link.send(publish(&Publish {
+        topic: "bead/i/ada".to_owned(),
+        identifier: Some(5),
+        payload: vec![1],
+        ..Publish::default()
+    }));
+    until(|| !heard.messages().is_empty()).await;
+    heard.messages()[0].settle();
+
+    assert_eq!(
+        adapter.unsettled(),
+        1,
+        "counted still, in the settle's own turn"
+    );
+    assert_eq!(
+        link.next(Some(Kind::Puback), PATIENCE).await.unwrap(),
+        Scripted::Puback {
+            identifier: 5,
+            reason: 0,
+        },
+        "its PUBACK, its owner's turn run"
+    );
+    assert_eq!(
+        adapter.unsettled(),
+        0,
+        "none, once the broker holds its PUBACK"
+    );
     adapter.stop().await;
 }
 
@@ -4237,6 +4278,44 @@ async fn gives_up_a_start_a_subscription_or_a_publication_its_signal_aborts_a_pu
 }
 
 // ── Its password ─────────────────────────────────────────────────────────────────────────────
+
+// spec 15.26: on threads of their own, the provider is asked outside the application's call to
+// start, which a mark of that call's own thread shows
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_its_password_provider_outside_the_call_to_start_before_the_start_settles() {
+    thread_local! {
+        // whether the application's call to start runs on this thread
+        static IS_CALLING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    let script = script().await;
+    let asked: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let asking = Arc::clone(&asked);
+    let mut options = MqttBrokerAdapterOptions::new(script.url(), ID);
+
+    options.password_provider = Some(provider_of(move |_signal| {
+        asking.lock().unwrap().push(IS_CALLING.get());
+
+        Box::pin(async { Ok(PASSWORD.to_owned()) })
+    }));
+
+    let adapter = adapter_of(&options);
+
+    IS_CALLING.set(true);
+
+    let starting = adapter.start(BrokerStart::default());
+
+    IS_CALLING.set(false);
+
+    let link = script.link(PATIENCE).await.unwrap();
+
+    link.send(connack(&Connack::default()));
+    starting.await.unwrap();
+
+    // read once the start settled: a provider not asked yet would pass a read before it
+    assert_eq!(*asked.lock().unwrap(), [false], "asked once, outside");
+    adapter.stop().await;
+}
 
 #[tokio::test]
 async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()

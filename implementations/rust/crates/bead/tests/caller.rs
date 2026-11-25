@@ -1336,6 +1336,13 @@ async fn refuses_non_string_and_noncanonical_raw_event_data_and_releases_its_rea
     for (data, detail) in [
         ("null", "an HTTP text or raw event holds a JSON string"),
         ("\"AB==\"", "an HTTP raw event holds standard padded base64"),
+        ("\"%%\"", "an HTTP raw event holds standard padded base64"),
+        ("\"AAF=\"", "an HTTP raw event holds standard padded base64"),
+        (
+            "\"A AE=\"",
+            "an HTTP raw event holds standard padded base64",
+        ),
+        ("\"AA-_\"", "an HTTP raw event holds standard padded base64"),
     ] {
         let body = format!("event: result\ndata: {data}\n\n");
         let held = Held::new(("200 OK", "text/event-stream"), (body.as_bytes(), 1)).await;

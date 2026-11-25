@@ -38,9 +38,9 @@ use crate::http::wire::{AnswerBody, Answered, Cut, Flow, Malformed, WireOptions,
 use crate::http_policy::HttpPolicy;
 use crate::identity::Procedure;
 use crate::judgement::hosts::{
-    TakenOrigins, assert_hosts, assert_origins, credential_of, has_visible_fields,
-    is_listed_origin, is_taken_host, is_taken_origin, is_visible_target, own_authority_of,
-    request_target_of,
+    TakenOrigins, assert_hosts, assert_listening_address, assert_origins, credential_of,
+    has_visible_fields, is_listed_origin, is_taken_host, is_taken_origin, is_visible_target,
+    own_authority_of, request_target_of,
 };
 use crate::judgement::proxies::{
     ClientAddressOptions, TrustedProxies, client_address_of, trusted_proxies_of,
@@ -53,6 +53,7 @@ use crate::net::bounds::{
     HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPaceOptions, hold_count,
 };
 use crate::net::listening::{Acceptance, Bound, Listening, accepting, bind, io_error};
+use crate::net::loopbacks::LOCALHOST;
 use crate::net::tls::serving_config_of;
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::platform::{self, Handle};
@@ -474,6 +475,10 @@ struct Inner {
     clock: SharedClock,
     settings: Settings,
     state: Mutex<GatewayState>,
+    // ! held by a start from its judgement to its listeners' entry, and taken first by a stop: a
+    // stop on another thread comes wholly before a start or wholly after it, and the state's lock
+    // is never held across a bind
+    starting: Mutex<()>,
     listeners: Listened<GatewayErrorListener>,
     // the bytes of body the exchanges under way hold
     budget: Arc<AtomicU64>,
@@ -2361,6 +2366,7 @@ impl Inner {
     // its stop's body: no listener from now, every exchange under way ended, each socket ended
     // once what it answers went
     fn stopping(&self) -> BoxFuture<Result<(), RouterError>> {
+        let starting = locked(&self.starting);
         let mut state = locked(&self.state);
 
         state.is_listening = false;
@@ -2370,6 +2376,7 @@ impl Inner {
         let flows: Vec<Arc<Flow>> = state.flows.values().cloned().collect();
 
         drop(state);
+        drop(starting);
 
         for listener in &listening {
             listener.let_go();
@@ -2890,6 +2897,7 @@ impl HttpGateway {
                 clock,
                 settings,
                 state: Mutex::new(GatewayState::default()),
+                starting: Mutex::new(()),
                 listeners: Listened::default(),
                 budget: Arc::new(AtomicU64::new(0)),
             }),
@@ -2901,9 +2909,10 @@ impl HttpGateway {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] once it is disposed; a second start while it listens; an address that
-    /// is no bare IP address nor `localhost`; a start its signal gave up; what the platform refuses
-    /// the bind with. Each but the first two leaves it ready to start again.
+    /// A [`ProgrammerError`] once it is disposed, then for an address that is no bare IP address nor
+    /// `localhost`, then for a second start while it listens, judged in that order; a start its
+    /// signal gave up; what the platform refuses the bind with. Each but the first and the third
+    /// leaves it ready to start again.
     pub fn start(
         &self,
         options: &HttpGatewayStartOptions,
@@ -2914,11 +2923,20 @@ impl HttpGateway {
             Box::pin(async move { Err(error) })
         };
 
+        let starting = locked(&self.inner.starting);
+
+        // * its disposal judged first, then its address, then whether it listens
         {
             let mut state = locked(&self.inner.state);
 
             if state.is_disposed {
                 return refused("the gateway is disposed");
+            }
+
+            if let Err(error) =
+                assert_listening_address(options.address.as_deref().unwrap_or(LOCALHOST))
+            {
+                return Box::pin(async move { Err(RouterError::Other(Arc::new(error))) });
             }
 
             if state.is_listening {
@@ -2941,6 +2959,8 @@ impl HttpGateway {
         if listened.is_err() {
             locked(&self.inner.state).is_listening = false;
         }
+
+        drop(starting);
 
         Box::pin(async move { listened })
     }

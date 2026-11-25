@@ -436,7 +436,9 @@ impl MqttBrokerAdapter {
         self.shared.is_linked.load(Ordering::SeqCst)
     }
 
-    /// The messages it handed its participant at least once that are not acknowledged yet.
+    /// The messages it handed its participant at least once that are not acknowledged yet. It falls
+    /// as its acknowledgement goes: in its owner's next turn after the settle, which writes its
+    /// PUBACK, so a read in the settle's own turn still counts it.
     #[must_use]
     pub fn unsettled(&self) -> u64 {
         self.shared.unsettled.load(Ordering::SeqCst)
