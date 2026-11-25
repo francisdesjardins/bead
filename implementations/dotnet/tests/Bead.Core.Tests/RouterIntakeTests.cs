@@ -40,6 +40,73 @@ public sealed class RouterIntakeTests
 
     // definition
 
+    [Fact]
+    public void Pauses_a_connection_once_what_it_handed_within_one_task_reaches_either_bound_once()
+    {
+        var intake = IntakeOf((3, 100));
+        var calls = new Calls();
+
+        foreach (var (handle, bytes) in new[] { ("a", 10), ("a", 10), ("b", 100) })
+        {
+            Assert.True(intake.Handed((handle, bytes), calls.Pause));
+        }
+
+        Assert.Equal(["pause b"], calls.Taken());
+        Assert.Equal(["b"], intake.Paused);
+
+        foreach (var (handle, bytes) in new[] { ("a", 10), ("a", 4), ("b", 1) })
+        {
+            Assert.True(intake.Handed((handle, bytes), calls.Pause));
+        }
+
+        Assert.Equal(["pause a"], calls.Taken());
+        Assert.Equal(["a", "b"], intake.Paused.Order());
+        intake.End(calls.Resume);
+    }
+
+    [Fact]
+    public void Resumes_what_it_paused_as_it_ends_and_counts_nothing_after()
+    {
+        var intake = IntakeOf((1, 1_048_576));
+        var calls = new Calls();
+
+        Assert.True(intake.Handed(("a", 1), calls.Pause));
+        intake.End(calls.Resume);
+        intake.End(calls.Resume);
+
+        Assert.False(intake.Handed(("b", 1), calls.Pause));
+        Assert.Equal(["pause a", "resume a"], calls.Taken());
+        Assert.Empty(intake.Paused);
+    }
+
+    [Fact]
+    public void Counts_each_connection_apart_and_an_end_resumes_each_paused_and_counts_nothing_more()
+    {
+        var intake = IntakeOf((2, 1_048_576));
+        var calls = new Calls();
+
+        foreach (var handle in new[] { "first", "second", "first", "third", "second" })
+        {
+            Assert.True(intake.Handed((handle, 1), calls.Pause));
+        }
+
+        Assert.Equal(["pause first", "pause second"], calls.Taken());
+
+        intake.Forget("second");
+        intake.Taken(("second", 1), calls.Resume);
+
+        Assert.Empty(calls.Taken());
+        intake.End(calls.Resume);
+
+        Assert.Equal(["resume first"], calls.Taken());
+        Assert.False(intake.Handed(("first", 1), calls.Pause));
+        Assert.False(intake.Handed(("first", 1), calls.Pause));
+
+        intake.Taken(("third", 1), calls.Resume);
+
+        Assert.Empty(calls.Taken());
+    }
+
     // spec 15.12.17, 15.12.18
     [Fact]
     public void Pauses_at_the_envelope_that_reaches_a_bound_and_resumes_once_both_counts_are_at_half()

@@ -10,6 +10,73 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class ServiceManagerTests
 {
+    [Fact]
+    public void Admits_on_true_alone_and_refuses_anything_else_with_its_refusal_or_access_denied()
+    {
+        var request = new AdmissionRequest("a", new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1 });
+        var asked = new List<AdmissionRequest>();
+        var answers = new Queue<bool>([true, false]);
+        var plain = new BeforeRequest((admission) =>
+        {
+            asked.Add(admission);
+
+            return answers.Dequeue();
+        });
+
+        Assert.Null(plain.RefusalOf(request));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), plain.RefusalOf(request));
+        Assert.Equal([request, request], asked);
+        Assert.All(asked, (admission) =>
+        {
+            Assert.Equal("a", admission.ConnectionHandle);
+            Assert.Equal(request.Header, admission.Header);
+            Assert.Null(admission.Session);
+        });
+
+        var refusal = Failure.OfProtocol(ProtocolCode.SessionRequired);
+        var supplied = new BeforeRequest((_) => { return false; }, refusal);
+
+        Assert.Equal(refusal, supplied.RefusalOf(request));
+    }
+
+    [Fact]
+    public void Is_one_of_the_two_admission_failures_of_the_table_s_own_side_and_nothing_else()
+    {
+        foreach (var code in new[] { ProtocolCode.AccessDenied, ProtocolCode.SessionRequired })
+        {
+            var failure = Failure.OfProtocol(code);
+
+            Assert.True(BeforeRequest.IsAdmissionFailure(failure));
+            Assert.Equal(failure, new BeforeRequest((_) => { return false; }, failure).Refusal);
+        }
+
+        foreach (var failure in new[]
+        {
+            Failure.OfProtocol(ProtocolCode.PayloadTooLarge),
+            Failure.OfApplication((ushort)ProtocolCode.AccessDenied),
+        })
+        {
+            Assert.False(BeforeRequest.IsAdmissionFailure(failure));
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new BeforeRequest((_) => { return false; }, failure);
+            });
+        }
+    }
+
+    [Fact]
+    public void Throws_what_the_admission_throws()
+    {
+        var broken = new InvalidOperationException("no admission today");
+        var throwing = new BeforeRequest((_) => { throw broken; });
+        var request = new AdmissionRequest("a", new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1 });
+
+        Assert.Same(broken, Assert.Throws<InvalidOperationException>(() =>
+        {
+            return throwing.RefusalOf(request);
+        }));
+    }
+
     // constants
 
     private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";

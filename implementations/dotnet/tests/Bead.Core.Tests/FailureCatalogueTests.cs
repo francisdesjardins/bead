@@ -8,6 +8,39 @@ namespace Bead.Tests;
 public sealed class FailureCatalogueTests
 {
     [Fact]
+    public void Narrows_to_the_failure_of_its_name_and_leaves_a_failure_error_it_is_not_one()
+    {
+        var catalogue = new FailureCatalogue(7);
+
+        string Told(FailureException failure)
+        {
+            if (catalogue.Is(failure, SayHelloFailure.NobodyToGreet))
+            {
+                return $"NOBODY_TO_GREET of {failure.ProcedureAddress?.ServiceId}, {failure.Code}";
+            }
+
+            if (catalogue.Is(failure, new TooLoud()))
+            {
+                return $"TOO_LOUD, {(byte)failure.Scope}";
+            }
+
+            return $"{failure.Code}, {(byte)failure.Scope}";
+        }
+
+        static FailureException Received(ushort code, ushort serviceId)
+        {
+            return new FailureException(Failure.OfApplication(code), new FailureException.Raised(FailureOrigin.Peer, RouterSide.Server))
+            {
+                ProcedureAddress = new ProcedureAddress(serviceId, 1),
+            };
+        }
+
+        Assert.Equal("NOBODY_TO_GREET of 7, 1", Told(Received(1, 7)));
+        Assert.Equal("TOO_LOUD, 1", Told(Received(2, 7)));
+        Assert.Equal("2, 1", Told(Received(2, 8)));
+    }
+
+    [Fact]
     public void Tells_a_failure_of_its_service_by_its_name_and_none_of_another_service()
     {
         // a failure that names no procedure tells no service

@@ -3,6 +3,7 @@ import { createReadyStateMethods } from '../lifecycle';
 import type { IReadyStateMethods } from '../types';
 import {
   getReadyState,
+  getReadyStateName,
   isReadyStateClosed,
   isReadyStateClosing,
   isReadyStateConnecting,
@@ -31,6 +32,30 @@ const createEnd = (): IReadyStateMethods => {
 };
 
 test.describe('ReadyState', () => {
+  test('names where it stands as the other sides do', () => {
+    const end = createEnd();
+    const setters = [
+      setReadyStateConnecting,
+      setReadyStateOpen,
+      setReadyStateClosing,
+      setReadyStateClosed,
+      setReadyStateUninitialized,
+      setReadyStateReconnecting,
+    ];
+    const names = setters.map((set) => {
+      set(end);
+      return [READY_STATE_NAMES[getReadyState(end)], getReadyStateName(end)];
+    });
+    expect(names).toEqual([
+      ['CONNECTING', 'connecting'],
+      ['OPEN', 'open'],
+      ['CLOSING', 'closing'],
+      ['CLOSED', 'closed'],
+      ['UNINITIALIZED', 'uninitialized'],
+      ['RECONNECTING', 'reconnecting'],
+    ]);
+  });
+
   test('keeps the WebSocket numbering for CONNECTING to CLOSED', () => {
     expect(ReadyState).toEqual({
       CONNECTING: 0,

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net.WebSockets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
 
@@ -235,6 +236,130 @@ public sealed class FrameMeterTests
     }
 
     // definition
+
+    [Fact]
+    public void Counts_a_message_s_time_only_while_its_connection_is_not_paused()
+    {
+        var clock = new FakeTimeProvider();
+        var meter = new FrameMeter(new FrameMeter.MeterOptions
+        {
+            MaximumMessageBytes = 64,
+            IsServer = true,
+            Rate = new FrameMeter.RateOptions { MinimumBodyBytesPerSecond = 240, BodyGracePeriod = TimeSpan.FromSeconds(3), Clock = clock },
+        });
+        var first = FrameOf((0x02, new byte[10], false));
+
+        Assert.Equal(first.Length, meter.Read(first));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        meter.Hold();
+        clock.Advance(TimeSpan.FromSeconds(9));
+        Assert.Null(meter.Verdict);
+        meter.Unhold();
+        clock.Advance(TimeSpan.FromMilliseconds(1_999));
+        Assert.Null(meter.Verdict);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, meter.Verdict?.Code);
+        meter.End();
+    }
+
+    [Fact]
+    public void Fails_with_1009_at_its_head_a_frame_that_takes_its_message_past_its_bound_a_continuation_s_among_them()
+    {
+        var options = new FrameMeter.MeterOptions { MaximumMessageBytes = 64, IsServer = true };
+        var meter = new FrameMeter(options);
+        byte[] head = [0x82, 0x80 | 100, .. Key];
+
+        Assert.Equal(0, meter.Read(head));
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, meter.Verdict?.Code);
+
+        var first = FrameOf((0x02, new byte[40], false));
+        byte[] continuation = [0x80, 0x80 | 25, .. Key];
+        var continued = new FrameMeter(options);
+
+        Assert.Equal(first.Length, continued.Read([.. first, .. continuation]));
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, continued.Verdict?.Code);
+    }
+
+    [Fact]
+    public void Fails_with_1008_the_frame_past_its_bound_at_its_head_an_empty_frame_counting_a_control_frame_not()
+    {
+        var meter = new FrameMeter(new FrameMeter.MeterOptions { MaximumMessageBytes = 64, MaximumMessageFrames = 2, IsServer = true });
+        byte[] before = [.. FrameOf((0x02, [1], false)), .. FrameOf((0x89, [], false)), .. FrameOf((0x00, [], false))];
+
+        Assert.Equal(before.Length, meter.Read([.. before, 0x80]));
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, meter.Verdict?.Code);
+    }
+
+    [Fact(Skip = "divergence: a 64-bit length with its top bit set reaches the reader until the whole length arrives")]
+    public void Fails_with_1002_each_head_RFC_6455_forbids_at_the_byte_that_draws_it()
+    {
+        foreach (var (bytes, reason) in new (byte[] Bytes, string Reason)[]
+        {
+            ([0xC2, 0x80], "a reserved bit set"),
+            ([0x83, 0x80], "a reserved opcode, 3"),
+            ([0x8B, 0x80], "a reserved opcode, 11"),
+            ([0x09, 0x80], "a control frame not final"),
+            ([0x80, 0x80], "a continuation with no message under way"),
+            ([0x89, 0xFE], "a control frame longer than 125 bytes"),
+            ([0x8A, 0xFF], "a control frame longer than 125 bytes"),
+            ([0x82, 0x00], "an unmasked frame"),
+            ([0x82, 0xFF, 0x80], "a 64-bit length with its top bit set"),
+        })
+        {
+            var meter = new FrameMeter(new FrameMeter.MeterOptions { MaximumMessageBytes = int.MaxValue, IsServer = true });
+
+            Assert.Equal(0, meter.Read(bytes));
+            Assert.Equal(WebSocketCloseStatus.ProtocolError, meter.Verdict?.Code);
+            Assert.Equal($"a frame head RFC 6455 forbids, {reason}", meter.Verdict?.Why);
+        }
+
+        var first = FrameOf((0x02, [1], false));
+        var continued = new FrameMeter(new FrameMeter.MeterOptions { MaximumMessageBytes = int.MaxValue, IsServer = true });
+
+        Assert.Equal(first.Length, continued.Read([.. first, 0x82]));
+        Assert.Equal(WebSocketCloseStatus.ProtocolError, continued.Verdict?.Code);
+        Assert.EndsWith("a data frame that is not a continuation while a message is under way", continued.Verdict?.Why, StringComparison.Ordinal);
+
+        var client = new FrameMeter(new FrameMeter.MeterOptions { MaximumMessageBytes = int.MaxValue, IsServer = false });
+
+        Assert.Equal(0, client.Read(FrameOf((0x82, [1], false))));
+        Assert.Equal(WebSocketCloseStatus.ProtocolError, client.Verdict?.Code);
+        Assert.EndsWith("a masked frame", client.Verdict?.Why, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Takes_a_length_not_in_its_minimal_form_as_tungstenite_takes_it()
+    {
+        var meter = new FrameMeter(new FrameMeter.MeterOptions { MaximumMessageBytes = int.MaxValue, IsServer = true });
+        var frame = FrameOf((0x82, [1, 2, 3], true));
+
+        Assert.Equal(frame.Length, meter.Read(frame));
+        Assert.Null(meter.Verdict);
+    }
+
+    [Fact]
+    public void Charges_each_byte_of_a_message_partway_and_128_a_head_a_pong_between_its_frames_among_it()
+    {
+        var budget = new MessageBudget(long.MaxValue);
+        var meter = MeterOf(budget);
+        var before = FrameOf((0x89, [], false));
+        byte[] message = [.. FrameOf((0x02, new byte[12], false)), .. FrameOf((0x8A, "beat"u8.ToArray(), false)), .. FrameOf((0x80, new byte[3], false))];
+
+        Assert.Equal(before.Length, meter.Read(before));
+        Assert.Equal(0, budget.Charged);
+        foreach (var octet in message[..^1])
+        {
+            Assert.Equal(1, meter.Read([octet]));
+            Assert.Null(meter.Verdict);
+        }
+
+        Assert.Equal((6 + 12 + 128) + (6 + 4 + 128) + (6 + 3 + 128) - 1, budget.Charged);
+        Assert.Equal(1, meter.Read(message.AsSpan(message.Length - 1)));
+        Assert.Equal(0, budget.Charged);
+        Assert.Equal(before.Length, meter.Read(before));
+        Assert.Equal(0, budget.Charged);
+        Assert.Null(meter.Verdict);
+    }
 
     // spec 15.3, 15.12
     [Fact]

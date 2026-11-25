@@ -76,7 +76,7 @@ public sealed class CallSessionTests
     }
 
     [Fact]
-    public void CredentialSchemesDetailOf_names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between()
+    public void Names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between()
     {
         Assert.Equal("OPAQUE", CallSession.CredentialSchemesDetailOf([CredentialScheme.Opaque]));
         Assert.Equal(

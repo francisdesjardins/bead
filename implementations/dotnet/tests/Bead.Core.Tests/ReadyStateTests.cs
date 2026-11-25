@@ -9,6 +9,17 @@ public sealed class ReadyStateTests
     // definition
 
     [Fact]
+    public void Names_where_it_stands_as_the_other_sides_do()
+    {
+        Assert.Equal(
+            ["connecting", "open", "closing", "closed", "uninitialized", "reconnecting"],
+            Enum.GetValues<ReadyState>().Select((state) =>
+            {
+                return NotOpen.NameOf(state);
+            }));
+    }
+
+    [Fact]
     public void Keeps_the_WebSocket_numbering_for_CONNECTING_to_CLOSED()
     {
         Assert.Equal(

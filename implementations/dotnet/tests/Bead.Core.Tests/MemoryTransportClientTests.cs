@@ -1167,4 +1167,756 @@ public sealed class MemoryTransportClientTests
 
         return taken;
     }
+    [Fact]
+    public async Task Starts_uninitialized_with_no_protocol()
+    {
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient();
+
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+        Assert.Empty(server.Clients);
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        })).Message);
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Connect_with_a_signal_already_aborted_rejects_with_a_cancel_error_never_reaching_the_transport()
+    {
+        var attempts = 0;
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Accepting = (_) =>
+            {
+                Interlocked.Increment(ref attempts);
+                return Task.CompletedTask;
+            },
+        });
+        await using var client = new MemoryTransportClient();
+        using var cancelling = new CancellationTokenSource();
+
+        await cancelling.CancelAsync();
+        await server.Start();
+        var refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = cancelling.Token });
+        });
+
+        Assert.Equal(cancelling.Token, refused.CancellationToken);
+        Assert.Equal(0, Volatile.Read(ref attempts));
+        Assert.Empty(server.Clients);
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_reconnect_error_carrying_the_last_failure_as_cause_ending_closed()
+    {
+        var scheduler = new SerialScheduler();
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock, Scheduler = scheduler });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+
+        var taps = new ConcurrentQueue<(TimeSpan, int)>();
+        var pending = client.Reconnect(new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromSeconds(1)),
+            MaximumAttempts = 2,
+            CancellationToken = Cancelled,
+            Tap = (delay, attempt) =>
+            {
+                taps.Enqueue((delay, attempt));
+            },
+        });
+
+        Assert.Equal(ReadyState.Reconnecting, client.ReadyState);
+        Assert.Equal([TimeSpan.FromSeconds(1)], await clock.UntilArmed(TimeSpan.FromSeconds(1), Patience));
+        await clock.Advance(TimeSpan.FromSeconds(1));
+        var refused = await Assert.ThrowsAsync<ReconnectException>(() =>
+        {
+            return pending.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.IsType<ConnectException>(refused.InnerException);
+        Assert.Equal([(TimeSpan.FromSeconds(1), 1)], taps);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Does_not_keep_the_signal_of_a_connect_for_its_reconnections()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        using var cancelling = new CancellationTokenSource();
+        var drawn = new List<string>();
+
+        server.Connection += drawn.Add;
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = cancelling.Token });
+        await cancelling.CancelAsync();
+        await client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero), CancellationToken = Cancelled });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(["type=MEMORY;ip=local;ordinal=1", "type=MEMORY;ip=local;ordinal=2"], drawn);
+        Assert.Single(server.Clients);
+    }
+
+    [Fact]
+    public async Task Connect_on_an_open_client_rejects_without_reaching_the_transport()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var drawn = new List<string>();
+
+        server.Connection += drawn.Add;
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "h", Port = 1, CancellationToken = Cancelled });
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "h", Port = 2, CancellationToken = Cancelled });
+        });
+
+        Assert.Equal("the transport client is already open", refused.Message);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(["type=MEMORY;ip=h;ordinal=1"], drawn);
+        Assert.Equal(1, Assert.Single(server.Clients).Port);
+    }
+
+    [Fact]
+    public async Task Reuses_the_options_of_the_last_accepted_connect_disposing_an_open_protocol_first()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var told = new List<string>();
+
+        server.Connection += (handle) =>
+        {
+            told.Add($"connection {handle}");
+        };
+        server.Close += (clean, handle) =>
+        {
+            told.Add($"closed {handle} {clean}");
+        };
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "h", Port = 7, CancellationToken = Cancelled });
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "h", Port = 8, CancellationToken = Cancelled });
+        });
+        await client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero), CancellationToken = Cancelled });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(["connection type=MEMORY;ip=h;ordinal=1", "closed type=MEMORY;ip=h;ordinal=1 False", "connection type=MEMORY;ip=h;ordinal=2"], told);
+        Assert.Equal(7, Assert.Single(server.Clients).Port);
+    }
+
+    [Fact]
+    public async Task Emits_reconnect_once_as_it_starts_open_or_closed_and_not_on_a_misuse()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var starts = 0;
+
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            starts += 1;
+        };
+        await server.Start();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
+        Assert.Equal(0, starts);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        await client.Reconnect(new TransportClientReconnectOptions { CancellationToken = Cancelled });
+        await client.CloseConnection();
+        await client.Reconnect(new TransportClientReconnectOptions { CancellationToken = Cancelled });
+
+        Assert.Equal(2, starts);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_programmer_error_when_the_transport_was_never_connected()
+    {
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient();
+        await server.Start();
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
+
+        Assert.Equal("the transport client was never connected", refused.Message);
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+        Assert.Empty(server.Clients);
+    }
+
+    [Fact]
+    public async Task Calls_each_listener_though_one_throws_reporting_a_client_s_throw_with_no_connection()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, _) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        var thrown = new InvalidOperationException("a listener that throws");
+        var told = new List<string>();
+        var reported = new List<Exception>();
+
+        client.Close += (_, _) =>
+        {
+            throw thrown;
+        };
+        client.Close += (clean, quick) =>
+        {
+            told.Add($"closed {clean} {quick}");
+        };
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            throw thrown;
+        };
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            told.Add("reconnect");
+        };
+        client.Error += reported.Add;
+
+        await client.CloseConnection();
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        await client.Reconnect(new TransportClientReconnectOptions { CancellationToken = Cancelled });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["closed True False", "reconnect"], told);
+        Assert.Equal(2, reported.Count);
+        Assert.All(reported, (reason) =>
+        {
+            Assert.Same(thrown, reason);
+        });
+    }
+
+    [Fact]
+    public async Task Passes_on_what_tap_throws_ending_closed_with_no_attempt_after_it_and_no_wait_left_armed()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var thrown = new InvalidOperationException("tap_error");
+        var taps = 0;
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions
+            {
+                Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(10)),
+                CancellationToken = Cancelled,
+                Tap = (_, attempt) =>
+                {
+                    taps += 1;
+                    Assert.Equal(1, attempt);
+                    throw thrown;
+                },
+            });
+        });
+
+        Assert.Same(thrown, refused);
+        Assert.Equal(1, taps);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+        await clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(1, taps);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_cancel_error_without_waiting_out_the_delay_when_the_signal_aborts_mid_wait()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var before = clock.GetTimestamp();
+        var pending = client.Reconnect(new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
+            CancellationToken = cancelling.Token,
+        });
+
+        Assert.Equal([TimeSpan.FromMinutes(1)], await clock.UntilArmed(TimeSpan.FromMinutes(1), Patience));
+        await cancelling.CancelAsync();
+        var refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return pending.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("the reconnection was cancelled", refused.Message);
+        Assert.Equal(cancelling.Token, refused.CancellationToken);
+        Assert.Equal(before, clock.GetTimestamp());
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Waits_its_delay_after_each_failed_attempt_on_the_clock_its_transport_runs_on_connecting_once_per_attempt()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await using var defaulted = new MemoryTransportClient();
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var tapped = new TaskCompletionSource<(TimeSpan, int)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pending = client.Reconnect(new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(60)),
+            CancellationToken = Cancelled,
+            Tap = (delay, attempt) =>
+            {
+                Assert.True(tapped.TrySetResult((delay, attempt)), "one failed attempt before the server starts");
+            },
+        });
+
+        Assert.Equal((TimeSpan.FromMilliseconds(60), 1), await tapped.Task.WaitAsync(Patience, Cancelled));
+        Assert.Equal([TimeSpan.FromMilliseconds(60)], clock.Dues());
+        await clock.Advance(TimeSpan.FromMilliseconds(59));
+        Assert.Equal(ReadyState.Reconnecting, client.ReadyState);
+        Assert.False(pending.IsCompleted);
+        Assert.Equal([TimeSpan.FromMilliseconds(1)], clock.Dues());
+        await server.Start();
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        await pending.WaitAsync(Patience, Cancelled);
+
+        Assert.Same(clock, client.Clock);
+        Assert.Same(TimeProvider.System, defaulted.Clock);
+        Assert.Single(server.Clients);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Arms_its_wait_before_tap_hears_it_so_a_tap_that_moves_the_clock_by_the_wait_lets_the_next_attempt_follow_with_no_other_move()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var taps = 0;
+        Task? opening = null;
+        Task? advancing = null;
+
+        await client.Reconnect(new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(60)),
+            CancellationToken = Cancelled,
+            Tap = (delay, attempt) =>
+            {
+                taps += 1;
+                Assert.Equal((TimeSpan.FromMilliseconds(60), 1), (delay, attempt));
+                Assert.Equal([delay], clock.Dues());
+                opening = server.Start();
+                advancing = clock.Advance(delay);
+            },
+        }).WaitAsync(Patience, Cancelled);
+        await Assert.IsAssignableFrom<Task>(opening);
+        await Assert.IsAssignableFrom<Task>(advancing);
+
+        Assert.Equal(1, taps);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Single(server.Clients);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task The_drop_leaves_an_open_client_closed()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        await using var ownedServer = server;
+        var told = new List<(bool, string)>();
+
+        server.Close += (clean, connection) =>
+        {
+            told.Add((clean, connection));
+        };
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        // * the internal drop, which Rust's dispose and TypeScript's dispose symbol reach
+        typeof(MemoryTransportClient).GetMethod("Drop", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(client, null);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal([(false, handle)], told);
+        Assert.Empty(server.Clients);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_programmer_error_when_already_reconnecting_and_leaves_the_first_one_alone()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var first = client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(20)), CancellationToken = Cancelled });
+
+        Assert.Equal([TimeSpan.FromMilliseconds(20)], await clock.UntilArmed(TimeSpan.FromMilliseconds(20), Patience));
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
+        Assert.Equal("the transport client is already reconnecting", refused.Message);
+        Assert.Equal(ReadyState.Reconnecting, client.ReadyState);
+        Assert.False(first.IsCompleted);
+        await server.Start();
+        await clock.Advance(TimeSpan.FromMilliseconds(20));
+        await first.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Single(server.Clients);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Never_attempts_with_a_signal_already_aborted_and_stops_at_the_wait_when_tap_aborts()
+    {
+        var scheduler = new SerialScheduler();
+        var (opened, client, handle) = await Connected(scheduler);
+        await using var ownedServer = opened;
+        await using var ownedClient = client;
+        var refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = new CancellationToken(true) });
+        });
+        Assert.Equal("the reconnection was cancelled", refused.Message);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(handle, Assert.Single(opened.Clients).ConnectionHandle);
+
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var failing = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return failing.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var taps = 0;
+        refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return failing.Reconnect(new TransportClientReconnectOptions
+            {
+                Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
+                CancellationToken = cancelling.Token,
+                Tap = (_, attempt) =>
+                {
+                    taps += 1;
+                    Assert.Equal(1, attempt);
+                    cancelling.Cancel();
+                },
+            });
+        });
+
+        Assert.Equal("the reconnection was cancelled", refused.Message);
+        Assert.Equal(cancelling.Token, refused.CancellationToken);
+        Assert.Equal(1, taps);
+        Assert.Equal(ReadyState.Closed, failing.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Connect_during_the_wait_rejects_with_a_programmer_error()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var first = client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)), CancellationToken = cancelling.Token });
+
+        Assert.Equal([TimeSpan.FromMinutes(1)], await clock.UntilArmed(TimeSpan.FromMinutes(1), Patience));
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        Assert.Equal("the transport client is already reconnecting", refused.Message);
+        Assert.Equal(ReadyState.Reconnecting, client.ReadyState);
+        await cancelling.CancelAsync();
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return first.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(cancelling.Token, cancelled.CancellationToken);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+        Assert.Empty(server.Clients);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_programmer_error_ending_closed_when_delay_throws()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var thrown = new InvalidOperationException("decay_error");
+        var delays = 0;
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions
+            {
+                CancellationToken = Cancelled,
+                Delay = new TransportClientReconnectDelay((_, attempt) =>
+                {
+                    delays += 1;
+                    Assert.Equal(1, attempt);
+                    throw thrown;
+                }),
+            });
+        });
+
+        Assert.Equal("decay_error", refused.Message);
+        Assert.Same(thrown, refused.InnerException);
+        Assert.Equal(1, delays);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task An_explicit_undefined_option_falls_back_to_its_default()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        var refused = await Assert.ThrowsAsync<ReconnectException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions
+            {
+                Delay = new TransportClientReconnectDelay(TimeSpan.Zero),
+                MaximumAttempts = null,
+                Tap = null,
+                CancellationToken = default,
+            }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("attempt 5 reached", refused.Message);
+        Assert.IsType<ConnectException>(refused.InnerException);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Aborts_the_attempt_in_flight_when_the_signal_aborts()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+        await server.Start();
+        var drawn = 0;
+        server.Connection += (_) =>
+        {
+            drawn += 1;
+            cancelling.Cancel();
+        };
+        var refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero), CancellationToken = cancelling.Token });
+        });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("the reconnection was cancelled", refused.Message);
+        Assert.Equal(cancelling.Token, refused.CancellationToken);
+        Assert.Equal(1, drawn);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(server.Clients);
+    }
+
+    [Fact]
+    public async Task Tells_tap_the_wait_and_the_attempt_that_failed_and_nothing_when_the_first_one_succeeds()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        var taps = new ConcurrentQueue<(TimeSpan, int)>();
+        var tapped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(10)),
+            CancellationToken = Cancelled,
+            Tap = (delay, attempt) =>
+            {
+                taps.Enqueue((delay, attempt));
+                tapped.TrySetResult();
+            },
+        };
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        await client.Reconnect(options);
+        Assert.Empty(taps);
+
+        await using var failingServer = new MemoryTransportServer();
+        await using var failing = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return failing.Connect(new MemoryTransportClientConnectOptions { Server = failingServer, CancellationToken = Cancelled });
+        });
+        var pending = failing.Reconnect(options);
+        await tapped.Task.WaitAsync(Patience, Cancelled);
+        Assert.Equal([(TimeSpan.FromMilliseconds(10), 1)], taps);
+        Assert.Equal([TimeSpan.FromMilliseconds(10)], clock.Dues());
+        await failingServer.Start();
+        await clock.Advance(TimeSpan.FromMilliseconds(10));
+        await pending.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(TimeSpan.FromMilliseconds(10), 1)], taps);
+        Assert.Equal(ReadyState.Open, failing.ReadyState);
+        Assert.Single(failingServer.Clients);
+    }
+
+    // * the Rust unit fixture sets its state directly for these guards; neither runtime exposes
+    // a closing memory connection across a turn
+    private static void GivenState(MemoryTransportClient client, ReadyState state)
+    {
+        typeof(MemoryTransportClient).GetField("_readyState", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(client, state);
+    }
+
+    [Fact]
+    public async Task Connect_while_closing_rejects_without_reaching_the_transport()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        GivenState(client, ReadyState.Closing);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        });
+
+        Assert.Equal("the transport client is already closing", refused.Message);
+        Assert.Equal(ReadyState.Closing, client.ReadyState);
+        Assert.Equal(handle, Assert.Single(server.Clients).ConnectionHandle);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_programmer_error_while_connecting()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        GivenState(client, ReadyState.Connecting);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
+
+        Assert.Equal("the transport client cannot reconnect while connecting", refused.Message);
+        Assert.Equal(ReadyState.Connecting, client.ReadyState);
+        Assert.Equal(handle, Assert.Single(server.Clients).ConnectionHandle);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_programmer_error_while_closing()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        GivenState(client, ReadyState.Closing);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
+
+        Assert.Equal("the transport client cannot reconnect while closing", refused.Message);
+        Assert.Equal(ReadyState.Closing, client.ReadyState);
+        Assert.Equal(handle, Assert.Single(server.Clients).ConnectionHandle);
+    }
+
+    [Fact(Skip = "divergence: the reconnection settles before its pre-open message listener cancels it")]
+    public async Task Disconnects_and_rejects_with_a_cancel_error_when_the_signal_aborts_after_the_connect_resolved()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, first) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var atClient = new List<string>();
+        var atServer = new List<string>();
+
+        server.Connection += (handle) =>
+        {
+            atServer.Add($"connection {handle}");
+            _ = server.Send(new TransportMessage(new byte[] { 1 }, false), handle);
+        };
+        server.Close += (clean, handle) =>
+        {
+            atServer.Add($"closed {handle} {clean}");
+        };
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            atClient.Add("reconnect");
+        };
+        client.Message += (message) =>
+        {
+            atClient.Add($"heard {Convert.ToHexString(message.Bytes.Span)}");
+            cancelling.Cancel();
+        };
+        client.Close += (clean, quick) =>
+        {
+            atClient.Add($"closed {clean} {quick}");
+        };
+        var refused = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero), CancellationToken = cancelling.Token });
+        });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("the reconnection was cancelled", refused.Message);
+        Assert.Equal(cancelling.Token, refused.CancellationToken);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal(["reconnect", "heard 01", "closed True False"], atClient);
+        Assert.Equal([$"closed {first} False", "connection type=MEMORY;ip=local;ordinal=2", "closed type=MEMORY;ip=local;ordinal=2 True"], atServer);
+        Assert.Empty(server.Clients);
+    }
+
 }

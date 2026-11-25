@@ -6,7 +6,7 @@ public sealed class GaugesTests
     // definition
 
     [Fact]
-    public void Gives_a_part_gauges_what_it_does_not_give_being_none()
+    public void Gives_a_part_s_gauges_frozen_what_it_does_not_give_being_none()
     {
         var gauges = Gauges.Of(new Dictionary<string, long> { ["calls"] = 2 }, []);
 

@@ -10,6 +10,42 @@ namespace Bead.Transport.Http.Tests;
 public sealed partial class HttpTransportServerTests
 {
     [Fact]
+    public async Task Finishes_an_exchange_with_two_authorization_fields_400_one_declared_past_its_limit_413_and_one_its_connection_cannot_take_429_before_it_reads_a_byte()
+    {
+        await Start(new HttpTransportServerOptions { MaximumBodyBytes = 16, MaximumWaitingExchanges = 1 });
+        var (token, _) = await Connect();
+        var endings = new List<(int Status, string? Reason)>();
+
+        foreach (var fields in new[]
+        {
+            $"Authorization: {Bearer}\r\nAuthorization: {Bearer}\r\nContent-Length: 16",
+            "Content-Length: 17",
+        })
+        {
+            using var wire = await Wire.Open(_port);
+            await wire.Write(PostHead(token, fields));
+            var head = await wire.ReadHead();
+            endings.Add((head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+        }
+
+        using var first = await Wire.Open(_port);
+        using var second = await Wire.Open(_port);
+        await first.Write(PostHead(token, "Content-Length: 16"));
+        await first.Write(EnvelopeOf(EnvelopeKind.Request, 1)[..1]);
+        await second.Write(PostHead(token, "Content-Length: 16"));
+        await second.Write(EnvelopeOf(EnvelopeKind.Request, 3)[..1]);
+        await Until(() => { return Count("bodyBytes") == 2; });
+        using var crowded = await Wire.Open(_port);
+        await crowded.Write(PostHead(token, "Content-Length: 16"));
+        var busy = await crowded.ReadHead();
+        endings.Add((busy.Status, busy.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+
+        Assert.Equal([(400, HttpRefusals.Malformed), (413, HttpRefusals.TooLarge), (429, HttpRefusals.Busy)], endings);
+        Assert.Equal("1", busy.Headers["retry-after"]);
+        Assert.Empty(_messages);
+    }
+
+    [Fact]
     public async Task Refuses_a_POST_with_two_Authorization_fields_400_malformed_before_reading_its_body_and_hands_the_router_nothing()
     {
         await Start();

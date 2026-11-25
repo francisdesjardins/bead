@@ -53,6 +53,31 @@ internal sealed class TlsWire : IAsyncDisposable
 
     // helpers
 
+    /// <summary>Writes a raw prefix and observes EOF or an IO refusal within the bound.</summary>
+    public async Task<bool> EndsAfterRaw(byte[] prefix, TimeSpan within)
+    {
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        bound.CancelAfter(within);
+
+        try
+        {
+            await _tls.WriteAsync(prefix, bound.Token);
+            var buffer = new byte[4096];
+            while (await _tls.ReadAsync(buffer, bound.Token) != 0)
+            {
+            }
+            return true;
+        }
+        catch (OperationCanceledException) when (!Cancelled.IsCancellationRequested && bound.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+    }
+
     private static CancellationToken Cancelled
     {
         get

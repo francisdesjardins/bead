@@ -162,6 +162,285 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('bounds the DELETE of its disconnect on the real clock, never on the one it is given', async () => {
+  test.setTimeout(DISCONNECT_TIMEOUT * 4);
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+  const connecting = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await connecting;
+  const began = performance.now();
+  const disconnecting = client.disconnect();
+
+  await clock.tickAsync(86_400_000);
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 100);
+  });
+  expect(client.isClosing()).toBe(true);
+  await disconnecting;
+  expect(performance.now() - began).toBeGreaterThanOrEqual(4_500);
+  expect(performance.now() - began).toBeLessThan(10_000);
+  expect(client.isClosed()).toBe(true);
+});
+
+test('refuses a connect while open, reaching no server', async () => {
+  const { client, fake } = await connectFake();
+  await using _held = client;
+
+  await expect(client.connect({ host, port: 8_080 })).rejects.toThrow(
+    new ProgrammerError('the transport client is already open')
+  );
+  expect(client.isOpen()).toBe(true);
+  expect(fake.calls).toHaveLength(1);
+});
+
+test('refuses a second connect while the first is connecting, opening one socket only', async () => {
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const first = client.connect({ host, port: 8_080 });
+
+  await expect(client.connect({ host, port: 8_080 })).rejects.toThrow(
+    new ProgrammerError('the transport client is already connecting')
+  );
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await first;
+  expect(client.isOpen()).toBe(true);
+  expect(fake.calls).toHaveLength(1);
+});
+
+test('refuses a connect while its close is under way, and connects again once closed', async () => {
+  const { client, fake } = await connectFake();
+  await using _held = client;
+  const closing = client.disconnect();
+
+  await expect(client.connect({ host, port: 8_080 })).rejects.toThrow(
+    new ProgrammerError('the transport client is already closing')
+  );
+  fake.calls[1]?.answer({ status: 204 });
+  await closing;
+  const connecting = client.connect({ host, port: 8_080 });
+
+  fake.calls[2]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'U'.repeat(22) } });
+  await connecting;
+  expect(client.isOpen()).toBe(true);
+  expect(fake.calls).toHaveLength(3);
+});
+
+test('reconnects after a close', async () => {
+  await using started = await startServer();
+  await using client = createHTTPTransportClient({ isListening: false });
+
+  await client.connect({ host, port: started.port });
+  await client.disconnect();
+  await client.reconnect({ delay: 10, maximumAttempts: 1 });
+  expect(client.isOpen()).toBe(true);
+  expect(started.connections).toHaveLength(2);
+});
+
+test('keeps no token of a connect for its reconnections', async () => {
+  await using started = await startServer();
+  await using client = createHTTPTransportClient({ isListening: false });
+  const cancelling = new AbortController();
+
+  await client.connect({ host, port: started.port, signal: cancelling.signal });
+  cancelling.abort();
+  await client.reconnect({ delay: 0 });
+  expect(client.isOpen()).toBe(true);
+  expect(started.connections).toHaveLength(2);
+});
+
+test('refuses to reconnect a client never connected, leaving it uninitialized', async () => {
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+
+  await expect(client.reconnect()).rejects.toThrow(
+    new ProgrammerError('the transport client was never connected')
+  );
+  expect(client.isUninitialized()).toBe(true);
+  expect(fake.calls).toEqual([]);
+});
+
+test('refuses to reconnect while a close is under way', async () => {
+  const { client, fake } = await connectFake();
+  await using _held = client;
+  const closing = client.disconnect();
+
+  await expect(client.reconnect()).rejects.toThrow(
+    new ProgrammerError('the transport client cannot reconnect while closing')
+  );
+  expect(fake.calls).toHaveLength(2);
+  fake.calls[1]?.answer({ status: 204 });
+  await closing;
+  expect(client.isClosed()).toBe(true);
+});
+
+test('refuses to reconnect while a connect is under way, and that connect still opens', async () => {
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const connecting = client.connect({ host, port: 8_080 });
+
+  await expect(client.reconnect()).rejects.toThrow(
+    new ProgrammerError('the transport client cannot reconnect while connecting')
+  );
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await connecting;
+  expect(client.isOpen()).toBe(true);
+  expect(fake.calls).toHaveLength(1);
+});
+
+test('refuses a second reconnection, leaving the first alone', async () => {
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ clock, isListening: false, fetch: fake.fetch });
+  const initial = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 503 });
+  await expect(initial).rejects.toBeInstanceOf(ConnectError);
+  const first = client.reconnect({ delay: 20 });
+
+  await expect(client.reconnect()).rejects.toThrow(
+    new ProgrammerError('the transport client is already reconnecting')
+  );
+  expect(client.isReconnecting()).toBe(true);
+  fake.calls[1]?.answer({ status: 503 });
+  await expect
+    .poll(() => {
+      return delaysOn(clock);
+    })
+    .toEqual([20]);
+  await clock.tickAsync(20);
+  fake.calls[2]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await first;
+  expect(client.isOpen()).toBe(true);
+  expect(fake.calls).toHaveLength(3);
+});
+
+test('refuses a connect while it waits to attempt again', async () => {
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ clock, isListening: false, fetch: fake.fetch });
+  const cancelling = new AbortController();
+  const initial = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 503 });
+  await expect(initial).rejects.toBeInstanceOf(ConnectError);
+  const reconnecting = client.reconnect({ delay: 60_000, signal: cancelling.signal });
+  const outcome = reconnecting.catch((reason: unknown) => {
+    return reason;
+  });
+
+  fake.calls[1]?.answer({ status: 503 });
+  await expect
+    .poll(() => {
+      return delaysOn(clock);
+    })
+    .toEqual([60_000]);
+  await expect(client.connect({ host, port: 8_080 })).rejects.toThrow(
+    new ProgrammerError('the transport client is already reconnecting')
+  );
+  cancelling.abort();
+  expect(await outcome).toMatchObject({
+    name: 'CancelError',
+    message: 'the reconnection was cancelled',
+  });
+  expect(client.isClosed()).toBe(true);
+  expect(fake.calls).toHaveLength(2);
+  expect(delaysOn(clock)).toEqual([]);
+});
+
+test('raises reconnect once as it starts, open or closed, and not on a misuse', async () => {
+  await using started = await startServer();
+  await using client = createHTTPTransportClient({ isListening: false });
+  let reconnects = 0;
+
+  client.on('reconnect', () => {
+    reconnects += 1;
+  });
+  await expect(client.reconnect()).rejects.toBeInstanceOf(ProgrammerError);
+  expect(reconnects).toBe(0);
+  await client.connect({ host, port: started.port });
+  await client.reconnect();
+  await client.disconnect();
+  await client.reconnect();
+  expect(reconnects).toBe(2);
+  expect(client.isOpen()).toBe(true);
+});
+
+test('throws a ReconnectException carrying the last failure, ending closed', async () => {
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const initial = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 503 });
+  await expect(initial).rejects.toBeInstanceOf(ConnectError);
+  const outcome = client.reconnect({ delay: 0, maximumAttempts: 2 }).catch((reason: unknown) => {
+    return reason;
+  });
+
+  fake.calls[1]?.answer({ status: 501 });
+  await expect
+    .poll(() => {
+      return fake.calls.length;
+    })
+    .toBe(3);
+  fake.calls[2]?.answer({ status: 502 });
+  const failure = await outcome;
+
+  expect(failure).toBeInstanceOf(ReconnectError);
+  expect(failure).toMatchObject({
+    message: 'attempt 2 reached',
+    cause: { message: 'the server drew no connection: 502' },
+  });
+  expect((failure as ReconnectError).cause).toBeInstanceOf(ConnectError);
+  expect(client.isClosed()).toBe(true);
+  expect(fake.calls).toHaveLength(3);
+});
+
+test('never attempts with a token cancelled already, and stops at the wait when its tap cancels', async () => {
+  const opened = await connectFake();
+  await using _held = opened.client;
+  let reconnects = 0;
+
+  opened.client.on('reconnect', () => {
+    reconnects += 1;
+  });
+  await expect(
+    opened.client.reconnect({ delay: 0, signal: AbortSignal.abort() })
+  ).rejects.toBeInstanceOf(CancelError);
+  expect(opened.client.isOpen()).toBe(true);
+  expect(opened.fake.calls).toHaveLength(1);
+  expect(reconnects).toBe(0);
+
+  const fake = createFakeFetch();
+  await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const cancelling = new AbortController();
+  const initial = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ status: 503 });
+  await expect(initial).rejects.toBeInstanceOf(ConnectError);
+  const outcome = client
+    .reconnect({
+      delay: 60_000,
+      signal: cancelling.signal,
+      tap: () => {
+        cancelling.abort();
+      },
+    })
+    .catch((reason: unknown) => {
+      return reason;
+    });
+
+  fake.calls[1]?.answer({ status: 503 });
+  expect(await outcome).toMatchObject({
+    name: 'CancelError',
+    message: 'the reconnection was cancelled',
+  });
+  expect(client.isClosed()).toBe(true);
+  expect(fake.calls).toHaveLength(2);
+});
+
 test('releases a late reconnection answer without opening after cancellation', async () => {
   const fake = createFakeFetch();
   const entered = Promise.withResolvers<void>();
@@ -1406,6 +1685,29 @@ test.describe('createHTTPTransportClient', () => {
     await client.disconnect();
   });
 
+  test('throws a ReconnectException from what its connect threw when the server is gone', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    await using client = createHTTPTransportClient();
+    const failed = new Promise<unknown>((resolve) => {
+      client.once('close', () => {
+        client.reconnect({ maximumAttempts: 1 }).then(resolve, resolve);
+      });
+    });
+    await client.connect({ host, port });
+    await expect
+      .poll(() => {
+        return server.gauges().counts['listens'];
+      })
+      .toBe(1);
+    await server.stop();
+    const failure = await failed;
+
+    expect(failure).toBeInstanceOf(ReconnectError);
+    expect((failure as ReconnectError).cause).toBeInstanceOf(ConnectError);
+    expect(client.isClosed()).toBe(true);
+  });
+
   test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
     await using started = await startServer();
     const { port, server } = started;
@@ -1967,6 +2269,40 @@ test.describe('createHTTPTransportClient, listening', () => {
         [[false, false]],
         { last: 'DELETE', listens: 3 },
       ]);
+    }
+  });
+
+  test('times its inactivity on a timer, never on its clock, whether the clock leaps or stands still', async () => {
+    for (const { leap, timeout } of [
+      { leap: 3_600_000, timeout: 40 },
+      { leap: 0, timeout: 700 },
+    ]) {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      let wall = clock.Date.now();
+      clock.Date.now = () => {
+        wall += leap;
+        return wall;
+      };
+      const fetch = losingFetch();
+      await using client = createHTTPTransportClient({
+        clock,
+        fetch: fetch.fetch,
+        inactivityTimeout: timeout,
+      });
+      const closes = closesOf(client);
+
+      await client.connect({ host, port: 80 });
+      await clock.tickAsync(timeout - 1);
+      expect(client.isOpen()).toBe(true);
+      if (leap !== 0) {
+        expect(methodsOf(fetch).listens).toBe(2);
+      }
+      await clock.tickAsync(1);
+      expect(closes).toEqual([[false, false]]);
+      expect(methodsOf(fetch).last).toBe('DELETE');
+      if (leap !== 0) {
+        expect(methodsOf(fetch).listens).toBe(3);
+      }
     }
   });
 
@@ -2667,7 +3003,7 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
   });
 
   // spec 15.6, 15.7, 15.12
-  test('a client whose exchangeTimeout is never sends again a non-request refused busy past 2³¹ − 1 ms', async () => {
+  test('a client whose exchange timeout is never sends again a non-request refused busy past 2³¹ minus 1 ms', async () => {
     const clock = createTestClock(Date.UTC(2026, 0, 1));
     const fake = createFakeFetch();
     const client = createHTTPTransportClient({

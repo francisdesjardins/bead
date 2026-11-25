@@ -1073,3 +1073,25 @@ test.describe('createMemoryTransportClient', () => {
     ]);
   });
 });
+
+test('refuses a second reconnection leaving the first alone', async () => {
+  const clock = createTestClock();
+  await using server = createMemoryTransportServer();
+  await using client = createMemoryTransportClient({ clock });
+
+  await expect(client.connect({ server })).rejects.toBeInstanceOf(ConnectError);
+
+  const first = client.reconnect({ delay: 1_000, maximumAttempts: 2 });
+  const failed = expect(first).rejects.toBeInstanceOf(ReconnectError);
+
+  await turn();
+  expect(clock.countTimers()).toBe(1);
+  await expect(client.reconnect()).rejects.toThrow(
+    new ProgrammerError('the transport client is already reconnecting')
+  );
+  expect(client.isReconnecting()).toBe(true);
+  await clock.tickAsync(1_000);
+  await failed;
+  expect(client.isClosed()).toBe(true);
+  expect(clock.countTimers()).toBe(0);
+});
