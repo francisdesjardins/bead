@@ -700,8 +700,8 @@ that a test of each side does:
   first to connect winning and the other closed`, `ends every attempt, leaving no socket, once its
   connect is given up`), each twin named by the same sentence;
 - a client's connect of a host it judges on the loopback, to the loopback itself, through no proxy,
-  a localhost name asking no resolver (spec 13.4, 15.12; decision 0054), which no entry plays, since
-  `spec/transports.json` injects no resolver and no proxy: the connector,
+  a localhost name asking no resolver (spec 13.4.2, 15.12; decision 0054), which no entry plays,
+  since `spec/transports.json` injects no resolver and no proxy: the connector,
   `transport/shared/__tests__/loopback.test.ts`, `Bead.Core.Tests/HappyEyeballsTests` and
   `bead/src/net/racing/tests.rs` (`connects a localhost name to the loopback, asking its resolver
   nothing`, `tries the IPv4 loopback first for a localhost name, then the IPv6 one an attempt delay

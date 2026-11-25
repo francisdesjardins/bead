@@ -3029,7 +3029,7 @@ def an_accept_not_secure(transport):
     captures, first = Captures(transport), Connection('first', acceptor=half(1))
 
     return ('a client whose acceptor\'s ACCEPT is not marked secure is not secure, though its own leg is',
-            ['15.22', '13.4'], {'role': 'client'}, [*client_opened(captures, first, secure=False), side(secure=False)])
+            ['15.22', '13.4.1'], {'role': 'client'}, [*client_opened(captures, first, secure=False), side(secure=False)])
 
 
 @case(IN_MEMORY, MQTT, AMQP)

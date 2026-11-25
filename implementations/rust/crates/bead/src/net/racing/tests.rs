@@ -304,7 +304,7 @@ async fn ends_every_attempt_leaving_no_socket_once_its_connect_is_given_up() {
     );
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -331,7 +331,7 @@ async fn connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing()
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn tries_the_ipv4_loopback_first_for_a_localhost_name_then_the_ipv6_one_an_attempt_delay_after()
  {
@@ -390,7 +390,7 @@ async fn tries_the_ipv4_loopback_first_for_a_localhost_name_then_the_ipv6_one_an
     );
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -421,7 +421,7 @@ async fn asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_amon
     assert_eq!(*asked.lock().unwrap(), names, "each asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();

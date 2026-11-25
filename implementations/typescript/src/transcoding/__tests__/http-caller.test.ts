@@ -1364,7 +1364,7 @@ test('refuses a stream failure with an invalid HTTP problem status and no Bead c
   }
 });
 
-// spec 13.4: a caller connects a gateway it judges on the loopback to the loopback itself
+// spec 13.4.2: a caller connects a gateway it judges on the loopback to the loopback itself
 test.describe('createHTTPCaller, on the loopback', () => {
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
     await using fixture = await startTranscoding();

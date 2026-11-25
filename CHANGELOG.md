@@ -13,6 +13,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runtimes: getting started says how a client in Node connects by `localhost` and what the
   WebSocket server bounds, and the recipes tell the closes those bounds make and read the
   transport's `messageBytes` gauge.
+- The spec says what every side already does where its words fell short. A request's answer and a
+  gateway call's are among the writes by which a server learns its client went. A server holds a
+  fixed bound of what it reads ahead on an HTTP/1 socket, never what its memory allows, and the
+  two ways a socket is not kept are named. A transfer coding's name is compared in any ASCII
+  case. Three platforms' answers to a `Content-Length` past 2⁶³ − 1 are named, and 13.4's connect
+  rule is an item of its own. The conformance files hold:
+  - a coding named in any case;
+  - a `Content-Length` of 2⁶⁴ − 2 and 2⁶⁴ − 1;
+  - a name under `.localhost.` at every server;
+  - a field with no auth-scheme at the gateway;
+  - what a WebSocket server reports as it fails a connection.
 
 ### Fixed
 
