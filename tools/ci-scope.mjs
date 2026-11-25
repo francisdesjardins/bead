@@ -750,10 +750,20 @@ export const LOCAL = Object.freeze({
       return step(RUST, `cargo deny --manifest-path ${manifest} --locked check`);
     }),
     step(RUST, 'node tools/check-protobuf.mjs'),
-    step(RUST, 'cargo test --workspace --all-features --locked', {
-      suite: true,
-      note: "the coverage held to its floor and the fuzz targets built on the nightly are the rust job's Linux leg's",
-    }),
+    step(RUST, 'cargo test --workspace --all-features --locked', { suite: true }),
+    step(
+      RUST,
+      String.raw`cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$' --output-path coverage/rust.json`,
+      {
+        suite: true,
+        note: "the coverage the rust job's Linux leg measures, then its floor; the fuzz targets, built on the nightly, are that leg's alone",
+      }
+    ),
+    step(
+      RUST,
+      'node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust',
+      { suite: true }
+    ),
   ],
   'interop-rust': [
     step(RUST, 'cargo build -p francisdesjardins-bead-interop-server --locked'),
