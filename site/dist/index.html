@@ -6975,6 +6975,10 @@ const MARK_BOX = '2.6 4.7 25 25';
 const CORONA_BOX = '-1 1 30 31';
 const CENTRE = Object.freeze({ x: 14, y: 18 });
 const RIM = 'M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46';
+// the face's centre, between its eyes and halfway from its brows to its mouth, and the one factor
+// every face is drawn at about it
+const FACE_CENTRE = Object.freeze({ x: 13.4, y: 19 });
+const FACE_SCALE = 1.2;
 const MONOCLE =
   'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 20.5 19.9 21.3 21.9';
 const STYLE_ID = 'bead-mascot-style';
@@ -7188,19 +7192,23 @@ const coronaOf = () => {
 
 // the face's parts by name, the flare beside them
 const facePartsOf = () => {
-  return {
-    flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }),
-    parts: {
-      eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
-      eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
-      pL: element('circle', { class: 'pupil' }),
-      pR: element('circle', { class: 'pupil' }),
-      bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
-      bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
-      g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
-      m: element('path', { class: 'line', 'stroke-width': 0.6 }),
-    },
+  const parts = {
+    eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    pL: element('circle', { class: 'pupil' }),
+    pR: element('circle', { class: 'pupil' }),
+    bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
+    m: element('path', { class: 'line', 'stroke-width': 0.6 }),
   };
+  // * every face drawn FACE_SCALE times its skeleton's size about its centre, one factor for all six
+  const face = element('g', {
+    class: 'bead-face',
+    transform: `translate(${String(FACE_CENTRE.x)} ${String(FACE_CENTRE.y)}) scale(${String(FACE_SCALE)}) translate(${String(-FACE_CENTRE.x)} ${String(-FACE_CENTRE.y)})`,
+  });
+  face.append(...Object.values(parts));
+  return { flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }), face, parts };
 };
 
 // the drawing, its parts by name, and the corona's when it has one
@@ -7220,13 +7228,13 @@ const drawingOf = (hasCorona) => {
   const beads = BEADS.map(({ x, y, r }) => {
     return element('circle', { class: 'bead', cx: x, cy: y, r });
   });
-  const { flare, parts } = facePartsOf();
+  const { flare, face, parts } = facePartsOf();
   svg.append(
     element('circle', { class: 'moon', cx: CENTRE.x, cy: CENTRE.y, r: 10.5 }),
     rim,
     ...beads,
     flare,
-    ...Object.values(parts)
+    face
   );
   return { svg, corona, rim, beads, flare, parts };
 };
@@ -7262,9 +7270,7 @@ const markDrawingOf = (svg) => {
   styled();
   giveBack(svg);
   const corona = coronaOf();
-  const { flare, parts } = facePartsOf();
-  const face = element('g', { class: 'bead-face' });
-  face.append(...Object.values(parts));
+  const { flare, face, parts } = facePartsOf();
   for (const part of [corona, flare, face]) {
     part.setAttribute(TAKEN, '');
   }
