@@ -1313,6 +1313,74 @@ public sealed partial class HttpTransportClientTests
 
     // definition
 
+    private sealed class ShiftedWall(TimeProvider time) : TimeProvider
+    {
+        public TimeSpan Shift { get; set; }
+
+        public override long TimestampFrequency
+        {
+            get { return time.TimestampFrequency; }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return time.GetUtcNow() + Shift;
+        }
+
+        public override long GetTimestamp()
+        {
+            return time.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return time.CreateTimer(callback, state, dueTime, period);
+        }
+    }
+
+    [Fact]
+    public async Task Bounds_its_disconnect_on_the_real_clock_whatever_its_own_a_server_that_never_answers_the_DELETE_is_let_go_once_disconnect_timeout_has_passed()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var waiting = await ConnectFake(NotListening with { Clock = clock }, new Fetch { IsDeleteHeld = true });
+        var began = TimeProvider.System.GetTimestamp();
+        var disconnecting = waiting.Client.CloseConnection();
+        var delete = await waiting.Fetch.CallOf(1);
+
+        Assert.Empty(clock.Dues());
+        await disconnecting.WaitAsync(Patience, Cancelled);
+        Assert.Equal(HttpMethod.Delete, delete.Method);
+        Assert.True(delete.IsAborted);
+        Assert.True(TimeProvider.System.GetElapsedTime(began) >= TimeSpan.FromSeconds(5) - TimeSpan.FromMilliseconds(50));
+        Assert.Equal(ReadyState.Closed, waiting.Client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Times_its_inactivity_on_a_timer_never_on_a_reading_of_the_wall_clock_whether_that_leaps_or_goes_back_the_connection_is_lost_at_its_timeout()
+    {
+        foreach (var leap in new[] { 3_600_000, -3_600_000 })
+        {
+            var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var clock = new ShiftedWall(time);
+            using var fetch = LosingFetch();
+            await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, Clock = clock, InactivityTimeout = TimeSpan.FromMilliseconds(40) });
+            var closes = ClosesOf(client);
+            await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
+
+            for (var step = 0; step < 39; step += 1)
+            {
+                clock.Shift += TimeSpan.FromMilliseconds(leap);
+                time.Advance(Millisecond);
+            }
+
+            Assert.Equal((ReadyState.Open, 2), (client.ReadyState, ListensOf(fetch)));
+            clock.Shift += TimeSpan.FromMilliseconds(leap);
+            time.Advance(Millisecond);
+            Assert.Equal((false, false), await Next(closes));
+            Assert.Equal((HttpMethod.Delete, 3), (fetch.Calls[^1].Method, ListensOf(fetch)));
+        }
+    }
+
     // spec 15.15
     [Fact]
     public async Task Bounds_an_unresponsive_HTTP_connect_by_cancellation_timeout_and_disposal()
@@ -4137,6 +4205,31 @@ public sealed partial class HttpTransportClientTests
 
     [Fact]
     public async Task Throws_a_ReconnectException_from_what_its_connect_threw_when_the_server_is_gone()
+    {
+        await using var started = await Started.Start();
+        await using var client = new HttpTransportClient();
+        var offered = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reentered = false;
+        client.Close += (_, _) =>
+        {
+            if (!reentered)
+            {
+                reentered = true;
+                offered.TrySetResult(client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
+            }
+        };
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
+        await Eventually(() => { return started.Server.Gauges().Counts["listens"] == 1; });
+        await started.Server.Stop().WaitAsync(Patience, Cancelled);
+        var reconnecting = await offered.Task.WaitAsync(Patience, Cancelled);
+        var failure = await Assert.ThrowsAsync<ReconnectException>(() => { return reconnecting.WaitAsync(Patience, Cancelled); });
+
+        Assert.IsType<HttpRequestException>(failure.InnerException);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_server_is_gone()
     {
         using var refused = new ClosedPort();
         await using var started = await Started.Start();

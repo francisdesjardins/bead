@@ -77,6 +77,70 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         return sent.Task.WaitAsync(Patience, Cancelled);
     }
 
+    // * a transport without a router: each envelope waits for the test's answer
+    private sealed class EnvelopePeer : IAsyncDisposable
+    {
+        private readonly WebSocketTransportServer _transport = new();
+        private readonly Channel<Envelope> _received = Channel.CreateUnbounded<Envelope>();
+        private string _handle = "";
+
+        public WebSocketClient Client { get; } = new();
+
+        public static async Task<EnvelopePeer> Start()
+        {
+            var peer = new EnvelopePeer();
+            peer._transport.Connection += (handle) => { peer._handle = handle; };
+            peer._transport.Message += (message, _) =>
+            {
+                peer._received.Writer.TryWrite(EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server })!);
+            };
+            try
+            {
+                var bound = await peer._transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+                await peer.Client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled });
+                return peer;
+            }
+            catch
+            {
+                await peer.DisposeAsync();
+                throw;
+            }
+        }
+
+        public Task<Envelope> Next()
+        {
+            return _received.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        }
+
+        public Task Send(Envelope envelope)
+        {
+            return _transport.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false), _handle).WaitAsync(Patience, Cancelled);
+        }
+
+        public Task<bool> Close()
+        {
+            return _transport.CloseConnection(_handle).WaitAsync(Patience, Cancelled);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Client.DisposeAsync();
+            await _transport.DisposeAsync();
+        }
+    }
+
+    private static readonly Procedure RawEcho = new() { ServiceId = 1, ProcedureId = 2, ProcedureName = "echo", ServiceRevision = 1 };
+
+    private static Task<string> RawCall(WebSocketClient client, string payload, RequestOptions? options = null)
+    {
+        return client.Services.GetRequest(RawEcho, new RequestDependencies<string, string> { Serializer = new TextSerializer() })(payload)(options);
+    }
+
+    private static Envelope ResultTo(uint callId, string payload)
+    {
+        return new Envelope { Header = new ResultHeader { CallId = callId }, Payload = System.Text.Encoding.UTF8.GetBytes(payload) };
+    }
+
     // definition
 
     public async ValueTask InitializeAsync()
@@ -89,6 +153,105 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await _client.DisposeAsync();
         await _server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Sends_a_request_as_an_envelope_resolves_with_its_result_and_learns_the_session()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var answering = RawCall(peer.Client, "hello");
+        var request = await peer.Next();
+
+        Assert.Equal(new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 2 }, request.Header);
+        Assert.Equal("hello", System.Text.Encoding.UTF8.GetString(request.Payload.Span));
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)9, 16).ToArray());
+        await peer.Send(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Credential.Opaque(token) }, Payload = "HELLO"u8.ToArray() });
+        Assert.Equal("HELLO", await answering.WaitAsync(Patience, Cancelled));
+        Assert.Equal(token, peer.Client.Router.SessionToken);
+    }
+
+    [Fact]
+    public async Task Rejects_with_the_failure_the_server_answers_its_procedure_s_own_included()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var answering = RawCall(peer.Client, "hello");
+        var request = await peer.Next();
+        await peer.Send(new Envelope { Header = new FailureHeader { CallId = request.Header.CallId }, Failure = Failure.OfApplication(21, "not ready") });
+        var failure = await Assert.ThrowsAsync<FailureException>(() => { return answering.WaitAsync(Patience, Cancelled); });
+
+        Assert.Equal((ushort)21, failure.Code);
+        Assert.Equal("not ready", failure.Detail);
+        Assert.Equal(FailureOrigin.Peer, failure.Origin);
+        Assert.Equal(RouterSide.Server, failure.Side);
+        Assert.Equal(new ProcedureAddress { ServiceId = 1, ProcedureId = 2 }, failure.ProcedureAddress);
+        Assert.True(failure.IsApplication(21));
+    }
+
+    [Fact]
+    public async Task Hears_the_notifications_of_its_subscription_under_the_call_id_that_opened_it_one_ahead_of_its_result_included()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var heard = Channel.CreateUnbounded<string>();
+        var news = RawEcho with { ProcedureId = 4, ProcedureName = "news", ProcedureKind = ProcedureKind.Notifies };
+        var subscribing = peer.Client.Services.GetNotification(news, new NotificationDependencies<string, string, string> { Serializer = new TextSerializer() }).Register("subscribe", (payload) =>
+        {
+            heard.Writer.TryWrite(payload);
+            return Task.CompletedTask;
+        })();
+        var callId = (await peer.Next()).Header.CallId;
+        await peer.Send(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = "first"u8.ToArray() });
+        await peer.Send(ResultTo(callId, ""));
+        await using var held = await subscribing.WaitAsync(Patience, Cancelled);
+        await peer.Send(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = "news"u8.ToArray() });
+
+        Assert.Equal("first", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("news", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal(0, heard.Reader.Count);
+    }
+
+    [Fact]
+    public async Task Answers_the_server_s_commands_on_even_call_ids_with_the_resolver_registered()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var ping = RawEcho with { ProcedureId = 3, ProcedureName = "ping", ProcedureKind = ProcedureKind.Command };
+        peer.Client.Services.GetCommandResolver(ping, new RequestResolverDependencies<string, string> { Serializer = new TextSerializer() })((request, response) =>
+        {
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        await peer.Send(new Envelope { Header = new RequestHeader { CallId = 78, ServiceId = 1, ProcedureId = 3 }, Payload = "quiet"u8.ToArray() });
+        var answer = await peer.Next();
+
+        Assert.Equal(new ResultHeader { CallId = 78 }, answer.Header);
+        Assert.Equal("QUIET", System.Text.Encoding.UTF8.GetString(answer.Payload.Span));
+    }
+
+    [Fact]
+    public async Task Cancels_a_request_whose_timeout_passes_and_hears_nothing_of_an_answer_too_late()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var errors = new ConcurrentQueue<Exception>();
+        peer.Client.Router.Error += errors.Enqueue;
+        var answering = RawCall(peer.Client, "hello", new RequestOptions { Timeout = TimeSpan.FromMilliseconds(500) });
+        var callId = (await peer.Next()).Header.CallId;
+        await Assert.ThrowsAsync<TimeoutException>(() => { return answering.WaitAsync(Patience, Cancelled); });
+        Assert.Equal(new CancelHeader { CallId = 1 }, (await peer.Next()).Header);
+        await peer.Send(ResultTo(callId, "late"));
+        var following = RawCall(peer.Client, "after");
+        var next = (await peer.Next()).Header.CallId;
+        await peer.Send(ResultTo(next, "AFTER"));
+
+        Assert.Equal("AFTER", await following.WaitAsync(Patience, Cancelled));
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public async Task Rejects_a_request_still_waiting_when_the_server_closes_the_connection()
+    {
+        await using var peer = await EnvelopePeer.Start();
+        var answering = RawCall(peer.Client, "hello");
+        await peer.Next();
+        Assert.True(await peer.Close());
+        await Assert.ThrowsAsync<DisconnectException>(() => { return answering.WaitAsync(Patience, Cancelled); });
     }
 
     [Fact]
@@ -445,7 +608,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         Assert.Equal("a payload is 8 bytes at most, not 13", refused.Detail);
     }
 
-    private sealed class TextSerializer : IRequestSerializerClient<string, string>, IRequestSerializerServer<string, string>
+    private sealed class TextSerializer : INotificationSerializerClient<string, string, string>, IRequestSerializerServer<string, string>
     {
         public ReadOnlyMemory<byte> Encode(string request)
         {
@@ -455,6 +618,11 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         public string Decode(ReadOnlyMemory<byte> response)
         {
             return System.Text.Encoding.UTF8.GetString(response.Span);
+        }
+
+        public string DecodeNotification(ReadOnlyMemory<byte> notification)
+        {
+            return Decode(notification);
         }
     }
 }

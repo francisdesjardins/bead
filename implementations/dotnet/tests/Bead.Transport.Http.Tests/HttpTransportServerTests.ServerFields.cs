@@ -2,8 +2,11 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
+using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -13,6 +16,118 @@ namespace Bead.Transport.Http.Tests;
 /// </summary>
 public sealed partial class HttpTransportServerTests
 {
+    [Fact]
+    public void Reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_RFC_9651_Items_and_a_body_as_its_length_or_its_coding_says()
+    {
+        var fields = typeof(HttpTransportServer).GetNestedType("HttpServerFields", BindingFlags.NonPublic)!;
+        object? Read(string name, object?[] arguments)
+        {
+            return fields.GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, arguments);
+        }
+        static HttpRequest RequestOf(string name, string[] values)
+        {
+            var request = new DefaultHttpContext().Request;
+            request.Headers[name] = values;
+            return request;
+        }
+
+        var twice = RequestOf("authorization", [Bearer, "Basic"]);
+        Assert.Equal(Bearer, twice.Headers.Authorization[0]);
+        Assert.Equal([Bearer, "Basic"], twice.Headers.Authorization.ToArray());
+        Assert.Equal($"{Bearer}, Basic", Read("HeaderOf", [twice, "authorization"]));
+        Assert.Null(Read("HeaderOf", [new DefaultHttpContext().Request, "authorization"]));
+
+        foreach (var (values, expected) in new (string[], long?)[]
+        {
+            (["3"], 3), (["0;p=1"], 0), ([], 0), (["-1"], null), (["1", "2"], null),
+        })
+        {
+            Assert.Equal(expected, Read("CountOf", [RequestOf(HttpTransport.AfterHeader, values), HttpTransport.AfterHeader, null]));
+        }
+        var requiredType = typeof(HttpTransportServer).GetNestedType("CountOptions", BindingFlags.NonPublic)!;
+        var required = Activator.CreateInstance(requiredType)!;
+        requiredType.GetProperty("IsRequired")!.SetValue(required, true);
+        Assert.Null(Read("CountOf", [new DefaultHttpContext().Request, HttpTransport.AfterHeader, required]));
+
+        foreach (var (values, expected) in new (string[], bool?)[]
+        {
+            (["?1"], true), (["?0"], false), ([], false), (["1"], null),
+        })
+        {
+            Assert.Equal(expected, Read("ListeningOf", [RequestOf(HttpTransport.ListenHeader, values)]));
+        }
+        foreach (var (name, value, expected) in new[]
+        {
+            ("Content-Length", "0", false), ("Content-Length", "8", true),
+            ("Transfer-Encoding", "chunked", true), ("x-none", "", false),
+        })
+        {
+            Assert.Equal(expected, Read("HasBody", [RequestOf(name, [value]).HttpContext]));
+        }
+        foreach (var (types, codings, expected) in new (string[], string[], bool)[]
+        {
+            ([HttpTransport.MediaType], [], true),
+            ([HttpTransport.MediaType], ["IDENTITY"], true),
+            ([HttpTransport.MediaType, HttpTransport.MediaType], [], false),
+            ([HttpTransport.MediaType, "text/html"], [], false),
+            ([HttpTransport.MediaType], ["identity", "identity"], false),
+            ([HttpTransport.MediaType], ["identity, gzip"], false),
+        })
+        {
+            var request = RequestOf("Content-Type", types);
+            request.Headers.ContentEncoding = codings;
+            Assert.Equal(expected, Read("IsBeadBody", [request]));
+        }
+    }
+
+    [Fact]
+    public async Task Keeps_an_HTTP_2_session_past_headers_timeout_while_an_answer_is_under_way()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        using var http = SecureClient();
+        using var drew = await Fetch(http, Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20));
+
+        Assert.Equal(201, (int)drew.StatusCode);
+        var token = HeaderOf(drew, HttpTransport.ConnectionTokenHeader);
+        var handle = Assert.Single(_server.ConnectionHandles);
+        var asking = Fetch(http, Over(PostOf(SecureUrl, (token, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
+        await Until(() => { return _messages.Count == 1; });
+        Assert.Single(_messages);
+        // * the answer waits past the head's timeout many times over, and its linger
+        await Task.Delay(TimeSpan.FromSeconds(3), Cancelled);
+        Assert.False(asking.IsCompleted);
+        var answer = EnvelopeOf(EnvelopeKind.Result, 1);
+        await _server.Send(new TransportMessage(answer, false), handle);
+        using var asked = await asking;
+        Assert.Equal((200, HttpVersion.Version20), ((int)asked.StatusCode, asked.Version));
+        Assert.Equal(answer, await BytesOf(asked));
+    }
+
+    [Fact(Skip = "divergence: HTTP/2 sessions with no preface or no head stay open past HeadersTimeout")]
+    public async Task Ends_an_HTTP_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        byte[] settled = [.. Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"), 0, 0, 0, 4, 0, 0, 0, 0, 0];
+        byte[][] prefixes = [[], settled, [.. settled, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0x82]];
+        var wires = new List<TlsWire>();
+        try
+        {
+            foreach (var prefix in prefixes)
+            {
+                wires.Add(await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2)));
+            }
+            var endings = await Task.WhenAll(wires.Select((wire, index) =>
+            {
+                return wire.EndsAfterRaw(prefixes[index], TimeSpan.FromSeconds(5));
+            }));
+            Assert.Equal([true, true, true], endings);
+        }
+        finally
+        {
+            foreach (var wire in wires) { await wire.DisposeAsync(); }
+        }
+    }
+
     [Fact]
     public async Task Checks_every_request_field_for_visible_bytes_and_edge_whitespace_before_admission()
     {

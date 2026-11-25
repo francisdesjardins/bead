@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
 using Bead.Transport.WebSockets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -18,6 +19,27 @@ namespace Bead.Transport.Http.Tests;
 public sealed class HttpServerTests
 {
     // constants
+
+    [Fact]
+    public async Task Runs_its_router_on_its_transports_clock_which_a_facade_is_given_through_its_transports_options_and_refuses_a_router_on_another()
+    {
+        var clock = new FakeTimeProvider();
+        await using var server = new HttpServer<string>(new HttpServerOptions
+        {
+            Transport = new HttpTransportServerOptions { Clock = clock },
+        });
+
+        Assert.Same(clock, server.Transport.Clock);
+        Assert.Same(clock, server.Router.Clock);
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpServer<string>(new HttpServerOptions
+            {
+                Server = new ServerOptions { Clock = clock },
+            });
+        });
+        Assert.Contains("clock", refusal.Message, StringComparison.Ordinal);
+    }
 
     private const string Host = "127.0.0.1";
 

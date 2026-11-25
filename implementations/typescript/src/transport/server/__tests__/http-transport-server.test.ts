@@ -166,6 +166,85 @@ test.describe('createHTTPTransportServer', () => {
     await tcpSocketsClosed();
   });
 
+  test('listens on the port it was asked for', async () => {
+    await using server = createHTTPTransportServer({ createServer });
+    const bound = await server.start({ address: host, port: 0 });
+
+    expect(bound.address).toBe(host);
+    expect(bound.port).not.toBe(0);
+    const socket = connectTcp(bound.port, host);
+    try {
+      await once(socket, 'connect');
+      expect(socket.remotePort).toBe(bound.port);
+      expect(server.isOpen()).toBe(true);
+    } finally {
+      socket.destroy();
+    }
+    await server.stop();
+  });
+
+  test('serves every address it binds by one configuration', async () => {
+    const ipv6 = await hasIPv6Loopback();
+    await using server = createHTTPTransportServer({ createServer, pathname: '/elsewhere' });
+    const { port } = await server.start({ findOpenPort: true });
+
+    for (const address of ipv6 ? ['127.0.0.1', '::1'] : ['127.0.0.1']) {
+      const authority = address.includes(':') ? `[${address}]` : address;
+      const response = await post(`http://${authority}:${String(port)}/bead`, {
+        headers: { host: 'localhost' },
+      });
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get(REFUSAL_HEADER)).toBe(HTTP_REFUSALS.PATH);
+      await response.arrayBuffer();
+    }
+    await server.stop();
+  });
+
+  test('listens on port 80 when its start names none and on the port it names otherwise', async () => {
+    for (const [options, expected] of [
+      [{}, 80],
+      [{ port: 8080 }, 8080],
+    ] as const) {
+      const fake = createFakeHTTPServer();
+      await using server = createHTTPTransportServer({ createServer: fake.createServer });
+      const starting = server.start({ address: host, ...options });
+
+      fake.listen();
+      await starting;
+      expect(fake.servers[0]?.listened).toEqual([expected, host]);
+      await server.stop();
+    }
+  });
+
+  test('answers a request an answer comes for between its body’s end and its hand-on, never handing it on', async () => {
+    test.skip(
+      true,
+      'divergence: a request answered while its connection is paused is handed on after resume'
+    );
+    await using started = await startTransport();
+    const { server, url, events } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 });
+    const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
+
+    server.pause(connectionHandle);
+    const coming = post(url, { body: request, connectionToken });
+    await expect
+      .poll(() => {
+        return server.gauges().counts['waitingExchanges'];
+      })
+      .toBe(1);
+    await server.send({ data: answer }, connectionHandle);
+    const response = await coming;
+
+    expect(response.status).toBe(200);
+    expect(await bytesOf(response)).toEqual([...answer]);
+    server.resume(connectionHandle);
+    await sleep(50);
+    expect(namesOf(events, 'message')).toEqual([]);
+  });
+
   test('shows how the platform reads chunked with trailing space and tab', async () => {
     await platformFramingOf({ coding: 'chunked \t' });
   });
@@ -1664,6 +1743,108 @@ const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) =
 };
 
 test.describe('createHTTPTransportServer, over TLS', () => {
+  test('keeps an HTTP/2 session past headers timeout while an answer is under way', async () => {
+    await using started = await startSecure({ headersTimeout: 200 });
+    const { server, session } = started;
+    const drawing = session.request({
+      ':method': 'POST',
+      ':path': '/bead',
+      'content-type': BEAD_MEDIA_TYPE,
+      'content-length': '0',
+    });
+    const drew = new Promise<IncomingHttpHeaders>((resolve) => {
+      drawing.once('response', resolve);
+    });
+    drawing.resume();
+    drawing.end();
+    const headers = await drew;
+
+    expect(headers[':status']).toBe(201);
+    const client = server.clients[0];
+    if (client === undefined) {
+      throw new Error('the connection is drawn');
+    }
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 });
+    const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
+    const asking = session.request({
+      ':method': 'POST',
+      ':path': '/bead',
+      'content-type': BEAD_MEDIA_TYPE,
+      'content-length': String(request.length),
+      [CONNECTION_TOKEN_HEADER]: headers[CONNECTION_TOKEN_HEADER],
+    });
+    const responding = new Promise<IncomingHttpHeaders>((resolve) => {
+      asking.once('response', resolve);
+    });
+    asking.end(request);
+    const response = await responding;
+
+    expect(response[':status']).toBe(200);
+    // * the answer waits past the head's timeout many times over, and its linger
+    await sleep(3_000);
+    expect([session.closed, session.destroyed, asking.closed]).toEqual([false, false, false]);
+    const body = new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      asking.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      asking.once('end', () => {
+        resolve(Buffer.concat(chunks));
+      });
+      asking.once('error', reject);
+    });
+    await server.send({ data: answer }, client.connectionHandle);
+    expect(await body).toEqual(Buffer.from(answer));
+  });
+
+  test('ends an HTTP/2 session that reads no request’s head within headers timeout, its preface, its settings or its head never whole', async () => {
+    test.skip(
+      true,
+      'divergence: HTTP/2 sessions with no preface, no head or an unfinished head stay open past headersTimeout'
+    );
+    await using started = await startSecure({ headersTimeout: 200 });
+    const settled = Buffer.concat([
+      Buffer.from('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'),
+      Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0]),
+    ]);
+    const prefixes = [
+      Buffer.alloc(0),
+      settled,
+      Buffer.concat([settled, Buffer.from([0, 0, 1, 1, 1, 0, 0, 0, 1, 0x82])]),
+    ];
+    const sockets: ReturnType<typeof connectTLS>[] = [];
+    try {
+      const endings: Promise<boolean>[] = [];
+      for (const prefix of prefixes) {
+        const socket = connectTLS({
+          host,
+          port: started.port,
+          ca: TLS_FIXTURE.cert,
+          ALPNProtocols: ['h2'],
+        });
+        sockets.push(socket);
+        socket.on('error', () => {});
+        await once(socket, 'secureConnect');
+        endings.push(
+          Promise.race([
+            new Promise<boolean>((resolve) => {
+              socket.once('close', () => {
+                resolve(true);
+              });
+            }),
+            sleep(5_000, false, { ref: false }),
+          ])
+        );
+        socket.write(prefix);
+      }
+      expect(await Promise.all(endings)).toEqual([true, true, true]);
+    } finally {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+    }
+  });
+
   // spec 15.12
   test('answers a preflight over HTTP/2 as over HTTP/1.1', async () => {
     await using started = await startSecure({ origins: [PAGE] });

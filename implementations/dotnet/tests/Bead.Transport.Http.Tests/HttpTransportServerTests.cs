@@ -913,6 +913,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12.4
     [Fact]
+    public void Listens_on_port_80_when_its_start_names_none_and_on_the_port_it_names_otherwise()
+    {
+        Assert.Equal(80, new TransportServerStartOptions().Port);
+        Assert.Equal(8080, new TransportServerStartOptions { Port = 8080 }.Port);
+    }
+
+    [Fact]
     public void Keeps_its_constants_in_step_with_the_router_s()
     {
         // the kinds it tells apart are the router's own, EnvelopeKind; what it reads by default, the
@@ -4089,7 +4096,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.12
     [Fact]
-    public async Task Gauges_the_connections_its_busiest_address_holds_against_maximumConnectionsPerAddress_which_its_health_warns_on_at_80_percent()
+    public async Task Gauges_the_connections_its_busiest_address_holds_against_maximum_connections_per_address_which_its_health_warns_on_at_80()
     {
         await Start(new HttpTransportServerOptions { MaximumConnectionsPerAddress = 5 });
 

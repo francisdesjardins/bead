@@ -5,6 +5,24 @@ namespace Bead.Transport.WebSockets.Tests;
 /// <summary>The connection's queues, with a socket whose frames and first send the test controls.</summary>
 public sealed class WebSocketConnectionTests
 {
+    [Fact]
+    public void Takes_a_number_of_milliseconds_a_timer_holds_rounded_to_the_nearest_whole_one_or_infinity_for_none_and_refuses_infinity_which_the_durations_file_holds_no_input_of()
+    {
+        foreach (var (given, held) in new[]
+        {
+            (TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1)),
+            (TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(2)),
+            (TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30)),
+            (Clocks.LongestTimer, Clocks.LongestTimer),
+            (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
+        })
+        {
+            Assert.Equal(held, WebSocketConnection.AssertHeartbeat(given, nameof(WebSocketTransportClientOptions.Heartbeat)));
+        }
+        Assert.Equal(TimeSpan.FromSeconds(30), new WebSocketTransportClientOptions().Heartbeat);
+        Assert.Throws<OverflowException>(() => { return TimeSpan.FromMilliseconds(double.NegativeInfinity); });
+    }
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private sealed class HeldWebSocket : WebSocket

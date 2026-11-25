@@ -106,7 +106,7 @@ test('WebSocketServer runs every layer on its transport’s clock and refuses an
   }).toThrow(ProgrammerError);
 });
 
-test('createWebSocketServer builds on a WebSocket transport server, not yet started, with the layers given', async () => {
+test('WebSocket server builds on a WebSocket transport server, not yet started, with its layers and the limits given', async () => {
   const sessions = createSessionManager();
   const built: string[] = [];
   const limits: unknown[] = [];
@@ -140,7 +140,7 @@ test('createWebSocketServer builds on a WebSocket transport server, not yet star
   expect(limits).toEqual([{ maximumPayloadBytes: 8 }]);
 });
 
-test('createWebSocketServer takes a message of an envelope at most, more when the transport says so, and never less', async () => {
+test('takes a message of an envelope at most, more when the transport says so, and never less', async () => {
   // envelopes of 256 bytes
   const small = { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 };
 
@@ -174,7 +174,7 @@ test('createWebSocketServer takes a message of an envelope at most, more when th
   }
 });
 
-test('createWebSocketServer builds its router with the pacing its options give', async () => {
+test('WebSocket server builds its router with the pacing its options give', async () => {
   await using server = createWebSocketServer({
     pacing: { maximumQueuedNotificationBytes: 2_048, maximumQueuedNotifications: 3 },
     transport: { WebSocketServer },
@@ -186,7 +186,7 @@ test('createWebSocketServer builds its router with the pacing its options give',
   });
 });
 
-test('createWebSocketServer closes with 1009 a connection that sends more than `maxPayload`', async () => {
+test('WebSocket server closes with 1009 a connection that sends more than maximum message bytes', async () => {
   const server = createWebSocketServer({
     limits: { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 },
     transport: { maxPayload: 256, WebSocketServer },
@@ -210,7 +210,7 @@ test('createWebSocketServer closes with 1009 a connection that sends more than `
   }
 });
 
-test('createWebSocketServer closes a client that lets a command go unanswered, when told to', async () => {
+test('WebSocket server closes a client that lets a command go unanswered when told to', async () => {
   const server = createWebSocketServer({
     closeOnCommandTimeout: true,
     transport: { WebSocketServer },

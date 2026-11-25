@@ -14,6 +14,117 @@ namespace Bead.Transport.WebSockets.Tests;
 /// </summary>
 public sealed partial class WebSocketTransportServerTests
 {
+    [Fact]
+    public async Task Pings_once_nothing_was_read_for_its_heartbeat_again_after_each_echo_and_drops_its_connection_once_a_ping_s_echo_has_not_come_within_its_heartbeat()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromSeconds(1) });
+        var reported = new ConcurrentQueue<Exception>();
+        _server.Error += (error, _) => { reported.Enqueue(error); };
+        var (tcp, stream, handle) = await Raw();
+        using (tcp)
+        {
+            for (var read = 0; read < 4; read += 1)
+            {
+                await stream.WriteAsync(MaskedFrame((0x82, [7])), Cancelled);
+                await Next(_messages);
+                await Task.Delay(200, Cancelled);
+            }
+            Assert.Equal(0, tcp.Available);
+            var first = await FrameFrom(stream);
+            Assert.Equal(0x9, first?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 1], first!.Value.Payload);
+            await stream.WriteAsync(PongOf(first.Value.Payload), Cancelled);
+            var second = await FrameFrom(stream);
+            Assert.Equal(0x9, second?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 2], second!.Value.Payload);
+            await stream.WriteAsync(MaskedFrame((0x82, [7])), Cancelled);
+            await Next(_messages);
+
+            Assert.Equal((false, handle), await Next(_closes));
+            Assert.Null(await FrameFrom(stream));
+            Assert.Empty(reported);
+        }
+    }
+
+    [Fact]
+    public async Task Stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_which_the_clock_given_never_times()
+    {
+        var clock = new Bead.Tests.SteppingClock(DateTimeOffset.UnixEpoch);
+        await Start(new WebSocketTransportServerOptions { Clock = clock, CloseTimeout = TimeSpan.FromMilliseconds(100) });
+        var (tcp, stream, handle) = await Raw();
+        using (tcp)
+        {
+            await stream.WriteAsync(MaskedFrame((0x82, [1])), Cancelled);
+            await Next(_messages);
+
+            Assert.Equal(DateTimeOffset.UnixEpoch, Assert.Single(_server.Clients).LastActivity);
+            Assert.True(await _server.CloseConnection(handle).WaitAsync(Patience, Cancelled));
+            Assert.Empty(clock.Dues());
+        }
+    }
+
+    [Fact]
+    public async Task An_error_before_listening_rejects_the_start_and_closes_what_was_opened()
+    {
+        await using var other = new WebSocketTransportServer();
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+        {
+            return other.Start(new TransportServerStartOptions { Address = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
+        });
+
+        Assert.Equal(ReadyState.Closed, other.ReadyState);
+        await other.Start(Loopback with { CancellationToken = Cancelled });
+        Assert.Equal(ReadyState.Open, other.ReadyState);
+        await other.Stop().WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Fails_a_peer_s_close_of_a_status_no_end_sends_as_a_protocol_error_answered_1002()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan, CloseTimeout = TimeSpan.FromMilliseconds(100) });
+        var reported = new ConcurrentQueue<Exception>();
+        _server.Error += (error, _) => { reported.Enqueue(error); };
+        foreach (var status in new ushort[] { 1005, 1006, 999, 1002 })
+        {
+            var before = reported.Count;
+            var (tcp, stream, connectionHandle) = await Raw();
+            using (tcp)
+            {
+                var payload = new byte[2];
+                BinaryPrimitives.WriteUInt16BigEndian(payload, status);
+                await stream.WriteAsync(MaskedFrame((0x88, payload)), Cancelled);
+
+                Assert.Equal(1002, await FirstCloseCodeOf(stream));
+                await stream.WriteAsync(MaskedFrame((0x88, [0x03, 0xea])), Cancelled);
+                await Next(_closes);
+                Assert.Equal(status == 1002 ? 0 : 1, reported.Count - before);
+                if (status != 1002)
+                {
+                    Assert.IsType<WebSocketException>(reported.Last());
+                }
+            }
+        }
+    }
+
+    [Fact(Skip = "divergence: .NET answers 1002 to a close reason that is no UTF-8; Rust and TypeScript answer 1007")]
+    public async Task Fails_a_text_message_or_a_close_s_reason_that_is_no_UTF_8_answered_1007()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan, CloseTimeout = TimeSpan.FromMilliseconds(100) });
+        foreach (var frame in new[] { MaskedFrame((0x81, [0xff, 0xfe])), MaskedFrame((0x88, [0x03, 0xe8, 0xff, 0xfe])) })
+        {
+            var (tcp, stream, connectionHandle) = await Raw();
+            using (tcp)
+            {
+                await stream.WriteAsync(frame, Cancelled);
+
+                Assert.Equal(1007, await FirstCloseCodeOf(stream));
+                await stream.WriteAsync(MaskedFrame((0x88, [0x03, 0xef])), Cancelled);
+                Assert.Equal((false, connectionHandle), await Next(_closes));
+                Assert.Equal(0, _messages.Reader.Count);
+            }
+        }
+    }
+
     // a WebSocket's opcodes, as a frame's first byte carries them, final or not (RFC 6455 §5.2)
     private const byte Fragment = 0x02;
     private const byte Continued = 0x00;

@@ -264,7 +264,7 @@ test.describe('answerBeforeClose', () => {
 });
 
 test.describe('lingerOn', () => {
-  test('reads on once its answer is written, the destroy Node armed taken off, and destroys the socket once its client ends it', () => {
+  test('reads on once its answer is written and destroys the socket once its client ends it', () => {
     const socket = createLingeringSocket();
     const response = new EventEmitter();
 
