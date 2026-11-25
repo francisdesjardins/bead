@@ -3820,8 +3820,8 @@ EXCHANGES = [
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: bearer a.b.c']),
               call_failed({'code': 36, 'arose': 'server', 'detail': 'OPAQUE, ELSEWHERE'})],
              options={'authorization': 'bearer-jwt'}),
-    exchange("under bearer-jwt, another auth-scheme presents no credential: a procedure that needs a session "
-             "answers 401, its challenge alone, and one that needs none runs", ['2.4', '2.4.2', '2.5', '7.6.8'],
+    exchange("under bearer-jwt, another auth-scheme, or none, presents no credential: a procedure that needs a "
+             "session answers 401, its challenge alone, and one that needs none runs", ['2.4', '2.4.2', '2.5', '7.6.8'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic YTpi'], on='a'),
               call_failed({'code': 32, 'arose': 'server'}, on='a'),
               json_post('/api/Transcoding/echo', '{}', ['authorization: Basic YTpi'], on='b'),
@@ -3829,7 +3829,9 @@ EXCHANGES = [
               json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic\tYTpi'], on='c'),
               call_failed({'code': 32, 'arose': 'server'}, on='c'),
               json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearerabc'], on='d'),
-              call_failed({'code': 32, 'arose': 'server'}, on='d')],
+              call_failed({'code': 32, 'arose': 'server'}, on='d'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: =abc'], on='e'),
+              call_failed({'code': 32, 'arose': 'server'}, on='e')],
              options={'authorization': 'bearer-jwt'}),
     exchange("under bearer-jwt, Bearer alone presents no credential", ['2.4', '2.4.2', '2.5', '7.6.8'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer'], on='a'),
@@ -3860,7 +3862,7 @@ EXCHANGES = [
              options={'authorization': 'bearer-jwt'}),
     exchange("two authorization fields, 400 malformed", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
-              refused_own(400, 'malformed', 'two authorization fields')]),
+              refused_own(400, 'malformed', 'two authorization fields', fields={'www-authenticate': None})]),
     exchange("under bearer-jwt, two authorization fields, 400 malformed, invalid_request", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
               refused_own(400, 'malformed', 'two authorization fields', fields=INVALID_REQUEST)],
@@ -3941,6 +3943,16 @@ EXCHANGES = [
     exchange("a host it does not take, 403", ['10.1', '10.1.2', '7.7'],
              [send('GET', '/v1/books/2', ['host: evil.example']),
               refused_own(403, 'host-refused', 'a host it does not take')]),
+    # spec 13.4.1 and 15.12: localhost. and a name under .localhost. are no loopback names, which every
+    # server, a gateway among them, compares as they come
+    exchange("a gateway given no hosts takes localhost and a name under .localhost, and refuses localhost. and a "
+             "name under .localhost. 403", ['10.1', '10.1.2', 'spec:15.12', 'spec:13.4.1'],
+             [*[step for on, host in (('a', 'localhost'), ('b', 'a.localhost'))
+                for step in (send('GET', '/v1/books/2', [f'host: {host}'], on=on),
+                             answered(result('Book', {'name': '2', 'title': 'A tale'}), on=on))],
+              *[step for on, host in (('c', 'localhost.'), ('d', 'a.localhost.'))
+                for step in (send('GET', '/v1/books/2', [f'host: {host}'], on=on),
+                             refused_own(403, 'host-refused', 'a host it does not take', on=on))]]),
     exchange("an origin neither its own nor listed, 403", ['10.1', '10.1.4'],
              [send('GET', '/v1/books/2', ['origin: https://other.example']),
               refused_own(403, 'origin-refused', 'an origin neither its own nor listed')]),
@@ -4086,6 +4098,16 @@ EXCHANGES = [
                                          'body': ''}, 'on': on})],
               framed_by([('transfer-encoding', ', chunked')], on='d'),
               answered('{}', on='d')]),
+    # a coding's name compared in any ASCII case (spec 15.12, RFC 9112 §7): Chunked and CHUNKED decoded,
+    # the body echoed, and gzip, CHUNKED a coding before its chunked, refused as HTTP refuses it
+    exchange("a body whose Transfer-Encoding names its codings in any ASCII case is read so: Chunked and CHUNKED "
+             "are decoded, and gzip, CHUNKED refused as HTTP refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [*[step for on, coding in (('a', 'Chunked'), ('b', 'CHUNKED'))
+                for step in (framed_by([('transfer-encoding', coding)], on=on), answered('{}', on=on))],
+              framed_by([('transfer-encoding', 'gzip, CHUNKED')], on='c'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'c'}]),
     # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
     # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
     # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)
@@ -4099,7 +4121,7 @@ EXCHANGES = [
                        'language': 'Rust'}]),
     # * a Content-Length past 2⁶³ − 1, read by value whatever zeros lead it, refused as HTTP refuses it
     # before the host is judged; one at the count, in 19 digits and in 23, goes on to the host's 403;
-    # 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out, since hyper answers them 431 (spec 15.12)
+    # 2⁶⁴ − 2 and 2⁶⁴ − 1 are an exchange of their own below, which the Rust side's row excuses it from
     exchange("a body whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, refused as HTTP "
              "refuses it, unmarked, its body empty, before its host is judged",
              ['10.1', '10.1.1', 'spec:15.12'],
@@ -4110,6 +4132,17 @@ EXCHANGES = [
                            if int(length) <= 2 ** 63 - 1 else
                            {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
                                        'body': ''}, 'on': on})]),
+    # ! an exchange of its own, so that the side whose HTTP answers 2⁶⁴ − 2 and 2⁶⁴ − 1 431 (hyper, the
+    # row A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1) is excused by its differs from it
+    # alone (spec 15.12)
+    exchange("a body whose Content-Length is 2⁶⁴ − 2 or 2⁶⁴ − 1, refused as HTTP refuses it, unmarked, its body "
+             "empty, before its host is judged",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, length in (('a', str(2 ** 64 - 2)), ('b', str(2 ** 64 - 1)))
+              for step in (framed_by([length], on=on, host='evil.example'),
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})],
+             differs=[{'row': 'A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1', 'language': 'Rust'}]),
     # ! an exchange of its own, so that the side whose HTTP reads a Content-Length beside a
     # Transfer-Encoding by the Transfer-Encoding alone (hyper drops the Content-Length, the row A
     # `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1) is excused by its differs from it

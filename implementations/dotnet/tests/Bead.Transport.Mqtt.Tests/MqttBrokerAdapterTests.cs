@@ -527,7 +527,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
-    // spec 13.4: the platform's resolver stood in for, process-wide, as the broker's classes run alone
+    // spec 13.4.2: the platform's resolver stood in for, process-wide, as the broker's classes run alone
     [Fact]
     public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_TCP()
     {
@@ -551,7 +551,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_a_WebSocket()
     {
@@ -576,7 +576,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
     {
@@ -638,7 +638,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
-    // spec 13.4: the platform's proxy stood in for, process-wide, as the broker's classes run alone
+    // spec 13.4.2: the platform's proxy stood in for, process-wide, as the broker's classes run alone
     [Fact]
     public async Task Sends_nothing_through_the_platforms_proxy_to_a_host_on_the_loopback()
     {

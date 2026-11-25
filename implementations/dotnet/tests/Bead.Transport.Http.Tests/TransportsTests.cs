@@ -899,9 +899,21 @@ public sealed class TransportsTests
         }
     }
 
+    // what the server's transport reported of its own: its message, the connection it came on, and
+    // the index of the step before which it was first seen, none until the next step starts
+    private sealed class TransportError(string message, string connectionHandle)
+    {
+        public string Message { get; } = message;
+
+        public string ConnectionHandle { get; } = connectionHandle;
+
+        public int? Step { get; set; }
+    }
+
     // a case played: the server under test, the exchanges a peer of the test's own opened by name,
-    // the values it captured, and what the server reported, and the refusals its transport told,
-    // that no step took yet, each report with the connection it came with
+    // the values it captured, and what the server reported, the refusals its transport told and
+    // the errors it reported of its own, that no step took yet, each report with the connection it
+    // came with
     private sealed class Peer : IDisposable
     {
         private readonly Served _served;
@@ -910,7 +922,14 @@ public sealed class TransportsTests
         private readonly Dictionary<string, string> _captured = [];
         private readonly ConcurrentQueue<(string Report, string? ConnectionHandle)> _reports = new();
         private readonly ConcurrentQueue<TransportServerRefusal> _refusals = new();
+        private readonly List<TransportError> _errors = [];
+        private readonly Lock _erring = new();
+
+        // the connection of each exchange by its name, read from the transport's clients while it is
+        // live: a connection its transport fails is gone from them by the time its error is read
+        private readonly Dictionary<string, string> _handles = [];
         private int _port;
+        private int _taken;
 
         public Peer(Served served, bool isAnsweringPings)
         {
@@ -925,6 +944,15 @@ public sealed class TransportsTests
 
             // what its transport tells of each refusal it judges (spec 15.1)
             served.Transport.Refusal += _refusals.Enqueue;
+
+            // what its transport reports of its own, a connection it fails among it
+            served.Transport.Error += (reason, connectionHandle) =>
+            {
+                lock (_erring)
+                {
+                    _errors.Add(new TransportError(reason.Message, connectionHandle));
+                }
+            };
         }
 
         // a step in a few words: what it does, and on which exchange
@@ -943,7 +971,56 @@ public sealed class TransportsTests
             _port = await _served.Start();
         }
 
+        // a step taken, the connection of each exchange read before it and after it, and counted once
+        // it ends, whether it passed or not
         public async Task Take(JsonElement step)
+        {
+            try
+            {
+                Stamp();
+                Capture();
+                await TakeOne(step);
+                Capture();
+            }
+            finally
+            {
+                _taken += 1;
+            }
+        }
+
+        // each error the transport reported of its own is stamped with the first step it came
+        // before, or with the count of steps at the end
+        private void Stamp()
+        {
+            lock (_erring)
+            {
+                foreach (var error in _errors)
+                {
+                    error.Step ??= _taken;
+                }
+            }
+        }
+
+        // the connection of each exchange that has none read yet, by its port, where the transport
+        // holds it
+        private void Capture()
+        {
+            var clients = _served.Clients();
+
+            foreach (var (name, exchange) in _exchanges)
+            {
+                if (!_handles.ContainsKey(name) && clients.FirstOrDefault((client) =>
+                {
+                    return client.Port == exchange.Port;
+                }) is { } client)
+                {
+                    _handles[name] = client.ConnectionHandle;
+                }
+            }
+        }
+
+        // a step's one act, on the exchange and within the times it may name
+        private async Task TakeOne(JsonElement step)
         {
             var on = step.TryGetProperty("on", out var named) ? named.GetString()! : "";
             var timing = new Timing(step);
@@ -979,6 +1056,7 @@ public sealed class TransportsTests
                 NothingMore();
                 _exchanges[on].Dispose();
                 _exchanges.Remove(on);
+                _handles.Remove(on);
             }
             else if (step.TryGetProperty("until", out var until))
             {
@@ -1001,6 +1079,10 @@ public sealed class TransportsTests
             {
                 await Report((report, on));
             }
+            else if (step.TryGetProperty("reported", out var reported))
+            {
+                await Reported((reported, on));
+            }
             else if (step.TryGetProperty("stop", out _))
             {
                 await _served.Stop().WaitAsync(Patience, Cancelled);
@@ -1011,11 +1093,67 @@ public sealed class TransportsTests
             }
         }
 
-        // the server reported nothing, and told no refusal, that no step took
+        // the server reported nothing, and told no refusal, that no step took; over WebSocket, its
+        // transport reported nothing of its own either
         public void NothingMore()
         {
+            Stamp();
             Assert.Empty(_reports);
             Assert.True(_refusals.IsEmpty, $"told no refusal, and {string.Join("; ", _refusals.Select(TellingOf))}");
+
+            // * over HTTP, no case reads what its transport reports of its own
+            if (_served.Transport is WebSocketTransportServer)
+            {
+                var errors = ErrorsLeft();
+
+                Assert.True(errors.Length == 0, $"its transport reported nothing of its own, and {string.Join("; ", errors.Select(ErrorOf))}");
+            }
+        }
+
+        // the errors its transport reported of its own that no step took yet
+        private TransportError[] ErrorsLeft()
+        {
+            lock (_erring)
+            {
+                return [.. _errors];
+            }
+        }
+
+        // the first error its transport reported of its own of a connection, or of any for none,
+        // taken from those no step took yet; none when none came
+        private TransportError? NextErrorOf(string? connectionHandle)
+        {
+            lock (_erring)
+            {
+                var index = _errors.FindIndex((error) =>
+                {
+                    return connectionHandle is null || error.ConnectionHandle == connectionHandle;
+                });
+
+                if (index < 0)
+                {
+                    return null;
+                }
+
+                var error = _errors[index];
+
+                _errors.RemoveAt(index);
+
+                return error;
+            }
+        }
+
+        // an error its transport reported of its own, as a failure tells it: its message, the
+        // exchange whose connection it came on, and the steps taken before it was seen
+        private string ErrorOf(TransportError error)
+        {
+            var on = _handles.FirstOrDefault((named) =>
+            {
+                return named.Value == error.ConnectionHandle;
+            }).Key ?? (error.ConnectionHandle.Length == 0 ? "no connection" : ExchangeOf(error.ConnectionHandle));
+            var seen = error.Step is { } step ? $", seen once {step} steps were taken" : "";
+
+            return $"\"{error.Message}\" on {on}{seen}";
         }
 
         // a refusal told, written as a case writes what it expects
@@ -1074,6 +1212,7 @@ public sealed class TransportsTests
                 before.Dispose();
             }
 
+            _handles.Remove(step.On);
             _exchanges[step.On] = await Exchange.Send((_port, octets, _isAnsweringPings));
         }
 
@@ -1423,6 +1562,48 @@ public sealed class TransportsTests
             Assert.Equal(
                 on.Length == 0 ? $"report {expected}" : $"report {expected} on {on}",
                 on.Length == 0 ? $"report {came.Report}" : $"report {came.Report} on {ExchangeOf(came.ConnectionHandle ?? "no connection")}");
+        }
+
+        // the first error the transport reported of its own of the connection of the exchange named,
+        // or the next of any where none is named, within a patience, since it reports a connection
+        // it fails once that connection ends; its message holding each word given
+        private async Task Reported((JsonElement Words, string On) step)
+        {
+            var (words, on) = step;
+            string? connectionHandle = null;
+
+            if (on.Length > 0)
+            {
+                Assert.True(_handles.TryGetValue(on, out var named), $"the connection of {on}, read while it was live, and none was");
+                connectionHandle = named;
+            }
+
+            var watch = Stopwatch.StartNew();
+            var came = NextErrorOf(connectionHandle);
+
+            while (came is null && watch.Elapsed < Patience)
+            {
+                await Task.Delay(5, Cancelled);
+                came = NextErrorOf(connectionHandle);
+            }
+
+            if (came is null)
+            {
+                var others = ErrorsLeft();
+
+                Assert.Fail($"expected an error reported{(on.Length == 0 ? "" : $" on {on}")}, and none was{(others.Length == 0 ? "" : $", but {string.Join("; ", others.Select(ErrorOf))}")}");
+            }
+
+            foreach (var word in words.EnumerateArray())
+            {
+                Assert.True(IsNaming((came.Message, word.GetString()!)), $"\"{came.Message}\" names {word.GetString()}");
+            }
+        }
+
+        // whether a message names a word, bounded as a word is, so that 500 bytes is not 1500 bytes
+        private static bool IsNaming((string Message, string Word) named)
+        {
+            return Regex.IsMatch(named.Message, $"(?<![A-Za-z0-9]){Regex.Escape(named.Word)}(?![A-Za-z0-9])", RegexOptions.CultureInvariant);
         }
 
         // the exchange whose socket a connection came by, as its port says; its handle when none did

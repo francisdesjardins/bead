@@ -65,7 +65,7 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
     }
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
     let fake = fake().await;
@@ -88,7 +88,7 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     client.dispose();
 }
 
-// spec 13.4, 15.39
+// spec 13.4.2, 15.39
 #[tokio::test]
 async fn keeps_a_localhost_name_in_its_host_and_its_tls_server_name_while_it_connects_the_loopback()
 {
@@ -134,7 +134,7 @@ async fn keeps_a_localhost_name_in_its_host_and_its_tls_server_name_while_it_con
     client.dispose();
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let closed = crate::testing::closed_port::closed_port().unwrap();
@@ -154,7 +154,7 @@ async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no
     client.dispose();
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
  {
@@ -203,7 +203,7 @@ async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_befo
     );
 }
 
-// spec 13.4; RFC 7301: its socket raced, the TLS and ALPN laid over it are what an IP literal's are
+// spec 13.4.2; RFC 7301: its socket raced, the TLS and ALPN laid over it are what an IP literal's are
 #[tokio::test]
 async fn negotiates_the_http_version_with_a_localhost_name_that_it_negotiates_with_127_0_0_1() {
     // * a server that offers HTTP/2 first by ALPN, then HTTP/1.1

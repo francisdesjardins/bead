@@ -3627,7 +3627,7 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
   });
 });
 
-// spec 13.4: a link to a host on the loopback, connected by Bead to the loopback itself
+// spec 13.4.2: a link to a host on the loopback, connected by Bead to the loopback itself
 test.describe('createMqttBrokerAdapter, on the loopback', () => {
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers, over TCP', async () => {
     await using script = await createMqttScript();

@@ -764,6 +764,14 @@ for group, entries in (('transports', named['transports']), ('transcoding: excha
                 problems.append(f'{where} reads the end of {on!r} once {read.get(on, 0)} of the '
                                 f'{written.get(on, 0)} requests written on it were answered')
 
+# reported reads what a WebSocket's or a broker's transport reported of its own; no player of a case
+# over HTTP reads it
+for case in named['transports']:
+    for number, step in enumerate(case['steps'], 1):
+        if case['transport'] == 'http' and 'reported' in step:
+            problems.append(f'transports: {case["name"]!r}, step {number}, reads reported, which a case over HTTP '
+                            'never does: a WebSocket\'s or a broker\'s transport reports of its own')
+
 # a conversation that opens its connections names one, opened already, on every other step but those
 # that move the server's clock, which are no connection's; one that opens none plays the one connection
 # opened before its first step, and names none. An exit's are a conversation's, and what it counted,
