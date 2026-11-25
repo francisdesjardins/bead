@@ -1054,6 +1054,9 @@ const mainContentOf = (language, known) => {
 // one document of both languages in the shell: English in the page, French in a template the page
 // swaps in, each language's head and canonical address in the JSON beside the script
 const documentOf = ({ address, strings, contents }) => {
+  const hasMascot = Object.values(contents).some((content) => {
+    return facesOf(content) !== '';
+  });
   const heads = Object.fromEntries(
     LANGUAGES.map((language) => {
       return [
@@ -1090,9 +1093,13 @@ const documentOf = ({ address, strings, contents }) => {
     'page-script': raw(() => {
       return read(join(SRC, 'page.js')).trim();
     }),
-    'mascot-script': raw(() => {
-      // * the mascot as the demo and the panel have it, one module, mounted on the page's sections
-      return `${read(join(SKIN, 'mascot.js')).trim()}\n\nmountMascot();`;
+    mascot: raw(() => {
+      // * the mascot as the demo and the panel have it, one module, mounted on the page's sections;
+      // a document whose sections give it no face has none
+      if (!hasMascot) {
+        return '';
+      }
+      return `    <script type="module">\n${read(join(SKIN, 'mascot.js')).trim()}\n\nmountMascot();\n    </script>`;
     }),
     heads: raw(() => {
       return JSON.stringify(heads).replaceAll('<', '\\u003c');
