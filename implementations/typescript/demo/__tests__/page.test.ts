@@ -561,30 +561,29 @@ test.describe('the demo’s page', () => {
     }
   });
 
-  test('shows a call’s end on Bead’s mascot, in the bar: happy when it is answered, surprised when it is refused', async ({
+  test('shows a call’s end on the bar’s mark, Bead’s mascot: happy when it is answered, surprised when it is refused, and no second mascot', async ({
     page,
   }) => {
     await page.goto(served?.url ?? '');
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
 
-    const mascot = page.locator('button.bead-mascot');
+    // * the page leaves no room beside its scenes: the mascot is the bar's own mark
+    const mark = page.locator('.topbar .brand .mark');
 
-    // * hidden until a scroll or a call, and never focused on its own
-    await expect(mascot).toHaveAttribute('data-state', 'hidden');
-    await expect(mascot).toHaveAttribute('aria-label', 'Bead’s moon: click for an eclipse');
+    await expect(mark).toHaveClass(/bead-mark/u);
+    await expect(mark).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('.topbar .brand')).toHaveAttribute('title', "Bead's page");
 
     await page.click('button[data-action="reader"]');
-    await expect(mascot).toHaveAttribute('data-face', 'happy');
-    await expect(mascot).toHaveAttribute('data-dock', 'bar');
-    await expect(mascot).toBeVisible();
+    await expect(mark).toHaveAttribute('data-face', 'happy');
+    await expect(mark).toHaveAttribute('data-face-shown', '');
 
     await page.click('button[data-action="fail"]');
-    await expect(mascot).toHaveAttribute('data-face', 'surprised');
-    expect(
-      await page.evaluate(() => {
-        return document.activeElement?.classList.contains('bead-mascot');
-      })
-    ).toBe(false);
+    await expect(mark).toHaveAttribute('data-face', 'surprised');
+
+    // one mascot at a time: no button of its own, no other drawing in the bar
+    await expect(page.locator('button.bead-mascot')).toBeHidden();
+    await expect(page.locator('.topbar svg')).toHaveCount(1);
   });
 });
 
