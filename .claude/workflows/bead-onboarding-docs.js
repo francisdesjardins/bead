@@ -68,7 +68,7 @@ From ${OUT}/facts.md and the proven project ${OUT}/project/ (its files copied, n
 3. docs/guides/architecture-overview.md: the mental model, .proto to blueprint to beadc.yaml to targets, as a diagram (Mermaid, which GitHub renders), and a decision matrix of Bead against gRPC-Web, Connect and SignalR, each cell a fact of Bead's sources or of the other's own public documentation, with its link; no claim about another project that its documentation does not make.
 4. The root README.md: a prominent "Getting started for teams" link to docs/guides/getting-started.md, right after its "At a glance".
 5. A line under the CHANGELOG's [Unreleased] ### Added.
-Then: \`node tools/check-links.mjs\`, \`node tools/check-format.mjs\`, \`node tools/check-citations.mjs\` if a guide cites a test, and the names check over each file. Write ${OUT}/written.md: each file, what it holds, the gates. Return at most ten lines.
+Then every command \`node tools/ci-scope.mjs --local --gates\` prints for what you changed, from the folders it names (\`git add -N\` a new guide first, since \`check-citations\` reads the files git lists), and the names check over each file. Write ${OUT}/written.md: each file, what it holds, the gates. Return at most ten lines.
 The proving stage said: ${proved || '(none)'}`,
   { label: 'write', phase: 'Write', effort: 'high' }
 );
