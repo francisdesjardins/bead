@@ -534,11 +534,6 @@ test('requests that fail in their resolver or do not read are reported with thei
 });
 
 test('that fail in their resolver delivered before either settles are reported as their tasks settle after one that does not read', async () => {
-  test.skip(
-    true,
-    'divergence: a synchronous resolver throw is reported before the earlier rejected promise'
-  );
-
   const { control, deliver, emitter, sent, transport } = createScriptedTransport();
   using router = createRouterServer(transport);
   const errors = recordErrors(router);
@@ -990,52 +985,6 @@ test.describe('createRouterServer', () => {
         [ProtocolCode.KIND_UNSUPPORTED, first],
         [ProtocolCode.CALL_UNKNOWN, first],
         [ProtocolCode.LAYOUT_UNSUPPORTED, second],
-      ]);
-    });
-
-    test('that fail in their resolver, or do not read, are reported with their connection', async () => {
-      const { control, deliver, emitter, sent, transport } = createScriptedTransport();
-      using router = createRouterServer(transport);
-      const errors = recordErrors(router);
-
-      router.registerResolver(
-        Object.assign(() => {
-          return Promise.reject(new Error('rejected'));
-        }, echo)
-      );
-      router.registerResolver(
-        Object.assign(() => {
-          throw new Error('thrown');
-        }, news)
-      );
-
-      deliver(first, requestOf(1));
-      deliver(second, subscribingOf(1));
-      emitter.emit('message', { data: 'text' }, first);
-      // each resolver handed its request in a later turn
-      await sleep(0);
-
-      // a refusal that cannot go out
-      const gone = new Error('gone');
-
-      control.sendErrors.set(second, gone);
-      deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
-      await sleep(0);
-
-      expect(reportedOf(errors)).toEqual([
-        [ProtocolCode.ENVELOPE_MALFORMED, first],
-        ['thrown', second],
-        ['rejected', first],
-        ['gone', second],
-      ]);
-      expect(errors[3]?.[0]).toBe(gone);
-      // each resolver that failed answered PROCEDURE_FAILED, in the later turn it was handed its
-      // request in, before its connection's sends fail: the one that threw, then the one that
-      // rejected
-      expect(answersOf(sent)).toEqual([
-        [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
-        [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
-        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
       ]);
     });
 
@@ -6704,7 +6653,9 @@ test.describe('createRouterServer, within a telling', () => {
     });
     open(first);
     deliver(first, requestOf(5));
-    // the turn its resolver is handed the request in, a later one
+    // the turn its resolver is handed the request in, a later one, then the turn its throw fails in
+    // (spec 9.5)
+    await Promise.resolve();
     await Promise.resolve();
 
     // * nothing of the call within the turn: its answer first

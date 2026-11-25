@@ -217,11 +217,8 @@ test.describe('createHTTPTransportServer', () => {
     }
   });
 
+  // spec 15.12
   test('answers a request an answer comes for between its body’s end and its hand-on, never handing it on', async () => {
-    test.skip(
-      true,
-      'divergence: a request answered while its connection is paused is handed on after resume'
-    );
     await using started = await startTransport();
     const { server, url, events } = started;
     const { connectionHandle, connectionToken } = await connect(url, server);
@@ -1800,7 +1797,7 @@ test.describe('createHTTPTransportServer, over TLS', () => {
   test('ends an HTTP/2 session that reads no request’s head within headers timeout, its preface, its settings or its head never whole', async () => {
     test.skip(
       true,
-      'divergence: HTTP/2 sessions with no preface, no head or an unfinished head stay open past headersTimeout'
+      "divergence: work ahead, docs/support.md's row An idle connection's close: one idle bound over HTTP/1.1 and HTTP/2"
     );
     await using started = await startSecure({ headersTimeout: 200 });
     const settled = Buffer.concat([

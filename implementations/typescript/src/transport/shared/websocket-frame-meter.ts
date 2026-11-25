@@ -210,9 +210,9 @@ export const createFrameMeter = ({
     return undefined;
   };
 
-  // the length a head announces, once its last byte came; none where a 64-bit length has its top bit
-  // set, which RFC 6455 §5.2 forbids, read as two halves since a number holds 53 bits
-  const lengthOf = (): number | undefined => {
+  // the length a head announces, once its last byte came, its top bit judged already: a 64-bit one
+  // read as two halves, since a number holds 53 bits
+  const lengthOf = (): number => {
     const short = (head[1] ?? 0) & 0x7f;
 
     if (short === 126) {
@@ -220,9 +220,7 @@ export const createFrameMeter = ({
     }
 
     if (short === 127) {
-      const high = view.getUint32(2);
-
-      return high >= 0x8000_0000 ? undefined : high * 0x1_0000_0000 + view.getUint32(6);
+      return view.getUint32(2) * 0x1_0000_0000 + view.getUint32(6);
     }
 
     return short;
@@ -342,16 +340,16 @@ export const createFrameMeter = ({
         }
       }
 
+      // ! a 64-bit length's top bit is judged at that length's first byte, the head's third, which
+      // breaks its head (RFC 6455 §5.2)
+      if (headLength === 3 && lengthEnd === 10 && (byte & 0x80) !== 0) {
+        return fail({ code: 1002, reason: 'a 64-bit length with its top bit set' });
+      }
+
       // * judged at its length's last byte, before its mask, as `ws` reads it: a continuation's among
       // them, without waiting for its payload
       if (headLength === lengthEnd) {
-        const announcing = lengthOf();
-
-        if (announcing === undefined) {
-          return fail({ code: 1002, reason: 'a 64-bit length with its top bit set' });
-        }
-
-        length = announcing;
+        length = lengthOf();
         announced += opcode < CONTROL ? length : 0;
 
         if (announced > maximumMessageBytes) {

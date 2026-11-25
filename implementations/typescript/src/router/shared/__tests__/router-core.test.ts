@@ -105,21 +105,27 @@ test.describe('createRouterCore', () => {
   });
 
   test('a hook that panics fails its own call and the router answers the next', async () => {
-    test.skip(
-      true,
-      'divergence: a throwing onSent hook also throws on the failed handoff, unhandled'
-    );
-
-    const { port, sent, reported } = createPort();
+    const { control, port, sent, reported } = createPort();
     using core = createRouterCore(port);
+    const kindsOf = (from: number) => {
+      return sent.slice(from).map(({ envelope }) => {
+        return [envelope?.kind, envelope?.header.callId];
+      });
+    };
 
     for (const hook of ['onCallId', 'onSent'] as const) {
       const broken = new Error(`this ${hook} breaks, on purpose`);
+      const told: boolean[] = [];
+      const from = sent.length;
       const asking = core.request(new TextEncoder().encode('hi'), {
         connectionHandle: 'a',
         options,
         procedure: echo,
-        [hook]: () => {
+        [hook]: (isSent: unknown) => {
+          if (hook === 'onSent') {
+            told.push(isSent as boolean);
+          }
+
           throw broken;
         },
       });
@@ -127,8 +133,86 @@ test.describe('createRouterCore', () => {
       await expect(asking).rejects.toBe(broken);
 
       if (hook === 'onCallId') {
+        // nothing went, and nothing of the call is kept
         expect(sent).toEqual([]);
+        expect(core.gauges().counts['pendingCalls']).toBe(0);
+      } else {
+        const callId = sent[from]?.envelope?.header.callId;
+
+        // gone out, then ended by its hook as a timeout ends it: the peer told to cancel it
+        expect(kindsOf(from)).toEqual([
+          [EnvelopeKind.REQUEST, callId],
+          [EnvelopeKind.CANCEL, callId],
+        ]);
+        expect(told).toEqual([true]);
+        expect(core.gauges().counts['pendingCalls']).toBe(0);
       }
+    }
+
+    // a hook that throws as its transport then refuses the send: told nothing more, the call failed
+    // by the hook's throw
+    {
+      const broken = new Error('this onSent breaks, on purpose');
+      const told: boolean[] = [];
+      const from = sent.length;
+
+      control.held = [];
+
+      const asking = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        onSent: (isSent) => {
+          told.push(isSent);
+
+          throw broken;
+        },
+        options,
+        procedure: echo,
+      });
+
+      await expect(asking).rejects.toBe(broken);
+
+      const callId = sent[from]?.envelope?.header.callId;
+
+      expect(kindsOf(from)).toEqual([
+        [EnvelopeKind.REQUEST, callId],
+        [EnvelopeKind.CANCEL, callId],
+      ]);
+
+      // the request's send refused, the cancel's taken
+      const [request, cancel] = control.held.splice(0);
+
+      control.held = undefined;
+      request?.reject(new Error('the transport refuses it'));
+      cancel?.resolve();
+      await sleep(0);
+
+      expect(told).toEqual([true]);
+      await expect(asking).rejects.toBe(broken);
+    }
+
+    // a hook told its send refused while its call waits, that throws: its throw is the call's failure
+    {
+      const broken = new Error('this onSent breaks, on purpose');
+      const told: boolean[] = [];
+
+      control.sendErrors.set('a', new Error('the transport refuses it'));
+
+      const asking = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        onSent: (isSent) => {
+          told.push(isSent);
+
+          if (!isSent) {
+            throw broken;
+          }
+        },
+        options,
+        procedure: echo,
+      });
+
+      await expect(asking).rejects.toBe(broken);
+      expect(told).toEqual([true, false]);
+      control.sendErrors.delete('a');
     }
 
     const next = core.request(new TextEncoder().encode('hi'), {

@@ -1998,23 +1998,27 @@ test.describe('WebSocketTransportClient, what it carries', () => {
     }
   });
 
-  // spec 15.15
-  test('defers its credential provider until after connect returns', async () => {
+  // spec 15.2
+  test('asks its credential provider outside the call to connect, before the connect settles', async () => {
     const server = await startServer();
     await using client = createWebSocketTransportClient({ WebSocket: Ws });
-    let called = false;
+    // whether the application's call to connect runs, as each ask of its provider saw it
+    let isCalling = false;
+    const asked: boolean[] = [];
     try {
+      isCalling = true;
       const connecting = client.connect({
         host,
         port: portOf(server),
         credentialProvider: () => {
-          called = true;
+          asked.push(isCalling);
           return BEARER;
         },
       });
-      expect(called).toBe(false);
+      isCalling = false;
       await connecting;
-      expect(called).toBe(true);
+      // read once the connect settled: a provider not asked yet would pass a read before it
+      expect(asked).toEqual([false]);
       expect(client.isOpen()).toBe(true);
       await client.disconnect({ isQuick: true });
     } finally {

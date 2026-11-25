@@ -169,10 +169,6 @@ test.describe('createFrameMeter', () => {
   });
 
   test('fails with 1002 each head RFC 6455 forbids at the byte that draws it', () => {
-    test.skip(
-      true,
-      'divergence: a 64-bit length with its top bit set reaches the reader until the whole length arrives'
-    );
     const meterOf = (side: 'client' | 'server' = 'server') => {
       return createFrameMeter({
         maximumMessageBytes: MAXIMUM_MESSAGE_BYTES,

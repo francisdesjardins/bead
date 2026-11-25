@@ -2492,6 +2492,30 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect([downs, adapter.isLinked]).toEqual([[], false]);
   });
 
+  // spec 15.26, 15.33
+  test('asks its password provider outside the call to start, before the start settles', async () => {
+    // whether the application's call to start runs, as each ask of its provider saw it
+    let isCalling = false;
+    const asked: boolean[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asked.push(isCalling);
+
+        return PASSWORD;
+      },
+    });
+
+    isCalling = true;
+    const starting = adapter.start();
+    isCalling = false;
+    await script.link();
+    await starting;
+
+    // read once the start settled: a provider not asked yet would pass a read before it
+    expect(asked).toEqual([false]);
+    await adapter.stop();
+  });
+
   test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
     const late = Promise.withResolvers<string>();
     const adapter = adapterOf(script, {

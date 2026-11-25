@@ -454,6 +454,12 @@ export const createHTTPRequestExchange = <Connection>(
             release();
 
             if (kind === ENVELOPE_KINDS.REQUEST) {
+              // ! answered as it was held: its answer ended its exchange, and it is never handed
+              // on (spec 15.12)
+              if (port.isEnded(state)) {
+                return;
+              }
+
               handRequest();
             } else {
               handOther();
