@@ -82,6 +82,18 @@ export const PARTS = Object.freeze({
   'typescript-apps': Object.freeze({ area: 'typescript', needs: ['playwright'] }),
   // the coverage of the tests' shards, merged and held to the floor
   'typescript-coverage': Object.freeze({ area: 'typescript', needs: ['playwright', 'typescript'] }),
+  // the lints by feature set, the WebAssembly one among them, and the documentation
+  'rust-lints': Object.freeze({ area: 'rust', needs: [] }),
+  // the tests under instrumentation, held to the floor
+  'rust-coverage': Object.freeze({ area: 'rust', needs: [] }),
+  // the fuzz targets, built on the nightly
+  'rust-fuzz': Object.freeze({ area: 'rust', needs: [] }),
+  // the tests on Windows
+  'rust-windows': Object.freeze({ area: 'rust', needs: [] }),
+  // beadc's tests on its image, on each architecture
+  'builder-image': Object.freeze({ area: 'builder', needs: [] }),
+  // the Rust side over MQTT 5, against a broker of its own
+  'mqtt-rust': Object.freeze({ area: 'mqtt', needs: [] }),
 });
 
 // ── The rules ──────────────────────────────────────────────────────────────────
@@ -769,7 +781,7 @@ export const LOCAL = Object.freeze({
       String.raw`cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$' --output-path coverage/rust.json`,
       {
         suite: true,
-        note: "the coverage the rust job's Linux leg measures, then its floor; the fuzz targets, built on the nightly, are that leg's alone",
+        note: "the coverage rust-coverage measures, then its floor; the fuzz targets, built on the nightly, are rust-fuzz's alone",
       }
     ),
     step(

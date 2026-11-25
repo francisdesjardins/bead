@@ -1368,12 +1368,13 @@ carries, and prints the commit before the one push, which carries `develop`'s ti
 `prepare`, on a hotfix, which starts from `main`, writes it without every waiver, each moot since
 the release `main` holds. A branch behind a release's merge-back merges `develop` first, or meets
 the release's moot waivers. On the image's legs, Linux on Node 26, amd64 on `ubuntu-26.04` and arm64
-on `ubuntu-26.04-arm`, each natively: the image's test stage, beadc's tests on the image's own Node,
-protoc and environment; then the image, which `yarn test` runs through each wrapper under
+on `ubuntu-26.04-arm`, each natively: the image, which `yarn test` runs through each wrapper under
 `BEADC_IMAGE_REQUIRED=1`: `beadc version`, `generate --check` over the root's `beadc.yaml` and over
 [`examples/hello`](../examples/hello/README.md)'s, the messages fixture in both languages, a
 project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
-by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
+by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. Beside them, on both architectures,
+`builder-image` builds the image's test stage: beadc's tests on the image's own Node, protoc and
+environment. The C# side's `dotnet` job builds the
 C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
 generator. The Rust side's `rust` job compiles the Rust goldens whole under that side's lints, as an
 application mounts them, through `bead-goldens`.
