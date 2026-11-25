@@ -1,7 +1,9 @@
 name: CI
 
-# Every job on every push and pull request: the spec is shared, so a change anywhere can break
-# either side. `ci-ok` stands for every job; it fails when any other job did not pass.
+# The jobs a change reaches, by the rules of tools/ci-scope.mjs: on a feature branch and a pull
+# request into develop, the jobs of the areas its changed paths reach, a path no rule names reaching
+# every job; on develop, main, a release or a hotfix branch and by hand, every job. `ci-ok` stands
+# for every job; it fails when a job in scope did not pass, or one out of scope ran.
 on:
   # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
   push:
@@ -29,6 +31,30 @@ env:
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
 jobs:
+  # ── Scope ────────────────────────────────────────────────────────────────────
+  # The areas the change reaches, each a job's id, as tools/ci-scope.mjs maps each changed path: a
+  # JSON array every job but `commits` reads in its `if:`. On a feature branch, what changed since
+  # its merge base with develop; on a pull request into develop, since its base; every area on
+  # develop, main, a release or a hotfix branch, by hand, or where the merge base cannot be read.
+  # `fetch-depth: 0` brings develop's history, where the merge base is.
+  scope:
+    name: Scope
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      areas: ${{ steps.areas.outputs.areas }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - id: areas
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node tools/ci-scope.mjs --github
+
   # ── Spec ─────────────────────────────────────────────────────────────────────
   # The conformance files are what their generators write: regenerated, they must come out
   # identical to the committed ones, byte for byte. Then spec/check.py, from its hash-locked
@@ -38,6 +64,8 @@ jobs:
   # state.
   spec:
     name: Spec
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'spec')
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
@@ -77,6 +105,8 @@ jobs:
   # job installs a browser, and no copy of the version stands anywhere else.
   playwright:
     name: Playwright's version
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'playwright')
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     outputs:
@@ -105,7 +135,8 @@ jobs:
   # and on the floor `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
-    needs: playwright
+    needs: [scope, playwright]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'typescript')
     runs-on: ubuntu-26.04
     # the WCAG 2.2 AA sweeps of the page, the demo and the panel take some five minutes of it
     timeout-minutes: 20
@@ -192,11 +223,6 @@ jobs:
           /nowhere /playground/
           '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
           '/playground/#code' '/playground/#packages'
-      # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
-      # tool holds their list. The conformance files are left to their generators.
-      - name: Format of the root's files
-        working-directory: .
-        run: node tools/check-format.mjs
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
@@ -220,7 +246,8 @@ jobs:
   # `Directory.Build.props`: a restore that would change a `packages.lock.json` fails.
   dotnet:
     name: .NET
-    needs: playwright
+    needs: [scope, playwright]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'dotnet')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
@@ -288,6 +315,8 @@ jobs:
   # registry and the target are cached by the lock and the toolchain; every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
@@ -463,7 +492,8 @@ jobs:
   # `BEAD_INTEROP_RUST=1` asks for the Rust trials, which are ignored otherwise.
   interop-rust:
     name: Interop with the Rust side
-    needs: [playwright, rust]
+    needs: [scope, playwright, rust]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'interop-rust')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
@@ -525,7 +555,8 @@ jobs:
   # interop's.
   mqtt:
     name: MQTT 5, against Mosquitto
-    needs: playwright
+    needs: [scope, playwright]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'mqtt')
     runs-on: ubuntu-26.04
     timeout-minutes: 35
     env:
@@ -631,6 +662,8 @@ jobs:
   # that fails, as `BEAD_INTEROP_REQUIRED=1` does the interop's.
   amqp:
     name: AMQP 1.0, against RabbitMQ
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'amqp')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
@@ -698,6 +731,8 @@ jobs:
   # could only be a fetch gone wrong.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'builder')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -850,6 +885,8 @@ jobs:
   # The wrappers run over it on the builder job's image legs, where the image is.
   examples:
     name: Examples (Node ${{ matrix.node }})
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'examples')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
@@ -977,6 +1014,8 @@ jobs:
   # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
     name: Protobuf conformance
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'protobuf-conformance')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -1057,6 +1096,8 @@ jobs:
   # job has together.
   protovalidate-differential:
     name: protovalidate differential
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'protovalidate-differential')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -1138,14 +1179,15 @@ jobs:
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
   # anchor, resolves; the page site/ builds is the one committed; every version agrees with itself,
   # and a release moves each as its changes owe; the root's tools pass their own tests: here, since
-  # the job runs once, on the Node it already has; and the supply chain holds: every action pinned
-  # by its commit, no dependency under a known advisory, no code under a blocking rule of Semgrep's.
+  # the job runs once, on the Node it already has; the root's files keep their format; and the
+  # supply chain holds: every action pinned by its commit, no dependency under a known advisory, no
+  # code under a blocking rule of Semgrep's. The job runs on every change, outside the scope.
   # `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
   # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1221,6 +1263,23 @@ jobs:
       # The root's tools, by their own tests, in Node's runner: no dependency.
       - name: Test the root's tools
         run: node --test "tools/__tests__/*.test.mjs"
+      # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
+      # tool holds their list. The conformance files are left to their generators. Here, so that a
+      # change of the documents alone, which reaches no other job, is held too: the TypeScript side
+      # installed for its formatter.
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: implementations/typescript
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - name: Format of the root's files
+        run: node tools/check-format.mjs
       # Every action this repository runs, pinned by its commit, its version beside it: a tag
       # moves, and a moved tag runs another's code here.
       - name: Every action pinned by its commit
@@ -1265,7 +1324,8 @@ jobs:
   # one folder's Playwright alone still finds its browser.
   site:
     name: Site
-    needs: playwright
+    needs: [scope, playwright]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'site')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     container:
@@ -1284,13 +1344,16 @@ jobs:
         run: node layout.mjs
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
-  # The one check that stands for every job: green when every job above passed, red otherwise,
-  # including when one was cancelled or skipped.
+  # The one check that stands for every job: green when the scope passed, every job in it passed and
+  # every job out of it was skipped, red otherwise. A job in scope that was cancelled, or skipped
+  # because a job it needs failed, is red; tools/ci-scope.mjs --verdict holds each result to its
+  # scope.
   ci-ok:
     name: CI ok
     if: always()
     needs:
       [
+        scope,
         spec,
         playwright,
         typescript,
@@ -1309,11 +1372,15 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:
-      - name: Every job passed
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/ci-scope.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Each job as its scope asks
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "results: $RESULTS"
-          for result in $RESULTS; do
-            [ "$result" = success ] || exit 1
-          done
+          NEEDS: ${{ toJSON(needs) }}
+          AREAS: ${{ needs.scope.outputs.areas }}
+        run: node tools/ci-scope.mjs --verdict
