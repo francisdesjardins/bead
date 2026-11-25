@@ -229,44 +229,92 @@ const MONOCLE =
   'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 20.5 19.9 21.3 21.9';
 const STYLE_ID = 'bead-mascot-style';
 
-// the mark's colours in either theme, as `favicon.svg` has them, and the face in the beads'
-const LIGHT = Object.freeze([
+// the mark's colours in either theme, as `favicon.svg` has them: its own drawing's; the bar's mark
+// keeps the colours its page gives it
+const MARK_LIGHT = Object.freeze([
   ['.moon', 'fill: #17111d;'],
   ['.rim', 'fill: none; stroke: #c13584; stroke-width: 0.9;'],
   ['.bead', 'fill: #c13584;'],
+]);
+const MARK_DARK = Object.freeze([
+  ['.moon', 'fill: #15111c; stroke: #6d6278; stroke-width: 0.9;'],
+  ['.rim', 'stroke: #ff8bc4;'],
+  ['.bead', 'fill: #ff8bc4;'],
+]);
+// the face in the beads' colour, its flare and its corona, on its own drawing and on the bar's mark
+const FACE_LIGHT = Object.freeze([
   ['.flare', 'fill: #fde7f2;'],
   ['.halo', 'fill: none; stroke: #f3a6cd; stroke-width: 2.4; stroke-opacity: 0.35;'],
   ['.ray', 'fill: none; stroke: #f3a6cd; stroke-width: 0.35; stroke-linecap: round;'],
   ['.line', 'fill: none; stroke: #f3a6cd; stroke-linecap: round; stroke-linejoin: round;'],
   ['.pupil', 'fill: #f3a6cd;'],
 ]);
-const DARK = Object.freeze([
-  ['.moon', 'fill: #15111c; stroke: #6d6278; stroke-width: 0.9;'],
-  ['.rim', 'stroke: #ff8bc4;'],
-  ['.bead', 'fill: #ff8bc4;'],
+const FACE_DARK = Object.freeze([
   ['.flare', 'fill: #ffe3f1;'],
-  ['.halo, .bead-moon .ray, .bead-moon .line', 'stroke: #ff8bc4;'],
+  ['.halo', 'stroke: #ff8bc4;'],
+  ['.ray', 'stroke: #ff8bc4;'],
+  ['.line', 'stroke: #ff8bc4;'],
   ['.pupil', 'fill: #ff8bc4;'],
 ]);
 
-// each rule of `rules` on the drawing, under `scope`: the dark scheme as a script chose it, or as the
-// system gives it where no script chose
-const rulesOf = (rules, scope) => {
+// each rule of `rules` on each drawing of `drawings`, under `scope`: the dark scheme as a script
+// chose it, or as the system gives it where no script chose
+const rulesOf = (rules, { scope, drawings }) => {
   return rules
     .map(([part, declarations]) => {
-      return `${scope}.bead-moon ${part} { ${declarations} }`;
+      const selector = drawings
+        .map((drawing) => {
+          return `${scope}${drawing} ${part}`;
+        })
+        .join(', ');
+      return `${selector} { ${declarations} }`;
     })
     .join('\n');
 };
+
+const CHOSEN_DARK = ":root[data-color-scheme='dark'] ";
+const SYSTEM_DARK = ':root:not([data-color-scheme]) ';
+const OWN = Object.freeze(['.bead-moon']);
+const BOTH = Object.freeze(['.bead-moon', '.bead-mark']);
 
 // ! no custom property of its own: the page's build holds every one its page draws with to a sheet
 // that defines it, and this sheet is a script's
 const STYLE = `
 .bead-moon { display: block; overflow: visible; }
-${rulesOf(LIGHT, '')}
-${rulesOf(DARK, ":root[data-color-scheme='dark'] ")}
+${rulesOf(MARK_LIGHT, { scope: '', drawings: OWN })}
+${rulesOf(FACE_LIGHT, { scope: '', drawings: BOTH })}
+${rulesOf(MARK_DARK, { scope: CHOSEN_DARK, drawings: OWN })}
+${rulesOf(FACE_DARK, { scope: CHOSEN_DARK, drawings: BOTH })}
 @media (prefers-color-scheme: dark) {
-${rulesOf(DARK, ':root:not([data-color-scheme]) ')}
+${rulesOf(MARK_DARK, { scope: SYSTEM_DARK, drawings: OWN })}
+${rulesOf(FACE_DARK, { scope: SYSTEM_DARK, drawings: BOTH })}
+}
+/* * the bar's mark, taken over where no room is left beside the text: a finger's size, so the face
+   reads, its face coming and going with the marked sections, its strokes about 1.3 px whatever
+   its scale */
+:root[data-bead-mark] .bead-mark {
+  width: 44px;
+  height: 44px;
+  overflow: visible;
+}
+.bead-mark .bead-face {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+.bead-mark[data-face-shown] .bead-face {
+  opacity: 1;
+}
+.bead-mark .line {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.3px;
+}
+.bead-mark .ray {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1px;
+}
+.bead-mark .halo {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 3px;
 }
 .bead-mascot {
   position: fixed;
@@ -296,15 +344,8 @@ ${rulesOf(DARK, ':root:not([data-color-scheme]) ')}
   opacity: 0;
   pointer-events: none;
 }
-.bead-mascot[data-dock='bar'] {
-  left: 0;
-  z-index: calc(var(--app-z-topbar, 40) + 1);
-}
 /* ! away, it stays in the tab order, as a skip link does, and comes as it is focused: a control
    that came and went with the scroll would be one the Tab key misses */
-.bead-mascot[data-dock='none'] {
-  visibility: hidden;
-}
 .bead-mascot > .bead-moon {
   width: 100%;
   height: 100%;
@@ -315,6 +356,9 @@ ${rulesOf(DARK, ':root:not([data-color-scheme]) ')}
   .bead-mascot[data-state='hidden'],
   .bead-mascot[data-state='leaving'] {
     left: 0;
+    transition: none;
+  }
+  .bead-mark .bead-face {
     transition: none;
   }
 }
@@ -375,6 +419,40 @@ const onRim = (degrees, radius) => {
   return { x: CENTRE.x + radius * Math.cos(angle), y: CENTRE.y + radius * Math.sin(angle) };
 };
 
+// the corona, its halo and its rays, shut
+const coronaOf = () => {
+  const corona = element('g', { opacity: 0 });
+  corona.append(element('circle', { class: 'halo', cx: CENTRE.x, cy: CENTRE.y, r: 12.6 }));
+  for (let index = 0; index < 16; index += 1) {
+    const inner = onRim(index * 22.5, 11.3);
+    const outer = onRim(index * 22.5, index % 2 === 0 ? 14.6 : 13.2);
+    corona.append(
+      element('path', {
+        class: 'ray',
+        d: `M ${fixed(inner.x)} ${fixed(inner.y)} L ${fixed(outer.x)} ${fixed(outer.y)}`,
+      })
+    );
+  }
+  return corona;
+};
+
+// the face's parts by name, the flare beside them
+const facePartsOf = () => {
+  return {
+    flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }),
+    parts: {
+      eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
+      eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
+      pL: element('circle', { class: 'pupil' }),
+      pR: element('circle', { class: 'pupil' }),
+      bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
+      bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
+      g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
+      m: element('path', { class: 'line', 'stroke-width': 0.6 }),
+    },
+  };
+};
+
 // the drawing, its parts by name, and the corona's when it has one
 const drawingOf = (hasCorona) => {
   styled();
@@ -384,36 +462,15 @@ const drawingOf = (hasCorona) => {
     'aria-hidden': 'true',
     focusable: 'false',
   });
-  const corona = element('g', { opacity: 0 });
+  const corona = coronaOf();
   if (hasCorona) {
-    corona.append(element('circle', { class: 'halo', cx: CENTRE.x, cy: CENTRE.y, r: 12.6 }));
-    for (let index = 0; index < 16; index += 1) {
-      const inner = onRim(index * 22.5, 11.3);
-      const outer = onRim(index * 22.5, index % 2 === 0 ? 14.6 : 13.2);
-      corona.append(
-        element('path', {
-          class: 'ray',
-          d: `M ${fixed(inner.x)} ${fixed(inner.y)} L ${fixed(outer.x)} ${fixed(outer.y)}`,
-        })
-      );
-    }
     svg.append(corona);
   }
   const rim = element('path', { class: 'rim', d: RIM, 'stroke-opacity': 0.6 });
   const beads = BEADS.map(({ x, y, r }) => {
     return element('circle', { class: 'bead', cx: x, cy: y, r });
   });
-  const flare = element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 });
-  const parts = {
-    eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
-    eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
-    pL: element('circle', { class: 'pupil' }),
-    pR: element('circle', { class: 'pupil' }),
-    bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
-    bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
-    g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
-    m: element('path', { class: 'line', 'stroke-width': 0.6 }),
-  };
+  const { flare, parts } = facePartsOf();
   svg.append(
     element('circle', { class: 'moon', cx: CENTRE.x, cy: CENTRE.y, r: 10.5 }),
     rim,
@@ -421,6 +478,49 @@ const drawingOf = (hasCorona) => {
     flare,
     ...Object.values(parts)
   );
+  return { svg, corona, rim, beads, flare, parts };
+};
+
+// what the mascot drew into a mark it took over, so it gives the mark back as it was
+const TAKEN = 'data-bead-part';
+
+/** The mark `svg` as it was before the mascot took it over: its own drawing, its beads whole. */
+const giveBack = (svg) => {
+  for (const part of svg.querySelectorAll(`[${TAKEN}]`)) {
+    part.remove();
+  }
+  svg.querySelectorAll('.bead').forEach((bead, index) => {
+    bead.removeAttribute('opacity');
+    bead.setAttribute('r', String(BEADS[index]?.r ?? 1));
+  });
+  svg.querySelector('.rim')?.style.removeProperty('stroke-opacity');
+  svg.classList.remove('bead-mark');
+  svg.removeAttribute('data-face');
+  svg.removeAttribute('data-face-shown');
+};
+
+// ! the bar's mark taken over, the favicon's own drawing: its moon, rim and beads are the mascot's,
+// the corona goes under the moon, and the flare and the face over it; a mark of another drawing is
+// left as it is
+const markDrawingOf = (svg) => {
+  const moon = svg.querySelector('.moon');
+  const rim = svg.querySelector('.rim');
+  const beads = [...svg.querySelectorAll('.bead')];
+  if (moon === null || rim === null || beads.length !== BEADS.length) {
+    return null;
+  }
+  styled();
+  giveBack(svg);
+  const corona = coronaOf();
+  const { flare, parts } = facePartsOf();
+  const face = element('g', { class: 'bead-face' });
+  face.append(...Object.values(parts));
+  for (const part of [corona, flare, face]) {
+    part.setAttribute(TAKEN, '');
+  }
+  moon.before(corona);
+  svg.append(flare, face);
+  svg.classList.add('bead-mark');
   return { svg, corona, rim, beads, flare, parts };
 };
 
@@ -451,7 +551,8 @@ const paint = (drawing, { face, eclipse }) => {
   drawing.flare.setAttribute('opacity', fixed(eclipse.flare));
   drawing.flare.setAttribute('d', flareOf(0.6 + 0.6 * eclipse.flare));
   drawing.corona.setAttribute('opacity', fixed(eclipse.corona));
-  drawing.rim.setAttribute('stroke-opacity', fixed(0.6 * (1 - eclipse.corona)));
+  // ! a style, not an attribute: the bar's mark takes its rim's from its page's sheet
+  drawing.rim.style.strokeOpacity = fixed(0.6 * (1 - eclipse.corona));
 };
 
 /** The mark with face `name`, still, for a page to place: an empty state's, say. */
@@ -472,8 +573,6 @@ const LABELS = Object.freeze({
 const GAP = 16;
 const LEAST = 96;
 const MOST = 168;
-// a finger's target, in the bar
-const TOUCH = 44;
 const ARRIVE_MS = 500;
 const LEAVE_MS = 450;
 // how long it stays outside every marked section before it leaves
@@ -490,11 +589,12 @@ const REACT_HOLD_MS = 2200;
 const REACT_OUT_MS = 600;
 
 /**
- * The mascot on the page: a button at the end of the body, hidden until the reading line, the
- * middle of the viewport, first enters a section with a face (`data-bead-face`) after a scroll.
- * Beside the text where the page leaves room, in the bar's free stretch otherwise. Its face follows
- * the scroll from section to section, `react` gives it one for a moment, and a click starts an
- * eclipse.
+ * The mascot on the page. Where the page leaves room beside the text, a button at the end of the
+ * body, hidden until the reading line, the middle of the viewport, first enters a section with a
+ * face (`data-bead-face`) after a scroll; a click on it starts an eclipse. Where it leaves none,
+ * the bar's mark itself, its face shown while the reading line is in such a section; the brand's
+ * link to the top starts the eclipse. One or the other, never both. Its face follows the scroll
+ * from section to section, and `react` gives it one for a moment.
  */
 export const mountMascot = (options = {}) => {
   const sectionsSelector = options.sections ?? 'main section[id]';
@@ -502,6 +602,7 @@ export const mountMascot = (options = {}) => {
   const avoidSelector =
     options.avoid ?? 'main pre, main details, main .excerpt, main table, main figure';
   const dockSelector = options.dock ?? '.topbar';
+  const markSelector = options.mark ?? '.topbar .brand .mark';
 
   styled();
   const root = document.documentElement;
@@ -520,13 +621,15 @@ export const mountMascot = (options = {}) => {
   let keyframes = [];
   let obstacles = [];
   let marked = new Set();
-  let place = { dock: 'none', size: 0, left: 0, top: 0, room: 0, band: { top: 0, bottom: 0 } };
+  let place = { dock: 'none', size: 0, left: 0, room: 0, band: { top: 0, bottom: 0 } };
   let scrollMax = 1;
   let eclipseStart = null;
   let reaction = null;
   let restUntil = 0;
   let frame = null;
   let lastFace = '';
+  // the bar's mark while the mascot holds it
+  let mark = null;
   // how far it stands clear of a wide block, and when it was last drawn
   let dodged = 0;
   let drawn = 0;
@@ -579,7 +682,7 @@ export const mountMascot = (options = {}) => {
   };
 
   const arrive = () => {
-    if (place.dock === 'none') {
+    if (place.dock !== 'margin') {
       return;
     }
     cancel('leave');
@@ -614,6 +717,10 @@ export const mountMascot = (options = {}) => {
   // in a marked section, it comes after the first scroll and stays; outside every one, it leaves
   // after a while
   const settle = () => {
+    if (place.dock !== 'margin') {
+      schedule();
+      return;
+    }
     if (marked.size > 0 && hasScrolled) {
       arrive();
     } else if (marked.size === 0 && reaction === null) {
@@ -629,45 +736,16 @@ export const mountMascot = (options = {}) => {
     return element.getClientRects().length > 0;
   };
 
-  // the widest stretch the bar's children leave free, its brand, a label and its tools, the mascot
-  // at its far end
-  const barPlaceOf = (bar) => {
-    const none = { dock: 'none', size: TOUCH, left: 0, top: 0 };
-    if (bar === null) {
-      return none;
+  // the mark taken over, or given back: the one that stands in the bar now, or none
+  const holdMark = (svg) => {
+    if (mark !== null && mark.svg === svg) {
+      return;
     }
-    const box = bar.getBoundingClientRect();
-    const style = window.getComputedStyle(bar);
-    const edges = [...bar.children]
-      .filter(visible)
-      .map((control) => {
-        const at = control.getBoundingClientRect();
-        return { left: at.left, right: at.right };
-      })
-      .sort((one, other) => {
-        return one.left - other.left;
-      });
-    let from = box.left + Number.parseFloat(style.paddingLeft);
-    let best = { from: 0, to: 0 };
-    for (const edge of [
-      ...edges,
-      { left: box.right - Number.parseFloat(style.paddingRight), right: 0 },
-    ]) {
-      if (edge.left - from > best.to - best.from) {
-        best = { from, to: edge.left };
-      }
-      from = Math.max(from, edge.right);
+    if (mark !== null) {
+      giveBack(mark.svg);
     }
-    const free = best.to - best.from;
-    if (free < TOUCH + 2) {
-      return none;
-    }
-    return {
-      dock: 'bar',
-      size: TOUCH,
-      left: best.to - TOUCH - Math.min(8, (free - TOUCH) / 2),
-      top: box.top + (box.height - TOUCH) / 2,
-    };
+    mark = svg === null ? null : markDrawingOf(svg);
+    root.toggleAttribute('data-bead-mark', mark !== null);
   };
 
   // * read once per change of the layout, never per frame: the sections' centres, what is wider
@@ -701,33 +779,34 @@ export const mountMascot = (options = {}) => {
     const bar = document.querySelector(dockSelector);
     const barBottom = bar === null ? 0 : bar.getBoundingClientRect().bottom;
     const room = root.clientWidth - right;
+    const markSvg = document.querySelector(markSelector);
     if (room >= LEAST + 2 * GAP) {
       const size = Math.min(MOST, room - 2 * GAP);
       place = {
         dock: 'margin',
         size,
         left: right,
-        top: 0,
         room,
         band: { top: barBottom + GAP, bottom: window.innerHeight - GAP },
       };
+      holdMark(null);
     } else {
-      place = { ...barPlaceOf(bar), room, band: { top: 0, bottom: 0 } };
+      // * no room beside the text: the mascot is the bar's mark, and no button of its own
+      holdMark(markSvg !== null && visible(markSvg) ? markSvg : null);
+      place = { dock: mark === null ? 'none' : 'mark', size: 0, left: 0, room, band: place.band };
+      if (isShown() && state !== 'eclipse') {
+        set('hidden');
+      }
     }
+    button.hidden = place.dock !== 'margin';
     button.dataset['dock'] = place.dock;
     button.style.width = `${String(place.size)}px`;
     button.style.height = `${String(place.size)}px`;
-    if (place.dock === 'none' && isShown()) {
-      set('hidden');
-    }
     lastFace = '';
     schedule();
   };
 
   const positionOf = () => {
-    if (place.dock !== 'margin') {
-      return { x: place.left, y: place.top, dodge: 0, shove: 0 };
-    }
     const { size, room, band } = place;
     const travel = isReduced() ? 0 : clamp(window.scrollY / scrollMax);
     const swayX = Math.min(26, Math.max(0, (room - size) / 2 - GAP));
@@ -790,7 +869,7 @@ export const mountMascot = (options = {}) => {
         isMoving = true;
       } else {
         eclipseStart = null;
-        set('reading');
+        set(place.dock === 'margin' ? 'reading' : 'hidden');
         settle();
       }
     }
@@ -804,6 +883,23 @@ export const mountMascot = (options = {}) => {
         [fixed(eclipse.flare), fixed(eclipse.corona)]
       )
       .join(';');
+    if (place.dock === 'mark' && mark !== null) {
+      if (key !== lastFace) {
+        lastFace = key;
+        paint(mark, { face, eclipse });
+      }
+      // * the face comes with a marked section, a reaction or an eclipse, and goes with them
+      const isFaceShown = marked.size > 0 || reaction !== null || eclipseStart !== null;
+      mark.svg.toggleAttribute('data-face-shown', isFaceShown);
+      mark.svg.setAttribute('data-face', named);
+      if (isMoving) {
+        schedule();
+      }
+      return;
+    }
+    if (place.dock !== 'margin') {
+      return;
+    }
     if (key !== lastFace) {
       lastFace = key;
       paint(drawing, { face, eclipse });
@@ -917,8 +1013,8 @@ export const mountMascot = (options = {}) => {
     settle();
   };
 
-  const onClick = () => {
-    if (state === 'eclipse' || !isShown()) {
+  const eclipse = () => {
+    if (eclipseStart !== null) {
       return;
     }
     cancel('shy');
@@ -927,12 +1023,34 @@ export const mountMascot = (options = {}) => {
     schedule();
   };
 
+  const onClick = () => {
+    if (isShown()) {
+      eclipse();
+    }
+  };
+
+  // the brand's link to the top, where the mascot is the bar's mark: the page goes up as the link
+  // says, and the mark plays the eclipse; a link that leaves the page plays none
+  const onLink = (event) => {
+    const link = event.target instanceof Element ? event.target.closest('a') : null;
+    if (
+      place.dock === 'mark' &&
+      mark !== null &&
+      link !== null &&
+      link.contains(mark.svg) &&
+      (link.getAttribute('href') ?? '').startsWith('#')
+    ) {
+      eclipse();
+    }
+  };
+
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', measure);
   button.addEventListener('pointerenter', onEnter);
   button.addEventListener('click', onClick);
   button.addEventListener('focus', onFocus);
   button.addEventListener('blur', onBlur);
+  document.addEventListener('click', onLink);
   label();
   observeSections();
   observeContent();
@@ -961,6 +1079,8 @@ export const mountMascot = (options = {}) => {
       languages.disconnect();
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', measure);
+      document.removeEventListener('click', onLink);
+      holdMark(null);
       button.remove();
     },
   };

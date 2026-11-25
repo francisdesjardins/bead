@@ -72,8 +72,10 @@ export interface IMascotOptions {
   readonly content?: string;
   /** What may widen past the column, which the mascot slides clear of. */
   readonly avoid?: string;
-  /** The bar it stands in where no room is left beside the column. */
+  /** The page's fixed bar, under which it stands beside the column. */
   readonly dock?: string;
+  /** The bar's mark, Bead's own drawing, which it takes over where no room is left beside the column. */
+  readonly mark?: string;
 }
 
 /** The mascot on a page. */
