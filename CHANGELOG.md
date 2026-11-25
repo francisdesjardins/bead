@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The page's bar, where its contents are a sheet, holds the mark alone at its left, then the
+  section being read, a button that opens the contents, then the demo and the theme. The language
+  moves to the contents' foot, English and Français written out, the page's own marked; on a
+  desktop, the bar's language reads EN or FR.
 - CI runs the jobs a change reaches. `tools/ci-scope.mjs` maps each path a feature branch or a pull
   request into `develop` changes to the jobs that read it, a path no rule names reaching every job;
   `develop`, `main`, a release, a hotfix and a run by hand run every job, and `CI ok` holds each
