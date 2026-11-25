@@ -1091,6 +1091,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # ! the arm64 leg goes with the builder job's, whose note says what it costs
         os: [ubuntu-26.04, ubuntu-26.04-arm]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
