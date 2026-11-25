@@ -696,7 +696,7 @@ describe('prepare', () => {
     assert.ok(!ran.includes('py spec/check.py'));
     assert.deepEqual(logged.slice(0, 2), [
       "skipped: spec/check.py (no jsonschema for py); CI's spec job holds it",
-      "skipped: the root's format check (no implementations/typescript/node_modules/oxfmt/bin/oxfmt); CI's typescript job holds it",
+      "skipped: the root's format check (no implementations/typescript/node_modules/oxfmt/bin/oxfmt); CI's commits job holds it",
     ]);
     assert.throws(
       () => prepared(releasing(), { moves: { spec: 'minor' }, absent: ['--version'] }),

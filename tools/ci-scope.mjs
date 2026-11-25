@@ -219,7 +219,7 @@ export const RULES = Object.freeze([
     areas: ['commits', 'typescript', 'dotnet', 'rust'],
   },
   {
-    why: "the accessibility sweep, the typescript job's",
+    why: "the accessibility sweep, typescript-apps's, a part of typescript",
     patterns: [...tool('check-a11y'), 'tools/a11y-exceptions.json'],
     areas: ['commits', 'typescript'],
   },
@@ -264,7 +264,7 @@ export const RULES = Object.freeze([
     areas: ['commits'],
   },
   {
-    why: 'the page: its layout, and its accessibility in the typescript job, which serves it',
+    why: 'the page: its layout, and its accessibility in typescript-apps, which serves it',
     patterns: ['site/**'],
     areas: ['commits', 'typescript', 'site'],
   },
