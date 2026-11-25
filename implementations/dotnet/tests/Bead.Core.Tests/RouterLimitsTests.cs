@@ -41,7 +41,7 @@ public sealed class RouterLimitsTests
 
     [Theory]
     [MemberData(nameof(Broken))]
-    public void Refuses_limits_that_do_not_hold_together_each_by_its_own_rule(string words, RouterLimits limits)
+    public void Refuse_limits_that_do_not_hold_together_each_rule_by_its_own_failure(string words, RouterLimits limits)
     {
         ArgumentNullException.ThrowIfNull(limits);
         var failure = Assert.Throws<ArgumentException>(() =>
@@ -111,7 +111,7 @@ public sealed class RouterLimitsTests
     }
 
     [Fact]
-    public void Whole_envelope_limits_take_no_transfer_and_size_the_chunk_and_the_window_on_the_envelope_the_rest_as_given()
+    public void Takes_no_transfer_and_sizes_the_chunk_and_the_window_on_the_envelope_the_rest_as_given()
     {
         Assert.Equal(
             RouterLimits.Default with
@@ -142,4 +142,60 @@ public sealed class RouterLimitsTests
             return RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumTransfers = 4 });
         });
     }
+    [Fact]
+    public void Holds_the_limits_given_over_the_defaults_frozen_and_refuses_limits_that_do_not_hold_together()
+    {
+        var given = RouterLimits.Default with { BufferedBytesBudget = 1_024, ChunkBytes = 64, MaximumEnvelopeBytes = 64, MaximumPayloadBytes = 1_024, WindowBytes = 128 };
+        var held = given.Validate();
+
+        Assert.Same(RouterLimits.Default, RouterLimits.Default.Validate());
+        Assert.Equal(given, held);
+        Assert.Equal(RouterLimits.Default with { BufferedBytesBudget = 1_024, ChunkBytes = 64, MaximumEnvelopeBytes = 64, MaximumPayloadBytes = 1_024, WindowBytes = 128 }, held);
+        var changed = held with { WindowBytes = 64 };
+        Assert.Equal(128, held.WindowBytes);
+        Assert.Equal("the router's limits do not hold together: a window holds two chunks at least, so a sender waits for no credit it is owed", Assert.Throws<ArgumentException>(() =>
+        {
+            return changed.Validate();
+        }).Message);
+    }
+
+    [Fact]
+    public async Task Take_the_defaults_where_they_say_nothing_and_let_the_transfers_and_the_detail_be_none()
+    {
+        var given = new RouterLimits { MaximumDetailBytes = 0, MaximumTransfers = 0 };
+        var held = given.Validate();
+
+        Assert.Equal(LimitDefaults.ChunkBytes, held.ChunkBytes);
+        Assert.Equal(0, held.MaximumDetailBytes);
+        Assert.Equal(0, held.MaximumTransfers);
+        await using var transport = new MemoryTransportServer();
+        using var router = new RouterServer(transport, new RouterServerOptions { Limits = given });
+
+        Assert.Equal(LimitDefaults.ChunkBytes, router.Limits.ChunkBytes);
+        Assert.Equal(0, router.Limits.MaximumTransfers);
+        Assert.Equal(0, router.Limits.MaximumDetailBytes);
+    }
+
+    [Fact]
+    public void Refuse_a_limit_that_is_not_a_whole_number_or_not_above_0_where_0_means_nothing()
+    {
+        (RouterLimits Limits, string Name)[] refused =
+        [
+            (RouterLimits.Default with { WindowBytes = 0 }, "WindowBytes"),
+            (RouterLimits.Default with { ChunkBytes = 0 }, "ChunkBytes"),
+            (RouterLimits.Default with { MaximumPayloadBytes = 0 }, "MaximumPayloadBytes"),
+        ];
+
+        foreach (var (limits, name) in refused)
+        {
+            Assert.Equal($"{name} is a whole number above 0, not 0", Assert.Throws<ArgumentException>(() =>
+            {
+                return limits.Validate();
+            }).Message);
+        }
+
+        var absent = RouterLimits.Default with { MaximumDetailBytes = 0, MaximumTransfers = 0 };
+        Assert.Same(absent, absent.Validate());
+    }
+
 }

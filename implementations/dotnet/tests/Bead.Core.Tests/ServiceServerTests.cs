@@ -330,6 +330,66 @@ public sealed class ServiceServerTests
     }
 
     [Fact]
+    public async Task Accepts_a_cloned_descriptor_and_refuses_a_distinct_one_at_its_address_before_and_after_offer()
+    {
+        await using var link = await ServiceLink.Open();
+        var greeter = GreeterOf();
+        var otherHello = new RequestProcedure<GreeterProcedures, string, string, SayHelloFailure>(
+            GreeterProcedures.SayHello.Procedure, GreeterProcedures.SayHello.Bindings);
+        var otherNews = new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(
+            GreeterProcedures.News.Procedure, GreeterProcedures.News.Bindings);
+        var otherClock = new CommandProcedure<GreeterProcedures, string, string, NoFailure>(
+            GreeterProcedures.Clock.Procedure, GreeterProcedures.Clock.Bindings);
+
+        foreach (var offered in new[] { false, true })
+        {
+            if (offered)
+            {
+                greeter.Offer(link.Server);
+            }
+
+            Assert.Throws<ArgumentException>(() =>
+            {
+                greeter.On(otherHello, (request, response) =>
+                {
+                    return response.Answer(request.Payload);
+                });
+            });
+            Assert.Throws<ArgumentException>(() =>
+            {
+                greeter.On(otherNews, (request, response) =>
+                {
+                    return response.Answer(request.Payload);
+                });
+            });
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return greeter.CommandOf(otherClock);
+            });
+            var sameClock = GreeterProcedures.Clock;
+
+            Assert.NotNull(greeter.CommandOf(sameClock));
+        }
+
+        var sameHello = GreeterProcedures.SayHello;
+        var sameNews = GreeterProcedures.News;
+
+        greeter.On(sameHello, (request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        greeter.On(sameNews, (request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        var client = ClientOf(link);
+
+        Assert.Equal("hello", await client.RequesterOf(sameHello)("hello")().WaitAsync(Patience, Cancelled));
+        Assert.Equal("news", await client.RequesterOf(sameNews)("news")().WaitAsync(Patience, Cancelled));
+    }
+
+    [Fact]
     public async Task Refuses_a_second_offer()
     {
         await using var link = await ServiceLink.Open();
@@ -657,6 +717,48 @@ public sealed class ServiceServerTests
     // spec 18.2
     [Fact]
     public async Task Fails_a_command_whose_rule_throws_as_it_judges_with_that_throw_before_anything_goes()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new InvalidOperationException("this rule fails to judge, on purpose");
+        var shout = new CommandProcedure<CheckedProcedures, string, string, NoFailure>(
+            CheckedProcedures.Shout.Procedure,
+            CheckedProcedures.BindingsOf((_, _) =>
+            {
+                throw broken;
+            }));
+        var validating = new ServiceServer<CheckedProcedures, string>(
+            [shout],
+            new ServiceServerOptions<CheckedProcedures> { Admissions = new CheckedAdmissions(), Validates = true });
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+        var clientReports = new List<Exception>();
+
+        link.Client.Router.Error += (reason) =>
+        {
+            clientReports.Add(reason);
+        };
+        client.On(CheckedProcedures.Shout, (request, response) =>
+        {
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+        validating.Offer(link.Server);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return validating.CommandOf(shout)("hi")(new CommandOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Same(broken, thrown);
+        Assert.Empty(heard);
+        Assert.Empty(link.Reported);
+        Assert.Empty(clientReports);
+    }
+
+    // spec 18.2
+    [Fact]
+    public async Task Fails_a_command_whose_rule_panics_as_it_judges_with_that_panic_before_anything_goes()
     {
         await using var link = await ServiceLink.Open();
         var broken = new InvalidOperationException("this rule fails to judge, on purpose first");

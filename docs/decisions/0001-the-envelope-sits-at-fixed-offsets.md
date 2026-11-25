@@ -316,7 +316,7 @@ The order a connection's close ends its calls in, as the Decision states it: rel
 settle and notify, application code last. Each side keeps its notices last, the detach closes
 every transfer, the C# side sets its tokens in the teardown's turn by `CancelAsync`, and the twin
 tests,
-`detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once`
+`detaches calls before settling an incoming resolver awaiting an outgoing call, and counts its incoming close once`
 and
 `Detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_and_counts_its_incoming_close_once`,
 make the same assertions. Refused: the first proposal, every side aborting the calls a connection

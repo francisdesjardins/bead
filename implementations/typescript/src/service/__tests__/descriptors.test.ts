@@ -19,6 +19,23 @@ const sayHello = {
 // definition
 
 test.describe('the descriptors', () => {
+  test('makes a rule of every call, a session or a hook by its name', () => {
+    const rules = ['none', 'session', { hook: 'loud' }] as const;
+
+    expect(
+      rules.map((admission) => {
+        return requestOf({ ...sayHello, admission }).admission;
+      })
+    ).toEqual(['none', 'session', { hook: 'loud' }]);
+    expect(requestOf({ ...sayHello, admission: { hook: 'loud' } }).admission).toEqual({
+      hook: 'loud',
+    });
+    expect(rules[0]).not.toEqual(rules[1]);
+    expect(() => {
+      return requestOf({ ...sayHello, admission: { hook: '' } });
+    }).toThrow(ProgrammerError);
+  });
+
   test("sets a request's kind, a notifying request's and a command's", () => {
     const request = requestOf(sayHello);
     const notifying = requestOf({ ...sayHello, notification: text });

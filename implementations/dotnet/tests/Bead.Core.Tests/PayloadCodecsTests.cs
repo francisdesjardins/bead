@@ -11,6 +11,15 @@ namespace Bead.Tests;
 public sealed class PayloadCodecsTests
 {
     [Fact]
+    public void Reads_and_writes_its_bytes_as_they_are()
+    {
+        ReadOnlyMemory<byte> bytes = new byte[] { 0xFF, 0x00 };
+
+        Assert.Equal(bytes, PayloadCodecs.Raw.Decode(bytes));
+        Assert.Equal(bytes, PayloadCodecs.Raw.Encode(bytes));
+    }
+
+    [Fact]
     public void Gives_spec_17_s_codecs_by_their_encoding_s_name()
     {
         Assert.Equal([1, 2], PayloadCodecs.Raw.Encode(PayloadCodecs.Raw.Decode(new byte[] { 1, 2 })).ToArray());

@@ -281,7 +281,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
+    public async Task End_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
     {
         var client = new Peer(RouterSide.Client);
         var asked = client.Request(PatternOf(300), Timeout.InfiniteTimeSpan);
@@ -342,7 +342,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Finds_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_opening_goes_and_never_sends_inside_a_send()
+    public async Task Find_a_transfer_it_sends_at_once_for_a_credit_that_comes_back_as_its_opening_goes_and_never_send_inside_a_send()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -457,7 +457,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_transfer_nothing_comes_for_a_request_s_with_a_failure_a_result_s_with_a_timeout()
+    public async Task End_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -517,7 +517,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Stalls_no_request_whose_payload_came_whole_however_long_its_resolver_takes()
+    public async Task Stall_no_request_whose_payload_came_whole_however_long_its_resolver_takes()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -553,7 +553,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keeps_nothing_of_it()
+    public async Task Refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keep_nothing_of_it()
     {
         // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
         var given = RouterLimits.Default with { ChunkBytes = 64, MaximumPayloadBytes = 1_024, WindowBytes = 128 };
@@ -601,7 +601,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.3
     [Fact]
-    public async Task Answers_CHUNK_INVALID_to_an_opening_that_carries_other_than_its_sender_places_in_it()
+    public async Task Answer_chunk_invalid_to_an_opening_that_carries_other_than_its_sender_places_in_it()
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumPayloadBytes = 1_024 });
         var resolver = server.Resolve();
@@ -627,7 +627,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Finds_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out()
+    public async Task Find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -663,7 +663,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Assembles_a_request_s_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatches_it()
+    public async Task Assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatch_it()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -707,7 +707,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_request_s_transfer_its_requester_cancels_giving_the_budget_back()
+    public async Task End_a_requests_transfer_its_requester_cancels_giving_the_budget_back()
     {
         // a budget two transfers share
         var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200 });
@@ -730,7 +730,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_request_s_transfer_with_the_failure_a_chunk_breaks_and_drops_what_its_credit_let_come_after()
+    public async Task End_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_its_credit_let_come_after()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -779,7 +779,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Holds_a_connection_s_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
+    public async Task Hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumTransfers = 1 });
         var resolver = server.Resolve();
@@ -815,7 +815,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Gives_the_budget_back_once_a_payload_is_whole_and_admits_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
+    public async Task Give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
     {
         var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, TransferInactivityTimeout = TimeSpan.FromSeconds(30) });
         using var core = server.Core;
@@ -875,7 +875,7 @@ public sealed partial class RouterCoreTests
 
     // spec 12.10
     [Fact]
-    public async Task Ends_the_transfers_of_a_connection_that_goes_waiting_or_admitted_before_their_budget_admits_any_opening_and_sends_nothing_once_disposed()
+    public async Task End_the_transfers_of_a_connection_that_goes_waiting_or_admitted_before_their_budget_admits_any_opening_and_send_nothing_once_disposed()
     {
         var server = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 256, MaximumPayloadBytes = 256 });
 
@@ -916,7 +916,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off()
+    public async Task Send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off()
     {
         foreach (var total in new[] { 100, 150 })
         {
@@ -954,7 +954,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Stops_a_result_the_peer_cancels_and_sends_nothing_more_of_it_whatever_credit_comes()
+    public async Task Stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_credit_comes()
     {
         foreach (var (total, initialCredit) in new (int Total, int? InitialCredit)[] { (100, null), (150, 80) })
         {
@@ -1007,7 +1007,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Keeps_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
+    public async Task Keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -1047,7 +1047,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_result_whose_chunk_cannot_go_out_forgetting_its_call()
+    public async Task End_a_result_whose_chunk_cannot_go_out_forgetting_its_call()
     {
         foreach (var (total, credit, message) in new[] { (150, 80L, "gone"), (100, 100L, "the transport refused the chunk") })
         {
@@ -1115,7 +1115,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Announces_a_session_on_a_result_s_opening_which_leaves_room_for_it_within_its_envelope()
+    public async Task Announce_a_session_on_a_results_opening_which_leaves_room_for_it_within_its_envelope()
     {
         var server = new Peer(RouterSide.Server) { Session = SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray()) };
         var resolver = server.Resolve();
@@ -1209,7 +1209,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
+    public async Task End_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
     {
         static byte[] BytesOf(int length)
         {
@@ -1342,7 +1342,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Ends_a_result_whose_opening_cannot_go_out_forgetting_its_call()
+    public async Task End_a_result_whose_opening_cannot_go_out_forgetting_its_call()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -1394,7 +1394,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Carries_a_request_its_result_and_a_command_as_transfers_their_chunks_and_credits_shuffled_and_doubled()
+    public async Task Carry_a_request_its_result_and_a_command_as_transfers_their_chunks_and_credits_shuffled_and_doubled()
     {
         var link = new Shuffled();
         var (request, command) = (PatternOf(1_001), PatternOf(1_003));

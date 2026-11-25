@@ -278,6 +278,27 @@ test.describe('failureErrorOf', () => {
 });
 
 test.describe('redactHeader', () => {
+  test('an opaque header keeps its scheme without a token and redacts idempotently', () => {
+    const token = toSessionToken(new Uint8Array(16).fill(7));
+    const credential = { scheme: CredentialScheme.OPAQUE, token } as const;
+
+    for (const header of [
+      { callId: 1, credential, kind: 0x10, procedureId: 1, serviceId: 1 },
+      { callId: 2, credential, kind: 0x11 },
+      { callId: 3, credential, kind: 0x12 },
+    ] as const) {
+      const redacted = redactHeader(header);
+
+      expect(redacted.credentialScheme).toBe(CredentialScheme.OPAQUE);
+      expect(redacted).not.toHaveProperty('credential');
+      expect(redactHeader(redacted)).toEqual(redacted);
+      expect(redacted.callId).toBe(header.callId);
+      expect(redacted.kind).toBe(header.kind);
+      expect(header.credential).toBe(credential);
+      expect(JSON.stringify(redacted)).not.toContain(token);
+    }
+  });
+
   test('leaves the credential out and says its scheme alone, when there was one', () => {
     const token = toSessionToken(new Uint8Array(16).fill(9));
     const result: IResultHeader = {

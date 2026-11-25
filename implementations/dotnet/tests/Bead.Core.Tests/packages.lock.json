@@ -196,6 +196,12 @@
           "Bead.Core": "[0.17.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
+      },
+      "bead.transport.websockets": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.17.0, )"
+        }
       }
     }
   }

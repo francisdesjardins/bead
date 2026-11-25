@@ -142,3 +142,27 @@ test.describe('limitsOf', () => {
     }).toThrow(/^the router's limits do not hold together: a window holds two chunks at least/);
   });
 });
+
+test('takes the edges of each rule and 0 where 0 means none', () => {
+  const held = limitsOf({
+    bufferedBytesBudget: LIMIT_DEFAULTS.maximumPayloadBytes,
+    chunkBytes: 64,
+    maximumDetailBytes: 0,
+    maximumEnvelopeBytes: 64,
+    maximumTransfers: 0,
+    transferInactivityTimeout: 2 ** 31 - 1,
+    windowBytes: 128,
+  });
+
+  expect(held).toEqual({
+    ...LIMIT_DEFAULTS,
+    bufferedBytesBudget: LIMIT_DEFAULTS.maximumPayloadBytes,
+    chunkBytes: 64,
+    maximumDetailBytes: 0,
+    maximumEnvelopeBytes: 64,
+    maximumTransfers: 0,
+    transferInactivityTimeout: 2 ** 31 - 1,
+    windowBytes: 128,
+  });
+  expect(limitsOf({ transferInactivityTimeout: 1 }).transferInactivityTimeout).toBe(1);
+});

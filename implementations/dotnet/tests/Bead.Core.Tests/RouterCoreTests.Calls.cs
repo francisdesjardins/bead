@@ -9,6 +9,114 @@ namespace Bead.Tests;
 public sealed partial class RouterCoreTests
 {
     [Fact]
+    public async Task Answers_a_resolver_that_panics_PROCEDURE_FAILED_with_no_detail_and_reported()
+    {
+        var peer = new Peer(RouterSide.Server);
+        using var core = peer.Core;
+        var resolver = peer.Resolve();
+        var broken = new InvalidOperationException("this resolver breaks, on purpose");
+
+        resolver.Handling = (_) =>
+        {
+            return Task.FromException(broken);
+        };
+        await peer.Deliver(new Envelope { Header = RequestOf(1), Payload = "hi"u8.ToArray() });
+
+        var failure = Assert.Single(peer.Sent).Failure;
+
+        Assert.NotNull(failure);
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, failure.Code);
+        Assert.Equal("", failure.Detail);
+        Assert.Equal([broken], peer.Reports);
+        Assert.Equal([Handle], peer.ReportedOn);
+    }
+
+    [Fact(Skip = "divergence: a throwing OnSent hook leaves its call waiting after the failed handoff")]
+    public async Task A_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
+    {
+        var peer = new Peer(RouterSide.Server);
+        using var core = peer.Core;
+
+        foreach (var onCallId in new[] { true, false })
+        {
+            var broken = new InvalidOperationException("this hook breaks, on purpose");
+            var request = CallOf(Handle, (Echo, TimeSpan.FromSeconds(1))) with
+            {
+                OnCallId = onCallId ? (_) =>
+                {
+                    throw broken;
+                }
+                : null,
+                OnSent = onCallId ? null : (_) =>
+                {
+                    throw broken;
+                },
+            };
+            var asking = core.Request("hi"u8.ToArray(), request);
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            if (onCallId)
+            {
+                Assert.Empty(peer.Sent);
+            }
+        }
+
+        var next = peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1));
+        var callId = await peer.CallIdOf(next);
+
+        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId } });
+
+        Assert.Equal(callId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+        Assert.Empty(peer.Reports);
+    }
+
+    [Fact]
+    public async Task A_request_whose_send_panics_fails_as_its_transports_throw_would_and_the_router_answers_the_next()
+    {
+        foreach (var asynchronous in new[] { false, true })
+        {
+            var peer = new Peer(RouterSide.Server);
+            using var core = peer.Core;
+            var broken = new IOException("the transport breaks");
+            var refuses = true;
+
+            peer.OnSend = (_) =>
+            {
+                if (!refuses)
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (asynchronous)
+                {
+                    return Task.FromException(broken);
+                }
+
+                throw broken;
+            };
+            var refused = await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            refuses = false;
+
+            var next = peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1));
+            var callId = await peer.CallIdOf(next);
+
+            await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId } });
+
+            Assert.Equal(callId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+            Assert.Empty(peer.Reports);
+        }
+    }
+
+    [Fact]
     public void Refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts()
     {
         foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
@@ -1242,7 +1350,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Its_answers_name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record()
+    public async Task Name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record()
     {
         var server = new Peer(RouterSide.Server);
         var handler = new Held(server.Core);
@@ -1266,7 +1374,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Keeps_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it()
+    public async Task Keep_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it()
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default);
         var resolver = server.Resolve();
@@ -1325,7 +1433,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Tells_the_side_of_each_answer_before_it_goes_out_and_undoes_it_when_it_does_not_go_out()
+    public async Task Tell_the_side_of_each_answer_before_it_goes_out_and_undo_it_when_it_does_not_go_out()
     {
         var ordered = new Peer(RouterSide.Server);
         using var orderedCore = ordered.Core;
@@ -1383,7 +1491,7 @@ public sealed partial class RouterCoreTests
 
     // debugging 5.1
     [Fact]
-    public async Task Traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
+    public async Task Trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
     {
         var token = SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray());
         var server = new Peer(RouterSide.Server) { Session = token };
@@ -1464,7 +1572,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Takes_a_cancel_of_no_call_in_silence_offered_to_the_side_and_reports_one_of_its_own_parity()
+    public async Task Take_a_cancel_of_no_call_in_silence_offered_to_the_side_and_report_one_of_its_own_parity()
     {
         var server = new Peer(RouterSide.Server);
 
@@ -1481,7 +1589,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Cancels_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
+    public async Task Abort_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other_once_nothing_can_answer_it()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -1635,7 +1743,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reports_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drops_one_on_a_call_id_reserved_and_a_credit_in_silence()
+    public async Task Report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_and_drop_one_on_a_call_id_reserved_and_a_credit_in_silence()
     {
         var server = new Peer(RouterSide.Server);
         var asking = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
@@ -1674,9 +1782,9 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Frees_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again()
+    public async Task An_answer_whose_send_panics_fails_as_its_transports_throw_would_and_its_call_id_opens_again()
     {
-        foreach (var message in new[] { "the transport is closing", "the transport refused the result" })
+        foreach (var message in new[] { "the transport is closing", "the transport refused the result", "the transport breaks" })
         {
             var server = new Peer(RouterSide.Server);
             var resolver = server.Resolve();
@@ -1693,7 +1801,10 @@ public sealed partial class RouterCoreTests
             });
             Assert.Equal(message, refused.Message);
             await server.Deliver(new Envelope { Header = RequestOf(1), Payload = message == "the transport is closing" ? Array.Empty<byte>() : new byte[] { 2 } });
-            Assert.Equal(2, resolver.Requests.Count);
+            Assert.Equal([1u, 1u], resolver.Requests.Select((request) => { return request.Header.CallId; }));
+            await resolver.Answer(1, new byte[] { 2 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            Assert.Equal(new ResultHeader { CallId = 1 }, server.Sent[^1].Header);
+            Assert.Equal(new byte[] { 2 }, server.Sent[^1].Payload.ToArray());
             Assert.Empty(server.Reports);
         }
     }
@@ -1773,4 +1884,48 @@ public sealed partial class RouterCoreTests
 
         Assert.Equal((1L, 0L), (counts["answeringCalls"], counts["receivingTransfers"]));
     }
+    private sealed class RefusingCallClock : TimeProvider
+    {
+        private readonly Exception _reason;
+
+        public RefusingCallClock(Exception reason)
+        {
+            _reason = reason;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            throw _reason;
+        }
+    }
+
+    [Fact]
+    public async Task Sends_nothing_of_a_call_whose_timer_its_clock_cannot_arm_no_request_and_no_cancel()
+    {
+        foreach (var size in new[] { 8, 200 })
+        {
+            var broken = new InvalidOperationException("the call timer broke");
+            var port = new Sessionless();
+            using var core = new RouterCore(port, new RouterCoreOptions
+            {
+                Clock = new RefusingCallClock(broken),
+                Limits = Chunked with { TransferInactivityTimeout = TimeSpan.FromSeconds(30) },
+            });
+            var call = core.Request(Enumerable.Repeat((byte)7, size).ToArray(), new CoreRequest
+            {
+                ConnectionHandle = Handle,
+                Procedure = Echo,
+                Options = new ResolvedRequestOptions { Timeout = TimeSpan.FromMinutes(1) },
+            });
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return call.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Same(broken, refused);
+            await core.Loop.WhenIdle().WaitAsync(Patience, TestContext.Current.CancellationToken);
+            Assert.Empty(port.Sent);
+        }
+    }
+
 }

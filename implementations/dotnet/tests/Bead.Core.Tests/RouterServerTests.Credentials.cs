@@ -1337,7 +1337,7 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public async Task Ends_every_credential_s_session_of_an_issuer_by_that_issuer_on_every_connection_its_sid_s_and_its_sub_s_alike_and_nothing_of_another_issuer_s_nor_an_ELSEWHERE_s_whose_id_is_that_issuer_an_issuer_none_names_ends_nothing()
+    public async Task Ends_every_session_of_an_issuer_by_that_issuer_on_every_connection_sid_and_sub_alike_and_never_an_elsewheres()
     {
         const string OtherIssuer = "https://other.example";
 

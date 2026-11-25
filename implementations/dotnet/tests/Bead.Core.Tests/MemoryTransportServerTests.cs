@@ -711,4 +711,138 @@ public sealed class MemoryTransportServerTests
         Assert.Equal((ushort)ProtocolCode.ServiceUnknown, refused.Code);
         Assert.Equal("no service 1", refused.Failure.Detail);
     }
+    [Fact]
+    public async Task Rejects_a_second_start_with_a_programmer_error_without_reaching_the_transport()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var drawn = new List<string>();
+
+        server.Connection += drawn.Add;
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return server.Start();
+        });
+
+        Assert.Equal("the transport server is already open", refused.Message);
+        Assert.Equal(ReadyState.Open, server.ReadyState);
+        Assert.Equal([First], drawn);
+        Assert.Equal(First, Assert.Single(server.Clients).ConnectionHandle);
+    }
+
+    [Fact]
+    public async Task Close_resolves_false_for_an_unknown_handle_without_reaching_the_transport()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var closed = new List<(bool, string)>();
+
+        server.Close += (clean, handle) =>
+        {
+            closed.Add((clean, handle));
+        };
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+
+        Assert.False(await server.CloseConnection("type=MEMORY;ip=local;ordinal=2"));
+        Assert.Equal(First, Assert.Single(server.Clients).ConnectionHandle);
+        Assert.Empty(closed);
+        Assert.True(await server.CloseConnection(First));
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal([(true, First)], closed);
+        Assert.Empty(server.Clients);
+    }
+
+    [Fact]
+    public async Task Send_to_an_unknown_handle_resolves_without_reaching_the_transport()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+
+        client.Message += (message) =>
+        {
+            heard.Add(Convert.ToHexString(message.Bytes.Span));
+        };
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        await server.Send(new TransportMessage(new byte[] { 0x78 }, false), "type=MEMORY;ip=local;ordinal=2");
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(heard);
+        await server.Send(new TransportMessage(new byte[] { 0x78 }, false), First);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["78"], heard);
+        Assert.Equal(First, Assert.Single(server.Clients).ConnectionHandle);
+    }
+
+    [Fact]
+    public async Task Stop_forgets_every_connection()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+
+        await server.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        Assert.Single(server.Clients);
+        await server.Stop();
+        Assert.Empty(server.Clients);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+    }
+
+    [Fact]
+    public async Task Gives_a_takes_procedure_by_its_one_list_whatever_the_connection_and_none_for_no_list()
+    {
+        await using var every = new MemoryTransportServer();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [new ProcedureAddress(2, 1)] });
+        var first = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
+        var second = "type=HTTP;ip=127.0.0.1;ordinal=9";
+
+        Assert.False(every.NamesProcedures());
+        Assert.True(server.NamesProcedures());
+        Assert.True(server.TakesProcedure(first, new ProcedureAddress(2, 1)));
+        Assert.True(server.TakesProcedure(second, new ProcedureAddress(2, 1)));
+        Assert.False(server.TakesProcedure(first, new ProcedureAddress(2, 2)));
+    }
+
+    [Fact]
+    public async Task Runs_on_the_clock_its_transport_supplies_the_platform_s_when_it_supplies_none()
+    {
+        var clock = new FakeTimeProvider();
+        await using var supplied = new MemoryTransportServer(new MemoryTransportServerOptions { Clock = clock });
+        await using var unclocked = new MemoryTransportServer();
+        await using var server = new Server<string>(unclocked);
+
+        Assert.Same(clock, supplied.Clock);
+        Assert.Same(TimeProvider.System, unclocked.Clock);
+        Assert.Same(TimeProvider.System, server.Router.Clock);
+    }
+
+    [Fact]
+    public async Task Gives_nothing_for_no_list_and_for_a_list_what_it_names_each_address_once()
+    {
+        await using var every = new MemoryTransportServer();
+        await using var none = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [] });
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Procedures = [new ProcedureAddress(2, 1), new ProcedureAddress(2, 1), new ProcedureAddress(65_535, 65_535)],
+        });
+        var field = typeof(MemoryTransportServer).GetField("_procedures", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        Assert.Null(field.GetValue(every));
+        var taken = Assert.IsAssignableFrom<IReadOnlySet<ProcedureAddress>>(field.GetValue(server));
+        Assert.Equal(2, taken.Count);
+        Assert.True(taken.Contains(new ProcedureAddress(2, 1)));
+        Assert.True(taken.Contains(new ProcedureAddress(65_535, 65_535)));
+        Assert.False(taken.Contains(new ProcedureAddress(1, 2)));
+        Assert.False(taken.Contains(new ProcedureAddress(2, 2)));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlySet<ProcedureAddress>>(field.GetValue(none)));
+    }
+
 }
