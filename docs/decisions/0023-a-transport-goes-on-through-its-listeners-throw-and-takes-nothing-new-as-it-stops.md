@@ -209,7 +209,7 @@ at the transports, the routers'
 `drops what an error listener throws, the next error listener told, and the call goes on`, the
 participants' `drops what an error listener throws, the next error listener told, and the participant goes on`
 and the gateways'
-`writes a text or a raw stream’s data as a JSON string and a result it cannot read as a call’s failure`
+`writes a stream its result then each notification, each event an id`
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ## The Tenth Man

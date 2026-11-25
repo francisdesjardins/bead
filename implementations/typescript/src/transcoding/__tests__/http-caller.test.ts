@@ -1,4 +1,12 @@
 import { createServer } from 'node:http';
+import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici';
+import { createTlsFront, PKI } from '../../transport/shared/__tests__/tls-front';
+import { createServer as createBeadServer } from '../../server/server';
+import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
+import { PAYLOAD_CODECS } from '../../router/shared/payloads';
+import { requestOf } from '../../service/descriptors';
+import { createServiceServer } from '../../service/service-server';
+import { createHTTPGateway } from '../http-gateway';
 import { expect, test } from '@playwright/test';
 import { FailureScope, LIMIT_DEFAULTS, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
@@ -53,6 +61,108 @@ const stubOf = (
     );
   };
 };
+
+test('refuses a URL of another scheme or with user information, a query or a fragment, and a bound of 0', () => {
+  for (const url of [
+    'http://user:secret@localhost',
+    'http://localhost?x=1',
+    'http://localhost/#fragment',
+    'ftp://localhost',
+    'localhost',
+    'http://',
+  ]) {
+    expect(() => {
+      return new TranscodingHttpClient(url);
+    }).toThrow(
+      new ProgrammerError(
+        'an HTTP client URL uses HTTP or HTTPS without user information, query or fragment'
+      )
+    );
+  }
+  expect(() => {
+    return new TranscodingHttpClient('http://localhost', { maximumBodyBytes: 0 });
+  }).toThrow(ProgrammerError);
+  expect(() => {
+    return new TranscodingHttpClient('HTTPS://Example.COM');
+  }).not.toThrow();
+});
+
+test('presents its credential or the call’s own, and none when empty or omitted', async () => {
+  const presented: (string | null)[] = [];
+  const client = new TranscodingHttpClient('http://localhost', {
+    authorization: 'Bearer default',
+    fetch: (_url, init) => {
+      presented.push(new Headers(init?.headers).get('authorization'));
+      return Promise.resolve(new Response('ok', { headers: { 'content-type': 'text/plain' } }));
+    },
+  });
+  for (const options of [
+    undefined,
+    { authorization: 'Bearer own' },
+    { authorization: '' },
+    { authorization: 'Bearer own', withoutAuthorization: true },
+  ]) {
+    expect(await client.text('', options)).toBe('ok');
+  }
+  expect(presented).toEqual(['Bearer default', 'Bearer own', null, null]);
+});
+
+test('bounds a body and refuses a result of another media type', async () => {
+  const answers = [
+    ['12345', 'text/plain'],
+    ['ok', 'text/html'],
+    ['1234', 'Text/Plain; charset=utf-8'],
+  ] as const;
+  let index = 0;
+  const client = new TranscodingHttpClient('http://localhost', {
+    maximumBodyBytes: 4,
+    fetch: () => {
+      const answer = answers[index++];
+      if (answer === undefined) {
+        throw new Error('one response per call');
+      }
+      return Promise.resolve(new Response(answer[0], { headers: { 'content-type': answer[1] } }));
+    },
+  });
+  await expect(client.text('')).rejects.toMatchObject({
+    code: ProtocolCode.PAYLOAD_TOO_LARGE,
+    origin: 'local',
+    detail: 'the HTTP body passes maximumBodyBytes',
+  });
+  await expect(client.text('')).rejects.toMatchObject({
+    code: ProtocolCode.PAYLOAD_UNDECODABLE,
+    detail: 'the HTTP result has another media type',
+  });
+  expect(await client.text('')).toBe('1234');
+  expect(index).toBe(3);
+});
+
+test('refuses a credential in the clear or of no field value before anything goes', async () => {
+  let sent = 0;
+  const fetcher: typeof fetch = () => {
+    sent += 1;
+    return Promise.resolve(new Response('ok', { headers: { 'content-type': 'text/plain' } }));
+  };
+  const unsafe = new TranscodingHttpClient('http://example.com', {
+    authorization: 'Bearer good',
+    fetch: fetcher,
+  });
+  await expect(unsafe.text('')).rejects.toMatchObject({
+    code: ProtocolCode.DESTINATION_UNREACHABLE,
+    origin: 'local',
+    side: 'client',
+    detail: '',
+  });
+  await expect(unsafe.text('', { authorization: 'Bearer\nsplit' })).rejects.toThrow(
+    'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+  );
+  expect(sent).toBe(0);
+  for (const url of ['https://example.com', 'http://LOCALHOST', 'http://127.1', 'http://[::1]']) {
+    const client = new TranscodingHttpClient(url, { authorization: 'Bearer good', fetch: fetcher });
+    expect(await client.text('')).toBe('ok');
+  }
+  expect(sent).toBe(4);
+});
 
 test('refuses an answer from a supplied executor that follows a redirect', async () => {
   let disposed = 0;
@@ -1466,4 +1576,386 @@ test.describe('createHTTPCaller, on the loopback', () => {
       ).toBe(reason);
     }
   });
+});
+
+test('reads a problem as its Bead failure or a gateway’s own, by its refusal then its status', async () => {
+  const answers = [
+    [
+      422,
+      '{"code":1e0,"scope":"application","detail":"by choice"}',
+      {},
+      1,
+      'application',
+      'peer',
+      'by choice',
+    ],
+    [
+      503,
+      '{"type":"about:blank","detail":"by the gate"}',
+      { 'bead-refusal': 'busy', 'retry-after': '7' },
+      35,
+      'protocol',
+      'peer',
+      'the HTTP call answers 503; Retry-After: 7; by the gate',
+    ],
+    [
+      401,
+      '',
+      { 'retry-after': '3' },
+      32,
+      'protocol',
+      'peer',
+      'the HTTP call answers 401; Retry-After: 3',
+    ],
+    [307, '', { location: '/elsewhere' }, 65, 'protocol', 'peer', 'the HTTP call answers 307'],
+    [500, '{"code":"7"}', {}, 50, 'protocol', 'local', 'the HTTP problem holds no Bead failure'],
+    [408, '{"status":408}', {}, 17, 'protocol', 'peer', 'the HTTP call answers 408'],
+  ] as const;
+  for (const [status, body, headers, code, scope, origin, detail] of answers) {
+    let sent = 0;
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(
+          new Response(body, {
+            status,
+            headers:
+              status === 401 || status === 307
+                ? headers
+                : { 'content-type': 'Application/Problem+JSON', ...headers },
+          })
+        );
+      },
+    });
+    await expect(client.text('')).rejects.toMatchObject({
+      code,
+      scope: scope === 'application' ? FailureScope.APPLICATION : FailureScope.PROTOCOL,
+      origin,
+      detail,
+    });
+    expect(sent).toBe(1);
+  }
+});
+
+test('reads a stream’s result then its notifications then the failure that ends it', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  const route = { ...generated, result: 'text', notification: 'text' } as const;
+  for (const [body, detail, events, code, origin] of [
+    [
+      '\uFEFF: a comment\r\nevent: result\r\nid: 0\r\ndata: "op\r\n\r\ndata:"next"\r\n\r\nevent: message\ndata: "two"\n\nevent: failure\rdata: {"code":65,\rdata: "scope":"protocol"}\r\r',
+      'the HTTP payload cannot be decoded',
+      [],
+      50,
+      'local',
+    ],
+    [
+      'event: result\ndata: "open"\n\n',
+      'the HTTP event stream ends without a failure',
+      [{ kind: 'result', value: 'open' }],
+      65,
+      'local',
+    ],
+    [
+      'data: "early"\n\n',
+      'the HTTP event stream holds one result then notifications',
+      [],
+      50,
+      'local',
+    ],
+    [
+      '\uFEFF: a comment\r\nevent: result\r\nid: 0\r\ndata: "open"\r\n\r\ndata:"next"\r\n\r\nevent: message\ndata: "two"\n\nevent: failure\rdata: {"code":65,\rdata: "scope":"protocol"}\r\r',
+      '',
+      [
+        { kind: 'result', value: 'open' },
+        { kind: 'notification', value: 'next' },
+        { kind: 'notification', value: 'two' },
+      ],
+      65,
+      'peer',
+    ],
+  ] as const) {
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      fetch: (_url, init) => {
+        expect(new Headers(init?.headers).get('accept')).toBe('text/event-stream');
+        return Promise.resolve(
+          new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+        );
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({ code, origin, detail });
+    expect(received).toEqual(events);
+  }
+});
+
+test('reads raw event data in standard padded base64 alone and bounds each event', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  const route = { ...generated, result: 'raw', notification: 'raw' } as const;
+  for (const [body, detail, count] of [
+    [
+      'event: result\ndata: "AAE="\n\ndata: "AAE"\n\n',
+      'an HTTP raw event holds standard padded base64',
+      1,
+    ],
+    ['event: result\ndata: "%%"\n\n', 'the HTTP payload cannot be decoded', 0],
+    [
+      'event: result\ndata: "AAE="\n\ndata: "0123456789012345678901234567"\n\n',
+      'the HTTP event passes maximumBodyBytes',
+      1,
+    ],
+  ] as const) {
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      maximumBodyBytes: 32,
+      fetch: stubOf(body),
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({ detail });
+    expect(received).toHaveLength(count);
+    if (count === 1) {
+      expect(received).toEqual([{ kind: 'result', value: Uint8Array.of(0, 1) }]);
+    }
+  }
+});
+
+test('frames events across chunks by any line end and refuses a line of no UTF-8', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  const route = { ...generated, result: 'text' } as const;
+  for (const end of ['\r\n', '\n', '\r']) {
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      maximumBodyBytes: 64,
+      fetch: stubOf(`event: result${end}data: "été"${end}${end}`, { fragmented: true }),
+    });
+    const stream = caller.subscribe(route, {})[Symbol.asyncIterator]();
+    expect(await stream.next()).toEqual({ done: false, value: { kind: 'result', value: 'été' } });
+    await stream.return?.();
+  }
+  for (const [bytes, detail] of [
+    [Uint8Array.of(100, 97, 116, 97, 58, 32, 255, 10), 'the HTTP payload cannot be decoded'],
+    [new Uint8Array(), 'the HTTP event stream ends without a failure'],
+  ] as const) {
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      maximumBodyBytes: 64,
+      fetch: () => {
+        return Promise.resolve(
+          new Response(bytes, { headers: { 'content-type': 'text/event-stream' } })
+        );
+      },
+    });
+    await expect(async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        void event;
+      }
+    }).rejects.toMatchObject({ detail });
+  }
+});
+
+test('ends a call and a stream its signal gives up as cancelled', async () => {
+  const abort = new AbortController();
+  const reason = new Error('cancelled by the call');
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: (_url, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        if (init?.signal?.aborted === true) {
+          reject(reason);
+          return;
+        }
+        init?.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(reason);
+          },
+          { once: true }
+        );
+      });
+    },
+  });
+  const options = { signal: abort.signal };
+  const call = client.text('', options);
+  const stream = client.subscribeWatch({}, options)[Symbol.asyncIterator]();
+  const reading = stream.next();
+  const ended = [expect(call).rejects.toBe(reason), expect(reading).rejects.toBe(reason)];
+  abort.abort(reason);
+  await Promise.all(ended);
+  await expect(client.text('', options)).rejects.toBe(reason);
+});
+
+test('resolves each default route under its base path and refuses another procedure’s or no default one', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'text';
+  });
+  if (generated === undefined) {
+    throw new Error('text is a generated route');
+  }
+  const route = {
+    ...generated,
+    routes: [{ method: 'POST', template: '/api/S/echo', body: '*' }],
+  } as const;
+  for (const path of ['/proxy', '/proxy/']) {
+    let sent = 0;
+    const caller = createHTTPCaller([route], 'http://localhost' + path, {
+      fetch: (url, init) => {
+        sent += 1;
+        expect(url).toBe('http://localhost/proxy/api/S/echo');
+        expect(init?.method).toBe('POST');
+        expect(new Headers(init?.headers).get('content-type')).toBe('text/plain');
+        expect(new TextDecoder().decode(init?.body as Uint8Array)).toBe('hi');
+        return Promise.resolve(new Response('ok', { headers: { 'content-type': 'text/plain' } }));
+      },
+    });
+    expect(await caller.call(route, 'hi')).toBe('ok');
+    expect(sent).toBe(1);
+  }
+  const ruled = { ...generated, routes: [{ method: 'GET', template: '/v1/echo/{text}' }] } as const;
+  let sent = 0;
+  const caller = createHTTPCaller([ruled], 'http://localhost/a/b', {
+    fetch: () => {
+      sent += 1;
+      return Promise.resolve(new Response(''));
+    },
+  });
+  await expect(caller.call(ruled, 'hi')).rejects.toThrow(
+    'an HTTP client calls a default POST route with a whole body and result'
+  );
+  expect(sent).toBe(0);
+});
+
+test('calls a text, a raw and a JSON route and reads a stream through a gateway', async () => {
+  const procedure = (procedureName: string, procedureId: number) => {
+    return { procedureName, procedureId, serviceId: 7, serviceRevision: 1 };
+  };
+  const { text, raw, json } = PAYLOAD_CODECS;
+  const procedures = Object.freeze({
+    echo: requestOf({
+      procedure: procedure('echo', 1),
+      admission: 'none',
+      failures: {},
+      request: text,
+      result: text,
+    }),
+    raw: requestOf({
+      procedure: procedure('raw', 2),
+      admission: 'none',
+      failures: {},
+      request: raw,
+      result: raw,
+    }),
+    json: requestOf({
+      procedure: procedure('json', 3),
+      admission: 'none',
+      failures: {},
+      request: json,
+      result: json,
+    }),
+    news: requestOf({
+      procedure: procedure('news', 4),
+      admission: 'none',
+      failures: {},
+      request: text,
+      result: text,
+      notification: text,
+    }),
+  });
+  await using memory = createMemoryTransportServer();
+  await using server = createBeadServer({ transport: memory });
+  const service = createServiceServer(procedures);
+  service.on('echo', (request, response) => {
+    return response(request.payload + '!');
+  });
+  service.on('raw', (request, response) => {
+    return response(request.payload);
+  });
+  service.on('json', (request, response) => {
+    return response(request.payload);
+  });
+  service.on('news', (_request, response) => {
+    return response('open');
+  });
+  service.offer(server);
+  await memory.start();
+  const route = (
+    name: keyof typeof procedures,
+    payload: 'text' | 'raw' | 'json'
+  ): IHttpRouteInit => {
+    return {
+      procedure: procedures[name],
+      request: payload,
+      result: payload,
+      failures: {},
+      ...(name === 'news' ? { notification: 'text' as const } : {}),
+      routes: [{ method: 'POST', body: '*', template: '/api/S/' + name }],
+    };
+  };
+  const echo = route('echo', 'text');
+  const bytes = route('raw', 'raw');
+  const value = route('json', 'json');
+  const news = route('news', 'text');
+  const routes = [echo, bytes, value, news];
+  await using gateway = createHTTPGateway({
+    routes,
+    transport: memory,
+    createServer: (listener) => {
+      return createServer(listener);
+    },
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const caller = createHTTPCaller(routes, urlOf(port));
+  expect(await caller.call(echo, 'hi')).toBe('hi!');
+  expect(await caller.call(bytes, Uint8Array.of(0, 255, 7))).toEqual(Uint8Array.of(0, 255, 7));
+  expect(await caller.call(value, { a: [1, 'b', null] })).toEqual({ a: [1, 'b', null] });
+  const stream = caller.subscribe(news, '')[Symbol.asyncIterator]();
+  try {
+    expect(await stream.next()).toEqual({ done: false, value: { kind: 'result', value: 'open' } });
+    await service.notify.news('first');
+    expect(await stream.next()).toEqual({
+      done: false,
+      value: { kind: 'notification', value: 'first' },
+    });
+  } finally {
+    await stream.return?.();
+  }
+});
+
+test('calls its gateway over the client config it is given', async () => {
+  await using fixture = await startTranscoding();
+  await using front = await createTlsFront(fixture.port, { requiresCertificate: true });
+  const agent = new Agent({ connect: { ca: PKI.root, cert: PKI.clientChain, key: PKI.clientKey } });
+  let sent = 0;
+  const client = new TranscodingHttpClient(`https://127.0.0.1:${String(front.port)}`, {
+    fetch: (input, init) => {
+      sent += 1;
+      return undiciFetch(input as string, {
+        ...(init as UndiciRequestInit),
+        dispatcher: agent,
+      }) as unknown as Promise<Response>;
+    },
+  });
+  try {
+    expect(await client.text('hi!')).toBe('hi!');
+    expect(sent).toBe(1);
+  } finally {
+    await agent.close();
+  }
 });
