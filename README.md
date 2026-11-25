@@ -704,7 +704,10 @@ floor, when it measured nothing, or on a measure the floor names and no report m
 rises with `--raise`, never down but by a decision
 ([0006](docs/decisions/0006-a-rule-has-its-gate.md)). A run that fails keeps its reports 14 days,
 among its artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`,
-the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's. Locally, the same commands as CI's:
+the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's.
+CI runs the TypeScript side's tests in shards, each under c8, and c8 reports the raw coverage of
+every shard as one run's, so the floor counts the lines and branches one run counts. Locally, the
+same commands as CI's, the TypeScript side's tests in one run:
 
 ```sh
 cd implementations/typescript
@@ -1245,10 +1248,12 @@ release or a hotfix branch, and a run by hand, run every job. The jobs run on pi
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of `@playwright/test`
 the TypeScript side pins, which names Microsoft's image of it, the one the `typescript` and `dotnet`
 jobs run in, its Chromium already there); `typescript` on Node 26 and on the floor, 24.9 (install,
-the builder's packages too, which the demo's Packages tab reaches, check, the public surface held
-to its list among it, test, under coverage on Node 26, held to the side's floor, the demo's static
-build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on
-Node 26); `dotnet`
+the builder's packages too, which the type-check reaches, check, the public surface held to its
+list among it, the demo's static build and the DevTools extension built, then the tests, in two
+shards by Playwright's `--shard`, each under c8 on Node 26), with `typescript-apps` beside it on
+Node 26 (the DevTools extension tested in Chromium, the demo's tests, and the page and the demo
+held to WCAG 2.2 AA) and `typescript-coverage` after it (the shards' raw coverage reported by c8 as
+one run's, held to the side's floor); `dotnet`
 (every C# package audited by NuGetAudit as it restores, format, build, the builder's C# goldens
 among its projects and each `src` project's public surface held to its `PublicAPI` lists, the C#
 bench built in Release, test under coverage, held to the side's floor, the interop both ways with
