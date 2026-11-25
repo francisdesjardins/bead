@@ -2225,6 +2225,7 @@
     {
       "name": "a server given no hosts takes localhost, a name under .localhost and an IP literal, on any port or none, and refuses any other host 403, marked, a page that rebinds its name among them",
       "clauses": [
+        "13.4.1",
         "15.6.5",
         "15.12"
       ],
@@ -2349,6 +2350,30 @@
             }
           },
           "on": "final"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: a.localhost.\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "a.localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "dotted"
         },
         {
           "send": {
@@ -3717,6 +3742,202 @@
             "end": true
           },
           "on": "long"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length is 2⁶⁴ − 2 or 2⁶⁴ − 1 is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "differs": [
+        {
+          "row": "A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1",
+          "language": "Rust"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 18446744073709551614\r\n\r\n"
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "edge"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 18446744073709551615\r\n\r\n"
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "top"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Transfer-Encoding names chunked in any ASCII case is read so: a Chunked exchange is answered 204, Chunked and CHUNKED are judged on to their host, and gzip, CHUNKED is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "drawn"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "drawn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: Chunked\r\nconnection: close\r\n\r\n",
+            "body": "38 0D 0A A1 16 00 02  00 00 00 05 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "framed"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "framed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: Chunked\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "mixed"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "mixed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: CHUNKED\r\nconnection: close\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "upper"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "upper"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ntransfer-encoding: gzip, CHUNKED\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "coded"
         }
       ]
     },
@@ -18184,6 +18405,58 @@
             "end": true
           },
           "on": "long"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 18446744073709551614\r\n\r\n"
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "edge"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "edge"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 18446744073709551615\r\n\r\n"
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "top"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "top"
         }
       ]
     },
@@ -18672,6 +18945,101 @@
             }
           },
           "on": "empty"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose Transfer-Encoding names its codings in any ASCII case is read so: Chunked and CHUNKED are judged on to its host, and gzip, CHUNKED is answered 400 unmarked, before its host is judged, and its connection closed",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: Chunked\r\n\r\n"
+          },
+          "on": "mixed"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "mixed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: CHUNKED\r\n\r\n"
+          },
+          "on": "upper"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "upper"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: gzip, CHUNKED\r\n\r\n",
+            "body": "30 0D 0A 0D 0A"
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "coded"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "coded"
         }
       ]
     },
@@ -19965,6 +20333,7 @@
     {
       "name": "a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
+        "13.4.1",
         "15.2",
         "15.2.2",
         "15.6.5",
@@ -20113,6 +20482,32 @@
             }
           },
           "on": "final"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a.localhost.\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "a.localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "dotted"
         },
         {
           "send": {

@@ -282,11 +282,20 @@ SIGNED_CASE = ("a request whose Content-Length is signed, +0, -0 or +5, is answe
                "judged, and its connection closed")
 SIGNED = [{'row': 'A signed `Content-Length`', 'language': 'C#'}]
 # the largest count of a Content-Length (spec 15.12), 2⁶³ − 1, and the values each case sends about it,
-# read by value whatever zeros lead them: two at the count, five past it; 2⁶⁴ − 2 and 2⁶⁴ − 1 stay
-# out, since hyper answers them 431, a row of docs/support.md
+# read by value whatever zeros lead them: two at the count, five past it. 2⁶⁴ − 2 and 2⁶⁴ − 1, EDGES,
+# stay out of PAST_COUNT, which the HTTP case shares: the upgrade case takes them, since every side
+# answers them alike there, and over HTTP a case of their own carries the Rust side's row, hyper
+# answering them 431, a row of docs/support.md
 COUNT = 2 ** 63 - 1
 PAST_COUNT = [('counted', str(COUNT)), ('padded', f'0000{COUNT}'), ('past', str(COUNT + 1)),
               ('beyond', f'0000{COUNT + 1}'), ('nineteen', '9' * 19), ('wide', str(2 ** 64)), ('long', '9' * 23)]
+EDGES = [('edge', str(2 ** 64 - 2)), ('top', str(2 ** 64 - 1))]
+EDGES_CASE = ("a request whose Content-Length is 2⁶⁴ − 2 or 2⁶⁴ − 1 is answered 400 unmarked, before its host is "
+              "judged, and its connection closed")
+EDGES_ROW = [{'row': 'A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1', 'language': 'Rust'}]
+CODING_CASE = ("a request whose Transfer-Encoding names chunked in any ASCII case is read so: a Chunked exchange is "
+               "answered 204, Chunked and CHUNKED are judged on to their host, and gzip, CHUNKED is answered 400 "
+               "unmarked, before its host is judged, and its connection closed")
 # a chunked body's last chunk, and a CANCEL of call 5 in one chunk before it
 LAST_CHUNK = text('0\r\n\r\n')
 CHUNKED_CANCEL = ' '.join([text('8\r\n'), cancel(5), text('\r\n0\r\n\r\n')])
@@ -478,7 +487,7 @@ cases = [
         connect('taken', host='bead.test'), expect('taken', 201)]),
     # 15.12: the hosts every server takes, each by its host on any port, and no other
     ('a server given no hosts takes localhost, a name under .localhost and an IP literal, on any port or none, and refuses any other host 403, marked, a page that rebinds its name among them',
-     ['15.6.5', '15.12'], None, [
+     ['13.4.1', '15.6.5', '15.12'], None, [
          connect('localhost', host='localhost:8080'), expect('localhost', 201),
          connect('under', host='Bead.LocalHost'), expect('under', 201),
          connect('ipv4', host='192.0.2.1:80'), expect('ipv4', 201),
@@ -487,6 +496,7 @@ cases = [
          refused('rebound', 403, 'host-refused'),
          connect('suffixed', host='localhost.example'), refused('suffixed', 403, 'host-refused'),
          connect('final', host='localhost.'), refused('final', 403, 'host-refused'),
+         connect('dotted', host='a.localhost.'), refused('dotted', 403, 'host-refused'),
          connect('short', host='127.1'), refused('short', 403, 'host-refused'),
          connect('octal', host='0177.0.0.1'), refused('octal', 403, 'host-refused'),
          connect('named', host='127.0.0.1.example'), refused('named', 403, 'host-refused'),
@@ -612,6 +622,32 @@ cases = [
                       (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length,
                             close=False),
                        unmarked(on), {'expect': {'end': True}, 'on': on}))]),
+    # 15.12: 2⁶⁴ − 2 and 2⁶⁴ − 1, past the count, answered as every Content-Length past it; a case of
+    # their own, since hyper answers them 431, and a differs excuses a whole case
+    (EDGES_CASE, ['15.12'], {'hosts': ['bead.test']}, [
+        step
+        for on, length in EDGES
+        for step in (send(on, 'POST', host='elsewhere.test', fields={'content-type': BEAD}, length=length,
+                          close=False),
+                     unmarked(on), {'expect': {'end': True}, 'on': on})]),
+    # 15.12: a coding's name compared in any ASCII case (RFC 9112 §7): an exchange framed by Chunked is
+    # served, Chunked and CHUNKED alone go on to the host's 403, and gzip, CHUNKED lists a coding before
+    # its chunked, refused before hosts is read and its connection closed once answered
+    (CODING_CASE, ['15.12'], {'hosts': ['bead.test']}, [
+        *drawn('drawn'),
+        send('framed', 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD),
+                                       ('transfer-encoding', 'Chunked')], length=[], body=CHUNKED_CANCEL),
+        expect('framed', 204, body=''),
+        *[step
+          for on, coding in (('mixed', 'Chunked'), ('upper', 'CHUNKED'))
+          for step in (send(on, 'POST', host='elsewhere.test', fields=[('content-type', BEAD),
+                                                                       ('transfer-encoding', coding)],
+                            length=[], body=LAST_CHUNK),
+                       refused(on, 403, 'host-refused'))],
+        send('coded', 'POST', host='elsewhere.test', fields=[('content-type', BEAD),
+                                                             ('transfer-encoding', 'gzip, CHUNKED')],
+             length=[], body=LAST_CHUNK, close=False),
+        unmarked('coded'), {'expect': {'end': True}, 'on': 'coded'}]),
     # 15.7 and 15.12: a chunk size past what a server holds, answered as HTTP answers it and never 2xx,
     # and its connection closed once answered, on a socket that asks no close, on an exchange of a
     # connection drawn; a connect is refused at its head, a body declared, before its size is read
@@ -1756,11 +1792,12 @@ websocket = [
          for step in (handshake(on, [('content-length', length) for length in lengths], host='elsewhere.test'),
                       unmarked(on), {'expect': {'end': True}, 'on': on})]),
     # 15.2, step 1, and 15.12: a Content-Length past 2⁶³ − 1, read by value, judged before hosts is
-    # read; one at the count goes on to its host
+    # read; one at the count goes on to its host; 2⁶⁴ − 2 and 2⁶⁴ − 1 among them, which every side's
+    # WebSocket address answers alike
     ('an upgrade whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, is answered 400 unmarked, before its host is judged, and its connection closed',
      ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          step
-         for on, length in PAST_COUNT
+         for on, length in PAST_COUNT + EDGES
          for step in ((handshake(on, [('content-length', length)], host='elsewhere.test'),
                        refused(on, 403, 'host-refused', UPGRADE_REFUSED))
                       if int(length) <= COUNT else
@@ -1815,6 +1852,17 @@ websocket = [
                         unmarked(on), {'expect': {'end': True}, 'on': on})],
          handshake('empty', [('transfer-encoding', ', chunked')], host='elsewhere.test'),
          refused('empty', 403, 'host-refused', UPGRADE_REFUSED)]),
+    # 15.2, step 1, and 15.12: a coding's name compared in any ASCII case (RFC 9112 §7): Chunked and
+    # CHUNKED alone go on to step 2's host, and gzip, CHUNKED lists a coding before its chunked, judged
+    # before hosts is read
+    ('an upgrade whose Transfer-Encoding names its codings in any ASCII case is read so: Chunked and CHUNKED are judged on to its host, and gzip, CHUNKED is answered 400 unmarked, before its host is judged, and its connection closed',
+     ['15.2', '15.2.1', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         *[step
+           for on, coding in (('mixed', 'Chunked'), ('upper', 'CHUNKED'))
+           for step in (handshake(on, [('transfer-encoding', coding)], host='elsewhere.test'),
+                        refused(on, 403, 'host-refused', UPGRADE_REFUSED))],
+         handshake('coded', [('transfer-encoding', 'gzip, CHUNKED')], host='elsewhere.test', body=LAST_CHUNK),
+         unmarked('coded'), {'expect': {'end': True}, 'on': 'coded'}]),
     # 15.2, step 1, and 15.12: a Transfer-Encoding an HTTP/1.0 request carries, judged before hosts is
     # read and before step 4 would answer it 426, an upgrade asked or none
     ('an HTTP/1.0 request at a WebSocket\'s address carrying a Transfer-Encoding is answered 400 unmarked, before its host is judged, and its connection closed',
@@ -1915,7 +1963,7 @@ websocket = [
          handshake('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused', UPGRADE_REFUSED)]),
     # 15.12: the hosts every server takes, judged before the method and the upgrade
     ('a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form',
-     ['15.2', '15.2.2', '15.6.5', '15.12'], {}, [
+     ['13.4.1', '15.2', '15.2.2', '15.6.5', '15.12'], {}, [
          *upgrade('localhost', host='localhost:8080'), message('localhost', binary=ECHO),
          heard('localhost', envelope=result(1, '"x"')),
          *upgrade('under', host='a.localhost'), *upgrade('ipv6', host='[::1]'),
@@ -1923,6 +1971,7 @@ websocket = [
          refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
          asked('post', method='POST', host='rebind.example'), refused('post', 403, 'host-refused', UPGRADE_REFUSED),
          asked('final', host='localhost.'), refused('final', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('dotted', host='a.localhost.'), refused('dotted', 403, 'host-refused', UPGRADE_REFUSED),
          asked('empty', host=''), refused('empty', 403, 'host-refused', UPGRADE_REFUSED),
          asked('old', http='HTTP/1.0', host=None), refused('old', 403, 'host-refused', UPGRADE_REFUSED)]),
     ('an upgrade is taken from the hosts listed besides those every server takes, each by its host on any port',
@@ -3467,7 +3516,7 @@ HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeou
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
 HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS,
-                CL_TE_CASE: CL_TE, SIGNED_CASE: SIGNED}
+                CL_TE_CASE: CL_TE, SIGNED_CASE: SIGNED, EDGES_CASE: EDGES_ROW}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:

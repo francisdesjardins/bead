@@ -282,10 +282,11 @@ stream: the platform row of `docs/support.md` names each.
 `spec/transports.json`, over HTTP and at a WebSocket's address, and an exchange of
 `spec/transcoding.json` send it from a host not taken. 2⁶³ − 1, in 19 digits and in 23, goes on to
 the host's 403 `host-refused`; 2⁶³, in 19 digits and in 23, 19 nines, 2⁶⁴ and 23 nines are each
-answered 400 unmarked. 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out of the shared files, since hyper answers
-them 431. Each side's own tests send them: the Rust side's hold hyper's 431 at its HTTP transport
-and gateway, and every other surface answers them 400 unmarked. Over HTTP/2, each side's own test
-holds its answer.
+answered 400 unmarked. 2⁶⁴ − 2 and 2⁶⁴ − 1 are in the shared files. The WebSocket address's case
+takes them, since every side answers them there alike. An HTTP case and a gateway's exchange of
+their own hold them, the Rust side excused by the row of hyper's 431. Each side's own tests send
+them too: the Rust side's hold hyper's 431 at its HTTP transport and gateway, and every other
+surface answers them 400 unmarked. Over HTTP/2, each side's own test holds its answer.
 
 **A coding before `chunked` is answered alike on every side**: two cases of `spec/transports.json`
 and an exchange of `spec/transcoding.json` send `gzip, chunked`, `x-unknown, chunked` and the two
