@@ -896,7 +896,7 @@ requires review. At N=5, simulations on the transcoding measurements give roughl
 per unchanged measure and 70–90% detection at a +35% change. These rates depend on the
 measurement's distribution; 112 measures can give about one false flag per side, with noisier
 tails. The threshold and p test screen findings, each read and judged. CI's `dotnet` job builds the
-C# bench in Release on every push, so that a release's measure finds it whole, and measures
+C# bench in Release whenever it runs, so that a release's measure finds it whole, and measures
 nothing; `bench.yml` measures, and no regression fails it.
 
 `--tree` builds and runs a checkout of the baseline, alternating the trees process by process in
@@ -1130,6 +1130,11 @@ against each server.
 - `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
   axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
   installed, with Playwright's Chromium.
+- `node tools/ci-scope.mjs --local [<base>]`: the commands of the CI jobs what the branch changes
+  reaches, against its merge base with `origin/develop` by default, the working tree included, the
+  `commits` job's first, each from its folder; `--gates` leaves out the whole suites, and `--all`
+  gives every job's, for a release and a merge into `develop`. One table maps each path to the jobs
+  that read it, a path no rule names reaching every job; CI's `scope` job applies it.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
   saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
@@ -1232,15 +1237,18 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 
 ## CI
 
-[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned runner
-images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
+[`ci.yml`](.github/workflows/ci.yml) runs the jobs a change reaches. Its `scope` job maps each path
+a feature branch or a pull request into `develop` changes to the jobs that read it, by the rules of
+`tools/ci-scope.mjs`, a path no rule names reaching every job; a push to `develop`, `main`, a
+release or a hotfix branch, and a run by hand, run every job. The jobs run on pinned runner images,
+`ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of `@playwright/test`
 the TypeScript side pins, which names Microsoft's image of it, the one the `typescript` and `dotnet`
 jobs run in, its Chromium already there); `typescript` on Node 26 and on the floor, 24.9 (install,
 the builder's packages too, which the demo's Packages tab reaches, check, the public surface held
 to its list among it, test, under coverage on Node 26, held to the side's floor, the demo's static
 build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on
-Node 26, and the root's files under the same formatter); `dotnet`
+Node 26); `dotnet`
 (every C# package audited by NuGetAudit as it restores, format, build, the builder's C# goldens
 among its projects and each `src` project's public surface held to its `PublicAPI` lists, the C#
 bench built in Release, test under coverage, held to the side's floor, the interop both ways with
@@ -1288,12 +1296,14 @@ codec and its JSON, each held to its failure list and the floor, the C# and Rust
 then one corpus of `Probe` through every side's testee); `protovalidate-differential`
 (protovalidate-es, by its pin's sha512, over the verdicts of `spec/validations.json`, then those
 verdicts and a corpus mutated from them through every side's generated validators and through
-protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`
-(the subjects, the links, the cited tests, the details, the page and its deploy's tests, the names,
-the durations' members, the twins, the versions, the root's tools' own tests, then the supply chain:
-every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's
-community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok`
-needs them all, so one check stands for every job.
+protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`, on
+every change (the subjects, the links, the cited tests, the details, the page and its deploy's
+tests, the names, the durations' members, the twins, the versions, the root's tools' own tests, the
+root's files under the TypeScript side's formatter, then the supply chain: every action pinned by
+its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's community rules for
+TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok` needs them all, so
+one check stands for every job: it passes when every job in scope passed and every other was
+skipped.
 
 Dependabot, by [`dependabot.yml`](.github/dependabot.yml), brings the dependency updates each week to
 `develop` as grouped pull requests, which CI judges as any other, each release waiting out its first

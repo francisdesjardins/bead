@@ -17,6 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- CI runs the jobs a change reaches. `tools/ci-scope.mjs` maps each path a feature branch or a pull
+  request into `develop` changes to the jobs that read it, a path no rule names reaching every job;
+  `develop`, `main`, a release, a hotfix and a run by hand run every job, and `CI ok` holds each
+  job to its scope. `node tools/ci-scope.mjs --local` prints the same jobs' commands before a push,
+  and the root's format check moves to the `commits` job, which every change runs.
 - The guides for teams pin 0.17.0 and its image, their scenario built and run again against its
   runtimes: getting started says how a client in Node connects by `localhost` and what the
   WebSocket server bounds, and the recipes tell the closes those bounds make and read the
