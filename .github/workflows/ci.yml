@@ -447,8 +447,8 @@ jobs:
           path: |
             ~/.cargo/registry
             implementations/rust/target
-          key: rust-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
-          restore-keys: rust-ubuntu-26.04-
+          key: rust-build-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-build-ubuntu-26.04-
       # cargo-deny's prebuilt release, checked by its SHA-256 against the action's manifest
       - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
