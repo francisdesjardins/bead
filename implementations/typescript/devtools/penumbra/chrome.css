@@ -80,7 +80,6 @@ body {
   fill: none;
   stroke: var(--app-primary);
   stroke-width: 0.9;
-  stroke-opacity: 0.6;
 }
 
 .mark .bead {
