@@ -152,6 +152,18 @@ describe('the headers', () => {
     assert.deepEqual(inlineScriptHashes(html), [hash('\nfirst();\n    '), hash('\nsecond();\n')]);
   });
 
+  test('name the mascot’s module by its hash too', () => {
+    const hash = (text) => {
+      return `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
+    };
+    const module = '<script type="module">\nmountMascot();\n</script>';
+    assert.deepEqual(inlineScriptHashes(`${html}${module}`), [
+      hash('\nfirst();\n    '),
+      hash('\nsecond();\n'),
+      hash('\nmountMascot();\n'),
+    ]);
+  });
+
   test('hash a script as a parser reads it, a CRLF as an LF', () => {
     assert.deepEqual(inlineScriptHashes(html.replaceAll('\n', '\r\n')), inlineScriptHashes(html));
   });

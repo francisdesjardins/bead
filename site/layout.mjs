@@ -7,8 +7,9 @@
 // which scrolls sideways, split inside its word on a phone; the keyboard's focus shown
 // on the bar's tools and the menu's links; the menu opened, closed by Escape and the focus given
 // back; the page's contents in their two parts, each part's name above its links, every link
-// landing on a section in the page's order; and the theme the page keeps, set before the first
-// paint.
+// landing on a section in the page's order; the mascot, the bar's own mark on a phone, its face in
+// a marked section alone, and beside the text on a wide desktop, the mark plain; and the theme the
+// page keeps, set before the first paint.
 //
 //   node layout.mjs                       every check, in Playwright's own Chromium
 //   node layout.mjs --chromium <path>     the Chromium to drive
@@ -458,6 +459,87 @@ const holdTheme = async ({ browser, address, faults }) => {
   }
 };
 
+// the mascot, one at a time: on a phone, the bar's own mark, its face shown in a marked section
+// alone and no other drawing in the bar; beside the text on a wide desktop, the bar's mark plain
+const holdMascot = async ({ browser, address, language, faults }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const label = `the mascot, ${language}`;
+  try {
+    const page = await context.newPage();
+    await page.goto(`${address}?lng=${language}`);
+    await page.waitForFunction(() => {
+      return document.querySelector('.topbar .bead-mark') !== null;
+    });
+    const read = () => {
+      return page.evaluate(() => {
+        const mark = document.querySelector('.topbar .bead-mark');
+        const button = document.querySelector('.bead-mascot');
+        return {
+          shown: mark?.hasAttribute('data-face-shown') ?? false,
+          face: mark?.getAttribute('data-face') ?? null,
+          drawings: document.querySelectorAll('.topbar svg').length,
+          button: button !== null && button.checkVisibility(),
+          bar: document.querySelector('.topbar').getBoundingClientRect().height,
+        };
+      });
+    };
+    const outside = await read();
+    if (outside.shown) {
+      faults.push(`${label}, 390 px: a face on the mark outside every marked section`);
+    }
+    if (outside.drawings !== 1 || outside.button) {
+      faults.push(`${label}, 390 px: a second mascot beside the bar's mark`);
+    }
+    if (outside.bar !== BAR) {
+      faults.push(`${label}, 390 px: the bar ${outside.bar} px tall with the mark`);
+    }
+    await page.evaluate(() => {
+      const section = document.getElementById('securite');
+      const box = section.getBoundingClientRect();
+      window.scrollTo({
+        top: window.scrollY + box.top + box.height / 2 - innerHeight / 2,
+        behavior: 'instant',
+      });
+    });
+    try {
+      await page.waitForFunction(
+        () => {
+          const mark = document.querySelector('.topbar .bead-mark');
+          return (
+            mark?.hasAttribute('data-face-shown') && mark.getAttribute('data-face') === 'surprised'
+          );
+        },
+        null,
+        { timeout: 2000 }
+      );
+    } catch {
+      const inside = await read();
+      faults.push(
+        `${label}, 390 px: in the security section, the mark shows ${inside.shown ? inside.face : 'no face'}`
+      );
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    try {
+      await page.waitForFunction(
+        () => {
+          const button = document.querySelector('.bead-mascot');
+          return (
+            document.querySelector('.topbar .bead-mark') === null &&
+            button !== null &&
+            !button.hidden
+          );
+        },
+        null,
+        { timeout: 2000 }
+      );
+    } catch {
+      faults.push(`${label}, 1440 px: the bar's mark not plain, or no mascot beside the text`);
+    }
+  } finally {
+    await context.close();
+  }
+};
+
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 const main = async () => {
@@ -502,6 +584,7 @@ const main = async () => {
       }
       await holdFocus({ browser, address, language, faults });
       await holdContents({ browser, address, language, faults });
+      await holdMascot({ browser, address, language, faults });
     }
     await holdTheme({ browser, address, faults });
   } finally {

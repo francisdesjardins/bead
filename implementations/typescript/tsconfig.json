@@ -18,6 +18,7 @@
     "browser/**/*",
     "demo/**/*",
     "devtools/**/*",
+    "skin/**/*",
     "interop/**/*",
     // the fuzz targets, which import nothing of Jazzer.js: type-checked with the code they read,
     // though Jazzer.js is installed apart, by hand (tools/fuzz/package.json)

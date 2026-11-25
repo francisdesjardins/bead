@@ -54,7 +54,7 @@
   </div>
 </div>
 
-<section id="essentiel" data-toc="Bead in one example">
+<section id="essentiel" data-toc="Bead in one example" data-bead-face="happy">
   <h2>Bead in one example</h2>
   <p class="gist">
     Bead is a binary protocol for calls between a client and a server. A request receives its
@@ -367,7 +367,7 @@
   </p>
 </section>
 
-<section id="transports" data-toc="The transports">
+<section id="transports" data-toc="The transports" data-bead-face="listening">
   <h2 id="transports-h">The transports</h2>
   <p class="gist">
     Both ends keep the same API whatever carries the envelopes, so a team picks the transport by
@@ -382,7 +382,7 @@
   </p>
 </section>
 
-<section id="implantations" data-toc="The same behaviour on every side">
+<section id="implantations" data-toc="The same behaviour on every side" data-bead-face="focused">
   <h2 id="implantations-h">The same behaviour on every side</h2>
   <p class="gist">
     The three sides answer to one specification, and to the conformance files that are its
@@ -630,7 +630,7 @@
   </details>
 </section>
 
-<section id="securite" data-toc="Security">
+<section id="securite" data-toc="Security" data-bead-face="surprised">
   <h2 id="securite-h">Security, plainly</h2>
   <p class="gist">
     A Bead server keeps itself behind six gates, from the outermost to the innermost. Each gate
@@ -922,7 +922,7 @@
   </p>
 </section>
 
-<section id="protocole" data-toc="Bead’s choices" data-part="The protocol, in detail">
+<section id="protocole" data-toc="Bead’s choices" data-part="The protocol, in detail" data-bead-face="focused">
   <h2 id="protocole-h">The protocol, in detail</h2>
   <p class="gist">
     For the reader who implements a side, audits one, or wants the bytes. Each section follows the
@@ -991,7 +991,7 @@
   </p>
 </section>
 
-<section id="enveloppe" data-toc="The envelope">
+<section id="enveloppe" data-toc="The envelope" data-bead-face="focused">
   <h2 id="enveloppe-h">The envelope</h2>
   <p class="gist">
     Every envelope opens with the same 8-byte prefix. The kind and the flags add fields at fixed
@@ -1130,7 +1130,7 @@
   </figure>
 </section>
 
-<section id="echecs" data-toc="Failures">
+<section id="echecs" data-toc="Failures" data-bead-face="surprised">
   <h2 id="echecs-h">A failure travels once</h2>
   <p class="gist">
     A failure is the payload of a FAILURE, and nowhere else. It holds a 2-byte code, the number of
@@ -1172,7 +1172,7 @@
   {{code of="failure"}}
 </section>
 
-<section id="porte" data-toc="What does not read">
+<section id="porte" data-toc="What does not read" data-bead-face="surprised">
   <h2 id="porte-h">What does not read</h2>
   <p class="gist">
     An envelope that does not read has no callId to trust. Answering it at random could settle
@@ -1192,7 +1192,7 @@
   </figure>
 </section>
 
-<section id="regles" data-toc="A payload’s rules">
+<section id="regles" data-toc="A payload’s rules" data-bead-face="focused">
   <h2 id="regles-h">A payload’s rules</h2>
   <p class="gist">
     A request must often hold more than its encoding says: a count of 10 at most, a name of 1 to 63
@@ -1706,7 +1706,7 @@
   </details>
 </section>
 
-<section id="http" data-toc="Over HTTP">
+<section id="http" data-toc="Over HTTP" data-bead-face="listening">
   <h2 id="http-h">Over HTTP</h2>
   <p class="gist">
     Over WebSocket, each envelope is a binary message, in both directions. HTTP serves where
@@ -1782,7 +1782,7 @@
   </details>
 </section>
 
-<section id="memoire" data-toc="In memory">
+<section id="memoire" data-toc="In memory" data-bead-face="listening">
   <h2 id="memoire-h">In memory, and several transports</h2>
   <p class="gist">
     The in-memory transport joins a client’s router and a server’s within one process. The joined
@@ -1810,7 +1810,7 @@
   {{code of="joined"}}
 </section>
 
-<section id="courtier" data-toc="Over a broker">
+<section id="courtier" data-toc="Over a broker" data-bead-face="listening">
   <h2 id="courtier-h">Over a broker</h2>
   <p class="gist">
     A topic-based publish/subscribe broker is one more transport, and Bead never becomes a network
@@ -1877,7 +1877,7 @@
   </details>
 </section>
 
-<section id="suite" data-toc="What is ahead" data-part="">
+<section id="suite" data-toc="What is ahead" data-part="" data-bead-face="serene">
   <h2 id="suite-h">What is ahead</h2>
   <p class="gist">
     The first four come in this order, the others in no set order.

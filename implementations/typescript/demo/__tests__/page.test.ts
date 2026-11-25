@@ -560,6 +560,31 @@ test.describe('the demo’s page', () => {
       expect(await codeSizesOf(page), scene).toEqual(['13px']);
     }
   });
+
+  test('shows a call’s end on the bar’s mark, Bead’s mascot: happy when it is answered, surprised when it is refused, and no second mascot', async ({
+    page,
+  }) => {
+    await page.goto(served?.url ?? '');
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+
+    // * the page leaves no room beside its scenes: the mascot is the bar's own mark
+    const mark = page.locator('.topbar .brand .mark');
+
+    await expect(mark).toHaveClass(/bead-mark/u);
+    await expect(mark).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('.topbar .brand')).toHaveAttribute('title', "Bead's page");
+
+    await page.click('button[data-action="reader"]');
+    await expect(mark).toHaveAttribute('data-face', 'happy');
+    await expect(mark).toHaveAttribute('data-face-shown', '');
+
+    await page.click('button[data-action="fail"]');
+    await expect(mark).toHaveAttribute('data-face', 'surprised');
+
+    // one mascot at a time: no button of its own, no other drawing in the bar
+    await expect(page.locator('button.bead-mascot')).toBeHidden();
+    await expect(page.locator('.topbar svg')).toHaveCount(1);
+  });
 });
 
 test.describe('the demo’s page, over MQTT 5', () => {
