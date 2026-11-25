@@ -934,8 +934,9 @@ const STRINGS = Object.freeze({
       'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports, its MQTT 5 binding, its HTTP/JSON gateway and beadc’s Rust target.',
     skip: 'Skip to the content',
     contents: 'Contents',
-    menu: 'Open the contents',
-    menuClose: 'Close the contents',
+    // the section read, which the bar's button names, the contents it opens before it
+    reading: 'Contents:',
+    language: 'Language',
     home: '#top',
     top: 'Bead, to the top of the page',
     demo: 'Demo',
@@ -951,8 +952,8 @@ const STRINGS = Object.freeze({
       'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5, sa passerelle HTTP/JSON et la cible Rust de beadc.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
-    menu: 'Ouvrir le sommaire',
-    menuClose: 'Fermer le sommaire',
+    reading: `Sommaire${NARROW}:`,
+    language: 'Langue',
     home: '#top',
     top: 'Bead, en haut de la page',
     demo: 'Démo',
@@ -1004,6 +1005,13 @@ const pageOf = (language, { strings, content: filled }) => {
     other: () => {
       return other;
     },
+    // * the language of the page marked among the two its contents' foot offers
+    'current-en': raw(() => {
+      return language === 'en' ? ' aria-current="true"' : '';
+    }),
+    'current-fr': raw(() => {
+      return language === 'fr' ? ' aria-current="true"' : '';
+    }),
     toc: raw(() => {
       return items;
     }),

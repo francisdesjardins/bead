@@ -114,22 +114,113 @@ a code {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
-.language .short {
-  display: none;
+/* the bar is `penumbra/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
+   left, its name left to the section read, which names the button that opens the contents; the
+   language in the contents' foot. Where they are a column: the bar as the demo has it, the
+   language by its two letters */
+.reading {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--app-space-1);
+  min-width: 0;
+  height: var(--app-touch);
+  /* the title close to the mark, its pill's edge in the bar's gap */
+  margin: 0 0 0 calc(-1 * var(--app-space-2));
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
 }
 
-@media (max-width: 599px) {
-  .language .long {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+.reading:hover {
+  background-color: var(--app-hover);
+}
+
+/* ! a long title ends in an ellipsis, never on a second line: the bar's height is fixed */
+.reading-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-caret {
+  flex: none;
+  color: var(--app-text-secondary);
+  font-size: 1.1em;
+  transition: transform var(--app-quick) var(--app-ease);
+}
+
+.reading[aria-expanded='true'] .reading-caret {
+  transform: rotate(180deg);
+}
+
+/* the two languages at the contents' foot, each written out, the page's own marked */
+.toc-languages {
+  display: flex;
+  gap: var(--app-space-2);
+  max-width: none;
+  margin: var(--app-space-4) 0 0;
+  padding: var(--app-space-3) 0 0;
+  border-top: 1px solid var(--app-divider);
+  list-style: none;
+}
+
+.toc-languages li + li {
+  margin-top: 0;
+}
+
+.toc .toc-languages a {
+  display: inline-flex;
+  border-left: 0;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+  text-decoration: none;
+}
+
+.toc .toc-languages a:hover {
+  color: var(--app-text);
+}
+
+.toc .toc-languages a[aria-current] {
+  color: var(--app-text);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--app-primary);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.45em;
+}
+
+@media (max-width: 959px) {
+  .topbar .brand {
+    gap: 0;
+    font-size: 0;
   }
-  .language .short {
-    display: inline;
+  .tools .language {
+    display: none;
+  }
+}
+
+@media (min-width: 960px) {
+  .reading,
+  .toc-languages {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reading,
+  .reading-caret {
+    transition: none;
   }
 }
 
@@ -220,9 +311,6 @@ main:focus {
     align-self: start;
     max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-10));
     overflow-y: auto;
-  }
-  .tool[data-action='menu'] {
-    display: none;
   }
 }
 

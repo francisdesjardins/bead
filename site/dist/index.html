@@ -639,9 +639,8 @@ body {
   color: var(--app-text);
 }
 
-/* a tool drawn as a glyph: the theme, the page's menu */
-.tool[data-action='theme'],
-.tool[data-action='menu'] {
+/* a tool drawn as a glyph: the theme */
+.tool[data-action='theme'] {
   width: var(--app-touch);
   padding: 0;
   font-size: 1.25rem;
@@ -785,22 +784,113 @@ a code {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
-.language .short {
-  display: none;
+/* the bar is `penumbra/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
+   left, its name left to the section read, which names the button that opens the contents; the
+   language in the contents' foot. Where they are a column: the bar as the demo has it, the
+   language by its two letters */
+.reading {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--app-space-1);
+  min-width: 0;
+  height: var(--app-touch);
+  /* the title close to the mark, its pill's edge in the bar's gap */
+  margin: 0 0 0 calc(-1 * var(--app-space-2));
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
 }
 
-@media (max-width: 599px) {
-  .language .long {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+.reading:hover {
+  background-color: var(--app-hover);
+}
+
+/* ! a long title ends in an ellipsis, never on a second line: the bar's height is fixed */
+.reading-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-caret {
+  flex: none;
+  color: var(--app-text-secondary);
+  font-size: 1.1em;
+  transition: transform var(--app-quick) var(--app-ease);
+}
+
+.reading[aria-expanded='true'] .reading-caret {
+  transform: rotate(180deg);
+}
+
+/* the two languages at the contents' foot, each written out, the page's own marked */
+.toc-languages {
+  display: flex;
+  gap: var(--app-space-2);
+  max-width: none;
+  margin: var(--app-space-4) 0 0;
+  padding: var(--app-space-3) 0 0;
+  border-top: 1px solid var(--app-divider);
+  list-style: none;
+}
+
+.toc-languages li + li {
+  margin-top: 0;
+}
+
+.toc .toc-languages a {
+  display: inline-flex;
+  border-left: 0;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+  text-decoration: none;
+}
+
+.toc .toc-languages a:hover {
+  color: var(--app-text);
+}
+
+.toc .toc-languages a[aria-current] {
+  color: var(--app-text);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--app-primary);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.45em;
+}
+
+@media (max-width: 959px) {
+  .topbar .brand {
+    gap: 0;
+    font-size: 0;
   }
-  .language .short {
-    display: inline;
+  .tools .language {
+    display: none;
+  }
+}
+
+@media (min-width: 960px) {
+  .reading,
+  .toc-languages {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reading,
+  .reading-caret {
+    transition: none;
   }
 }
 
@@ -891,9 +981,6 @@ main:focus {
     align-self: start;
     max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-10));
     overflow-y: auto;
-  }
-  .tool[data-action='menu'] {
-    display: none;
   }
 }
 
@@ -1748,10 +1835,10 @@ footer {
 <a class="skip" href="#main">Skip to the content</a>
 <header class="topbar">
   <a class="brand" href="#top" title="Bead, to the top of the page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <button type="button" class="reading" data-action="menu" aria-expanded="false" aria-controls="toc"><span class="visually-hidden">Contents: </span><span class="reading-title" data-reading>Bead</span><span class="reading-caret" aria-hidden="true">▾</span></button>
   <span class="tools">
-    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Open the contents" data-open="Open the contents" data-close="Close the contents">≡</button>
     <a class="tool demo" href="/playground/">Demo</a>
-    <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" title="Lire cette page en français"><span class="long">Français</span><span class="short" aria-hidden="true">FR</span></a>
+    <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr" title="Lire cette page en français"><span class="visually-hidden">Français</span><span aria-hidden="true">FR</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Switch to dark mode" data-to-dark="Switch to dark mode" data-to-light="Switch to light mode">◐</button>
   </span>
 </header>
@@ -1759,6 +1846,10 @@ footer {
   <nav class="toc" id="toc" aria-label="Contents">
     <p class="toc-title">Contents</p>
     <ol><li><a href="#statut">Where Bead stands</a></li><li><a href="#essentiel">Bead in one example</a></li><li><a href="#pourquoi">Where Bead differs</a></li><li class="toc-part"><p class="toc-part-title">The questions</p><ol><li><a href="#contrat">One contract for every team</a></li><li><a href="#transcodage">Teams that do not speak Bead</a></li><li><a href="#versions">Evolving without breaking</a></li><li><a href="#transports">The transports</a></li><li><a href="#implantations">The same behaviour on every side</a></li><li><a href="#debogage">Debugging and observing</a></li><li><a href="#securite">Security</a></li></ol></li><li class="toc-part"><p class="toc-part-title">The protocol, in detail</p><ol><li><a href="#protocole">Bead’s choices</a></li><li><a href="#enveloppe">The envelope</a></li><li><a href="#callid">The callId</a></li><li><a href="#echecs">Failures</a></li><li><a href="#porte">What does not read</a></li><li><a href="#regles">A payload’s rules</a></li><li><a href="#annulation">Cancel</a></li><li><a href="#abonnements">Subscriptions</a></li><li><a href="#sessions">Sessions</a></li><li><a href="#transferts">Transfers</a></li><li><a href="#relais">Relays</a></li><li><a href="#http">Over HTTP</a></li><li><a href="#memoire">In memory</a></li><li><a href="#courtier">Over a broker</a></li></ol></li><li><a href="#suite">What is ahead</a></li><li><a href="#code">In the code</a></li></ol>
+    <ul class="toc-languages" aria-label="Language">
+      <li><a href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en" aria-current="true">English</a></li>
+      <li><a href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr">Français</a></li>
+    </ul>
   </nav>
   <main id="main" tabindex="-1">
 <div class="opening">
@@ -4053,10 +4144,10 @@ offerHello(server);
 <a class="skip" href="#main">Aller au contenu</a>
 <header class="topbar">
   <a class="brand" href="#top" title="Bead, en haut de la page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <button type="button" class="reading" data-action="menu" aria-expanded="false" aria-controls="toc"><span class="visually-hidden">Sommaire : </span><span class="reading-title" data-reading>Bead</span><span class="reading-caret" aria-hidden="true">▾</span></button>
   <span class="tools">
-    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Ouvrir le sommaire" data-open="Ouvrir le sommaire" data-close="Fermer le sommaire">≡</button>
     <a class="tool demo" href="/playground/">Démo</a>
-    <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" title="Read this page in English"><span class="long">English</span><span class="short" aria-hidden="true">EN</span></a>
+    <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en" title="Read this page in English"><span class="visually-hidden">English</span><span aria-hidden="true">EN</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Passer au thème sombre" data-to-dark="Passer au thème sombre" data-to-light="Passer au thème clair">◐</button>
   </span>
 </header>
@@ -4064,6 +4155,10 @@ offerHello(server);
   <nav class="toc" id="toc" aria-label="Sommaire">
     <p class="toc-title">Sommaire</p>
     <ol><li><a href="#statut">Où en est Bead</a></li><li><a href="#essentiel">Bead en un exemple</a></li><li><a href="#pourquoi">Où Bead diffère</a></li><li class="toc-part"><p class="toc-part-title">Les questions</p><ol><li><a href="#contrat">Un contrat pour toutes les équipes</a></li><li><a href="#transcodage">Les équipes qui ne parlent pas Bead</a></li><li><a href="#versions">Évoluer sans casser</a></li><li><a href="#transports">Les transports</a></li><li><a href="#implantations">Le même comportement de chaque côté</a></li><li><a href="#debogage">Déboguer et observer</a></li><li><a href="#securite">La sécurité</a></li></ol></li><li class="toc-part"><p class="toc-part-title">Le protocole en détail</p><ol><li><a href="#protocole">Les choix de Bead</a></li><li><a href="#enveloppe">L’enveloppe</a></li><li><a href="#callid">Le callId</a></li><li><a href="#echecs">Les échecs</a></li><li><a href="#porte">Ce qui ne se lit pas</a></li><li><a href="#regles">Les règles d’une charge</a></li><li><a href="#annulation">L’annulation</a></li><li><a href="#abonnements">Les abonnements</a></li><li><a href="#sessions">Les sessions</a></li><li><a href="#transferts">Les transferts</a></li><li><a href="#relais">Les relais</a></li><li><a href="#http">Sur HTTP</a></li><li><a href="#memoire">En mémoire</a></li><li><a href="#courtier">Sur un courtier</a></li></ol></li><li><a href="#suite">Ce qui vient</a></li><li><a href="#code">Dans le code</a></li></ol>
+    <ul class="toc-languages" aria-label="Langue">
+      <li><a href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en">English</a></li>
+      <li><a href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr" aria-current="true">Français</a></li>
+    </ul>
   </nav>
   <main id="main" tabindex="-1">
 <div class="opening">
@@ -6520,14 +6615,22 @@ offerHello(server);
     return found;
   };
 
+  // the section read, marked in the contents and named by the bar's button: its entry's words, or
+  // Bead's name above the first section. ! The button's name changes and nothing announces it
   const mark = () => {
     const section = current();
-    for (const link of page.querySelectorAll('.toc a')) {
+    let named = 'Bead';
+    for (const link of page.querySelectorAll('.toc ol a')) {
       if (section !== null && link.getAttribute('href') === `#${section.id}`) {
         link.setAttribute('aria-current', 'location');
+        named = link.textContent;
       } else {
         link.removeAttribute('aria-current');
       }
+    }
+    const reading = page.querySelector('[data-reading]');
+    if (reading !== null && reading.textContent !== named) {
+      reading.textContent = named;
     }
   };
 
@@ -6552,7 +6655,6 @@ offerHello(server);
     const button = page.querySelector('[data-action="menu"]');
     root.toggleAttribute('data-menu-open', open);
     button.setAttribute('aria-expanded', String(open));
-    button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
   const settle = () => {
@@ -6570,7 +6672,14 @@ offerHello(server);
         menu(!root.hasAttribute('data-menu-open'));
       } else if (action === 'language') {
         event.preventDefault();
-        const next = shown() === 'en' ? 'fr' : 'en';
+        const next = control.getAttribute('data-lang') ?? (shown() === 'en' ? 'fr' : 'en');
+        // the contents' foot offers the page's own language too: chosen, it only closes them
+        if (next === shown()) {
+          menu(false);
+          page.querySelector('[data-action="menu"]').focus();
+          return;
+        }
+        const fromContents = control.closest('.toc') !== null;
         // the section being read stays where it was on the screen
         const reading = current();
         const before = reading === null ? 0 : reading.getBoundingClientRect().top;
@@ -6589,7 +6698,10 @@ offerHello(server);
           const again = document.getElementById(reading.id);
           window.scrollBy({ top: again.getBoundingClientRect().top - before, behavior: 'instant' });
         }
-        page.querySelector('[data-action="language"]').focus();
+        // the focus where the choice was made: the bar's tool, or, the contents closed, their button
+        page
+          .querySelector(fromContents ? '[data-action="menu"]' : '.tools [data-action="language"]')
+          .focus();
       }
       return;
     }
@@ -6863,6 +6975,10 @@ const MARK_BOX = '2.6 4.7 25 25';
 const CORONA_BOX = '-1 1 30 31';
 const CENTRE = Object.freeze({ x: 14, y: 18 });
 const RIM = 'M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46';
+// the face's centre, between its eyes and halfway from its brows to its mouth, and the one factor
+// every face is drawn at about it
+const FACE_CENTRE = Object.freeze({ x: 13.4, y: 19 });
+const FACE_SCALE = 1.2;
 const MONOCLE =
   'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 20.5 19.9 21.3 21.9';
 const STYLE_ID = 'bead-mascot-style';
@@ -7076,19 +7192,23 @@ const coronaOf = () => {
 
 // the face's parts by name, the flare beside them
 const facePartsOf = () => {
-  return {
-    flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }),
-    parts: {
-      eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
-      eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
-      pL: element('circle', { class: 'pupil' }),
-      pR: element('circle', { class: 'pupil' }),
-      bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
-      bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
-      g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
-      m: element('path', { class: 'line', 'stroke-width': 0.6 }),
-    },
+  const parts = {
+    eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    pL: element('circle', { class: 'pupil' }),
+    pR: element('circle', { class: 'pupil' }),
+    bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
+    m: element('path', { class: 'line', 'stroke-width': 0.6 }),
   };
+  // * every face drawn FACE_SCALE times its skeleton's size about its centre, one factor for all six
+  const face = element('g', {
+    class: 'bead-face',
+    transform: `translate(${String(FACE_CENTRE.x)} ${String(FACE_CENTRE.y)}) scale(${String(FACE_SCALE)}) translate(${String(-FACE_CENTRE.x)} ${String(-FACE_CENTRE.y)})`,
+  });
+  face.append(...Object.values(parts));
+  return { flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }), face, parts };
 };
 
 // the drawing, its parts by name, and the corona's when it has one
@@ -7108,13 +7228,13 @@ const drawingOf = (hasCorona) => {
   const beads = BEADS.map(({ x, y, r }) => {
     return element('circle', { class: 'bead', cx: x, cy: y, r });
   });
-  const { flare, parts } = facePartsOf();
+  const { flare, face, parts } = facePartsOf();
   svg.append(
     element('circle', { class: 'moon', cx: CENTRE.x, cy: CENTRE.y, r: 10.5 }),
     rim,
     ...beads,
     flare,
-    ...Object.values(parts)
+    face
   );
   return { svg, corona, rim, beads, flare, parts };
 };
@@ -7150,9 +7270,7 @@ const markDrawingOf = (svg) => {
   styled();
   giveBack(svg);
   const corona = coronaOf();
-  const { flare, parts } = facePartsOf();
-  const face = element('g', { class: 'bead-face' });
-  face.append(...Object.values(parts));
+  const { flare, face, parts } = facePartsOf();
   for (const part of [corona, flare, face]) {
     part.setAttribute(TAKEN, '');
   }

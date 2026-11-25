@@ -1,10 +1,10 @@
 <a class="skip" href="#main">{{s:skip}}</a>
 <header class="topbar">
   <a class="brand" href="{{s:home}}" title="{{s:top}}"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <button type="button" class="reading" data-action="menu" aria-expanded="false" aria-controls="toc"><span class="visually-hidden">{{s:reading}} </span><span class="reading-title" data-reading>Bead</span><span class="reading-caret" aria-hidden="true">▾</span></button>
   <span class="tools">
-    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="{{s:menu}}" data-open="{{s:menu}}" data-close="{{s:menuClose}}">≡</button>
     <a class="tool demo" href="/playground/">{{s:demo}}</a>
-    <a class="tool language" href="?lng={{other}}" hreflang="{{other}}" lang="{{other}}" data-action="language" title="{{s:otherLabel}}"><span class="long">{{s:other}}</span><span class="short" aria-hidden="true">{{s:otherShort}}</span></a>
+    <a class="tool language" href="?lng={{other}}" hreflang="{{other}}" lang="{{other}}" data-action="language" data-lang="{{other}}" title="{{s:otherLabel}}"><span class="visually-hidden">{{s:other}}</span><span aria-hidden="true">{{s:otherShort}}</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="{{s:toDark}}" data-to-dark="{{s:toDark}}" data-to-light="{{s:toLight}}">◐</button>
   </span>
 </header>
@@ -12,6 +12,10 @@
   <nav class="toc" id="toc" aria-label="{{s:contents}}">
     <p class="toc-title">{{s:contents}}</p>
     <ol>{{toc}}</ol>
+    <ul class="toc-languages" aria-label="{{s:language}}">
+      <li><a href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en"{{current-en}}>English</a></li>
+      <li><a href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr"{{current-fr}}>Français</a></li>
+    </ul>
   </nav>
   <main id="main" tabindex="-1">
 {{content}}
