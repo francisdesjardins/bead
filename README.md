@@ -1260,10 +1260,12 @@ bench built in Release, test under coverage, held to the side's floor, the inter
 `BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the other's gateway among it,
 and a page of another origin in Chromium against both HTTP servers); `mqtt` (on the runner's host, a
 Mosquitto 2.1.2 by its digest and a password drawn for the run, with `BEAD_MQTT_REQUIRED=1` and
-`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on every side, each adapter against it over TCP
-and WebSocket, the interop over MQTT 5 both ways, the Rust side's built from the `rust` job's cache,
-the demo's server and its page's client over it, a page's client in Chromium, and the DevTools
-extension following the demo's client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by
+`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on the TypeScript and C# sides, each adapter
+against it over TCP and WebSocket, the interop over MQTT 5 both ways, the demo's server and its
+page's client over it, a page's client in Chromium, and the DevTools extension following the
+demo's client over it), with `mqtt-rust` beside it, against a broker of its own (the Rust side's
+cases over MQTT 5, its adapter's, and the interop over MQTT 5 both ways with the Rust side);
+`amqp` (on the runner's host, a RabbitMQ 4.4.0 by
 its digest, its heartbeat lowered, and a password and TLS certificates drawn for the run, with
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over

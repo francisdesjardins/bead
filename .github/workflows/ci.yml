@@ -711,13 +711,10 @@ jobs:
   # The cases over MQTT 5, each adapter against the fixture over TCP and WebSocket, the interop over
   # MQTT 5 both ways, the internal demo's sign-up and a page's client over WebSocket, against a
   # Mosquitto 2.1.2 of the run's own, by its digest, a password drawn for the run (decision 0041).
-  # The Rust side's too (decision 0050): its cases, its adapter's twins, the fixture's among them,
-  # its client against each side's server, and the TypeScript and C# clients against its server,
-  # built here on the toolchain its rust-toolchain.toml pins, from the rust job's Linux cache, read
-  # alone; no leg of that job waited on. On the runner's host, where Docker is, and the C compiler
-  # the Rust side's TLS builds with: the Playwright image of the other jobs reaches none, and a
-  # service container starts before any step could draw its password. `BEAD_MQTT_REQUIRED=1` turns a
-  # case that would skip without a broker into one that fails, as `BEAD_INTEROP_REQUIRED=1` does the
+  # On the runner's host, where Docker is: the Playwright image of the other jobs reaches none, and
+  # a service container starts before any step could draw its password. The Rust side's are
+  # mqtt-rust's, beside this job, against a broker of its own. `BEAD_MQTT_REQUIRED=1` turns a case
+  # that would skip without a broker into one that fails, as `BEAD_INTEROP_REQUIRED=1` does the
   # interop's.
   mqtt:
     name: MQTT 5, against Mosquitto
@@ -775,17 +772,59 @@ jobs:
       # the demo's page over MQTT 5 in Chromium, a glyph sent and one received
       - run: $YARN test:demo --project page --grep "over MQTT 5"
         working-directory: implementations/typescript
-      # the Rust side: 1.99.1 and its components, as rust-toolchain.toml names them, and the rust
-      # job's Linux registry and target, by its key, restored and never saved
+      # the broker start left, which a start that failed left none of
+      - name: The broker stopped
+        if: always()
+        run: if [ -n "${BEAD_MQTT_BROKER:-}" ]; then node tools/mqtt-broker.mjs stop; fi
+
+  # The Rust side over MQTT 5 (decision 0050), against a Mosquitto of its own, as the mqtt job
+  # starts one: its cases, its adapter's twins, the fixture's among them, its client against each
+  # side's server, and the TypeScript and C# clients against its server. Built on the toolchain its
+  # rust-toolchain.toml pins, its registry and target cached under a key of its own; on the
+  # runner's host, for Docker and the C compiler the Rust side's TLS builds with.
+  mqtt-rust:
+    name: MQTT 5 on the Rust side, against Mosquitto
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'mqtt')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      BEAD_MQTT_REQUIRED: 1
+      BEAD_INTEROP_REQUIRED: 1
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: implementations/typescript
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - name: Mosquitto 2.1.2 by its digest, a password drawn for this run
+        run: node tools/mqtt-broker.mjs start --github-env
+      # 1.99.1 and its components, as rust-toolchain.toml names them
       - run: rustup toolchain install
         working-directory: implementations/rust
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             implementations/rust/target
-          key: rust-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
-          restore-keys: rust-ubuntu-26.04-
+          key: mqtt-rust-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: mqtt-rust-ubuntu-26.04-
       # its cases over MQTT 5 and its vectors, then its adapter's twins, the fixture's among them
       - run: cargo test -p francisdesjardins-bead --features testing,mqtt --locked --test transports --test vectors
         working-directory: implementations/rust
@@ -1532,6 +1571,7 @@ jobs:
         rust-fuzz,
         interop-rust,
         mqtt,
+        mqtt-rust,
         amqp,
         builder,
         examples,
