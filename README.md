@@ -1291,9 +1291,10 @@ side's route table and document of `spec/transcoding.proto` held to what beadc
 writes, on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
 among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node 26,
-amd64 and arm64, each natively: beadc's image built, its test stage run on the image itself, each
-wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and `examples/hello`, and
-the wrappers' lint, each linter at its pin); `examples` on Node 26 and on 24.9, the floor the
+amd64 and arm64, each natively: beadc's image built, each wrapper run against it with
+`BEADC_IMAGE_REQUIRED=1`, over the repository and `examples/hello`, and the wrappers' lint, each
+linter at its pin), with `builder-image` beside it on both architectures (the image's test stage
+run on the image itself); `examples` on Node 26 and on 24.9, the floor the
 TypeScript half declares (what each example copies, or takes from beadc's wrapper and init, held to
 its source; beadc on Node holding `examples/hello`'s generated files; buf's lint and layout over its
 `.proto`; each half's gates and both its builds; then each client against each server, both modes of

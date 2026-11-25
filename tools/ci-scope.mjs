@@ -90,6 +90,8 @@ export const PARTS = Object.freeze({
   'rust-fuzz': Object.freeze({ area: 'rust', needs: [] }),
   // the tests on Windows
   'rust-windows': Object.freeze({ area: 'rust', needs: [] }),
+  // beadc's tests on its image, on each architecture
+  'builder-image': Object.freeze({ area: 'builder', needs: [] }),
   // the Rust side over MQTT 5, against a broker of its own
   'mqtt-rust': Object.freeze({ area: 'mqtt', needs: [] }),
 });

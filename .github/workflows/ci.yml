@@ -930,10 +930,10 @@ jobs:
   # other binaries, on the current line; on Linux, on the floor `engines.node` declares too. The C#
   # goldens build in the .NET job, which has the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are
   # held to one contract on every leg, against a stand-in engine. On the image's legs, Linux on
-  # Node 26, amd64 and arm64, each natively: beadc's image built from `builder/Dockerfile`, its test
-  # stage built on the image itself, so beadc's tests run once on the image's Node, protoc and
-  # environment, then once more from `builder/`, where each wrapper runs the image it built, over
-  # the repository's projects and `examples/hello`; and the wrappers' lint, each linter at its pin.
+  # Node 26, amd64 and arm64, each natively: beadc's image built from `builder/Dockerfile`, then
+  # the tests from `builder/`, where each wrapper runs the image it built, over the repository's
+  # projects and `examples/hello`; and the wrappers' lint, each linter at its pin. The image's test
+  # stage, beadc's tests on the image's Node, protoc and environment, is builder-image's.
   #
   # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails, and
   # `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1` one that would skip without protoc-gen-buffa: here a skip
@@ -1012,13 +1012,11 @@ jobs:
           echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: $YARN check
-      # the image's test stage first, then the image, which reuses every stage but the last; the
-      # tests after it run each wrapper against it
+      # the image, which the tests after it run each wrapper against
       - if: matrix.image
-        name: The image, its test stage first
+        name: The image
         working-directory: .
         run: |
-          docker build -f builder/Dockerfile --target test .
           docker build -f builder/Dockerfile -t beadc:ci .
           echo "BEADC_IMAGE=beadc:ci" >> "$GITHUB_ENV"
           echo "BEADC_IMAGE_REQUIRED=1" >> "$GITHUB_ENV"
@@ -1079,6 +1077,24 @@ jobs:
           git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
           cd examples/hello
           git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
+
+  # beadc's tests on its image, the Dockerfile's test stage built on the image itself: the image's
+  # Node, its protoc and its environment, the tests and the files of the repository they read laid
+  # over it. On each architecture natively, beside the builder job's image legs, which build the
+  # image again for the wrappers' tests.
+  builder-image:
+    name: beadc's image, tested (${{ matrix.os }})
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'builder')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -f builder/Dockerfile --target test .
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
@@ -1579,6 +1595,7 @@ jobs:
         mqtt-rust,
         amqp,
         builder,
+        builder-image,
         examples,
         protobuf-conformance,
         protovalidate-differential,
