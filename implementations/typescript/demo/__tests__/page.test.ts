@@ -560,6 +560,32 @@ test.describe('the demo’s page', () => {
       expect(await codeSizesOf(page), scene).toEqual(['13px']);
     }
   });
+
+  test('shows a call’s end on Bead’s mascot, in the bar: happy when it is answered, surprised when it is refused', async ({
+    page,
+  }) => {
+    await page.goto(served?.url ?? '');
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+
+    const mascot = page.locator('button.bead-mascot');
+
+    // * hidden until a scroll or a call, and never focused on its own
+    await expect(mascot).toHaveAttribute('data-state', 'hidden');
+    await expect(mascot).toHaveAttribute('aria-label', 'Bead’s moon: click for an eclipse');
+
+    await page.click('button[data-action="reader"]');
+    await expect(mascot).toHaveAttribute('data-face', 'happy');
+    await expect(mascot).toHaveAttribute('data-dock', 'bar');
+    await expect(mascot).toBeVisible();
+
+    await page.click('button[data-action="fail"]');
+    await expect(mascot).toHaveAttribute('data-face', 'surprised');
+    expect(
+      await page.evaluate(() => {
+        return document.activeElement?.classList.contains('bead-mascot');
+      })
+    ).toBe(false);
+  });
 });
 
 test.describe('the demo’s page, over MQTT 5', () => {
