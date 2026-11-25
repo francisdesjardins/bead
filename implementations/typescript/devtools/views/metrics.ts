@@ -12,6 +12,7 @@ import { type IProcedureMetrics, metricsOf, quantileOf, samplesOf } from '../exp
 import { type IReading, lineKeyOf, ratesOf } from '../model/history';
 import { KEEP_ALL, type IKeeper } from '../model/filter';
 import { numberOf, spanOf } from '../model/words';
+import { drawFace } from '../../skin/mascot';
 import { filterCountOf, listen, make, svgOf } from './dom';
 
 // interfaces
@@ -133,6 +134,7 @@ export const metricsViewOf = (view: IMetricsView): Node[] => {
   if (view.sources.length === 0) {
     return [
       filterCountOf(0),
+      drawFace('listening'),
       make('p', { className: 'note', text: 'No client announced itself yet.' }),
     ];
   }

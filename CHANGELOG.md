@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Bead has a mascot: its mark, the Moon's disc and three of Baily's beads, with a face engraved in
+  the beads' colour. On the page, it reads beside the text, or in the bar where the page leaves no
+  room, and its face follows the section read; a click or a tap plays an eclipse. The demo's
+  mascot shows each call's end, and the DevTools panel's waits, listening, until a client
+  announces itself. One module, `implementations/typescript/skin/mascot.js`, serves all three.
+
 ### Changed
 
 - The guides for teams pin 0.17.0 and its image, their scenario built and run again against its
