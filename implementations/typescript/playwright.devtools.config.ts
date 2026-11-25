@@ -23,6 +23,12 @@ export default defineConfig({
       ],
       testMatch: ['**/__tests__/*.test.ts'],
     },
+    // the skin the page, the demo and the panel share: its mascot's pure core, in Node
+    {
+      name: 'skin',
+      testDir: './skin',
+      testMatch: ['**/__tests__/*.test.ts'],
+    },
     {
       name: 'extension',
       testMatch: [
