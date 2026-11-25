@@ -230,45 +230,44 @@ const MONOCLE =
 const STYLE_ID = 'bead-mascot-style';
 
 // the mark's colours in either theme, as `favicon.svg` has them, and the face in the beads'
+const LIGHT = Object.freeze([
+  ['.moon', 'fill: #17111d;'],
+  ['.rim', 'fill: none; stroke: #c13584; stroke-width: 0.9;'],
+  ['.bead', 'fill: #c13584;'],
+  ['.flare', 'fill: #fde7f2;'],
+  ['.halo', 'fill: none; stroke: #f3a6cd; stroke-width: 2.4; stroke-opacity: 0.35;'],
+  ['.ray', 'fill: none; stroke: #f3a6cd; stroke-width: 0.35; stroke-linecap: round;'],
+  ['.line', 'fill: none; stroke: #f3a6cd; stroke-linecap: round; stroke-linejoin: round;'],
+  ['.pupil', 'fill: #f3a6cd;'],
+]);
+const DARK = Object.freeze([
+  ['.moon', 'fill: #15111c; stroke: #6d6278; stroke-width: 0.9;'],
+  ['.rim', 'stroke: #ff8bc4;'],
+  ['.bead', 'fill: #ff8bc4;'],
+  ['.flare', 'fill: #ffe3f1;'],
+  ['.halo, .bead-moon .ray, .bead-moon .line', 'stroke: #ff8bc4;'],
+  ['.pupil', 'fill: #ff8bc4;'],
+]);
+
+// each rule of `rules` on the drawing, under `scope`: the dark scheme as a script chose it, or as the
+// system gives it where no script chose
+const rulesOf = (rules, scope) => {
+  return rules
+    .map(([part, declarations]) => {
+      return `${scope}.bead-moon ${part} { ${declarations} }`;
+    })
+    .join('\n');
+};
+
+// ! no custom property of its own: the page's build holds every one its page draws with to a sheet
+// that defines it, and this sheet is a script's
 const STYLE = `
-.bead-moon {
-  --bead-moon: #17111d;
-  --bead-moon-line: none;
-  --bead-bead: #c13584;
-  --bead-face: #f3a6cd;
-  --bead-flare: #fde7f2;
-  display: block;
-  overflow: visible;
-}
-:root[data-color-scheme='dark'] .bead-moon {
-  --bead-moon: #15111c;
-  --bead-moon-line: #6d6278;
-  --bead-bead: #ff8bc4;
-  --bead-face: #ff8bc4;
-  --bead-flare: #ffe3f1;
-}
+.bead-moon { display: block; overflow: visible; }
+${rulesOf(LIGHT, '')}
+${rulesOf(DARK, ":root[data-color-scheme='dark'] ")}
 @media (prefers-color-scheme: dark) {
-  :root:not([data-color-scheme]) .bead-moon {
-    --bead-moon: #15111c;
-    --bead-moon-line: #6d6278;
-    --bead-bead: #ff8bc4;
-    --bead-face: #ff8bc4;
-    --bead-flare: #ffe3f1;
-  }
+${rulesOf(DARK, ':root:not([data-color-scheme]) ')}
 }
-.bead-moon .moon { fill: var(--bead-moon); stroke: var(--bead-moon-line); stroke-width: 0.9; }
-.bead-moon .rim { fill: none; stroke: var(--bead-bead); stroke-width: 0.9; }
-.bead-moon .bead { fill: var(--bead-bead); }
-.bead-moon .flare { fill: var(--bead-flare); }
-.bead-moon .halo { fill: none; stroke: var(--bead-face); stroke-width: 2.4; stroke-opacity: 0.35; }
-.bead-moon .ray { fill: none; stroke: var(--bead-face); stroke-width: 0.35; stroke-linecap: round; }
-.bead-moon .line {
-  fill: none;
-  stroke: var(--bead-face);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.bead-moon .pupil { fill: var(--bead-face); }
 .bead-mascot {
   position: fixed;
   top: 0;
@@ -281,11 +280,10 @@ const STYLE = `
   background: transparent;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transform: translateX(var(--bead-shove, 0px));
   transition:
     transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 450ms ease,
-    visibility 0s;
+    left 450ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 450ms ease;
 }
 .bead-mascot:focus-visible {
   outline: 2px solid var(--focus, var(--app-accent, #c13584));
@@ -294,20 +292,18 @@ const STYLE = `
 }
 .bead-mascot[data-state='hidden'],
 .bead-mascot[data-state='leaving'] {
+  left: 48px;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(calc(var(--bead-shove, 0px) + var(--bead-away, 40%)));
-}
-.bead-mascot[data-state='hidden'] {
-  visibility: hidden;
-  transition:
-    transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 450ms ease,
-    visibility 0s 450ms;
 }
 .bead-mascot[data-dock='bar'] {
-  --bead-away: 0px;
+  left: 0;
   z-index: calc(var(--app-z-topbar, 40) + 1);
+}
+/* ! away, it stays in the tab order, as a skip link does, and comes as it is focused: a control
+   that came and went with the scroll would be one the Tab key misses */
+.bead-mascot[data-dock='none'] {
+  visibility: hidden;
 }
 .bead-mascot > .bead-moon {
   width: 100%;
@@ -316,8 +312,9 @@ const STYLE = `
 }
 @media (prefers-reduced-motion: reduce) {
   .bead-mascot,
-  .bead-mascot[data-state='hidden'] {
-    --bead-away: 0px;
+  .bead-mascot[data-state='hidden'],
+  .bead-mascot[data-state='leaving'] {
+    left: 0;
     transition: none;
   }
 }
@@ -595,7 +592,7 @@ export const mountMascot = (options = {}) => {
     if (!isShown()) {
       return;
     }
-    if (state === 'eclipse') {
+    if (state === 'eclipse' || document.activeElement === button) {
       later('leave', leave);
       return;
     }
@@ -807,7 +804,7 @@ export const mountMascot = (options = {}) => {
     }
     const { x, y, shove } = positionOf();
     button.style.translate = `${fixed(x)}px ${fixed(y)}px`;
-    button.style.setProperty('--bead-shove', `${fixed(shove)}px`);
+    button.style.transform = `translateX(${fixed(shove)}px)`;
     if (isMoving) {
       schedule();
     }
@@ -895,6 +892,16 @@ export const mountMascot = (options = {}) => {
     });
   };
 
+  // the keyboard brings it, and it stays while it holds the focus
+  const onFocus = () => {
+    cancel('leave');
+    arrive();
+  };
+
+  const onBlur = () => {
+    settle();
+  };
+
   const onClick = () => {
     if (state === 'eclipse' || !isShown()) {
       return;
@@ -909,6 +916,8 @@ export const mountMascot = (options = {}) => {
   window.addEventListener('resize', measure);
   button.addEventListener('pointerenter', onEnter);
   button.addEventListener('click', onClick);
+  button.addEventListener('focus', onFocus);
+  button.addEventListener('blur', onBlur);
   label();
   observeSections();
   observeContent();
