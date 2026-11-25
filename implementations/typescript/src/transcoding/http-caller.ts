@@ -267,9 +267,11 @@ export const createHTTPCaller = (
   origin: string,
   options: IHTTPCallerOptions = {}
 ): IHTTPCaller => {
-  const url = new URL(origin);
+  // * a host the URL Standard's parser fails on, `foo.123` say, refused as the URL is, as it is built
+  const url = URL.parse(origin);
 
   if (
+    url === null ||
     !['http:', 'https:'].includes(url.protocol) ||
     url.username !== '' ||
     url.password !== '' ||

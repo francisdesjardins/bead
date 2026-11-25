@@ -36,6 +36,7 @@ use crate::http::server::MAXIMUM_BODY_BYTES;
 use crate::http::wire::Spawner;
 use crate::json::{self, integer_of};
 use crate::judgement::security::is_secure;
+use crate::judgement::url_host::url_host_of;
 use crate::net::bounds::hold_count;
 use crate::net::listening::unless_cancelled;
 use crate::net::racing::{RacingOptions, Resolve};
@@ -167,6 +168,23 @@ impl fmt::Debug for HttpCaller {
     }
 }
 
+// an authority, its host read as the URL Standard's host parser reads it and its port as given:
+// what it judges, connects to and names in its `Host` (spec 13.4); none for a host it fails on
+fn authority_of(authority: &str) -> Option<String> {
+    let (host, port) = if authority.starts_with('[') {
+        let end = authority.find(']')?.saturating_add(1);
+
+        authority.split_at_checked(end)?
+    } else {
+        authority
+            .rfind(':')
+            .map_or((authority, ""), |at| authority.split_at(at))
+    };
+    let host = url_host_of(host)?;
+
+    Some(format!("{host}{port}"))
+}
+
 // a URL's scheme, authority and path, as a base: its path ending in `/`
 fn base_of(url: &str) -> Option<(String, String, String)> {
     let (scheme, rest) = url.split_once("://")?;
@@ -182,6 +200,9 @@ fn base_of(url: &str) -> Option<(String, String, String)> {
         return None;
     }
 
+    // ! its host read once: `127.0.0.1.` and `127.1` are `127.0.0.1`, and a host the parser fails
+    // on, `foo.123` among them, is refused as it is built
+    let authority = authority_of(authority)?;
     // ! the whole URL as http reads it: a host it holds, its characters a URI's
     let uri = Uri::try_from(format!("{scheme}://{authority}{path}")).ok()?;
 
@@ -193,7 +214,7 @@ fn base_of(url: &str) -> Option<(String, String, String)> {
         format!("{path}/")
     };
 
-    Some((scheme, authority.to_ascii_lowercase(), path))
+    Some((scheme, authority, path))
 }
 
 // a path's dot segments removed (RFC 3986 §5.2.4)
@@ -249,6 +270,10 @@ impl Calling {
     // `/` taken away so that the base's path stays its prefix; none off its origin
     fn target_of(&self, template: &str) -> Result<Uri, ProgrammerError> {
         let reference = template.strip_prefix('/').unwrap_or(template);
+        // * a template's authority read as its base's is, so that each names its host alike
+        let read = |authority: &str| {
+            authority_of(authority).unwrap_or_else(|| authority.to_ascii_lowercase())
+        };
         let (authority, path) = if has_scheme(reference) {
             let (scheme, rest) = reference.split_once(':').unwrap_or_default();
             let rest = rest.strip_prefix("//").unwrap_or_default();
@@ -258,11 +283,11 @@ impl Calling {
                 return Err(ProgrammerError::new(OTHER_ORIGIN));
             }
 
-            (authority.to_ascii_lowercase(), without_dot_segments(path))
+            (read(authority), without_dot_segments(path))
         } else if let Some(rest) = reference.strip_prefix("//") {
             let (authority, path) = rest.find('/').map_or((rest, "/"), |at| rest.split_at(at));
 
-            (authority.to_ascii_lowercase(), without_dot_segments(path))
+            (read(authority), without_dot_segments(path))
         } else if reference.starts_with('/') {
             (self.authority.clone(), without_dot_segments(reference))
         } else {

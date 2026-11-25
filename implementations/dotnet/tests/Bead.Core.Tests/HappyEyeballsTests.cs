@@ -6,8 +6,8 @@ using Microsoft.Extensions.Time.Testing;
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="HappyEyeballs"/>: a connect by a name that races its addresses (RFC 8305), as Node's
-/// clients do for the TypeScript side.
+/// <see cref="HappyEyeballs"/>: a connect by a name that races its addresses (RFC 8305), as the
+/// TypeScript side's own race does.
 /// </summary>
 public sealed class HappyEyeballsTests
 {
@@ -35,6 +35,18 @@ public sealed class HappyEyeballsTests
         {
             return Task.FromResult(addresses);
         };
+    }
+
+    // waits until `condition` holds, within its patience
+    private static async Task Until(Func<bool> condition)
+    {
+        var since = TimeProvider.System.GetTimestamp();
+
+        while (!condition())
+        {
+            Assert.True(TimeProvider.System.GetElapsedTime(since) < Patience, "it never held");
+            await Task.Delay(10, Cancelled);
+        }
     }
 
     // a resolver that answers every name with the addresses given, and records each name it is asked
@@ -173,7 +185,165 @@ public sealed class HappyEyeballsTests
         Assert.Equal((SocketError.ConnectionRefused, SocketError.HostNotFound), (refused.SocketErrorCode, unknown.SocketErrorCode));
     }
 
-    // spec 13.4
+    // spec 13.4.2; RFC 8305 §5
+    [Fact]
+    public async Task Keeps_an_attempt_that_has_not_connected_by_its_delay_while_the_next_one_starts_the_first_to_connect_winning_and_the_other_closed()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var clock = new FakeTimeProvider();
+        var tokens = new ConcurrentDictionary<IPAddress, CancellationToken>();
+        var released = new ConcurrentDictionary<IPAddress, TaskCompletionSource>();
+        var late = new TaskCompletionSource<Socket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        foreach (var address in new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
+        {
+            released[address] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        var connecting = HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", port), new HappyEyeballsOptions
+        {
+            Clock = clock,
+            Connect = async (endPoint, cancellationToken) =>
+            {
+                tokens[endPoint.Address] = cancellationToken;
+
+                if (endPoint.Address.Equals(IPAddress.IPv6Loopback))
+                {
+                    second.TrySetResult();
+                }
+
+                // * each attempt held back until released, whatever the race asks of it: an attempt
+                // that connects late, as a slow accept does
+                await released[endPoint.Address].Task;
+
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+                await socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), Cancelled);
+
+                if (endPoint.Address.Equals(IPAddress.IPv6Loopback))
+                {
+                    late.TrySetResult(socket);
+                }
+
+                return socket;
+            },
+            CancellationToken = Cancelled,
+        });
+
+        // the next attempt starts at the delay, and the first is kept, never given up
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+        await second.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.False(tokens[IPAddress.Loopback].IsCancellationRequested);
+        Assert.False(connecting.IsCompleted);
+
+        // * the first attempt connects first, and wins
+        released[IPAddress.Loopback].TrySetResult();
+
+        using var socket = await connecting.WaitAsync(Patience, Cancelled);
+
+        Assert.True(socket.Connected);
+        Assert.True(tokens[IPAddress.IPv6Loopback].IsCancellationRequested);
+
+        // the other connects after it, and is closed
+        released[IPAddress.IPv6Loopback].TrySetResult();
+
+        var other = await late.Task.WaitAsync(Patience, Cancelled);
+
+        await Until(() =>
+        {
+            return other.SafeHandle.IsClosed;
+        });
+    }
+
+    // spec 13.4.2
+    [Fact]
+    public async Task Ends_every_attempt_leaving_no_socket_once_its_connect_is_given_up()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        // given up before it began: no connection made, and no socket stays
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", port), new HappyEyeballsOptions
+            {
+                CancellationToken = new CancellationToken(canceled: true),
+            }).WaitAsync(Patience, Cancelled);
+        });
+        Assert.False(listener.Pending());
+
+        var clock = new FakeTimeProvider();
+        var givenUp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = new TaskCompletionSource<Socket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var giving = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var connecting = HappyEyeballs.ConnectAsync(new DnsEndPoint("bead-probe.localhost", port), new HappyEyeballsOptions
+        {
+            Clock = clock,
+            Connect = async (endPoint, cancellationToken) =>
+            {
+                if (endPoint.Address.Equals(IPAddress.Loopback))
+                {
+                    // an attempt nothing answers, given up with its connect
+                    try
+                    {
+                        await Task.Delay(Timeout.InfiniteTimeSpan, TimeProvider.System, cancellationToken);
+                    }
+                    finally
+                    {
+                        givenUp.TrySetResult();
+                    }
+                }
+
+                second.TrySetResult();
+
+                // * one that connects after its connect was given up, as a late accept does
+                await release.Task;
+
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+                await socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), Cancelled);
+                late.TrySetResult(socket);
+
+                return socket;
+            },
+            CancellationToken = giving.Token,
+        });
+
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+        await second.Task.WaitAsync(Patience, Cancelled);
+
+        // * its connect given up, by its timeout or its cancellation: every attempt ends
+        await giving.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+        await givenUp.Task.WaitAsync(Patience, Cancelled);
+
+        // and the one that connects after is closed: no socket stays
+        release.TrySetResult();
+
+        var other = await late.Task.WaitAsync(Patience, Cancelled);
+
+        await Until(() =>
+        {
+            return other.SafeHandle.IsClosed;
+        });
+    }
+
+    // spec 13.4.2
     [Fact]
     public async Task Connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing()
     {
@@ -199,7 +369,7 @@ public sealed class HappyEyeballsTests
         Assert.Empty(asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Tries_the_IPv4_loopback_first_for_a_localhost_name_then_the_IPv6_one_an_attempt_delay_after()
     {
@@ -250,7 +420,7 @@ public sealed class HappyEyeballsTests
         });
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them()
     {
@@ -275,7 +445,7 @@ public sealed class HappyEyeballsTests
         Assert.Equal(names, asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
     {

@@ -14,6 +14,8 @@ import { TLS_FIXTURE } from './tls-fixture';
 export interface IRawRequestOptions {
   /** Its `content-type`; Bead's media type unless given. */
   contentType?: string;
+  /** Leaves the stream open after its head, with no body sent. */
+  isOpen?: boolean;
   /** Its `:path`; `/bead` unless given. */
   path?: string;
 }
@@ -58,7 +60,7 @@ const literalOf = ([name, value]: readonly [string, string]) => {
 export const rawResetOverHTTP2 = (
   port: number,
   fields: readonly (readonly [string, string])[],
-  { contentType = BEAD_MEDIA_TYPE, path = '/bead' }: IRawRequestOptions = {}
+  { contentType = BEAD_MEDIA_TYPE, isOpen = false, path = '/bead' }: IRawRequestOptions = {}
 ) => {
   return new Promise<number | undefined>((resolve, reject) => {
     const socket = connectTLS({
@@ -85,11 +87,15 @@ export const rawResetOverHTTP2 = (
         ...fields,
       ] as const;
 
-      // its preface, its SETTINGS, then its HEADERS, END_STREAM and END_HEADERS (RFC 9113 §3.4)
+      // its preface, its SETTINGS, then its HEADERS, END_HEADERS and optionally END_STREAM
       socket.write('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
       socket.write(frameOf(0x4, {}));
       socket.write(
-        frameOf(0x1, { flags: 0x5, payload: Buffer.concat(request.map(literalOf)), stream: 1 })
+        frameOf(0x1, {
+          flags: isOpen ? 0x4 : 0x5,
+          payload: Buffer.concat(request.map(literalOf)),
+          stream: 1,
+        })
       );
     });
     socket.on('data', (chunk: Buffer) => {

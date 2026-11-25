@@ -1182,7 +1182,18 @@ public sealed class HttpGatewayTests
                 {
                     var cell = $"{reader}, {framing}";
                     var before = (Calls: Volatile.Read(ref calls), Told: told.Count);
-                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body)));
+                    var octets = EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body));
+                    var answered = await Exchanged(port, octets);
+
+                    // ! the address's one place is released as the call before it ends, which its client
+                    // may see answered first: a 503 busy is tried again after its retry-after, as a client
+                    // does by RFC 9110 §10.2.3
+                    for (var tried = 0; tried < 3 && answered.Status == 503 && answered.Fields.GetValueOrDefault("bead-refusal") == "busy"; tried++)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(1), Cancelled);
+                        answered = await Exchanged(port, octets);
+                    }
+
                     var made = Volatile.Read(ref calls) - before.Calls;
                     List<string> reported;
 
@@ -2020,6 +2031,32 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // spec 15.12; transcoding 10.1; RFC 9112 §7.1; docs/support.md, a chunk size past 2³¹ − 1 over HTTP/1.1
+    [Fact]
+    public async Task Answers_400_unmarked_and_closes_a_chunk_size_past_what_Kestrel_holds()
+    {
+        var started = await Started();
+
+        try
+        {
+            var port = started.Port;
+
+            // * 2³¹, past the int Kestrel holds a chunk size in, on a socket that asks no close
+            var came = Encoding.ASCII.GetString(await Received(port, Encoding.ASCII.GetBytes($"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n80000000\r\n            ")));
+
+            // one answer, never the 200 Kestrel writes of a request left unanswered, its connection
+            // closed behind it
+            Assert.StartsWith("HTTP/1.1 400 ", came, StringComparison.Ordinal);
+            Assert.Single(came.Split("HTTP/1.1 ").Skip(1));
+            Assert.Contains("\r\nConnection: close\r\n", came, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("bead-refusal", came, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // spec 15.12; transcoding 10.1
     [Fact]
     public async Task Refuses_400_unmarked_a_Content_Length_beside_a_Transfer_Encoding_in_either_order_over_HTTP_1_0_too_and_closes_its_connection_before_a_request_smuggled_behind_it_is_read()
@@ -2225,6 +2262,28 @@ public sealed class HttpGatewayTests
                 $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: +2\r\nconnection: close\r\n\r\n{{}}"));
 
             Assert.Equal((200, "{}"), (answered.Status, answered.Body));
+
+            // * -0 frames an empty JSON body; its problem leaves the socket available for a canary
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(
+                $"POST /api/Transcoding/echo HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\ncontent-type: application/json\r\ncontent-length: -0\r\n\r\n"));
+            var reader = new Exchanges.Reader(socket);
+            var head = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+            var body = await reader.ReadBody(head).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(400, head.Status);
+            Assert.Equal("application/problem+json", head.Fields["content-type"]);
+            Assert.Equal(157, body.Length);
+            Assert.DoesNotContain("close", head.Fields.GetValueOrDefault("connection", ""), StringComparison.OrdinalIgnoreCase);
+            using var problem = JsonDocument.Parse(body);
+
+            Assert.Equal("PAYLOAD_UNDECODABLE", problem.RootElement.GetProperty("title").GetString());
+            Assert.Equal(400, problem.RootElement.GetProperty("status").GetInt32());
+            await socket.SendAsync(Encoding.ASCII.GetBytes(
+                $"GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\n\r\n"), Cancelled);
+            var canary = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(200, canary.Status);
+            Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(await reader.ReadBody(canary).WaitAsync(Patience, Cancelled)));
         }
         finally
         {
@@ -2699,6 +2758,61 @@ public sealed class HttpGatewayTests
         finally
         {
             await Stopped(started);
+        }
+    }
+
+    // spec 15.12; the row "A `Content-Length` HTTP refuses, over HTTP/2" of docs/support.md
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_names_one_number_twice_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var (application, port) = await MountedOverTls(gateway);
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        await using (application)
+        {
+            foreach (var lengths in (string[][])[["0", "0"], ["0", "00"]])
+            {
+                (string, string)[] fields = [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}"), .. lengths.Select((length) =>
+                {
+                    return ("content-length", length);
+                })];
+
+                Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Over(port, fields));
+            }
+
+            Assert.Equal(0, Volatile.Read(ref drawn));
+            Assert.Equal(new TlsAnswer(200, null, null), await Http2Over(port, [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}"), ("content-length", "0")]));
+            await application.StopAsync(Cancelled);
+        }
+    }
+
+    // spec 15.12; transcoding 10.1; RFC 9110 §8.6
+    [Fact]
+    public async Task Ends_over_HTTP_2_the_session_of_a_request_whose_Content_Length_passes_2_63_1_GOAWAY_PROTOCOL_ERROR_as_Kestrel_does()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var (application, port) = await MountedOverTls(gateway);
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        await using (application)
+        {
+            foreach (var length in (string[])["9223372036854775808", "9999999999999999999", "00009223372036854775808"])
+            {
+                await using var wire = await TlsWire.Open(port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+                // * its body never comes: Kestrel refuses the length with no END_STREAM mismatch
+                Assert.Equal(new TlsAnswer(null, null, null, 0x1), await wire.AskOpen([(":method", "POST"), (":path", "/api/Transcoding/echo"), (":authority", $"127.0.0.1:{port}"), ("content-type", "application/json"), ("content-length", length)]));
+            }
+
+            Assert.Equal(0, Volatile.Read(ref drawn));
+            await application.StopAsync(Cancelled);
         }
     }
 

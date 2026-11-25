@@ -27,7 +27,8 @@ interface IReceiverLike {
   readonly _opcode: number;
   readonly _state: number;
   on(event: string, listener: () => void): unknown;
-  write(chunk: Uint8Array): boolean;
+  // the parse itself, below the stream's queue: a chunk, its encoding, and what its end is handed
+  readonly _write: (...write: never[]) => void;
 }
 
 type ReceiverConstructor = new (options: {
@@ -59,10 +60,15 @@ const isBetweenFrames = (receiver: IReceiverLike): boolean => {
   return receiver._state === GET_INFO && receiver._bufferedBytes === 0;
 };
 
+// what a write's end is handed, its failure read from the reader's state instead
+const ignore = (): void => {};
+
 // hands `bytes` to the reader, a copy, since it unmasks a payload where it lies
+// ! straight to its parse: a stream's `write` settles each write by `process.nextTick`, which
+// `--sync` never runs, so each input would leave its reader held until the heap runs out
 const hand = (receiver: IReceiverLike, bytes: Uint8Array): void => {
   if (bytes.length > 0) {
-    receiver.write(Buffer.from(bytes));
+    Reflect.apply(receiver._write, receiver, [Buffer.from(bytes), 'buffer', ignore]);
   }
 };
 

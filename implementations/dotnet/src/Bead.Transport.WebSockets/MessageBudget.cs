@@ -3,10 +3,13 @@ namespace Bead.Transport.WebSockets;
 /// <summary>
 /// What a WebSocket server holds of its messages partway, across its connections, under
 /// <c>messageBytesBudget</c> (spec 15.12, decision 0056): each holder's charge as its bytes come,
-/// released once its message is whole or its connection fails. A charge that would pass the budget
-/// casts off holders, as few as fit it: those past their grace first, then the one that holds the
-/// most, then the one whose message began first, the asking one's charge counted in its own sum. A
-/// holder cast off charges nothing more, and hears it outside the budget's lock.
+/// released once its message is whole or its connection fails. A charge of <c>n</c> decides as
+/// <c>n</c> charges of one: each goes to the room left, and when none is left, the order is judged
+/// for that unit, the holder whose message holds the most first, the asking one's sum counting that
+/// unit, then, among equal sums, the one whose message began first, as Redis casts off its clients
+/// past <c>maxmemory-clients</c>. The first is cast off with 1013, its charge released at once; the
+/// asking one only when it comes first. A holder cast off charges nothing more, and hears it outside
+/// the budget's lock.
 /// </summary>
 internal sealed class MessageBudget
 {
@@ -56,10 +59,23 @@ internal sealed class MessageBudget
         // ! told outside the lock: a holder cast off fails its connection, which takes locks of its own
         foreach (var each in gone)
         {
-            each.Hooks.CastOff();
+            each.CastOff();
         }
 
         return isTaken;
+    }
+
+    /// <summary>
+    /// Its message began, at its first frame's first byte: the rank it holds among equal sums, though
+    /// it holds nothing until its first charge.
+    /// </summary>
+    public void Begin(Holder holder)
+    {
+        lock (_gate)
+        {
+            _began += 1;
+            holder.Began = _began;
+        }
     }
 
     /// <summary>Its message whole: its charge released, and it holds nothing until its next message.</summary>
@@ -81,9 +97,10 @@ internal sealed class MessageBudget
         }
     }
 
-    // * the charge taken, or whom it casts off (spec 15.12): as few as fit it, in the order those past
-    // their grace, then the most, then the first begun; the asking one alone when it comes first,
-    // or when nothing but its own cast-off fits it; under the lock
+    // * the charge taken unit by unit, or whom it casts off (spec 15.12): what fits the room left
+    // is taken; past it, the next unit is judged against the other holders that hold the most, then
+    // the first begun, and the first of them is cast off, or the asking one when it comes first;
+    // under the lock
     private bool Take((Holder Holder, long Bytes) charge, List<Holder> gone)
     {
         var (holder, bytes) = charge;
@@ -95,73 +112,48 @@ internal sealed class MessageBudget
 
         if (!holder.IsHolding)
         {
-            _began += 1;
-            holder.Began = _began;
             holder.IsHolding = true;
             _holding.Add(holder);
         }
 
-        var total = _charged + bytes;
-
-        if (total <= Budget)
+        // ! the others' order is taken once: their sums stay as they are while this charge decides
+        var others = new Queue<Holder>(_holding.Where((each) =>
         {
-            holder.Sum += bytes;
-            _charged = total;
-
-            return true;
-        }
-
-        // ! a charge its own holder could not hold with every other gone casts it off alone, which
-        // always fits: what was held before it was within the budget
-        if (holder.Sum + bytes > Budget)
-        {
-            CastOff(holder);
-
-            return false;
-        }
-
-        var order = _holding.Select((each) =>
-        {
-            return (Holder: each, IsPastGrace: each.Hooks.IsPastGrace(), Sum: each == holder ? each.Sum + bytes : each.Sum);
+            return each != holder && each.Sum > 0;
         }).OrderByDescending((each) =>
-        {
-            return each.IsPastGrace;
-        }).ThenByDescending((each) =>
         {
             return each.Sum;
         }).ThenBy((each) =>
         {
-            return each.Holder.Began;
-        }).ToList();
+            return each.Began;
+        }));
+        var left = bytes;
 
-        if (order[0].Holder == holder)
+        while (true)
         {
-            CastOff(holder);
+            var taken = Math.Min(Math.Max(Budget - _charged, 0), left);
 
-            return false;
-        }
+            holder.Sum += taken;
+            _charged += taken;
+            left -= taken;
 
-        foreach (var (each, _, _) in order)
-        {
-            if (total <= Budget)
+            if (left == 0)
             {
-                break;
+                return true;
             }
 
-            if (each == holder)
+            // the next unit, the asking holder's sum counting it, against the first of the others
+            if (!others.TryPeek(out var top) || holder.Sum + 1 > top.Sum || (holder.Sum + 1 == top.Sum && holder.Began < top.Began))
             {
-                continue;
+                CastOff(holder);
+
+                return false;
             }
 
-            total -= each.Sum;
-            CastOff(each);
-            gone.Add(each);
+            others.Dequeue();
+            CastOff(top);
+            gone.Add(top);
         }
-
-        holder.Sum += bytes;
-        _charged += bytes;
-
-        return true;
     }
 
     // a holder cast off: its charge released, and nothing more taken of it; under the lock
@@ -185,18 +177,17 @@ internal sealed class MessageBudget
     }
 
     /// <summary>
-    /// One connection's share of a budget: what tells whether its message is past its grace, what it
-    /// hears once it is cast off, and, under the budget's lock, its sum, the rank its message began
-    /// at, and whether it was cast off.
+    /// One connection's share of a budget: what it hears once it is cast off, and, under the budget's
+    /// lock, its sum, the rank its message began at, and whether it was cast off.
     /// </summary>
     internal sealed class Holder
     {
-        internal Holder((Func<bool> IsPastGrace, Action CastOff) hooks)
+        internal Holder(Action castOff)
         {
-            Hooks = hooks;
+            CastOff = castOff;
         }
 
-        internal (Func<bool> IsPastGrace, Action CastOff) Hooks { get; }
+        internal Action CastOff { get; }
 
         internal long Sum { get; set; }
 

@@ -1180,7 +1180,7 @@ fn chain_of(error: &CallError) -> String {
     words
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
     let service = Service::new();
@@ -1207,7 +1207,7 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let service = Service::new();
@@ -1229,4 +1229,56 @@ async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no
         chain_of(&failed)
     );
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
+}
+
+// spec 13.4.2
+#[tokio::test]
+async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+ {
+    let service = Service::new();
+    let routes = service.routes();
+
+    for host in ["127.0.0.1.", "127.1"] {
+        let scripted = Scripted::new(vec![whole_answer_of(("200 OK", "text/plain"), "hi!")]).await;
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let caller = resolving_caller(&format!("http://{host}:{}", scripted.port), &asked);
+        let echo = caller
+            .requester_of(&routes[0], &service.echo)
+            .expect("echo's requester");
+        let answered = settled(echo.call(&"hi".to_owned(), &HttpCallOptions::default()))
+            .await
+            .expect("its answer");
+
+        assert_eq!(answered, "hi!", "{host}: answered");
+        assert!(
+            scripted.requests()[0].contains(&format!("host: 127.0.0.1:{}", scripted.port)),
+            "{host}: named 127.0.0.1: {:?}",
+            scripted.requests()
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            Vec::<String>::new(),
+            "{host}: none asked"
+        );
+    }
+}
+
+// spec 13.4
+#[tokio::test]
+async fn refuses_a_host_the_url_standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+ {
+    for url in [
+        "http://foo.123",
+        "http://x%20.localhost:8080",
+        "https://foo.123/api",
+    ] {
+        let refused = HttpCaller::new(url, &HttpCallerOptions::default())
+            .expect_err("a host no URL can name");
+
+        assert_eq!(
+            refused.message(),
+            URL_REFUSED,
+            "{url}: refused as it is built"
+        );
+    }
 }

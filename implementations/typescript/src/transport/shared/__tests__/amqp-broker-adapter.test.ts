@@ -37,7 +37,13 @@ import {
   type IAmqpScriptedLink,
   type IScriptedAttach,
 } from './amqp-script';
-import { closedPort, PROBE, replaceResolver, startDropping } from './loopback-fixtures';
+import {
+  closedPort,
+  PROBE,
+  replaceResolver,
+  startDropping,
+  watchResolver,
+} from './loopback-fixtures';
 import { PKI } from './tls-front';
 
 // constants
@@ -734,6 +740,24 @@ test.describe('createAmqpBrokerAdapter', () => {
     await inboxUp({ adapter, script });
     expect(adapter.isLinked).toBe(true);
     await adapter.stop();
+
+    // * stopped as it races a localhost name on the loopback: no socket of it left open (spec 13.4)
+    await using dropping = await startDropping();
+    const raced = createAmqpBrokerAdapter({
+      id: ID,
+      password: PASSWORD,
+      url: `amqp://${PROBE}:${String(dropping.port)}`,
+    });
+    const racing = settledOf(raced.start());
+
+    await raced.stop();
+    expect(await racing).toEqual(new GenericError('the link of ada stopped as it started'));
+    await sleep(50);
+    await expect
+      .poll(() => {
+        return dropping.open;
+      })
+      .toBe(0);
   });
 
   test('fails an inbox declaration left unanswered within connectTimeout and closes its connection without telling a loss', async () => {
@@ -2349,6 +2373,31 @@ test.describe('createAmqpBrokerAdapter', () => {
     asking.resolve(PASSWORD);
     await expect(askedStart).rejects.toThrow('the link of ada stopped as it started');
 
+    // * a localhost name's race of the loopback given up by its signal, or by a signal aborted
+    // already: no socket of it left open (spec 13.4)
+    {
+      await using dropping = await startDropping();
+      const raced = createAmqpBrokerAdapter({
+        id: ID,
+        password: PASSWORD,
+        url: `amqp://${PROBE}:${String(dropping.port)}`,
+      });
+      const racing = new AbortController();
+      const racingStart = settledOf(raced.start({ signal: racing.signal }));
+
+      racing.abort();
+      expect(await racingStart).toBeInstanceOf(CancelError);
+      expect(await settledOf(raced.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+        CancelError
+      );
+      await sleep(50);
+      await expect
+        .poll(() => {
+          return dropping.open;
+        })
+        .toBe(0);
+    }
+
     // * a name's subscription, its ATTACH held: its session ended, its link kept
     script.policy.attach = ({ address }) => {
       return address === NAME_QUEUE ? 'hold' : 'take';
@@ -2722,8 +2771,12 @@ test.describe('createAmqpBrokerAdapter', () => {
         'amqp://localhost',
         'amqp://[::1]:5672',
         'amqp://broker.example:5672',
+        // * its host read once, as a special scheme's host whatever its scheme (spec 13.4)
+        'amqp://LOCALHOST',
+        'amqp://127.1:5672',
+        'amqp://loc%61lhost',
       ].map(secureOf)
-    ).toEqual([true, true, true, true, false]);
+    ).toEqual([true, true, true, true, false, true, true, true]);
 
     // what is none of its two is refused as it is built, and so is an id that is none
     for (const refused of [
@@ -3270,7 +3323,7 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
   });
 });
 
-// spec 13.4: a connection to a localhost name, connected by Bead to the loopback itself
+// spec 13.4.2: a connection to a localhost name, connected by Bead to the loopback itself
 test.describe('createAmqpBrokerAdapter, on the loopback', () => {
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
     const headers: Buffer[] = [];
@@ -3305,6 +3358,47 @@ test.describe('createAmqpBrokerAdapter, on the loopback', () => {
     } finally {
       listener.close();
     }
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    // * over TLS, its broker's certificate naming 127.0.0.1 alone: the host it read is the one its
+    // handshake checked
+    await using secured = await createAmqpScript({
+      tls: { ca: TLS_FIXTURE.cert, cert: PKI.addressedServer, key: PKI.addressedServerKey },
+    });
+    const { port } = new URL(secured.url);
+    const tls = { ...CERTIFIED, authorities: PKI.root };
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      const adapter = createAmqpBrokerAdapter({ id: ID, tls, url: `amqps://${written}:${port}` });
+
+      await linkUp({ adapter, script: secured });
+      expect([written, adapter.isSecure]).toEqual([written, true]);
+      await adapter.stop();
+    }
+
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', () => {
+    using resolver = watchResolver();
+
+    for (const host of ['foo.123', 'x%20.localhost']) {
+      for (const scheme of ['amqp', 'amqps']) {
+        expect(() => {
+          return createAmqpBrokerAdapter({
+            id: ID,
+            password: PASSWORD,
+            url: `${scheme}://${host}:5672`,
+          });
+        }).toThrow(new ProgrammerError(`${host} is no host a URL can name`));
+      }
+    }
+
+    expect(resolver.asked).toEqual([]);
   });
 
   test('says nothing of the loopback once a localhost name’s connect opened a socket', async () => {

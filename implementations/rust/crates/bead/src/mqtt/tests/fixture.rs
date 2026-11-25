@@ -372,6 +372,8 @@ async fn carries_a_link_over_a_websocket_of_subprotocol_mqtt() {
     );
     until(|| !kinds.0.lock().unwrap().is_empty()).await;
     assert_eq!(*kinds.0.lock().unwrap(), vec![8], "a RESET");
+    // ! its settling is a turn of its owner, after the listener heard the message
+    until(|| adapter.unsettled() == 0).await;
     assert_eq!(adapter.unsettled(), 0, "settled");
     // an inbox no one reads is the broker's 0x10
     assert_eq!(

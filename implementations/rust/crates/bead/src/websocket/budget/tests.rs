@@ -26,9 +26,9 @@ fn holding_of(budget: &Arc<MessageBudget>, bytes: u64) -> Holding {
     holding
 }
 
+// spec 15.12.19
 #[tokio::test]
-async fn casts_off_the_holders_that_hold_the_most_until_a_charge_fits_the_asking_one_only_when_it_holds_the_most()
- {
+async fn casts_off_other_budget_holders_or_refuses_the_asker_when_the_next_byte_passes_the_bound() {
     let clock = clock();
     let budget = budget_of(&clock, 500);
     let ada = holding_of(&budget, 194);
@@ -49,50 +49,74 @@ async fn casts_off_the_holders_that_hold_the_most_until_a_charge_fits_the_asking
     assert!(dave.charge(134), "dave's head fits");
     assert!(!dave.charge(47), "dave, who would hold the most, cast off");
     assert!(dave.is_cast_off(), "dave cast off");
-    assert_eq!(
-        budget.held(),
-        320,
-        "dave's charge released, his last not taken"
-    );
+    assert_eq!(budget.held(), 320, "dave's charge released");
     assert!(!dave.charge(1), "nothing charged after");
 
     carol.end();
     assert_eq!(budget.held(), 146, "carol's whole: released");
 }
 
+// spec 15.12.19
 #[tokio::test]
-async fn casts_off_a_holder_past_its_grace_before_a_larger_one_within_it_the_earlier_among_equals()
-{
+async fn charges_byte_by_byte_casting_off_whom_the_unit_that_passes_the_budget_finds_first() {
     let clock = clock();
-    let budget = budget_of(&clock, 300);
-    let ada = holding_of(&budget, 100);
 
-    clock.advance(Duration::from_millis(5_500)).await;
+    // * one charge of 650, or 450 then 200: the unit past 1,000 finds x first, 600 against a's 401
+    for cuts in [vec![650], vec![450, 200]] {
+        let budget = budget_of(&clock, 1_000);
+        let x = holding_of(&budget, 600);
+        let mut a = budget.holding();
 
-    let bob = holding_of(&budget, 150);
-    let cid = holding_of(&budget, 50);
-    let mut dee = budget.holding();
+        a.begin();
 
-    dee.begin();
+        for cut in &cuts {
+            assert!(a.charge(*cut), "{cuts:?}: a's {cut} taken");
+        }
 
-    assert!(dee.charge(10), "dee's charge taken");
-    assert!(
-        ada.is_cast_off(),
-        "ada, past her grace, though she holds less than bob"
-    );
-    assert!(!bob.is_cast_off() && !cid.is_cast_off(), "bob and cid kept");
+        assert!(x.is_cast_off(), "{cuts:?}: x, who held the most then");
+        assert!(!a.is_cast_off(), "{cuts:?}: a kept");
+        assert_eq!(budget.held(), 650, "{cuts:?}: a's 650 held");
+    }
+}
 
-    // among equal sums, the one whose message began first
-    let budget_equal = budget_of(&clock, 100);
-    let first = holding_of(&budget_equal, 40);
-    let second = holding_of(&budget_equal, 40);
-    let mut third = budget_equal.holding();
+// spec 15.12.19
+#[tokio::test]
+async fn casts_off_each_holder_that_comes_before_a_message_whose_charge_alone_passes_the_budget_then_that_message_s_connection()
+ {
+    let clock = clock();
+
+    for held in [1_096, 1_800] {
+        let budget = budget_of(&clock, 2_000);
+        let p = holding_of(&budget, held);
+        let mut a = budget.holding();
+
+        a.begin();
+
+        assert!(
+            !a.charge(2_036),
+            "p {held}: a, past the budget alone, cast off"
+        );
+        assert!(p.is_cast_off(), "p {held}: p, who came before a");
+        assert!(a.is_cast_off(), "p {held}: a cast off");
+        assert_eq!(budget.held(), 0, "p {held}: every charge released");
+    }
+}
+
+// spec 15.12.19
+#[tokio::test]
+async fn casts_off_among_equal_sums_the_holder_whose_message_began_first() {
+    let clock = clock();
+    let budget = budget_of(&clock, 100);
+    let first = holding_of(&budget, 40);
+    let second = holding_of(&budget, 40);
+    let mut third = budget.holding();
 
     third.begin();
 
     assert!(third.charge(30), "the third's charge taken");
     assert!(first.is_cast_off(), "the first begun");
     assert!(!second.is_cast_off(), "the second kept");
+    assert_eq!(budget.held(), 70, "the first's charge released");
 }
 
 #[tokio::test]

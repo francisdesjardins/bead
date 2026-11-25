@@ -33,6 +33,7 @@ import {
   ProgrammerError,
   type ITransportServerRefusal,
   type TRANSPORT_SERVER_EVENTS,
+  type TransportServerConnectionHandle,
   type TransportServerEventMap,
 } from '../transport-server';
 import {
@@ -4580,14 +4581,11 @@ test.describe('WebSocketTransportServer, a message partway', () => {
     const first = binaryOf(10, { fin: false, length: 1_000 });
 
     try {
-      // its head of 8 bytes as it comes, then 128 once whole, then the 10 bytes of payload come:
-      // the 1,000 it announces charge nothing
+      // its head of 8 bytes charges nothing until whole, then its bytes and 128, then the 10 bytes
+      // of payload come: the 1,000 it announces charge nothing
       exchange.write(first.subarray(0, 3));
-      await expect
-        .poll(() => {
-          return chargedOf(server);
-        })
-        .toBe(3);
+      await sleep(100);
+      expect(chargedOf(server)).toBe(0);
 
       exchange.write(first.subarray(3, 8));
       await expect
@@ -4626,7 +4624,7 @@ test.describe('WebSocketTransportServer, a message partway', () => {
   });
 
   // spec 15.12; IANA's WebSocket Close Code Number Registry, 1013
-  test('casts off with 1013 the connections whose messages hold the most when a charge would pass messageBytesBudget, the newcomer only when it holds the most', async () => {
+  test('casts off with 1013 the connections whose messages hold the most when a charge would pass messageBytesBudget, its own only when it comes first', async () => {
     await using started = await startDated({ heartbeat: Infinity, messageBytesBudget: 500 });
     const { server } = started;
     const told = toldOf(server);
@@ -4661,7 +4659,8 @@ test.describe('WebSocketTransportServer, a message partway', () => {
         })
         .toBe(320);
 
-      // dave's 234 passes it, more than any other holds: he alone is cast off
+      // dave's 234 passes it: at its 181st byte, he holds more than any other, and he alone is cast
+      // off
       dave.exchange.write(binaryOf(100, { fin: false }));
       expect(await dave.exchange.next(2_000)).toEqual({ close: 1013 });
       await expect
@@ -4687,53 +4686,101 @@ test.describe('WebSocketTransportServer, a message partway', () => {
     }
   });
 
-  // spec 15.12; rationale of decision 0056
-  test('casts off a message past its grace before one within it', async () => {
-    const clock = createTestClock(DATED);
-    await using started = await startDated({
-      clock,
-      heartbeat: Infinity,
-      messageBytesBudget: 3_200,
-    });
+  // spec 15.12; img-M5's paused-whole
+  test('charges what a paused connection’s read brought, as an unpaused one’s', async () => {
+    await using started = await startDated({ heartbeat: Infinity, messageBytesBudget: 1_050 });
     const { server } = started;
-    const ada = await connectOn(started);
-    const bob = await connectOn(started);
-    const carol = await connectOn(started);
+    const heard = heardOf(server);
+    const paused = await connectOn(started);
+    const asking = await connectOn(started);
+
+    server.on('message', ({ data }) => {
+      if (data === 'whole') {
+        server.pause(paused.connectionHandle);
+      }
+    });
 
     try {
-      // ada's 1,576, past her grace of 5 s once 5.5 s passed, but not yet due
-      ada.exchange.write(binaryOf(1_440, { fin: false }));
-      await expect
-        .poll(() => {
-          return duesOn(clock);
-        })
-        .toEqual([6_000]);
-
-      // * at 5 s, ada is within her grace, not past it: carol's 1,636, the most, is cast off
-      await clock.tickAsync(5_000);
-      carol.exchange.write(binaryOf(1_500, { fin: false }));
-      expect(await carol.exchange.next(2_000)).toEqual({ close: 1013 });
+      // * one read: a message whole, which its router pauses on, then a frame of 400 bytes of the
+      // next, 8 + 400 + 128 charged though its router reads none of it
+      paused.exchange.write(
+        Buffer.concat([
+          frameOf({ fin: true, opcode: OPCODES.TEXT, payload: encoder.encode('whole') }),
+          binaryOf(400, { fin: false }),
+        ])
+      );
       await expect
         .poll(() => {
           return chargedOf(server);
         })
-        .toBe(1_576);
-      await clock.tickAsync(500);
+        .toBe(536);
 
-      // bob's 1,636, the most, within his: ada is cast off
-      bob.exchange.write(binaryOf(1_500, { fin: false }));
-      expect(await ada.exchange.next(2_000)).toEqual({ close: 1013 });
+      // a message whole of 600 charged: its 515th byte finds the paused one holding the most
+      asking.exchange.write(binaryOf(600 - 8 - 128));
+      expect(await paused.exchange.next(2_000)).toEqual({ close: 1013 });
       await expect
         .poll(() => {
-          return chargedOf(server);
+          return heard;
         })
-        .toBe(1_636);
-      expect(await bob.exchange.next(100)).toBeUndefined();
+        .toEqual(['whole', '464 bytes']);
+      expect(chargedOf(server)).toBe(0);
     } finally {
-      ada.exchange.destroy();
-      bob.exchange.destroy();
-      carol.exchange.destroy();
+      paused.exchange.destroy();
+      asking.exchange.destroy();
     }
+  });
+
+  // spec 15.3, 15.12; RFC 6455 §7.1.7
+  test('closes at once a connection whose verdict falls behind a message its router paused on, dropping what the pause holds', async () => {
+    await using started = await startDated({ heartbeat: Infinity });
+    const { server } = started;
+    const heard = heardOf(server);
+    const told = toldOf(server);
+    const reserved = frameOf({ fin: true, opcode: 0x3, payload: new Uint8Array(0) });
+    const handles: TransportServerConnectionHandle[] = [];
+
+    server.on('message', ({ data }) => {
+      const last = handles.at(-1);
+
+      if (data === 'paused' && last !== undefined) {
+        server.pause(last);
+      }
+    });
+
+    // * the head right behind the paused message, then a second message past 125 bytes between
+    for (const between of [[], [binaryOf(200)]]) {
+      const { connectionHandle, exchange } = await connectOn(started);
+
+      handles.push(connectionHandle);
+
+      try {
+        exchange.write(
+          Buffer.concat([
+            frameOf({ fin: true, opcode: OPCODES.TEXT, payload: encoder.encode('paused') }),
+            ...between,
+            reserved,
+          ])
+        );
+
+        // never resumed: its verdict closes it all the same
+        expect(await exchange.next(2_000)).toEqual({ close: 1002 });
+        await expect
+          .poll(() => {
+            return told.at(-1);
+          })
+          .toBe(`close: ${connectionHandle}`);
+      } finally {
+        exchange.destroy();
+      }
+    }
+
+    await sleep(100);
+    expect(heard).toEqual(['paused', 'paused']);
+    expect(
+      told.filter((line) => {
+        return line.startsWith('error');
+      }).length
+    ).toBe(2);
   });
 
   // spec 15.12

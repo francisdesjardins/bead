@@ -69,6 +69,45 @@ public sealed partial class WebSocketTransportClientTests
         Assert.Equal(new object[] { "InvalidDataException: the connection is closed with 1008: a message past its maximumMessageFrames, 4 frames", (false, false) }, told);
     }
 
+    // spec 15.3
+    [Fact]
+    public async Task Closes_at_once_a_connection_whose_verdict_falls_behind_a_message_its_router_paused_on_dropping_what_the_pause_holds()
+    {
+        // one write: a message whole, then a head of a reserved opcode; then the same with a second
+        // message past 125 octets between them, which the pause holds
+        foreach (var between in new byte[][] { [], [0x82, 126, 0x01, 0x2C, .. new byte[300]] })
+        {
+            using var listener = new Listener(IPAddress.Loopback);
+            await using var client = new WebSocketTransportClient();
+            var (told, closed) = EndOf(client);
+            var messages = 0;
+
+            // * its router pauses on every message, and never resumes
+            client.Message += (_) =>
+            {
+                Interlocked.Increment(ref messages);
+                client.Pause();
+            };
+
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                await Listener.Upgrade(peer, head);
+                await connecting.WaitAsync(Patience, Cancelled);
+                await peer.GetStream().WriteAsync((byte[])[0x82, 3, 0x61, 0x62, 0x63, .. between, 0x83, 0x00], Cancelled);
+
+                Assert.Equal(1002, await CloseCodeOf(peer.GetStream()));
+            }
+
+            await closed.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1, messages);
+            Assert.Equal(new object[] { "WebSocketException: the connection is closed with 1002: a frame head RFC 6455 forbids, a reserved opcode, 3", (false, false) }, Described(told));
+        }
+    }
+
     // spec 15.3; RFC 6455 §5.1, §5.2
     [Fact]
     public async Task Fails_with_1002_a_frame_head_RFC_6455_forbids_before_its_platform_reads_it()

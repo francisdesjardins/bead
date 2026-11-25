@@ -7,13 +7,15 @@
 ## Context
 
 Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, and a
-Rust one, its core, its transports over WebSocket and HTTP and its MQTT 5 binding, each part it
-lacks a row of [the support matrix](../support.md) ahead
+Rust one, its core, its transports over WebSocket and HTTP, its MQTT 5 binding and its HTTP/JSON
+gateway, each part it lacks a row of [the support matrix](../support.md) ahead
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
-[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
-a builder generates servers and clients in the first two from the same definitions
-([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
+[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md),
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
+a builder generates servers and clients in all three from the same definitions
+([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md),
+[0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)), and
 a constrained C side besides is where Bead goes. Implementations of the same bytes drift unless
 something holds them to those bytes, and only a test every one runs does.
 
@@ -377,15 +379,15 @@ across languages in the interop, ahead, plays in their place
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
 there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
 the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which every
-side's HTTP server serves, an open row of the matrix; the close of a socket after a refusal of the
-server's own of a request that declares a body, which needs the requests behind it in that
-request's own write, never in a later step, and which no case writes; and the transport's contract
-with its router — its events, its handles, its gauges. Three framing cases over HTTP send on a
-socket that asks no close, one of them an HTTP/1.0 request that asks `connection: keep-alive`, and
-expect the socket's end: they play the close a framing refusal asks. The service of a socket's
-requests in their order, pipelining, and the keep of a socket after a refusal of the server's own of
-a request that declares no body are played by the cases of the step `behind`, which writes requests
-on an open exchange's socket.
+side's HTTP server serves and the cases do not play, a step over HTTP/2 in the conformance files
+ahead; the close of a socket after a refusal of the server's own of a request that declares a body,
+which needs the requests behind it in that request's own write, never in a later step, and which no
+case writes; and the transport's contract with its router — its events, its handles, its gauges.
+Framing cases over HTTP send on a socket that asks no close, one of them an HTTP/1.0 request that
+asks `connection: keep-alive`, and expect the socket's end: they play the close a framing refusal
+asks. The service of a socket's requests in their order, pipelining, and the keep of a
+socket after a refusal of the server's own of a request that declares no body are played by the
+step `behind`, which writes requests on an open exchange's socket.
 
 **A twin test leaves every side one assertion at a time**, in the change that pairs that assertion
 with the case that plays it, and the cell of the matrix it proves points to that case in the same

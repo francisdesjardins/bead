@@ -70,7 +70,7 @@ const LENSES = args.lenses || [
   {
     key: 'companion',
     focus:
-      "`spec/debugging.md` and its conformance files: the trace's steps, the debug filters, the metrics and their exposition, on both sides, against the text and against each other",
+      "`spec/debugging.md` and its conformance files: the trace's steps, the debug filters, the metrics and their exposition, on every side, against the text and against each other",
   },
 ];
 

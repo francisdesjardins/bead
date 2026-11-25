@@ -1,17 +1,20 @@
 import { FailureError, ProtocolCode } from '@francisdesjardins/bead/client';
 import { violationsOf } from '@francisdesjardins/bead/service';
+import { EchoFailures } from '../gen/echo/v1/echo_bead.ts';
 
 try {
   await echo('')();
 } catch (reason) {
-  const failure = reason instanceof FailureError ? reason : undefined;
-
-  if (failure?.isApplication(21)) {
-    // the procedure's own code 21: it refuses an empty text
-  } else if (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    // the protocol's code 32: open a session, or renew its credential, then call again
-  } else if (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    // code 52: each violation names its field and its rule, more counts those left out
-    const { more, violations } = violationsOf(failure);
+  if (EchoFailures.is(reason, 'EMPTY_TEXT')) {
+    // the procedure refuses an empty text: ask for one
+  } else if (!(reason instanceof FailureError)) {
+    throw reason;
+  } else if (reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    // open a session, or renew its credential, then call again
+  } else if (reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    // each violation names its field and its rule; more counts those left out
+    const { more, violations } = violationsOf(reason);
+  } else {
+    throw reason;
   }
 }

@@ -921,12 +921,27 @@ enum ExpectedField {
 /// What a response is expected to be.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Expected {
+struct ExpectedResponse {
     status: u16,
     fields: BTreeMap<String, Option<ExpectedField>>,
     body: Option<String>,
     body_bytes: Option<String>,
     stream: Option<String>,
+}
+
+/// A socket's end, which nothing more comes before: `{"end": true}`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExpectedEnd {
+    end: bool,
+}
+
+/// What a step expects on its socket: a response, or the socket's end.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Expected {
+    Response(ExpectedResponse),
+    End(ExpectedEnd),
 }
 
 /// A request's head, in exact octets, and its body in hexadecimal.
@@ -1401,9 +1416,40 @@ async fn read_on(peer: &mut Peer, stream: Option<&str>) -> Result<Read, Failed> 
     .map_err(|_elapsed| Failed::from(format!("no whole response within {PATIENCE:?}")))?
 }
 
+/// `peer`'s socket read to its end: nothing more came on it past the responses taken.
+async fn ended_on(peer: &Peer) -> Result<(), Failed> {
+    let woken = Arc::clone(&peer.woken);
+
+    patience(PATIENCE, async {
+        loop {
+            // * what came, read once its socket ended: its bytes past the responses taken
+            let more = {
+                let came = locked(&peer.heard);
+
+                came.is_ended
+                    .then(|| came.bytes.len().saturating_sub(peer.taken))
+            };
+
+            match more {
+                Some(0) => return Ok(()),
+                Some(more) => {
+                    return Err(Failed::from(format!(
+                        "{more} bytes more came before its end"
+                    )));
+                }
+                None => {}
+            }
+
+            drop(patience(LOOK, woken.notified()).await);
+        }
+    })
+    .await
+    .map_err(|_elapsed| Failed::from(format!("its socket not ended within {PATIENCE:?}")))?
+}
+
 fn held_to(
     read: &Read,
-    (expected, captured): (&Expected, &mut BTreeMap<String, String>),
+    (expected, captured): (&ExpectedResponse, &mut BTreeMap<String, String>),
 ) -> Result<(), Failed> {
     if read.status != expected.status {
         return Err(Failed::from(format!(
@@ -1527,9 +1573,19 @@ async fn steps_of(fixture: &TranscodingFixture, entry: &Exchange) -> Result<(), 
             let peer = peers
                 .get_mut(on)
                 .ok_or_else(|| Failed::from(format!("no exchange {on}")))?;
-            let read = read_on(peer, expected.stream.as_deref()).await?;
+            let held = match expected {
+                Expected::Response(expected) => {
+                    let read = read_on(peer, expected.stream.as_deref()).await?;
 
-            held_to(&read, (expected, &mut captured)).map_err(|failed| {
+                    held_to(&read, (expected, &mut captured))
+                }
+                Expected::End(ExpectedEnd { end: true }) => ended_on(peer).await,
+                Expected::End(ExpectedEnd { end: false }) => {
+                    Err(Failed::from("an end expected is true"))
+                }
+            };
+
+            held.map_err(|failed| {
                 Failed::from(format!("{on}: {}", failed.message().unwrap_or_default()))
             })?;
         } else if let Some(on) = &step.close {

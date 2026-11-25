@@ -14,7 +14,7 @@ use super::base64::base64_of;
 use super::read::integer_type_of;
 use super::text::{double_text, float_text, string_json};
 use super::wellknown::{Instant, duration_json, field_mask_json, timestamp_json};
-use super::{MAXIMUM_DEPTH, Refusal, is_own_form, is_wrapper};
+use super::{MAXIMUM_DEPTH, Refusal, is_own_form, is_wrapper, message_named};
 use crate::codec::decode_options;
 use crate::records::{ProtoSchema, filtered};
 
@@ -301,7 +301,7 @@ fn any_json(message: &dyn ReflectMessage, writing: Writing<'_>) -> Result<String
     let pool = writing.schema.pool();
     let Some(index) = type_url
         .rsplit_once('/')
-        .and_then(|(_, type_name)| pool.message_index(type_name))
+        .and_then(|(_, type_name)| message_named(pool, type_name))
     else {
         return Err(Refusal::new(
             "an Any whose type its definitions do not hold",

@@ -11,7 +11,9 @@ import {
   PROBE,
   replaceResolver,
   settledOf,
+  startHeard,
   startPlatformProxy,
+  watchResolver,
 } from '../../transport/shared/__tests__/loopback-fixtures';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
@@ -1362,7 +1364,7 @@ test('refuses a stream failure with an invalid HTTP problem status and no Bead c
   }
 });
 
-// spec 13.4: a caller connects a gateway it judges on the loopback to the loopback itself
+// spec 13.4.2: a caller connects a gateway it judges on the loopback to the loopback itself
 test.describe('createHTTPCaller, on the loopback', () => {
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
     await using fixture = await startTranscoding();
@@ -1372,6 +1374,50 @@ test.describe('createHTTPCaller, on the loopback', () => {
     expect(await client.whoAmI({}, { authorization: GOOD_CREDENTIAL })).toMatchObject({
       session: SESSION,
     });
+    expect(resolver.asked).toEqual([]);
+  });
+
+  // spec 13.4; the WHATWG URL Standard, host parsing
+  test('connects a host written 127.0.0.1. or 127.1 to the loopback, asking no resolver, and names it 127.0.0.1', async () => {
+    await using fixture = await startTranscoding();
+    await using heard = await startHeard();
+    using resolver = watchResolver();
+
+    for (const written of ['127.0.0.1.', '127.1']) {
+      const client = new TranscodingHttpClient(`http://${written}:${String(fixture.port)}`);
+
+      expect(await client.whoAmI({}, { authorization: GOOD_CREDENTIAL })).toMatchObject({
+        session: SESSION,
+      });
+
+      // * a server that notes the Host it was sent, its 404 failing the call
+      await settledOf(() => {
+        return new TranscodingHttpClient(`http://${written}:${String(heard.port)}`).json(null);
+      });
+    }
+
+    expect([
+      resolver.asked,
+      heard.heard.map(({ host }) => {
+        return host;
+      }),
+    ]).toEqual([[], [`127.0.0.1:${String(heard.port)}`, `127.0.0.1:${String(heard.port)}`]]);
+  });
+
+  // spec 13.4; RFC 3696 §2
+  test('refuses a host the URL Standard fails on, foo.123 or x%20.localhost, before any socket opens', () => {
+    using resolver = watchResolver();
+
+    for (const written of ['foo.123', 'x%20.localhost']) {
+      expect(() => {
+        return createHTTPCaller(HTTP_ROUTES, `http://${written}:8080`);
+      }).toThrow(
+        new ProgrammerError(
+          'an HTTP client URL uses HTTP or HTTPS without user information, query or fragment'
+        )
+      );
+    }
+
     expect(resolver.asked).toEqual([]);
   });
 

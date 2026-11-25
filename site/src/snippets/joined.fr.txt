@@ -17,4 +17,4 @@ const gateway = createHTTPGateway({
 
 await memory.start();
 await webSocket.start({ port: 8080 });
-await gateway.start({ port: 8081 }); // localhost : les deux boucles locales
+await gateway.start({ port: 8081 }); // localhost par défaut : 127.0.0.1 et ::1

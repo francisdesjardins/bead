@@ -332,7 +332,20 @@ public sealed class ParticipantDebugEventTests
             Assert.Equal("0102030405060708", item.Opener);
             Assert.Equal(3UL, item.Sequence);
             Assert.Equal((byte)7, item.Flags);
-            Assert.Equal(kind == 0x80 ? "advisory 128" : BrokerParcels.NameOf(kind), item.Kind);
+            Assert.Equal(kind switch
+            {
+                1 => "OPEN",
+                2 => "ACCEPT",
+                3 => "REFUSE",
+                4 => "DATA",
+                5 => "PING",
+                6 => "PONG",
+                7 => "CLOSE",
+                8 => "RESET",
+                9 => "GONE",
+                0x80 => "advisory 128",
+                _ => "0x0A",
+            }, item.Kind);
             Assert.Equal(kind is 1 or 2 or 9 ? "ada" : null, item.Id);
             Assert.Equal(kind is 1 or 2 or 9 ? string.Concat(Enumerable.Repeat("01", 16)) : null, item.Incarnation);
             Assert.Equal(kind is 1 or 2 ? 1024 : (long?)null, item.Bound);

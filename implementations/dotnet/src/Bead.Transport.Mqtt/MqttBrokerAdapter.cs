@@ -104,14 +104,19 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new ArgumentException(refusal, nameof(options));
         }
 
+        // * its host read once, as the URL Standard reads a special scheme's (spec 13.4): judged,
+        // dialed and named as read, one that parser fails on refused as it is built
+        var host = TransportSecurity.DialedHost(options.Uri.Host);
+
         _options = options with
         {
+            Uri = new UriBuilder(options.Uri) { Host = host }.Uri,
             Tls = tls,
             // ! never without end: a broker never counts a link of Keep Alive 0 lost, and its will never goes
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
-        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", options.Uri.Host));
+        _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
 
         // * a handler of its own: no cookie, no redirect followed, a host on the loopback connected to

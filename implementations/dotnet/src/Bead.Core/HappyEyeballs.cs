@@ -31,8 +31,9 @@ internal sealed record HappyEyeballsOptions
 /// A connect by a name that races its addresses, as RFC 8305 (Happy Eyeballs v2) asks and as Node's
 /// clients and the browsers do: the name resolved in the platform's order (RFC 6724), the address
 /// families interleaved, the first family the first answer's (§4); an attempt started every 250
-/// milliseconds, or at once when one fails, until one connects (§5); the first connected kept, and
-/// the attempts left cancelled, a socket one of them connects after closed. The platform's own
+/// milliseconds, each kept until one connects (§5), or at once when one fails, which is Bead's own;
+/// the first connected kept, and the attempts left cancelled, a socket one of them connects after
+/// closed. A connect given up ends every attempt, and no socket stays. The platform's own
 /// connect tries each address in turn, and so waits out the refusal of a loopback family a server
 /// does not listen on, two seconds on Windows, before it tries the other. A localhost name,
 /// <c>localhost</c> or a name that ends in <c>.localhost</c>, asks no resolver: its addresses are
@@ -153,7 +154,10 @@ internal static class HappyEyeballs
 
         var given = options ?? new HappyEyeballsOptions();
         var cancellationToken = given.CancellationToken;
-        var host = endPoint.Host.StartsWith('[') && endPoint.Host.EndsWith(']') ? endPoint.Host[1..^1] : endPoint.Host;
+        // ! its host read as the URL Standard reads it, as every client reads it before it dials
+        // (spec 13.4): a guard beside them, one that parser fails on refused before any attempt
+        var read = TransportSecurity.DialedHost(endPoint.Host);
+        var host = read.StartsWith('[') && read.EndsWith(']') ? read[1..^1] : read;
         var resolve = given.Resolve ?? PlatformResolve;
         var connect = given.Connect ?? Attempt;
         var clock = given.Clock ?? TimeProvider.System;

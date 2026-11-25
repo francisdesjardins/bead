@@ -60,7 +60,7 @@ the user decides. Not ten opinions: as many as the change needs, plus the one th
 runs once. One behaviour, a few files on each side and no new record: one dissenting agent at
 xhigh against the proposal as written, its objections answered in the record's table, then the
 change made directly. A change that adds a record, touches the wire's identity or spans many files:
-the `bead-tenth-man-round` workflow, then `bead-implement-both-sides`
+the `bead-tenth-man-round` workflow, then `bead-implement-every-side`
 ([the workflows](../../.claude/workflows/README.md)), its whole suites run locally or left to CI on
 the pushed feature branch (`suites: 'ci'`).
 
@@ -79,7 +79,8 @@ does not keep.
   CI's `commits` job, and `.githooks/commit-msg` holds a commit's subject to it before git records
   it, once a clone opts in. A subject that does not parse fails the run.
 - The branches are checked by nothing but review ([0006](0006-a-rule-has-its-gate.md)): CI runs on
-  every branch alike, and `ci-ok` stands for every job.
+  every branch, the jobs a feature branch's changes reach and every job elsewhere, and `ci-ok`
+  stands for every job.
 - A version's entries are only as complete as the commits that wrote them: a change that skips the
   CHANGELOG is missing from the release it ships in.
 - The TypeScript side's comment budget refuses a comment in its sources that narrates the past;

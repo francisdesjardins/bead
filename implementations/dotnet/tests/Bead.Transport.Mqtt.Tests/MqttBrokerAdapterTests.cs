@@ -527,7 +527,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
-    // spec 13.4: the platform's resolver stood in for, process-wide, as the broker's classes run alone
+    // spec 13.4.2: the platform's resolver stood in for, process-wide, as the broker's classes run alone
     [Fact]
     public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_TCP()
     {
@@ -551,7 +551,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
-    // spec 13.4
+    // spec 13.4.2
     [Fact]
     public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_a_WebSocket()
     {
@@ -576,7 +576,69 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Empty(resolver.Asked);
     }
 
-    // spec 13.4: the platform's proxy stood in for, process-wide, as the broker's classes run alone
+    // spec 13.4.2
+    [Fact]
+    public async Task Connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
+    {
+        using var resolver = new StandInResolver();
+
+        foreach (var host in new[] { "127.0.0.1.", "127.1" })
+        {
+            await using var listener = new HeadListener();
+            await using var tcp = AdapterOf((options) =>
+            {
+                return options with { Uri = new Uri($"mqtt://{host}:{listener.Port}") };
+            });
+            await using var webSocket = AdapterOf((options) =>
+            {
+                return options with { Uri = new Uri($"ws://{host}:{listener.Port}/mqtt") };
+            });
+
+            // * its CONNECT, then its upgrade, reach the listener on 127.0.0.1, which answers nothing
+            await FailureOf(() =>
+            {
+                return tcp.Start();
+            });
+            await FailureOf(() =>
+            {
+                return webSocket.Start();
+            });
+
+            var heads = await listener.Next();
+
+            Assert.Equal(0x10, heads[0][0]);
+            Assert.Contains($"Host: 127.0.0.1:{listener.Port}\r\n", heads[^1], StringComparison.Ordinal);
+            Assert.True(tcp.IsSecure);
+        }
+
+        Assert.Empty(resolver.Asked);
+    }
+
+    // spec 13.4; RFC 3696 §2
+    [Fact]
+    public void Refuses_a_host_the_URL_Standard_fails_on_foo_123_or_x_20_localhost_before_any_socket_opens()
+    {
+        using var resolver = new StandInResolver();
+
+        foreach (var uri in new[] { "mqtt://foo.123:1883", "ws://foo.123:9001/mqtt" })
+        {
+            var refused = Assert.Throws<ArgumentException>(() =>
+            {
+                return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) });
+            });
+
+            Assert.Equal("foo.123 is no host a URL can name", refused.Message);
+        }
+
+        // ! .NET's Uri, which the options take, refuses a percent-escaped host as it parses it
+        Assert.Throws<UriFormatException>(() =>
+        {
+            return new Uri("mqtt://x%20.localhost:1883");
+        });
+        Assert.Empty(resolver.Asked);
+    }
+
+    // spec 13.4.2: the platform's proxy stood in for, process-wide, as the broker's classes run alone
     [Fact]
     public async Task Sends_nothing_through_the_platforms_proxy_to_a_host_on_the_loopback()
     {
@@ -3061,11 +3123,20 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             "mqtt://127.0.0.1:1883",
             "ws://localhost:9001/mqtt",
             "mqtt://[::1]:1883",
+            "mqtt://LOCALHOST:1883",
+            "mqtt://127.1:1883",
             "mqtt://broker.example:1883",
             "ws://broker.example/mqtt",
         ];
 
-        Assert.Equal([true, true, true, true, true, false, false], uris.Select(IsSecure));
+        Assert.Equal([true, true, true, true, true, true, true, false, false], uris.Select(IsSecure));
+
+        // ! .NET's Uri, which the options take, refuses a percent-escaped host as it parses it, so
+        // none reaches the adapter to be read decoded (docs/support.md)
+        Assert.Throws<UriFormatException>(() =>
+        {
+            return new Uri("ws://local%68ost:9001/mqtt");
+        });
 
         // what is none of its four is refused as it is built, and so is an IPv6 address followed by
         // anything but its port (RFC 3986 §3.2.2), and an id that is none

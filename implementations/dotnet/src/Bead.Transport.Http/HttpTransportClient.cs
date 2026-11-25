@@ -310,8 +310,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
     /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
-    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, and with a
+    /// <see cref="ConnectException"/> for a host the URL Standard's host parser fails on, before any
+    /// socket opens, each of which leaves the state, and the target a reconnection replays, as they
+    /// were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
     /// Then it throws a <see cref="TimeoutException"/> past its timeout, an
@@ -645,11 +647,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return readyState.ToString().ToLowerInvariant();
     }
 
-    // http://host:port/pathname, or https://; an IPv6 literal bracketed, or its colons would read as
-    // the port's
+    // http://host:port/pathname, or https://, its host read once as the URL Standard reads it, an
+    // IPv6 literal bracketed (spec 13.4): one that parser fails on is a ConnectException, before any
+    // socket opens
     private static Uri UriOf(HttpTransportClientConnectOptions options)
     {
-        var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
+        string host;
+
+        try
+        {
+            host = TransportSecurity.DialedHost(options.Host);
+        }
+        catch (ArgumentException reason)
+        {
+            throw new ConnectException(reason.Message, reason);
+        }
+
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");

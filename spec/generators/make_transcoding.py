@@ -3609,16 +3609,22 @@ def exchange(name, clauses, steps, *, options=None, real_time=False, differs=Non
     return {**entry, 'steps': steps}
 
 
-def framed_by(fields, *, on='a', http='HTTP/1.1', host='{host}'):
+def framed_by(fields, *, on='a', http='HTTP/1.1', host='{host}', close=True, body=None):
     """A POST of {} to the echo route, of HTTP/1.1 unless told otherwise, naming the host given, framed
     by the field lines given, each a name and a value written as it is, a Content-Length's value alone
-    standing for its line; its body in one chunk beside a Transfer-Encoding."""
+    standing for its line; its body in one chunk beside a Transfer-Encoding, or the octets given; and
+    a socket it asks closed once answered, unless `close` is false, so that an exchange shows the
+    server close it of its own."""
     lines = [field if isinstance(field, tuple) else ('content-length', field) for field in fields]
     head = f'POST /api/Transcoding/echo {http}\r\nhost: {host}\r\ncontent-type: application/json\r\n'
     head += ''.join(f'{name}: {value}\r\n' for name, value in lines)
     coded = any(name == 'transfer-encoding' for name, _ in lines)
-    body = hexadecimal(b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}')
-    return {'send': {'head': head + 'connection: close\r\n\r\n', 'body': body}, 'on': on}
+
+    if body is None:
+        body = b'2\r\n{}\r\n0\r\n\r\n' if coded else b'{}'
+
+    return {'send': {'head': head + ('connection: close\r\n' if close else '') + '\r\n', 'body': hexadecimal(body)},
+            'on': on}
 
 
 def json_post(path, body, fields=(), *, on='a', close=True):
@@ -3814,8 +3820,8 @@ EXCHANGES = [
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: bearer a.b.c']),
               call_failed({'code': 36, 'arose': 'server', 'detail': 'OPAQUE, ELSEWHERE'})],
              options={'authorization': 'bearer-jwt'}),
-    exchange("under bearer-jwt, another auth-scheme presents no credential: a procedure that needs a session "
-             "answers 401, its challenge alone, and one that needs none runs", ['2.4', '2.4.2', '2.5', '7.6.8'],
+    exchange("under bearer-jwt, another auth-scheme, or none, presents no credential: a procedure that needs a "
+             "session answers 401, its challenge alone, and one that needs none runs", ['2.4', '2.4.2', '2.5', '7.6.8'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic YTpi'], on='a'),
               call_failed({'code': 32, 'arose': 'server'}, on='a'),
               json_post('/api/Transcoding/echo', '{}', ['authorization: Basic YTpi'], on='b'),
@@ -3823,7 +3829,9 @@ EXCHANGES = [
               json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Basic\tYTpi'], on='c'),
               call_failed({'code': 32, 'arose': 'server'}, on='c'),
               json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearerabc'], on='d'),
-              call_failed({'code': 32, 'arose': 'server'}, on='d')],
+              call_failed({'code': 32, 'arose': 'server'}, on='d'),
+              json_post('/api/Transcoding/whoAmI', '{}', ['authorization: =abc'], on='e'),
+              call_failed({'code': 32, 'arose': 'server'}, on='e')],
              options={'authorization': 'bearer-jwt'}),
     exchange("under bearer-jwt, Bearer alone presents no credential", ['2.4', '2.4.2', '2.5', '7.6.8'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer'], on='a'),
@@ -3854,7 +3862,7 @@ EXCHANGES = [
              options={'authorization': 'bearer-jwt'}),
     exchange("two authorization fields, 400 malformed", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
-              refused_own(400, 'malformed', 'two authorization fields')]),
+              refused_own(400, 'malformed', 'two authorization fields', fields={'www-authenticate': None})]),
     exchange("under bearer-jwt, two authorization fields, 400 malformed, invalid_request", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
               refused_own(400, 'malformed', 'two authorization fields', fields=INVALID_REQUEST)],
@@ -3935,6 +3943,16 @@ EXCHANGES = [
     exchange("a host it does not take, 403", ['10.1', '10.1.2', '7.7'],
              [send('GET', '/v1/books/2', ['host: evil.example']),
               refused_own(403, 'host-refused', 'a host it does not take')]),
+    # spec 13.4.1 and 15.12: localhost. and a name under .localhost. are no loopback names, which every
+    # server, a gateway among them, compares as they come
+    exchange("a gateway given no hosts takes localhost and a name under .localhost, and refuses localhost. and a "
+             "name under .localhost. 403", ['10.1', '10.1.2', 'spec:15.12', 'spec:13.4.1'],
+             [*[step for on, host in (('a', 'localhost'), ('b', 'a.localhost'))
+                for step in (send('GET', '/v1/books/2', [f'host: {host}'], on=on),
+                             answered(result('Book', {'name': '2', 'title': 'A tale'}), on=on))],
+              *[step for on, host in (('c', 'localhost.'), ('d', 'a.localhost.'))
+                for step in (send('GET', '/v1/books/2', [f'host: {host}'], on=on),
+                             refused_own(403, 'host-refused', 'a host it does not take', on=on))]]),
     exchange("an origin neither its own nor listed, 403", ['10.1', '10.1.4'],
              [send('GET', '/v1/books/2', ['origin: https://other.example']),
               refused_own(403, 'origin-refused', 'an origin neither its own nor listed')]),
@@ -4055,6 +4073,17 @@ EXCHANGES = [
                 for step in (framed_by([('transfer-encoding', coding)], on=on),
                              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
                                          'body': ''}, 'on': on})]]),
+    # * a chunk's size past 2⁶⁴ − 1, which no server holds, then 12 octets of its data, refused as HTTP
+    # refuses it and never 2xx, and its connection closed once answered, on a socket that asks no close
+    # (spec 15.7, 15.12); no size between 2³¹ and 2⁶⁴ − 1 goes here, where the C# side's Kestrel refuses
+    # at once what the others read as it comes, a row of docs/support.md
+    exchange("a chunk size past 2⁶⁴ − 1 is answered 400 unmarked at the gateway and its connection closed",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [framed_by([('transfer-encoding', 'chunked')], close=False,
+                        body=f'{2 ** 64 + 8:x}\r\n'.encode() + b' ' * 12),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'a'},
+              {'expect': {'end': True}, 'on': 'a'}]),
     # a Transfer-Encoding that lists a coding before its chunked, in one line or in two, refused as
     # HTTP refuses it before the route reads a body still coded; an empty element before chunked
     # ignored, the body echoed
@@ -4069,6 +4098,16 @@ EXCHANGES = [
                                          'body': ''}, 'on': on})],
               framed_by([('transfer-encoding', ', chunked')], on='d'),
               answered('{}', on='d')]),
+    # a coding's name compared in any ASCII case (spec 15.12, RFC 9112 §7): Chunked and CHUNKED decoded,
+    # the body echoed, and gzip, CHUNKED a coding before its chunked, refused as HTTP refuses it
+    exchange("a body whose Transfer-Encoding names its codings in any ASCII case is read so: Chunked and CHUNKED "
+             "are decoded, and gzip, CHUNKED refused as HTTP refuses it, unmarked, its body empty",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [*[step for on, coding in (('a', 'Chunked'), ('b', 'CHUNKED'))
+                for step in (framed_by([('transfer-encoding', coding)], on=on), answered('{}', on=on))],
+              framed_by([('transfer-encoding', 'gzip, CHUNKED')], on='c'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'c'}]),
     # ! an exchange of its own, so that the side whose HTTP reads one number in two lines as that number
     # (hyper keeps the first line and drops the other, the row A `Content-Length` naming one number in
     # several lines, over HTTP/1.1) is excused by its differs from it alone (spec 15.12)
@@ -4082,7 +4121,7 @@ EXCHANGES = [
                        'language': 'Rust'}]),
     # * a Content-Length past 2⁶³ − 1, read by value whatever zeros lead it, refused as HTTP refuses it
     # before the host is judged; one at the count, in 19 digits and in 23, goes on to the host's 403;
-    # 2⁶⁴ − 2 and 2⁶⁴ − 1 stay out, since hyper answers them 431 (spec 15.12)
+    # 2⁶⁴ − 2 and 2⁶⁴ − 1 are an exchange of their own below, which the Rust side's row excuses it from
     exchange("a body whose Content-Length passes 2⁶³ − 1, its leading zeros read by value, refused as HTTP "
              "refuses it, unmarked, its body empty, before its host is judged",
              ['10.1', '10.1.1', 'spec:15.12'],
@@ -4093,6 +4132,17 @@ EXCHANGES = [
                            if int(length) <= 2 ** 63 - 1 else
                            {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
                                        'body': ''}, 'on': on})]),
+    # ! an exchange of its own, so that the side whose HTTP answers 2⁶⁴ − 2 and 2⁶⁴ − 1 431 (hyper, the
+    # row A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1) is excused by its differs from it
+    # alone (spec 15.12)
+    exchange("a body whose Content-Length is 2⁶⁴ − 2 or 2⁶⁴ − 1, refused as HTTP refuses it, unmarked, its body "
+             "empty, before its host is judged",
+             ['10.1', '10.1.1', 'spec:15.12'],
+             [step for on, length in (('a', str(2 ** 64 - 2)), ('b', str(2 ** 64 - 1)))
+              for step in (framed_by([length], on=on, host='evil.example'),
+                           {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                       'body': ''}, 'on': on})],
+             differs=[{'row': 'A `Content-Length` of 2⁶⁴ − 2 or 2⁶⁴ − 1, over HTTP/1.1', 'language': 'Rust'}]),
     # ! an exchange of its own, so that the side whose HTTP reads a Content-Length beside a
     # Transfer-Encoding by the Transfer-Encoding alone (hyper drops the Content-Length, the row A
     # `Content-Length` beside a `Transfer-Encoding`, over HTTP/1.1) is excused by its differs from it
@@ -4296,7 +4346,7 @@ DOCUMENT_JSON = {
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one of its challenge's auth-scheme; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. behind writes requests, each a head and its body as a send writes them, in their order and in one write, on the socket of the exchange it names, which a send opened, as spec/transports.json's behind does: never awaited, each head whole, of no HEAD and no CONNECT and with no upgrade or expect, 65,536 octets at most. expect reads the next response on that exchange, in the order of the requests written on its socket, so that one exchange carries several responses where a behind wrote on it: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. An expect of end reads that its socket ended, its server's FIN read, nothing come on it past the responses read, as spec/transports.json's end does. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],

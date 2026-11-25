@@ -162,6 +162,14 @@ public sealed partial class HttpTransportServer
                 _port.Lose((connection, waiting));
                 await RefuseAsHttp(context, reason.StatusCode);
             }
+            catch (IOException reason) when (reason.InnerException is OverflowException)
+            {
+                // ! a chunk size past what Kestrel holds, an int's, fails its body's read as a size
+                // it overflows: answered 400 as HTTP refuses it (RFC 9112 §7.1), never the 200 Kestrel
+                // writes of an exchange left unanswered (spec 15.7); lost, its connection with it
+                _port.Lose((connection, waiting));
+                await RefuseAsHttp(context, StatusCodes.Status400BadRequest);
+            }
             catch (Exception reason) when (reason is IOException or OperationCanceledException)
             {
                 // the client went: lost, as its abort says — which may have resumed this exchange, and

@@ -39,9 +39,9 @@ const HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
 // ! every key of a step and of an option this player reads over a socket: one it does not know
 // fails the case, rather than pass it unplayed
-const STEP_KEYS: [&str; 11] = [
-    "advance", "after", "behind", "expect", "on", "report", "send", "stop", "until", "wait",
-    "within",
+const STEP_KEYS: [&str; 12] = [
+    "advance", "after", "behind", "expect", "on", "report", "reported", "send", "stop", "until",
+    "wait", "within",
 ];
 
 // the keys that time a step or name its exchange rather than make an act
@@ -298,12 +298,13 @@ pub(crate) fn read_response(response: &Value) -> Result<(), String> {
 
 // ── The server under test ────────────────────────────────────────────────────────────────────
 
-// what the server reported to its application, through its router, and the
-// refusals its transport told
+// what the server reported to its application, through its router, the refusals its transport
+// told, and the errors its transport reported of its own
 #[derive(Default)]
 struct Told {
     reports: Mutex<VecDeque<(Value, Option<ConnectionHandle>)>>,
     refusals: Mutex<VecDeque<TransportServerRefusal>>,
+    errors: Mutex<VecDeque<(String, Option<ConnectionHandle>)>>,
 }
 
 fn code_of(error: &RouterError) -> Value {
@@ -313,9 +314,9 @@ fn code_of(error: &RouterError) -> Value {
     }
 }
 
-// * what a transport tells: its refusals alone; every report is its router's, a text message's
-// ENVELOPE_MALFORMED among them (spec 15.2), as the other sides' players hear them, a connection
-// failed or dropped by its transport told by its transport alone
+// * what a transport tells: its refusals, and its own errors, a connection it failed or dropped
+// among them; a transport's own failures are read by `reported`, its router's by `report`, a text
+// message's ENVELOPE_MALFORMED among them (spec 15.2), as the other sides' players hear them
 struct AtTransport {
     told: Arc<Told>,
 }
@@ -323,6 +324,10 @@ struct AtTransport {
 impl ServerListener for AtTransport {
     fn on_refusal(&self, refusal: &TransportServerRefusal) {
         locked(&self.told.refusals).push_back(refusal.clone());
+    }
+
+    fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+        locked(&self.told.errors).push_back((error.to_string(), connection_handle.cloned()));
     }
 }
 
@@ -574,6 +579,9 @@ struct Played {
     server: UnderTest,
     told: Arc<Told>,
     exchanges: HashMap<String, Exchange>,
+    // the handle each exchange's connection had on the server while it held it, which a reported
+    // reads once its socket is gone
+    handles: HashMap<String, ConnectionHandle>,
     values: HashMap<String, String>,
     port: u16,
     answers_pings: bool,
@@ -587,6 +595,8 @@ impl Played {
             .ok_or_else(|| format!("{at}: no exchange {on} was sent"))
     }
 
+    // ! over WebSocket, the transport's own errors among what the server reported; over HTTP, they
+    // are not read
     fn nothing_reported(&self, when: &str) -> Result<(), String> {
         let reports: Vec<Value> = locked(&self.told.reports)
             .iter()
@@ -594,10 +604,94 @@ impl Played {
             .collect();
         let refusals: Vec<TransportServerRefusal> =
             locked(&self.told.refusals).iter().cloned().collect();
+        let errors: Vec<String> = if matches!(self.server, UnderTest::WebSocket(_)) {
+            locked(&self.told.errors)
+                .iter()
+                .map(|(message, _)| message.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
 
-        hold(reports.is_empty() && refusals.is_empty(), || {
-            format!("{when}: reported {reports:?}, and told {refusals:?}")
+        hold(
+            reports.is_empty() && errors.is_empty() && refusals.is_empty(),
+            || {
+                format!(
+                    "{when}: reported {reports:?}, of its transport {errors:?}, and told {refusals:?}"
+                )
+            },
+        )
+    }
+
+    // * the handle of each exchange whose connection the server holds now, kept past its socket
+    fn keep_handles(&mut self) {
+        let clients = self.server.clients();
+
+        for (on, exchange) in &self.exchanges {
+            if self.handles.contains_key(on) {
+                continue;
+            }
+
+            let port = exchange.local_port();
+
+            if let Some(client) = clients.iter().find(|client| client.port == Some(port)) {
+                self.handles
+                    .insert(on.clone(), Arc::clone(&client.connection_handle));
+            }
+        }
+    }
+
+    // the next error the transport reported of its own, of the connection of the exchange `on`
+    // names, the first one queued with its handle, or of any where the step names none
+    async fn reported(
+        &self,
+        words: &[Value],
+        (on, at): (Option<&str>, &str),
+    ) -> Result<(), String> {
+        let handle = match on {
+            Some(on) => Some(match self.handles.get(on) {
+                Some(handle) => Arc::clone(handle),
+                None => self.handle_of((on, at))?,
+            }),
+            None => None,
+        };
+        let is_theirs = |reported: &Option<ConnectionHandle>| {
+            handle.is_none() || reported.as_ref() == handle.as_ref()
+        };
+        poll_within(|| {
+            locked(&self.told.errors)
+                .iter()
+                .any(|(_, of)| is_theirs(of))
         })
+        .await;
+
+        let message = {
+            let mut errors = locked(&self.told.errors);
+
+            errors
+                .iter()
+                .position(|(_, of)| is_theirs(of))
+                .and_then(|found| errors.remove(found))
+                .map(|(message, _)| message)
+        };
+        let message = message.ok_or_else(|| {
+            let errors: Vec<(String, Option<ConnectionHandle>)> =
+                locked(&self.told.errors).iter().cloned().collect();
+
+            format!("{at}: nothing reported of {handle:?}, among {errors:?}")
+        })?;
+
+        for word in words {
+            let word = word
+                .as_str()
+                .ok_or_else(|| format!("{at}: a word is a string"))?;
+
+            hold(message.contains(word), || {
+                format!("{at}: the report {message:?} names no {word}")
+            })?;
+        }
+
+        Ok(())
     }
 
     // the handle the exchange `on`'s connection has on the server: the one it holds from the port
@@ -661,6 +755,8 @@ impl Played {
             if let Some(before) = self.exchanges.remove(on) {
                 before.destroy();
             }
+
+            self.handles.remove(on);
 
             let mut options = ExchangeOptions::new(SocketAddr::from((HOST, self.port)));
 
@@ -1034,6 +1130,9 @@ async fn expect_heard(
 async fn play_steps(played: &mut Played, steps: &[Value]) -> Result<(), String> {
     for (index, step) in steps.iter().enumerate() {
         let at = format!("step {}", index.saturating_add(1));
+
+        played.keep_handles();
+
         let object = step.as_object().ok_or("a step is an object")?;
         let unknown: Vec<&String> = object
             .keys()
@@ -1196,6 +1295,13 @@ async fn play_steps(played: &mut Played, steps: &[Value]) -> Result<(), String> 
             }
         }
 
+        if let Some(words) = step.get("reported") {
+            let words = words.as_array().ok_or("a reported is an array")?;
+            let on = step.get("on").and_then(Value::as_str);
+
+            played.reported(words, (on, &at)).await?;
+        }
+
         if step.get("stop") == Some(&Value::Bool(true)) {
             played.is_stopped = true;
             played
@@ -1236,6 +1342,7 @@ pub(crate) async fn play(case: &Value, wall: SystemTime) -> Result<(), String> {
         server,
         told,
         exchanges: HashMap::new(),
+        handles: HashMap::new(),
         values: HashMap::from([("host".to_owned(), format!("{HOST}:{}", started.port))]),
         port: started.port,
         answers_pings: case.get("answersPings") != Some(&Value::Bool(false)),

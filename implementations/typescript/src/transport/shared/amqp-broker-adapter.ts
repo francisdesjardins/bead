@@ -34,8 +34,8 @@ import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } fro
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
 import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
-import { isConnectFailure, loopbackConnectOptions, loopbackSentenceOf } from './loopback';
-import { isSecureUrl } from './secure';
+import { isConnectFailure, isLocalhostName, loopbackSentenceOf, raceLoopback } from './loopback';
+import { isSecureUrl, urlHostOf } from './secure';
 import { assertTls, builtinOf, isNode, nodeTlsOf, tlsOf } from './tls';
 import type {
   BrokerDelivery,
@@ -314,8 +314,8 @@ const abandon = (connection: Connection): void => {
   });
 };
 
-// the part of `node:net` and `node:tls` a connection to a localhost name connects by
-interface IConnectLike {
+// the part of `node:tls` a raced socket is secured by
+interface ITlsConnectLike {
   connect(options: object, listener: () => void): unknown;
 }
 
@@ -324,18 +324,30 @@ interface IGiven {
   transport?: string;
 }
 
-/**
- * rhea's `connect` for a localhost name, which connects it to the loopback itself and asks no
- * resolver (spec 13.4): rhea's own hands `net.connect` no options, its `lookup` lost.
- */
+// rhea's `connect`, whatever it takes: its port, its host, its options and its callback
 // oxlint-disable-next-line max-params, bead/options-last -- rhea's own `connect`, whatever it takes
-const loopbackConnect = (port: number, host: string, given: IGiven, done: () => void): unknown => {
-  const isTls = given.transport === 'tls' || given.transport === 'ssl';
-  const connect = { ...loopbackConnectOptions(host), host, port };
+type RheaConnect = (port: number, host: string, given: IGiven, done: () => void) => unknown;
 
-  return isTls
-    ? (builtinOf('node:tls') as IConnectLike).connect({ ...given, ...connect }, done)
-    : (builtinOf('node:net') as IConnectLike).connect(connect, done);
+/**
+ * rhea's `connect` over `raced`, the socket a localhost name's race of the loopback won, asking no
+ * resolver (spec 13.4): rhea's own connects by the platform's resolver. Under TLS, it lays TLS over
+ * it with the options rhea hands it; in the clear, it calls rhea back from a microtask, the socket
+ * already connected.
+ */
+const loopbackConnectOf = (raced: unknown): RheaConnect => {
+  // oxlint-disable-next-line max-params, bead/options-last -- rhea's own `connect`, whatever it takes
+  return (port, host, given, done) => {
+    if (given.transport === 'tls' || given.transport === 'ssl') {
+      return (builtinOf('node:tls') as ITlsConnectLike).connect(
+        { ...given, host, port, socket: raced },
+        done
+      );
+    }
+
+    queueMicrotask(done);
+
+    return raced;
+  };
 };
 
 // ! no refusal names the password it refuses: a word never carries the secret
@@ -478,11 +490,19 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
   assertAuthentication({ password, passwordProvider, tls });
 
+  // * its host read once, as the URL Standard reads a special scheme's host, whatever its scheme:
+  // judged, dialed, written in its OPEN and sent as its TLS name; one it fails on refused here
+  const read = urlHostOf(url);
+
+  if (read === undefined) {
+    throw new ProgrammerError(`${parsed.hostname} is no host a URL can name`);
+  }
+
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const isTls = parsed.protocol === 'amqps:';
-  const host = parsed.hostname.replace(/^\[(.*)\]$/, '$1');
-  // a URL writes an IPv6 address in brackets and an IPv4 one as four decimal numbers
-  const isAddress = parsed.hostname.startsWith('[') || /^\d+\.\d+\.\d+\.\d+$/.test(host);
+  const host = read.replace(/^\[(.*)\]$/, '$1');
+  // the parser writes an IPv6 address in brackets and an IPv4 one as four decimal numbers
+  const isAddress = read.startsWith('[') || /^\d+\.\d+\.\d+\.\d+$/.test(host);
   const port = parsed.port === '' ? (isTls ? 5671 : 5672) : Number(parsed.port);
   // * a localhost name connected to the loopback itself, asking no resolver; rhea reads no proxy
   const loopbackSaid = loopbackSentenceOf(host);
@@ -1490,7 +1510,46 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       throw new GenericError(`the link of ${id} stopped as it started`);
     }
 
-    const left = Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+    const leftOf = (): number => {
+      return Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+    };
+    // * a localhost name raced on the loopback before its connection is built, within its start's
+    // connectTimeout, given up by its start's signal or its stop
+    let raced: unknown;
+
+    if (isLocalhostName(host)) {
+      try {
+        raced = await raceLoopback(port, {
+          signal: signal === undefined ? ask.signal : AbortSignal.any([ask.signal, signal]),
+          timeout: leftOf(),
+        });
+      } catch (reason) {
+        if (signal?.aborted === true) {
+          throw toCancelError(signal);
+        }
+
+        if (ask.signal.aborted) {
+          throw toError(ask.signal.reason);
+        }
+
+        // * no socket opened: its every attempt failed, or its connectTimeout passed
+        const where =
+          loopbackSaid === undefined || !isConnectFailure(reason) ? '' : `; ${loopbackSaid}`;
+
+        throw new GenericError(
+          `the link of ${id} ended as it started: ${toError(reason).message}${where}`,
+          { cause: reason }
+        );
+      }
+
+      if (asked !== starts) {
+        (raced as { destroy(): void }).destroy();
+
+        throw new GenericError(`the link of ${id} stopped as it started`);
+      }
+    }
+
+    const left = leftOf();
 
     const connectionOptions: ConnectionOptions = {
       container_id: id,
@@ -1500,7 +1559,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       port,
       reconnect: false,
       ...(virtualHost === undefined ? {} : { hostname: `vhost:${virtualHost}` }),
-      ...(loopbackSaid === undefined ? {} : { connect: loopbackConnect }),
+      ...(raced === undefined ? {} : { connect: loopbackConnectOf(raced) }),
       ...(isTls
         ? {
             // ! an address is no server name (RFC 6066 §3), and Node refuses one: an empty name sends

@@ -1,12 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { createMessageBudget, type IMessageBudget } from '../websocket-message-budget';
 
-// holders of `budget` by their names, each past its grace as `pastGrace` names it; those another's
-// charge casts off, in order
-const holdersOf = (
-  budget: IMessageBudget,
-  { names, pastGrace = [] }: { names: readonly string[]; pastGrace?: readonly string[] }
-) => {
+// holders of `budget` by their names; those another's charge casts off, in order
+const holdersOf = (budget: IMessageBudget, { names }: { names: readonly string[] }) => {
   const castOff: string[] = [];
   const holders = new Map(
     names.map((name) => {
@@ -15,9 +11,6 @@ const holdersOf = (
         budget.holderOf({
           castOff: () => {
             castOff.push(name);
-          },
-          isPastGrace: () => {
-            return pastGrace.includes(name);
           },
         }),
       ];
@@ -43,7 +36,7 @@ const holdersOf = (
 
 test.describe('createMessageBudget', () => {
   // spec 15.12; IANA's WebSocket Close Code Number Registry, 1013
-  test('casts off with 1013 the connections whose messages hold the most when a charge would pass messageBytesBudget, the newcomer only when it holds the most', () => {
+  test('casts off other budget holders or refuses the asker when the next byte passes the bound', () => {
     const budget = createMessageBudget(500);
     const { castOff, charge, holders } = holdersOf(budget, {
       names: ['ada', 'bob', 'carol', 'dave', 'eve'],
@@ -62,8 +55,8 @@ test.describe('createMessageBudget', () => {
       320,
     ]);
 
-    // dave's 234 passes it, more than any other holds: he alone is cast off, his charge not
-    // taken, his own cast-off his caller's
+    // dave's 234 passes it: at its 181st byte, he holds more than any other, and he alone is cast
+    // off, what he held released, his own cast-off his caller's
     expect([charge('dave', { bytes: 234, isFirst: true }), castOff, budget.held]).toEqual([
       false,
       ['ada'],
@@ -100,29 +93,74 @@ test.describe('createMessageBudget', () => {
     expect(budget.held).toBe(0);
   });
 
-  // spec 15.12; rationale of decision 0056
-  test('casts off a message past its grace before one within it', () => {
-    const budget = createMessageBudget(3_200);
-    const { castOff, charge } = holdersOf(budget, {
-      names: ['ada', 'bob', 'carol'],
-      pastGrace: ['ada', 'carol'],
-    });
+  // spec 15.12
+  test('charges byte by byte, casting off whom the unit that passes the budget finds first', () => {
+    const budget = createMessageBudget(1_000);
+    const { castOff, charge, holders } = holdersOf(budget, { names: ['x', 'a'] });
 
-    charge('ada', { bytes: 1_576, isFirst: true });
-    charge('carol', { bytes: 100, isFirst: true });
+    charge('x', { bytes: 600, isFirst: true });
 
-    // bob's 1,636 holds the most, within his grace: ada, past hers, goes first, and alone fits it
-    expect([charge('bob', { bytes: 1_636, isFirst: true }), castOff, budget.held]).toEqual([
+    // * a's 650, whole, would hold more than x's 600; its 401st byte, the first past the budget,
+    // finds x holding the most, so x is cast off, and a takes the rest
+    expect([charge('a', { bytes: 650, isFirst: true }), castOff, budget.held]).toEqual([
       true,
-      ['ada'],
-      1_736,
+      ['x'],
+      650,
     ]);
+    expect([holders.get('x')?.held, holders.get('a')?.held]).toEqual([0, 650]);
 
-    // carol, past her grace, goes before bob, though she holds far less
-    expect([charge('bob', { bytes: 1_500 }), castOff, budget.held]).toEqual([
-      true,
-      ['ada', 'carol'],
-      3_136,
+    // a charge of none is taken, and judges nothing
+    expect([charge('a', { bytes: 0 }), castOff, budget.held]).toEqual([true, ['x'], 650]);
+  });
+
+  // spec 15.12
+  test('casts off each holder that comes before a message whose charge alone passes the budget, then that message’s connection', () => {
+    const budget = createMessageBudget(2_000);
+    const { castOff, charge, holders } = holdersOf(budget, { names: ['p', 'a'] });
+
+    charge('p', { bytes: 1_096, isFirst: true });
+
+    // a's 2,036: p, holding more at a's 905th byte, is cast off; past 2,000, none is left but a
+    expect([charge('a', { bytes: 2_036, isFirst: true }), castOff, budget.held]).toEqual([
+      false,
+      ['p'],
+      0,
     ]);
+    expect([holders.get('p')?.held, holders.get('a')?.held]).toEqual([0, 0]);
+  });
+
+  // spec 15.12
+  test('casts off, among equal sums, the holder whose message began first', () => {
+    // another holder: ada began first, bob second, each holding 200
+    const shared = createMessageBudget(500);
+    const others = holdersOf(shared, { names: ['ada', 'bob', 'carol'] });
+
+    others.charge('ada', { bytes: 200, isFirst: true });
+    others.charge('bob', { bytes: 200, isFirst: true });
+    expect([
+      others.charge('carol', { bytes: 150, isFirst: true }),
+      others.castOff,
+      shared.held,
+    ]).toEqual([true, ['ada'], 350]);
+
+    // the asking holder: its unit ties the other's sum, and the one begun first goes
+    for (const [first, expected] of [
+      ['ada', { castOff: [], isKept: false }],
+      ['bob', { castOff: ['bob'], isKept: true }],
+    ] as const) {
+      const budget = createMessageBudget(301);
+      const { castOff, charge, holders } = holdersOf(budget, { names: ['ada', 'bob'] });
+      const second = first === 'ada' ? 'bob' : 'ada';
+
+      holders.get(first)?.begin();
+      holders.get(second)?.begin();
+      charge('bob', { bytes: 151 });
+
+      // ada's 150th byte fills the budget, and her 151st ties bob's 151
+      expect([charge('ada', { bytes: 151 }), castOff], `${first} began first`).toEqual([
+        expected.isKept,
+        expected.castOff,
+      ]);
+    }
   });
 });

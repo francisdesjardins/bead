@@ -639,9 +639,8 @@ body {
   color: var(--app-text);
 }
 
-/* a tool drawn as a glyph: the theme, the page's menu */
-.tool[data-action='theme'],
-.tool[data-action='menu'] {
+/* a tool drawn as a glyph: the theme */
+.tool[data-action='theme'] {
   width: var(--app-touch);
   padding: 0;
   font-size: 1.25rem;
@@ -785,22 +784,113 @@ a code {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-/* the bar is `penumbra/chrome.css`'s: here, the language's two names, the long one past a phone */
-.language .short {
-  display: none;
+/* the bar is `penumbra/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
+   left, its name left to the section read, which names the button that opens the contents; the
+   language in the contents' foot. Where they are a column: the bar as the demo has it, the
+   language by its two letters */
+.reading {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--app-space-1);
+  min-width: 0;
+  height: var(--app-touch);
+  /* the title close to the mark, its pill's edge in the bar's gap */
+  margin: 0 0 0 calc(-1 * var(--app-space-2));
+  padding: 0 var(--app-space-2);
+  border: 2px solid transparent;
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  background-clip: padding-box;
+  color: var(--app-text);
+  font: 500 var(--app-text-md) / 1 var(--app-font-body);
+  cursor: pointer;
+  transition: background-color var(--app-quick) var(--app-ease);
 }
 
-@media (max-width: 599px) {
-  .language .long {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+.reading:hover {
+  background-color: var(--app-hover);
+}
+
+/* ! a long title ends in an ellipsis, never on a second line: the bar's height is fixed */
+.reading-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-caret {
+  flex: none;
+  color: var(--app-text-secondary);
+  font-size: 1.1em;
+  transition: transform var(--app-quick) var(--app-ease);
+}
+
+.reading[aria-expanded='true'] .reading-caret {
+  transform: rotate(180deg);
+}
+
+/* the two languages at the contents' foot, each written out, the page's own marked */
+.toc-languages {
+  display: flex;
+  gap: var(--app-space-2);
+  max-width: none;
+  margin: var(--app-space-4) 0 0;
+  padding: var(--app-space-3) 0 0;
+  border-top: 1px solid var(--app-divider);
+  list-style: none;
+}
+
+.toc-languages li + li {
+  margin-top: 0;
+}
+
+.toc .toc-languages a {
+  display: inline-flex;
+  border-left: 0;
+  align-items: center;
+  min-height: var(--app-touch);
+  padding: 0 var(--app-space-3);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-md);
+  text-decoration: none;
+}
+
+.toc .toc-languages a:hover {
+  color: var(--app-text);
+}
+
+.toc .toc-languages a[aria-current] {
+  color: var(--app-text);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--app-primary);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.45em;
+}
+
+@media (max-width: 959px) {
+  .topbar .brand {
+    gap: 0;
+    font-size: 0;
   }
-  .language .short {
-    display: inline;
+  .tools .language {
+    display: none;
+  }
+}
+
+@media (min-width: 960px) {
+  .reading,
+  .toc-languages {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reading,
+  .reading-caret {
+    transition: none;
   }
 }
 
@@ -891,9 +981,6 @@ main:focus {
     align-self: start;
     max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-10));
     overflow-y: auto;
-  }
-  .tool[data-action='menu'] {
-    display: none;
   }
 }
 
@@ -1748,10 +1835,10 @@ footer {
 <a class="skip" href="#main">Skip to the content</a>
 <header class="topbar">
   <a class="brand" href="#top" title="Bead, to the top of the page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <button type="button" class="reading" data-action="menu" aria-expanded="false" aria-controls="toc"><span class="visually-hidden">Contents: </span><span class="reading-title" data-reading>Bead</span><span class="reading-caret" aria-hidden="true">▾</span></button>
   <span class="tools">
-    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Open the contents" data-open="Open the contents" data-close="Close the contents">≡</button>
     <a class="tool demo" href="/playground/">Demo</a>
-    <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" title="Lire cette page en français"><span class="long">Français</span><span class="short" aria-hidden="true">FR</span></a>
+    <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr" title="Lire cette page en français"><span class="visually-hidden">Français</span><span aria-hidden="true">FR</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Switch to dark mode" data-to-dark="Switch to dark mode" data-to-light="Switch to light mode">◐</button>
   </span>
 </header>
@@ -1759,11 +1846,15 @@ footer {
   <nav class="toc" id="toc" aria-label="Contents">
     <p class="toc-title">Contents</p>
     <ol><li><a href="#statut">Where Bead stands</a></li><li><a href="#essentiel">Bead in one example</a></li><li><a href="#pourquoi">Where Bead differs</a></li><li class="toc-part"><p class="toc-part-title">The questions</p><ol><li><a href="#contrat">One contract for every team</a></li><li><a href="#transcodage">Teams that do not speak Bead</a></li><li><a href="#versions">Evolving without breaking</a></li><li><a href="#transports">The transports</a></li><li><a href="#implantations">The same behaviour on every side</a></li><li><a href="#debogage">Debugging and observing</a></li><li><a href="#securite">Security</a></li></ol></li><li class="toc-part"><p class="toc-part-title">The protocol, in detail</p><ol><li><a href="#protocole">Bead’s choices</a></li><li><a href="#enveloppe">The envelope</a></li><li><a href="#callid">The callId</a></li><li><a href="#echecs">Failures</a></li><li><a href="#porte">What does not read</a></li><li><a href="#regles">A payload’s rules</a></li><li><a href="#annulation">Cancel</a></li><li><a href="#abonnements">Subscriptions</a></li><li><a href="#sessions">Sessions</a></li><li><a href="#transferts">Transfers</a></li><li><a href="#relais">Relays</a></li><li><a href="#http">Over HTTP</a></li><li><a href="#memoire">In memory</a></li><li><a href="#courtier">Over a broker</a></li></ol></li><li><a href="#suite">What is ahead</a></li><li><a href="#code">In the code</a></li></ol>
+    <ul class="toc-languages" aria-label="Language">
+      <li><a href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en" aria-current="true">English</a></li>
+      <li><a href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr">Français</a></li>
+    </ul>
   </nav>
   <main id="main" tabindex="-1">
 <div class="opening">
   <header class="hero">
-    <p class="eyebrow">bead 0.16.0 · spec 0.17.0 · layouts 0xA1 and 0xB1</p>
+    <p class="eyebrow">bead 0.17.0 · spec 0.18.0 · layouts 0xA1 and 0xB1</p>
     <h1>Bead</h1>
     <p class="lede">
       One typed contract for teams that call each other in TypeScript, C# and Rust, from a browser,
@@ -1773,8 +1864,8 @@ footer {
       A service is declared once, in a <code>.proto</code>. <code>beadc</code> generates its typed
       server and client in each language. A gateway each side offers answers the same procedures in
       HTTP and JSON, for the teams that do not speak Bead. A specification holds the sides to one
-      behaviour: each plays its conformance files, the Rust side the part it reaches, and the
-      support matrix lists each place where they still differ.
+      behaviour, and each plays its conformance files. The Rust side has their AMQP 1.0 cases
+      ahead, with its binding. The support matrix lists each place where the sides still differ.
     </p>
   </header>
   <section id="statut" class="status">
@@ -1790,12 +1881,14 @@ footer {
       a team can carry it on with an agent.
     </p>
     <p id="methode-agents">
-      The ideas, the protocol’s design and the TypeScript side are its author’s. Much of the rest was
-      written by AI agents under the repository’s gates: the other implementations, the generator,
-      and many of the spec’s readings of standards. The idioms of the other languages, and those
-      readings, were checked by the tests, the design rounds and the agents’ reviews. No one with the
-      knowledge to judge them has reviewed Bead’s core, its security or its reading of the standards
-      it follows; a team that takes it reviews it as its own code.
+      The ideas, the project’s values, the protocol’s design and the decisions are its author’s, and
+      so are the TypeScript side’s first versions. Much of the code was written by AI agents under
+      the repository’s gates: the other implementations, the generator, much of what has changed on
+      the TypeScript side since, and many of the spec’s readings of standards. Those readings and
+      each language’s idioms were checked by the tests, the design rounds and the agents’
+      reviews. Bead’s core, its security and its reading of the standards it follows have been
+      reviewed by no one with the knowledge to judge them; a team that takes it reviews it as its
+      own code.
     </p>
     <p id="methode">
       On <a href="https://francisdesjardins.ca/?lng=en#method">francisdesjardins.ca</a>, its author
@@ -1815,7 +1908,7 @@ footer {
   </div>
 </div>
 
-<section id="essentiel">
+<section id="essentiel" data-bead-face="happy">
   <h2>Bead in one example</h2>
   <p class="gist">
     Bead is a binary protocol for calls between a client and a server. A request receives its
@@ -1902,8 +1995,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>A broker is one more transport</strong
-      ><span>Over MQTT 5, and over AMQP 1.0 on the TypeScript and C# sides, both ends keep the API
-        they have over a WebSocket.</span>
+      ><span>Over MQTT 5 on every side, and over AMQP 1.0 on RabbitMQ 4 for the TypeScript and C#
+        sides, both ends keep the API they have over a WebSocket.</span>
     </li>
     <li>
       <strong>One credit paces a subscription as it paces a transfer</strong
@@ -1912,14 +2005,14 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>The spec’s conformance files are its executable form</strong
-      ><span>Each side plays those files, not a copy of its own, and the Rust side plays the part it
-        reaches.</span>
+      ><span>Each side plays those files, not a copy of its own. The Rust side has their AMQP 1.0
+        cases ahead, with its binding.</span>
     </li>
   </ul>
   <p class="space">
     The architecture guide sets Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">beside gRPC-Web, Connect and SignalR</a>.
-    The other projects’ cells quote or sum up their own pages. What Bead lacks beside them: its
+    Its table quotes or sums up the other three projects’ own pages. What Bead lacks beside them: its
     packages are unpublished, and it speaks three languages.
   </p>
 </section>
@@ -1985,12 +2078,12 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <p>
     A companion of the specification, <code>spec/transcoding.md</code>, describes it under its own
-    version, 0.7.0. The gateway listens on its own port,
+    version, 0.8.0. The gateway listens on its own port,
     <code>localhost</code> by default, or mounts into the application’s web server.
   </p>
   <p>
-    What the wire can do and a gateway does not carry is listed, not hidden: a connection’s
-    session, a command and a stream’s window, each a row of the support matrix’s
+    A connection’s session, a command and a stream’s window are carried by the wire and not by a
+    gateway. Each is a row of the support matrix’s
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/support.md#leveled-down">“Leveled down”</a> (the companion’s §2.5,
     §2.6 and §8.8). A stream’s resumption has its row there too (§8.3): Server-Sent Events offer
     it, and a Bead subscription keeps no notification past its end.
@@ -2047,12 +2140,13 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <h3 id="transcodage-echecs">A failure, a problem</h3>
   <p>
-    Each failure answers an RFC 9457 problem, <code>application/problem+json</code>.
-    <code>code</code> and <code>scope</code> carry what the wire carries, and <code>detail</code>
-    the failure’s detail. The status depends on where the code arose: what the caller can fix
-    gives a 4xx, what happens between the gateway and its server a 5xx.
+    The gateway answers each failure with an RFC 9457 problem,
+    <code>application/problem+json</code>. <code>code</code> and <code>scope</code> carry what the
+    wire carries, and <code>detail</code> the failure’s detail. The status depends on where the
+    failure arose: what the caller can mend gives a 4xx, and what it cannot, in the server, in the
+    gateway or between them, a 5xx.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, and what is said only between the gateway and its server</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Status</th><th scope="col">What raised it</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE of a body, a query string or a variable, or of a json, text or raw request; an application’s failure</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, its challenge in www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, its violations in errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">431</td><td>a JWT past 1004 bytes, under bearer-jwt</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED; what is said only between the gateway and its server; a protocol code the specification does not name; the gateway’s own configuration; a result its JSON form cannot hold, or what no gate foresaw</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>an answer the gateway could not take; DESTINATION_LOST, or the exchange’s connection closed before its answer; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED; PAYLOAD_UNDECODABLE of a proto request</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, or the call’s timeout, 5 s by default</td></tr></tbody></table></div>
   <p class="space">
     A <code>PAYLOAD_INVALID</code> gives a 422 whose <code>errors</code> place each violation:
     <code>pointer</code> into the body, or <code>parameter</code> for a variable of the path or of
@@ -2196,7 +2290,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
 </section>
 
-<section id="transports">
+<section id="transports" data-bead-face="listening">
   <h2 id="transports-h">The transports</h2>
   <p class="gist">
     Both ends keep the same API whatever carries the envelopes, so a team picks the transport by
@@ -2211,20 +2305,21 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
 </section>
 
-<section id="implantations">
+<section id="implantations" data-bead-face="focused">
   <h2 id="implantations-h">The same behaviour on every side</h2>
   <p class="gist">
     The three sides answer to one specification, and to the conformance files that are its
     executable form: every unit of the spec is cited by a file, or carries the reason none does.
-    Each side plays those files from <code>spec/</code>, the Rust side the part it reaches, and the
-    three call each other in CI. Where they still differ, each difference is a row of the support
-    matrix, with the test that shows it.
+    Each side plays those files from <code>spec/</code>, and the three call each other in CI. The
+    Rust side has the files’ AMQP 1.0 cases ahead, with its binding. Where the sides still differ,
+    each difference is a row of the support matrix, with the test that shows it.
   </p>
   <p>
-    TypeScript and C# are at behavioural parity. The Rust side has the parts below, and what it
+    TypeScript and C# are at behavioural parity, but for the C# side’s core in a page and in a
+    worker, ahead with its Web Worker transport. The Rust side has the parts below, and what it
     lacks is ahead.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined; a Web Worker ahead, with its core in a page</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined; AMQP 1.0 and a Web Worker ahead</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     Parity holds down to the field. Where one platform cannot do what another can, the difference
     either stays between the sides or is leveled, every side keeping to what that platform can. A
@@ -2236,7 +2331,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <p>
     The sides also measure themselves. TypeScript and C# measure the same layers in the same
     units: the envelope’s codec, a JSON payload, protobuf’s JSON mapping, an <code>echo</code> over
-    HTTP, over WebSocket and in memory, paced notifications and a 20 MiB transfer. Rust measures its
+    HTTP, over WebSocket and in memory, paced notifications and a 20 MiB echo. Rust measures its
     codec, its JSON mapping and its <code>echo</code> in memory; its layers on the loopback are
     ahead. On each release’s branch,
     CI measures each side against the last release. It runs both trees in turn on one machine and
@@ -2250,7 +2345,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <details class="more">
     <summary>The conformance files, in figures</summary>
     <ul>
-      <li><strong>The units</strong>: 412 for the specification,
+      <li><strong>The units</strong>: 414 for the specification,
         185 for debugging and 193 for
         transcoding, each held by the sha256 fingerprint of its text.</li>
       <li><strong>The vectors</strong>: 474, in 17
@@ -2260,7 +2355,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         Codes each MQTT 5 acknowledgement names.</li>
       <li><strong>The conversations</strong>: 210, each a script between
         clients and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 312, each at a
+      <li><strong>The transports’ cases</strong>: 318, each at a
         transport’s edge, over HTTP, over WebSocket and over a broker, written byte by byte.</li>
       <li><strong>The durations</strong>: 36 places that take a duration,
         and what each makes of 19 inputs.</li>
@@ -2272,7 +2367,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <li><strong>Transcoding</strong>: 26 templates, 192
         readings, 78 writings, 66 bindings,
         45 failures, 10 event streams and
-        103 exchanges.</li>
+        107 exchanges.</li>
       <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors.</li>
     </ul>
   </details>
@@ -2424,7 +2519,7 @@ disallowed-types = [
       A failure arrives as <code>error</code>, a <code>FailureError</code> that says who raised it
       and where. A notification heard is a single step in, with no options and no duration.
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo(''): the server answers the procedure's failure 21</span>
+    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo(''): the server answers the procedure's failure EMPTY_TEXT, code 21</span>
 FailureError {
   code: <span class="tok-number">21</span>,
   detail: <span class="tok-string">'nothing to echo'</span>,
@@ -2535,7 +2630,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// at /metrics, for Prometheus, and a Grafana behind it</span>
+<span class="tok-comment">// served at /metrics, in the text Prometheus reads</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -2579,7 +2674,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </details>
 </section>
 
-<section id="securite">
+<section id="securite" data-bead-face="surprised">
   <h2 id="securite-h">Security, plainly</h2>
   <p class="gist">
     A Bead server keeps itself behind six gates, from the outermost to the innermost. Each gate
@@ -2651,8 +2746,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       session. It plays the part of a session cookie, tied to its connection.
     </li>
     <li>
-      <strong><code>JWT</code></strong>: a signed access token, which each server verifies on the
-      spot, with the keys its application gives it.
+      <strong><code>JWT</code></strong>: a signed access token, which each server verifies itself,
+      with the keys or the key set its application gives it.
     </li>
     <li>
       <strong><code>ELSEWHERE</code></strong>: the credential travels in the transport, and the
@@ -2739,8 +2834,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more" id="securite-relais">
     <summary>A relay</summary>
     <p>
-      A relay terminates each leg and forwards a JWT as it is to the destination of its audience,
-      which verifies it. By default it refuses a call with no credential, or with OPAQUE, so as not to lend its own
+      A relay terminates each leg and forwards a bearer credential as it is to the destination the
+      requester chooses, which verifies it. By default it refuses a call with no credential, or with OPAQUE, so as not to lend its own
       session to any requester. <a href="#relais">Relays</a> details it all.
     </p>
   </details>
@@ -2783,8 +2878,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       counts.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused: authority "rebind.example:8080", origin "http://rebind.example:8080",</span>
-  <span class="tok-comment">// from 127.0.0.1:53114</span>
+  <span class="tok-comment">// a page of another site, by DNS rebinding, prints:</span>
+  <span class="tok-comment">// refused 403 host-refused: authority "rebind.example:8080",</span>
+  <span class="tok-comment">//   origin "http://rebind.example:8080", from 127.0.0.1:53114</span>
   console.warn(
     <span class="tok-string">`refused ${status} ${reason}: authority ${JSON.stringify(authority)}, `</span> +
       <span class="tok-string">`origin ${JSON.stringify(origin)}, from ${address}:${port}`</span>
@@ -2804,8 +2900,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
   <span class="tok-string">'accessRefused'</span>,
   ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-    <span class="tok-comment">// credential 32 exp: an expired JWT, scheme 2, service 1, procedure 4,</span>
-    <span class="tok-comment">// from 203.0.113.7:53114</span>
+    <span class="tok-comment">// an expired JWT prints:</span>
+    <span class="tok-comment">// refused credential 32 exp: scheme 2, 1/4, from 203.0.113.7:53114</span>
     console.warn(
       <span class="tok-string">`refused ${stage} ${code} ${reason ?? ''}: scheme ${credentialScheme}, `</span> +
         <span class="tok-string">`${serviceId}/${procedureId}, from ${address}:${port}`</span>
@@ -2888,7 +2984,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </p>
 </section>
 
-<section id="protocole">
+<section id="protocole" data-bead-face="focused">
   <h2 id="protocole-h">The protocol, in detail</h2>
   <p class="gist">
     For the reader who implements a side, audits one, or wants the bytes. Each section follows the
@@ -2898,7 +2994,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <ul class="chips space" aria-label="In figures">
     <li>8-byte prefix</li>
     <li>23 failure codes</li>
-    <li>412 units in the spec</li>
+    <li>414 units in the spec</li>
   </ul>
   <p class="space">
     Three aims guide each choice. A decoder written by hand reads each field at its place, parsing
@@ -2957,7 +3053,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </p>
 </section>
 
-<section id="enveloppe">
+<section id="enveloppe" data-bead-face="focused">
   <h2 id="enveloppe-h">The envelope</h2>
   <p class="gist">
     Every envelope opens with the same 8-byte prefix. The kind and the flags add fields at fixed
@@ -3096,7 +3192,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </figure>
 </section>
 
-<section id="echecs">
+<section id="echecs" data-bead-face="surprised">
   <h2 id="echecs-h">A failure travels once</h2>
   <p class="gist">
     A failure is the payload of a FAILURE, and nowhere else. It holds a 2-byte code, the number of
@@ -3130,30 +3226,34 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="echecs-code">In the code</h3>
   <p>
     On the TypeScript side, the requester receives a <code>FailureError</code>:
-    <code>isProtocol</code> tests a code of the protocol, <code>isApplication</code> a code of the
-    procedure. The C# side’s <code>FailureException</code> and the Rust side’s <code>Failure</code>
-    ask the same.
+    <code>isProtocol</code> tests a code of the protocol. A procedure’s own failure is tested by the
+    catalogue beadc generates from the <code>.proto</code>, here <code>EchoFailures.is</code>.
+    This test also checks that the failure comes from that service. The C# side’s
+    <code>FailureException</code> and the Rust side’s <code>Failure</code> ask the same.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
 <span class="tok-keyword">import</span> { violationsOf } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/service'</span>;
+<span class="tok-keyword">import</span> { EchoFailures } <span class="tok-keyword">from</span> <span class="tok-string">'../gen/echo/v1/echo_bead.ts'</span>;
 
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
-
-  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
-    <span class="tok-comment">// the procedure's own code 21: it refuses an empty text</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    <span class="tok-comment">// the protocol's code 32: open a session, or renew its credential, then call again</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    <span class="tok-comment">// code 52: each violation names its field and its rule, more counts those left out</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
+  <span class="tok-keyword">if</span> (EchoFailures.is(reason, <span class="tok-string">'EMPTY_TEXT'</span>)) {
+    <span class="tok-comment">// the procedure refuses an empty text: ask for one</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (!(reason <span class="tok-keyword">instanceof</span> FailureError)) {
+    <span class="tok-keyword">throw</span> reason;
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    <span class="tok-comment">// open a session, or renew its credential, then call again</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    <span class="tok-comment">// each violation names its field and its rule; more counts those left out</span>
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+  } <span class="tok-keyword">else</span> {
+    <span class="tok-keyword">throw</span> reason;
   }
 }</code></pre>
 </section>
 
-<section id="porte">
+<section id="porte" data-bead-face="surprised">
   <h2 id="porte-h">What does not read</h2>
   <p class="gist">
     An envelope that does not read has no callId to trust. Answering it at random could settle
@@ -3173,7 +3273,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </figure>
 </section>
 
-<section id="regles">
+<section id="regles" data-bead-face="focused">
   <h2 id="regles-h">A payload’s rules</h2>
   <p class="gist">
     A request must often hold more than its encoding says: a count of 10 at most, a name of 1 to 63
@@ -3223,7 +3323,8 @@ message CountDownRequest {
       string’s pattern; an enum’s defined values; a list’s and a map’s rules; and
       <code>oneof</code>. It refuses any other rule with <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL
       and a pattern of bytes among them. It ignores none: a rule written and not played would let
-      through what a protovalidate server refuses.
+      through what a protovalidate server refuses. Bead judges requests alone, so rules on a message
+      no request reaches draw a warning, <code>VALIDATE_RULES_UNPLAYED</code>.
       <a href="#suite">Rules in CEL are ahead, then the rest of the rules it refuses.</a>
     </p>
     <p>
@@ -3274,20 +3375,21 @@ message CountDownRequest {
   <h3 id="abonnements-rythme">At the client’s pace</h3>
   <p>
     With PACED beside SUBSCRIPTION, the server sends only the notifications the client has
-    granted. The client grants as its callbacks finish, an asynchronous one once its work is done.
-    With a window of one, it grants the next notification once they are done with the previous
-    one. With a wider window, it grants as far as the window reaches past what they finished, and
+    granted. The client grants as its callbacks finish. An asynchronous callback finishes once its
+    work is done. With a window of one, the client grants the next notification once its callbacks
+    are done with the previous one. With a wider window, it grants as far as the window reaches past what they finished, and
     grants again at half the window. It grants with a CREDIT that carries PACED.
     That credit counts notifications, as RSocket’s <code>REQUEST_N</code> does. But it is absolute,
     as a transfer’s credit is.
   </p>
   <p>
     Past its credit, a notification waits in a queue. The server can give it a key. A notification
-    of the same key replaces the one waiting, so an entity’s state keeps only its latest value:
-    forty-five changes to an article, while a callback fetches its data, arrive as two
-    notifications. Without a key, every event is kept, in order. A full queue, 64 notifications or
-    1 MiB by default, ends the subscription with <code>CAPACITY_EXCEEDED</code>. Nothing is lost in
-    silence: the client subscribes again and reads the state anew.
+    of the same key replaces the one waiting, so an entity’s state keeps only its latest value. If
+    an article changes forty-five times while a callback fetches its data, the client receives two
+    notifications: the first change, then the last. Without a key, every event is kept, in order. A
+    full queue, 64 notifications or 1 MiB by default, ends the subscription with
+    <code>CAPACITY_EXCEEDED</code>. Nothing is lost in silence: the client’s application subscribes
+    again and reads the state anew.
   </p>
   <figure class="figure">
     <figcaption>A paced subscription, its callback fetching</figcaption>
@@ -3667,8 +3769,7 @@ message CountDownRequest {
     </table>
   </div>
   <p class="space">
-    Bead’s gateway answers these two codes with 503 and 502, as an HTTP gateway does. gRPC’s retry
-    rules turn on the same difference: whether the procedure may have run.
+    Bead’s gateway answers these two codes with 503 and 502, as an HTTP gateway does.
   </p>
   <details class="more">
     <summary>What a relay does not do, and what its requesters share</summary>
@@ -3692,7 +3793,7 @@ message CountDownRequest {
   </details>
 </section>
 
-<section id="http">
+<section id="http" data-bead-face="listening">
   <h2 id="http-h">Over HTTP</h2>
   <p class="gist">
     Over WebSocket, each envelope is a binary message, in both directions. HTTP serves where
@@ -3700,7 +3801,7 @@ message CountDownRequest {
     <code>POST</code> carries an envelope (§15.4 to §15.12).
   </p>
   <p>
-    Where its platform lets it, each end of a WebSocket sends a PING on a connection silent for
+    Where its platform lets it, each end of a WebSocket sends a ping on a connection silent for
     30 s, and drops it if no pong echoes the ping. So a peer gone without a word is dropped.
     The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
     server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455), one past <code>maximumMessageFrames</code> with 1008, and a frame RFC 6455 forbids with 1002. A side reads each frame’s head where its platform lets it, and judges it there.
@@ -3714,9 +3815,10 @@ message CountDownRequest {
     callId, at the prefix’s fixed offsets, to hand each answer to its request’s exchange.
   </p>
   <p>
-    The server marks each of its refusals in the <code>bead-refusal</code> field, and only a marked
-    refusal fails the send beyond doubt: nothing was tried. Any other status, a gateway’s 502 for
-    instance, may have come after the request ran, and counts as an exchange lost. A relay thus
+    The transport marks each refusal of its own in the <code>bead-refusal</code> field, and only a
+    marked refusal fails the send beyond doubt: nothing was tried. Any other status but a 2xx, a
+    gateway’s 502 for instance, may have come after the request ran, and counts as an exchange
+    lost. A relay thus
     always tells <code>DESTINATION_UNREACHABLE</code> from <code>DESTINATION_LOST</code>. A client
     follows no redirect: it would carry the connection’s token where no one judged it.
   </p>
@@ -3729,7 +3831,7 @@ message CountDownRequest {
   <p>
     A notification, a command or a relayed request has no exchange to go to. They wait, numbered,
     in the connection’s outbox. The client listens with a <code>GET /bead</code> the server holds
-    until something arrives, 30 s at most. The server then reports a batch, each envelope preceded
+    until something arrives, 30 s at most. The server then brings back a batch, each envelope preceded
     by its length on 4 bytes. The next listen acknowledges what was heard by its
     <code>bead-after</code> field, and the rest comes again.
   </p>
@@ -3741,7 +3843,7 @@ message CountDownRequest {
   </p>
   <figure class="figure">
     <figcaption>A long poll: a batch, its acknowledgement, then nothing</figcaption>
-    <div class="figure-scroll" tabindex="0"><svg id="d-listen-en" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 631.5 655" role="graphics-document document" aria-roledescription="sequence" width="632" height="655" style="--w:632px"><g><line id="actor11" x1="405" y1="65" x2="405" y2="2000" class="actor-line 200" stroke-width="0.5px" name="S" data-et="life-line" data-id="S" style="stroke:var(--diagram-edge)"></line><g id="root-11" data-et="participant" data-type="participant" data-id="S"><rect x="330" y="0" width="150" height="65" name="S" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="405" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="405" dy="0">Server</tspan></text></g></g><g><line id="actor10" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-10" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-listen-en{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-listen-en .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-listen-en .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-listen-en .error-icon{fill:var(--diagram-surface);}#d-listen-en .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-listen-en .edge-thickness-normal{stroke-width:1px;}#d-listen-en .edge-thickness-thick{stroke-width:3.5px;}#d-listen-en .edge-pattern-solid{stroke-dasharray:0;}#d-listen-en .edge-thickness-invisible{stroke-width:0;fill:none;}#d-listen-en .edge-pattern-dashed{stroke-dasharray:3;}#d-listen-en .edge-pattern-dotted{stroke-dasharray:2;}#d-listen-en .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .marker.cross{stroke:var(--diagram-edge);}#d-listen-en svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-listen-en p{margin:0;}#d-listen-en .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-listen-en text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .actor-line{stroke:var(--diagram-edge);}#d-listen-en .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-listen-en .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-listen-en .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-listen-en [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .sequenceNumber{fill:var(--diagram-surface);}#d-listen-en [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-listen-en [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .messageText{fill:var(--diagram-ink);stroke:none;}#d-listen-en .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-listen-en .labelText,#d-listen-en .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopText,#d-listen-en .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .sectionTitle,#d-listen-en .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-listen-en .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-listen-en .noteText,#d-listen-en .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .actorPopupMenu{position:absolute;}#d-listen-en .actor-man circle,#d-listen-en line{fill:var(--diagram-actor);stroke-width:2px;}#d-listen-en .node .neo-node{stroke:var(--diagram-node-line);}#d-listen-en [data-look="neo"].swimlane.cluster rect{filter:none;}#d-listen-en [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-listen-en [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-listen-en :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-listen-en-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-listen-en-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-listen-en-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-listen-en-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-listen-en-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-listen-en-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-listen-en-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i3"><rect x="330" y="273" width="150" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="278" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">nothing to report:</tspan></text><text x="405" y="299" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">the listen is held</tspan></text></g><g data-et="note" data-id="i4"><rect x="315" y="345" width="180" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="350" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">a NOTIFICATION, no. 1,</tspan></text><text x="405" y="371" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">enters the outbox</tspan></text></g><g data-et="note" data-id="i7"><rect x="278.5" y="542" width="253" height="41" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="547" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">no. 1 is acknowledged, forgotten</tspan></text></g><text x="239" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">POST · bead-listen ?1</text><line x1="76" y1="117" x2="401" y2="117" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="132" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">201 · bead-connection-token,</text><text x="242" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-listen ?1</text><line x1="404" y1="190" x2="79" y2="190" class="messageLine1" data-et="message" data-id="i1" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="205" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 0</text><text x="239" y="226" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="263" x2="401" y2="263" class="messageLine0" data-et="message" data-id="i2" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="422" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">200 · a batch, from no. 1</text><line x1="404" y1="459" x2="79" y2="459" class="messageLine1" data-et="message" data-id="i5" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="474" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 1</text><text x="239" y="495" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="532" x2="401" y2="532" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="598" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">204 · nothing, at the end of the wait</text><line x1="404" y1="635" x2="79" y2="635" class="messageLine1" data-et="message" data-id="i8" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
+    <div class="figure-scroll" tabindex="0"><svg id="d-listen-en" xmlns="http://www.w3.org/2000/svg" viewBox="-50 -10 631.5 655" role="graphics-document document" aria-roledescription="sequence" width="632" height="655" style="--w:632px"><g><line id="actor1" x1="405" y1="65" x2="405" y2="2000" class="actor-line 200" stroke-width="0.5px" name="S" data-et="life-line" data-id="S" style="stroke:var(--diagram-edge)"></line><g id="root-1" data-et="participant" data-type="participant" data-id="S"><rect x="330" y="0" width="150" height="65" name="S" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="405" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="405" dy="0">Server</tspan></text></g></g><g><line id="actor0" x1="75" y1="65" x2="75" y2="2000" class="actor-line 200" stroke-width="0.5px" name="C" data-et="life-line" data-id="C" style="stroke:var(--diagram-edge)"></line><g id="root-0" data-et="participant" data-type="participant" data-id="C"><rect x="0" y="0" width="150" height="65" name="C" rx="3" ry="3" class="actor actor-top" style="fill:var(--diagram-actor);stroke:var(--diagram-actor-line)"></rect><text x="75" y="32.5" dominant-baseline="central" alignment-baseline="central" class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400; font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif;"><tspan x="75" dy="0">Client</tspan></text></g></g><style>#d-listen-en{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;fill:var(--diagram-ink);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#d-listen-en .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#d-listen-en .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#d-listen-en .error-icon{fill:var(--diagram-surface);}#d-listen-en .error-text{fill:var(--diagram-ink);stroke:var(--diagram-ink);}#d-listen-en .edge-thickness-normal{stroke-width:1px;}#d-listen-en .edge-thickness-thick{stroke-width:3.5px;}#d-listen-en .edge-pattern-solid{stroke-dasharray:0;}#d-listen-en .edge-thickness-invisible{stroke-width:0;fill:none;}#d-listen-en .edge-pattern-dashed{stroke-dasharray:3;}#d-listen-en .edge-pattern-dotted{stroke-dasharray:2;}#d-listen-en .marker{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .marker.cross{stroke:var(--diagram-edge);}#d-listen-en svg{font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;font-size:14px;}#d-listen-en p{margin:0;}#d-listen-en .actor{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);stroke-width:1;}#d-listen-en text.actor&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .actor-line{stroke:var(--diagram-edge);}#d-listen-en .innerArc{stroke-width:1.5;stroke-dasharray:none;}#d-listen-en .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:var(--diagram-edge);}#d-listen-en .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:var(--diagram-edge);}#d-listen-en [id$="-arrowhead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .sequenceNumber{fill:var(--diagram-surface);}#d-listen-en [id$="-sequencenumber"]{fill:var(--diagram-edge);}#d-listen-en [id$="-crosshead"] path{fill:var(--diagram-edge);stroke:var(--diagram-edge);}#d-listen-en .messageText{fill:var(--diagram-ink);stroke:none;}#d-listen-en .labelBox{stroke:var(--diagram-actor-line);fill:var(--diagram-actor);filter:none;}#d-listen-en .labelText,#d-listen-en .labelText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopText,#d-listen-en .loopText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .sectionTitle,#d-listen-en .sectionTitle&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:var(--diagram-actor-line);fill:var(--diagram-actor-line);}#d-listen-en .note{stroke:var(--diagram-note-line);fill:var(--diagram-note);}#d-listen-en .noteText,#d-listen-en .noteText&gt;tspan{fill:var(--diagram-ink);stroke:none;}#d-listen-en .activation0{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation1{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .activation2{fill:var(--diagram-cluster);stroke:var(--diagram-cluster-line);}#d-listen-en .actorPopupMenu{position:absolute;}#d-listen-en .actor-man circle,#d-listen-en line{fill:var(--diagram-actor);stroke-width:2px;}#d-listen-en .node .neo-node{stroke:var(--diagram-node-line);}#d-listen-en [data-look="neo"].swimlane.cluster rect{filter:none;}#d-listen-en [data-look="neo"].node path{stroke:var(--diagram-node-line);stroke-width:1px;}#d-listen-en [data-look="neo"].node .neo-line path{stroke:var(--diagram-node-line);filter:none;}#d-listen-en :root{--mermaid-font-family:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;}</style><g></g><defs><symbol id="d-listen-en-computer" width="24" height="24"><path transform="scale(.5)" d="M2 2v13h20v-13h-20zm18 11h-16v-9h16v9zm-10.23 6l.466-1h3.52l.467 1h-4.46zm14.23 3h-24l2-6h2.1l-1.33 4h18.45l-1.3-4h2.07l2 6zm-5-10h-14v-7h14v7z"></path></symbol></defs><defs><symbol id="d-listen-en-database" fill-rule="evenodd" clip-rule="evenodd"><path transform="scale(.5)" d="M12.258.001l.256.004.255.005.253.008.251.01.249.012.247.015.246.016.242.019.241.02.239.023.236.024.233.027.231.028.229.031.225.032.223.034.22.036.217.038.214.04.211.041.208.043.205.045.201.046.198.048.194.05.191.051.187.053.183.054.18.056.175.057.172.059.168.06.163.061.16.063.155.064.15.066.074.033.073.033.071.034.07.034.069.035.068.035.067.035.066.035.064.036.064.036.062.036.06.036.06.037.058.037.058.037.055.038.055.038.053.038.052.038.051.039.05.039.048.039.047.039.045.04.044.04.043.04.041.04.04.041.039.041.037.041.036.041.034.041.033.042.032.042.03.042.029.042.027.042.026.043.024.043.023.043.021.043.02.043.018.044.017.043.015.044.013.044.012.044.011.045.009.044.007.045.006.045.004.045.002.045.001.045v17l-.001.045-.002.045-.004.045-.006.045-.007.045-.009.044-.011.045-.012.044-.013.044-.015.044-.017.043-.018.044-.02.043-.021.043-.023.043-.024.043-.026.043-.027.042-.029.042-.03.042-.032.042-.033.042-.034.041-.036.041-.037.041-.039.041-.04.041-.041.04-.043.04-.044.04-.045.04-.047.039-.048.039-.05.039-.051.039-.052.038-.053.038-.055.038-.055.038-.058.037-.058.037-.06.037-.06.036-.062.036-.064.036-.064.036-.066.035-.067.035-.068.035-.069.035-.07.034-.071.034-.073.033-.074.033-.15.066-.155.064-.16.063-.163.061-.168.06-.172.059-.175.057-.18.056-.183.054-.187.053-.191.051-.194.05-.198.048-.201.046-.205.045-.208.043-.211.041-.214.04-.217.038-.22.036-.223.034-.225.032-.229.031-.231.028-.233.027-.236.024-.239.023-.241.02-.242.019-.246.016-.247.015-.249.012-.251.01-.253.008-.255.005-.256.004-.258.001-.258-.001-.256-.004-.255-.005-.253-.008-.251-.01-.249-.012-.247-.015-.245-.016-.243-.019-.241-.02-.238-.023-.236-.024-.234-.027-.231-.028-.228-.031-.226-.032-.223-.034-.22-.036-.217-.038-.214-.04-.211-.041-.208-.043-.204-.045-.201-.046-.198-.048-.195-.05-.19-.051-.187-.053-.184-.054-.179-.056-.176-.057-.172-.059-.167-.06-.164-.061-.159-.063-.155-.064-.151-.066-.074-.033-.072-.033-.072-.034-.07-.034-.069-.035-.068-.035-.067-.035-.066-.035-.064-.036-.063-.036-.062-.036-.061-.036-.06-.037-.058-.037-.057-.037-.056-.038-.055-.038-.053-.038-.052-.038-.051-.039-.049-.039-.049-.039-.046-.039-.046-.04-.044-.04-.043-.04-.041-.04-.04-.041-.039-.041-.037-.041-.036-.041-.034-.041-.033-.042-.032-.042-.03-.042-.029-.042-.027-.042-.026-.043-.024-.043-.023-.043-.021-.043-.02-.043-.018-.044-.017-.043-.015-.044-.013-.044-.012-.044-.011-.045-.009-.044-.007-.045-.006-.045-.004-.045-.002-.045-.001-.045v-17l.001-.045.002-.045.004-.045.006-.045.007-.045.009-.044.011-.045.012-.044.013-.044.015-.044.017-.043.018-.044.02-.043.021-.043.023-.043.024-.043.026-.043.027-.042.029-.042.03-.042.032-.042.033-.042.034-.041.036-.041.037-.041.039-.041.04-.041.041-.04.043-.04.044-.04.046-.04.046-.039.049-.039.049-.039.051-.039.052-.038.053-.038.055-.038.056-.038.057-.037.058-.037.06-.037.061-.036.062-.036.063-.036.064-.036.066-.035.067-.035.068-.035.069-.035.07-.034.072-.034.072-.033.074-.033.151-.066.155-.064.159-.063.164-.061.167-.06.172-.059.176-.057.179-.056.184-.054.187-.053.19-.051.195-.05.198-.048.201-.046.204-.045.208-.043.211-.041.214-.04.217-.038.22-.036.223-.034.226-.032.228-.031.231-.028.234-.027.236-.024.238-.023.241-.02.243-.019.245-.016.247-.015.249-.012.251-.01.253-.008.255-.005.256-.004.258-.001.258.001zm-9.26 20.5v.01l.001.021.003.021.004.022.005.021.006.022.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.023.018.024.019.024.021.024.022.025.023.024.024.025.052.049.056.05.061.051.066.051.07.051.075.051.079.052.084.052.088.052.092.052.097.052.102.051.105.052.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.048.144.049.147.047.152.047.155.047.16.045.163.045.167.043.171.043.176.041.178.041.183.039.187.039.19.037.194.035.197.035.202.033.204.031.209.03.212.029.216.027.219.025.222.024.226.021.23.02.233.018.236.016.24.015.243.012.246.01.249.008.253.005.256.004.259.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.021.224-.024.22-.026.216-.027.212-.028.21-.031.205-.031.202-.034.198-.034.194-.036.191-.037.187-.039.183-.04.179-.04.175-.042.172-.043.168-.044.163-.045.16-.046.155-.046.152-.047.148-.048.143-.049.139-.049.136-.05.131-.05.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.053.083-.051.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.05.023-.024.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.023.01-.022.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.13l-.077.055-.08.053-.083.054-.085.053-.087.052-.09.052-.093.051-.095.05-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.045-.118.044-.12.043-.122.042-.124.042-.126.041-.128.04-.13.04-.132.038-.134.038-.135.037-.138.037-.139.035-.142.035-.143.034-.144.033-.147.032-.148.031-.15.03-.151.03-.153.029-.154.027-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.01-.179.008-.179.008-.181.006-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.006-.179-.008-.179-.008-.178-.01-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.027-.153-.029-.151-.03-.15-.03-.148-.031-.146-.032-.145-.033-.143-.034-.141-.035-.14-.035-.137-.037-.136-.037-.134-.038-.132-.038-.13-.04-.128-.04-.126-.041-.124-.042-.122-.042-.12-.044-.117-.043-.116-.045-.113-.045-.112-.046-.109-.047-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.05-.093-.052-.09-.051-.087-.052-.085-.053-.083-.054-.08-.054-.077-.054v4.13zm0-5.65v.011l.001.021.003.021.004.021.005.022.006.022.007.022.009.022.01.022.011.023.012.023.013.023.015.024.016.023.017.024.018.024.019.024.021.024.022.024.023.025.024.024.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.052.11.051.114.051.119.052.123.05.127.051.131.05.135.049.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.044.171.042.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.022.23.02.233.018.236.016.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.012.241-.015.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.048.139-.05.136-.049.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.051.051-.049.023-.025.023-.024.021-.025.02-.024.019-.024.018-.024.017-.024.015-.023.014-.023.013-.024.012-.022.01-.023.01-.023.008-.022.006-.022.006-.022.004-.021.004-.022.001-.021.001-.021v-4.14l-.077.054-.08.054-.083.054-.085.052-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.049-.105.048-.106.047-.109.047-.111.046-.114.045-.115.044-.118.044-.12.044-.122.042-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.035-.143.033-.144.033-.147.033-.148.031-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.025-.161.024-.162.023-.163.022-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.011-.178.009-.179.009-.179.007-.181.007-.182.005-.182.004-.184.003-.184.002h-.37l-.184-.002-.184-.003-.182-.004-.182-.005-.181-.007-.179-.007-.179-.009-.178-.009-.176-.011-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.022-.162-.023-.161-.024-.159-.025-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.031-.146-.033-.145-.033-.143-.033-.141-.035-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.04-.126-.041-.124-.042-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.047-.105-.048-.102-.049-.1-.049-.097-.05-.095-.051-.093-.051-.09-.051-.087-.053-.085-.052-.083-.054-.08-.054-.077-.054v4.14zm0-5.67v.011l.001.02.003.022.004.021.005.022.006.021.007.022.009.023.01.022.011.023.012.023.013.023.015.023.016.024.017.024.018.023.019.024.021.025.022.024.023.024.024.025.052.05.056.05.061.05.066.051.07.051.075.052.079.051.084.052.088.052.092.052.097.052.102.052.105.051.11.052.114.051.119.051.123.051.127.05.131.05.135.05.139.049.144.048.147.048.152.047.155.046.16.045.163.045.167.043.171.043.176.042.178.04.183.04.187.038.19.037.194.036.197.034.202.033.204.032.209.03.212.028.216.027.219.025.222.024.226.021.23.02.233.018.236.017.24.014.243.012.246.01.249.008.253.006.256.003.259.001.26-.001.257-.003.254-.006.25-.008.247-.01.244-.013.241-.014.237-.016.233-.018.231-.02.226-.022.224-.024.22-.025.216-.027.212-.029.21-.03.205-.032.202-.033.198-.035.194-.036.191-.037.187-.039.183-.039.179-.041.175-.042.172-.043.168-.044.163-.045.16-.045.155-.047.152-.047.148-.048.143-.049.139-.049.136-.049.131-.051.126-.05.123-.051.118-.052.114-.051.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.052.07-.051.065-.051.06-.051.056-.05.051-.049.023-.025.023-.025.021-.024.02-.024.019-.024.018-.024.017-.024.015-.023.014-.024.013-.023.012-.023.01-.022.01-.023.008-.022.006-.022.006-.022.004-.022.004-.021.001-.021.001-.021v-4.15l-.077.054-.08.054-.083.053-.085.053-.087.053-.09.051-.093.051-.095.051-.097.05-.1.049-.102.048-.105.048-.106.048-.109.046-.111.046-.114.046-.115.044-.118.044-.12.043-.122.043-.124.042-.126.041-.128.04-.13.039-.132.039-.134.038-.135.037-.138.036-.139.036-.142.034-.143.034-.144.033-.147.032-.148.032-.15.03-.151.03-.153.028-.154.028-.156.027-.158.026-.159.024-.161.024-.162.023-.163.023-.165.021-.166.02-.167.019-.169.018-.169.017-.171.016-.173.015-.173.014-.175.013-.175.012-.177.01-.178.01-.179.009-.179.007-.181.006-.182.006-.182.004-.184.003-.184.001-.185.001-.185-.001-.184-.001-.184-.003-.182-.004-.182-.006-.181-.006-.179-.007-.179-.009-.178-.01-.176-.01-.176-.012-.175-.013-.173-.014-.172-.015-.171-.016-.17-.017-.169-.018-.167-.019-.166-.02-.165-.021-.163-.023-.162-.023-.161-.024-.159-.024-.157-.026-.156-.027-.155-.028-.153-.028-.151-.03-.15-.03-.148-.032-.146-.032-.145-.033-.143-.034-.141-.034-.14-.036-.137-.036-.136-.037-.134-.038-.132-.039-.13-.039-.128-.041-.126-.041-.124-.041-.122-.043-.12-.043-.117-.044-.116-.044-.113-.046-.112-.046-.109-.046-.106-.048-.105-.048-.102-.048-.1-.05-.097-.049-.095-.051-.093-.051-.09-.052-.087-.052-.085-.053-.083-.053-.08-.054-.077-.054v4.15zm8.74-8.18l-.257.004-.254.005-.25.008-.247.011-.244.012-.241.014-.237.016-.233.018-.231.021-.226.022-.224.023-.22.026-.216.027-.212.028-.21.031-.205.032-.202.033-.198.034-.194.036-.191.038-.187.038-.183.04-.179.041-.175.042-.172.043-.168.043-.163.045-.16.046-.155.046-.152.048-.148.048-.143.048-.139.049-.136.05-.131.05-.126.051-.123.051-.118.051-.114.052-.11.052-.106.052-.101.052-.096.052-.092.052-.088.052-.083.052-.079.052-.074.051-.07.052-.065.051-.06.05-.056.05-.051.05-.023.025-.023.024-.021.024-.02.025-.019.024-.018.024-.017.023-.015.024-.014.023-.013.023-.012.023-.01.023-.01.022-.008.022-.006.023-.006.021-.004.022-.004.021-.001.021-.001.021.001.021.001.021.004.021.004.022.006.021.006.023.008.022.01.022.01.023.012.023.013.023.014.023.015.024.017.023.018.024.019.024.02.025.021.024.023.024.023.025.051.05.056.05.06.05.065.051.07.052.074.051.079.052.083.052.088.052.092.052.096.052.101.052.106.052.11.052.114.052.118.051.123.051.126.051.131.05.136.05.139.049.143.048.148.048.152.048.155.046.16.046.163.045.168.043.172.043.175.042.179.041.183.04.187.038.191.038.194.036.198.034.202.033.205.032.21.031.212.028.216.027.22.026.224.023.226.022.231.021.233.018.237.016.241.014.244.012.247.011.25.008.254.005.257.004.26.001.26-.001.257-.004.254-.005.25-.008.247-.011.244-.012.241-.014.237-.016.233-.018.231-.021.226-.022.224-.023.22-.026.216-.027.212-.028.21-.031.205-.032.202-.033.198-.034.194-.036.191-.038.187-.038.183-.04.179-.041.175-.042.172-.043.168-.043.163-.045.16-.046.155-.046.152-.048.148-.048.143-.048.139-.049.136-.05.131-.05.126-.051.123-.051.118-.051.114-.052.11-.052.106-.052.101-.052.096-.052.092-.052.088-.052.083-.052.079-.052.074-.051.07-.052.065-.051.06-.05.056-.05.051-.05.023-.025.023-.024.021-.024.02-.025.019-.024.018-.024.017-.023.015-.024.014-.023.013-.023.012-.023.01-.023.01-.022.008-.022.006-.023.006-.021.004-.022.004-.021.001-.021.001-.021-.001-.021-.001-.021-.004-.021-.004-.022-.006-.021-.006-.023-.008-.022-.01-.022-.01-.023-.012-.023-.013-.023-.014-.023-.015-.024-.017-.023-.018-.024-.019-.024-.02-.025-.021-.024-.023-.024-.023-.025-.051-.05-.056-.05-.06-.05-.065-.051-.07-.052-.074-.051-.079-.052-.083-.052-.088-.052-.092-.052-.096-.052-.101-.052-.106-.052-.11-.052-.114-.052-.118-.051-.123-.051-.126-.051-.131-.05-.136-.05-.139-.049-.143-.048-.148-.048-.152-.048-.155-.046-.16-.046-.163-.045-.168-.043-.172-.043-.175-.042-.179-.041-.183-.04-.187-.038-.191-.038-.194-.036-.198-.034-.202-.033-.205-.032-.21-.031-.212-.028-.216-.027-.22-.026-.224-.023-.226-.022-.231-.021-.233-.018-.237-.016-.241-.014-.244-.012-.247-.011-.25-.008-.254-.005-.257-.004-.26-.001-.26.001z"></path></symbol></defs><defs><symbol id="d-listen-en-clock" width="24" height="24"><path transform="scale(.5)" d="M12 2c5.51 0 10 4.49 10 10s-4.49 10-10 10-10-4.49-10-10 4.49-10 10-10zm0-2c-6.63 0-12 5.37-12 12s5.37 12 12 12 12-5.37 12-12-5.37-12-12-12zm5.85 12.46c.202.038.202.333.001.372-1.907.361-6.04 1.11-6.55 1.11-.719 0-1.3-.582-1.3-1.3 0-.512.77-5.45 1.13-7.445.034-.192.312-.181.343.014l.985 6.24 5.39 1.01z"></path></symbol></defs><defs><marker id="d-listen-en-arrowhead" refX="7.9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs><defs><marker id="d-listen-en-crosshead" markerWidth="15" markerHeight="8" orient="auto" refX="4" refY="4.5"><path fill="none" stroke-width="1pt" d="M 1,2 L 6,7 M 6,2 L 1,7" style="stroke-dasharray: 0, 0;stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-filled-head" refX="15.5" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L14,7 L9,1 Z"></path></marker></defs><defs><marker id="d-listen-en-sequencenumber" refX="15" refY="15" markerWidth="60" markerHeight="40" orient="auto"><circle cx="15" cy="15" r="6"></circle></marker></defs><defs><marker id="d-listen-en-solidTopArrowHead" refX="7.9" refY="7.25" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 8 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-solidBottomArrowHead" refX="7.9" refY="0.75" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 10 0 L 0 8 z"></path></marker></defs><defs><marker id="d-listen-en-stickTopArrowHead" refX="7.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 0 L 7 7" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><defs><marker id="d-listen-en-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke-width="1.5" fill="none" style="stroke:var(--diagram-edge)"></path></marker></defs><g data-et="note" data-id="i3"><rect x="314.5" y="273" width="181" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="278" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">nothing to bring back:</tspan></text><text x="405" y="299" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">the listen is held</tspan></text></g><g data-et="note" data-id="i4"><rect x="315" y="345" width="180" height="62" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="350" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">a NOTIFICATION, no. 1,</tspan></text><text x="405" y="371" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">enters the outbox</tspan></text></g><g data-et="note" data-id="i7"><rect x="278.5" y="542" width="253" height="41" class="note" style="fill:var(--diagram-note);stroke:var(--diagram-actor-line)"></rect><text x="405" y="547" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="noteText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;"><tspan x="405">no. 1 is acknowledged, forgotten</tspan></text></g><text x="239" y="80" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">POST · bead-listen ?1</text><line x1="76" y1="117" x2="401" y2="117" class="messageLine0" data-et="message" data-id="i0" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="132" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">201 · bead-connection-token,</text><text x="242" y="153" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-listen ?1</text><line x1="404" y1="190" x2="79" y2="190" class="messageLine1" data-et="message" data-id="i1" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="205" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 0</text><text x="239" y="226" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="263" x2="401" y2="263" class="messageLine0" data-et="message" data-id="i2" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="422" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">200 · a batch, from no. 1</text><line x1="404" y1="459" x2="79" y2="459" class="messageLine1" data-et="message" data-id="i5" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line><text x="239" y="474" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">GET /bead · bead-after: 1</text><text x="239" y="495" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">bead-wait: 25000</text><line x1="76" y1="532" x2="401" y2="532" class="messageLine0" data-et="message" data-id="i6" data-from="C" data-to="S" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="fill: none;"></line><text x="242" y="598" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle" class="messageText" dy="1em" style="font-family: Geist, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 16px; font-weight: 400;">204 · nothing, at the end of the wait</text><line x1="404" y1="635" x2="79" y2="635" class="messageLine1" data-et="message" data-id="i8" data-from="S" data-to="C" stroke-width="2" stroke="none" marker-end="url(#d-listen-en-arrowhead)" style="stroke-dasharray: 3, 3; fill: none;"></line></svg></div>
   </figure>
   <p class="space">
     A client that does not listen receives no subscription, no command and no relayed request. HTTP
@@ -3751,8 +3853,8 @@ message CountDownRequest {
   <details class="more">
     <summary>A request’s timeouts, and WebSocket’s handshake</summary>
     <p>
-      A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the server
-      answers 408, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
+      A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the HTTP server
+      answers 408 before the transport reads anything, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
       receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
       or a byte past ASCII, is refused before anything else, 400 unmarked over HTTP/1.1 (§15.12).
     </p>
@@ -3767,7 +3869,7 @@ message CountDownRequest {
   </details>
 </section>
 
-<section id="memoire">
+<section id="memoire" data-bead-face="listening">
   <h2 id="memoire-h">In memory, and several transports</h2>
   <p class="gist">
     The in-memory transport joins a client’s router and a server’s within one process. The joined
@@ -3811,10 +3913,10 @@ offerHello(server);
 
 <span class="tok-keyword">await</span> memory.start();
 <span class="tok-keyword">await</span> webSocket.start({ port: <span class="tok-number">8080</span> });
-<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost: both loopbacks</span></code></pre>
+<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost by default: 127.0.0.1 and ::1</span></code></pre>
 </section>
 
-<section id="courtier">
+<section id="courtier" data-bead-face="listening">
   <h2 id="courtier-h">Over a broker</h2>
   <p class="gist">
     A topic-based publish/subscribe broker is one more transport, and Bead never becomes a network
@@ -3881,7 +3983,7 @@ offerHello(server);
   </details>
 </section>
 
-<section id="suite">
+<section id="suite" data-bead-face="serene">
   <h2 id="suite-h">What is ahead</h2>
   <p class="gist">
     The first four come in this order, the others in no set order.
@@ -3918,9 +4020,9 @@ offerHello(server);
         hook.</span>
     </li>
     <li>
-      <strong>More conformance</strong
-      ><span>The client part over HTTP and WebSocket, a relay across languages, and one corpus read
-        alike by every side’s parsers.</span>
+      <strong>More shared tests</strong
+      ><span>The transports’ client part of the conformance, over HTTP and WebSocket, a relay across
+        languages in the interop, and one corpus read alike by every side’s parsers.</span>
     </li>
     <li>
       <strong>A connection’s age</strong
@@ -4042,10 +4144,10 @@ offerHello(server);
 <a class="skip" href="#main">Aller au contenu</a>
 <header class="topbar">
   <a class="brand" href="#top" title="Bead, en haut de la page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
+  <button type="button" class="reading" data-action="menu" aria-expanded="false" aria-controls="toc"><span class="visually-hidden">Sommaire : </span><span class="reading-title" data-reading>Bead</span><span class="reading-caret" aria-hidden="true">▾</span></button>
   <span class="tools">
-    <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Ouvrir le sommaire" data-open="Ouvrir le sommaire" data-close="Fermer le sommaire">≡</button>
     <a class="tool demo" href="/playground/">Démo</a>
-    <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" title="Read this page in English"><span class="long">English</span><span class="short" aria-hidden="true">EN</span></a>
+    <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en" title="Read this page in English"><span class="visually-hidden">English</span><span aria-hidden="true">EN</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Passer au thème sombre" data-to-dark="Passer au thème sombre" data-to-light="Passer au thème clair">◐</button>
   </span>
 </header>
@@ -4053,11 +4155,15 @@ offerHello(server);
   <nav class="toc" id="toc" aria-label="Sommaire">
     <p class="toc-title">Sommaire</p>
     <ol><li><a href="#statut">Où en est Bead</a></li><li><a href="#essentiel">Bead en un exemple</a></li><li><a href="#pourquoi">Où Bead diffère</a></li><li class="toc-part"><p class="toc-part-title">Les questions</p><ol><li><a href="#contrat">Un contrat pour toutes les équipes</a></li><li><a href="#transcodage">Les équipes qui ne parlent pas Bead</a></li><li><a href="#versions">Évoluer sans casser</a></li><li><a href="#transports">Les transports</a></li><li><a href="#implantations">Le même comportement de chaque côté</a></li><li><a href="#debogage">Déboguer et observer</a></li><li><a href="#securite">La sécurité</a></li></ol></li><li class="toc-part"><p class="toc-part-title">Le protocole en détail</p><ol><li><a href="#protocole">Les choix de Bead</a></li><li><a href="#enveloppe">L’enveloppe</a></li><li><a href="#callid">Le callId</a></li><li><a href="#echecs">Les échecs</a></li><li><a href="#porte">Ce qui ne se lit pas</a></li><li><a href="#regles">Les règles d’une charge</a></li><li><a href="#annulation">L’annulation</a></li><li><a href="#abonnements">Les abonnements</a></li><li><a href="#sessions">Les sessions</a></li><li><a href="#transferts">Les transferts</a></li><li><a href="#relais">Les relais</a></li><li><a href="#http">Sur HTTP</a></li><li><a href="#memoire">En mémoire</a></li><li><a href="#courtier">Sur un courtier</a></li></ol></li><li><a href="#suite">Ce qui vient</a></li><li><a href="#code">Dans le code</a></li></ol>
+    <ul class="toc-languages" aria-label="Langue">
+      <li><a href="?lng=en" hreflang="en" lang="en" data-action="language" data-lang="en">English</a></li>
+      <li><a href="?lng=fr" hreflang="fr" lang="fr" data-action="language" data-lang="fr" aria-current="true">Français</a></li>
+    </ul>
   </nav>
   <main id="main" tabindex="-1">
 <div class="opening">
   <header class="hero">
-    <p class="eyebrow">bead 0.16.0 · spécification 0.17.0 · dispositions 0xA1 et 0xB1</p>
+    <p class="eyebrow">bead 0.17.0 · spécification 0.18.0 · dispositions 0xA1 et 0xB1</p>
     <h1>Bead</h1>
     <p class="lede">
       Un contrat typé pour les équipes qui s’appellent en TypeScript, en C# et en Rust, depuis un
@@ -4067,9 +4173,9 @@ offerHello(server);
       Un service se déclare une fois, dans un <code>.proto</code>. <code>beadc</code> en génère le
       serveur et le client typés dans chaque langage. Une passerelle qu’offre chaque côté sert les
       mêmes procédures en HTTP et en JSON, pour les équipes qui ne parlent pas Bead. Une
-      spécification tient les côtés à un même comportement : chacun joue ses fichiers de
-      conformance, le côté Rust la part qu’il atteint, et la matrice de support liste chaque endroit
-      où ils diffèrent encore.
+      spécification tient les côtés à un même comportement, et chacun joue ses fichiers de
+      conformance. Le côté Rust en a les cas d’AMQP 1.0 à venir, avec sa liaison. La matrice de
+      support liste chaque endroit où les côtés diffèrent encore.
     </p>
   </header>
   <section id="statut" class="status">
@@ -4085,13 +4191,14 @@ offerHello(server);
       si bien qu’une équipe peut poursuivre Bead avec un agent.
     </p>
     <p id="methode-agents">
-      Les idées, la conception du protocole et le côté TypeScript sont de son auteur. Une bonne part
-      du reste a été écrite par des agents d’IA sous les portes du dépôt : les autres implantations,
-      le générateur, et bien des lectures que la spécification fait des normes. Les idiomes des
-      autres langages, et ces lectures, ont été vérifiés par les tests, les rondes de conception et
-      les revues des agents. Personne ayant les connaissances pour en juger n’a revu le cœur de Bead,
-      sa sécurité ni sa lecture des normes qu’il suit ; une équipe qui le reprend le revoit comme son
-      propre code.
+      Les idées, les valeurs du projet, la conception du protocole et les décisions sont de son
+      auteur, ainsi que les premières versions du côté TypeScript. Une bonne part du code a été
+      écrite par des agents d’IA sous les portes du dépôt : les autres implantations, le
+      générateur, une grande partie de ce qui a changé depuis du côté TypeScript, et bien des
+      lectures que la spécification fait des normes. Ces lectures et les idiomes de chaque langage
+      ont été vérifiés par les tests, les rondes de conception et les revues des agents. Le cœur de
+      Bead, sa sécurité et sa lecture des normes qu’il suit n’ont été revus par personne qui ait les
+      connaissances pour en juger ; une équipe qui le reprend le revoit comme son propre code.
     </p>
     <p id="methode">
       Sur <a href="https://francisdesjardins.ca/?lng=fr#method">francisdesjardins.ca</a>, son auteur
@@ -4112,7 +4219,7 @@ offerHello(server);
   </div>
 </div>
 
-<section id="essentiel">
+<section id="essentiel" data-bead-face="happy">
   <h2>Bead en un exemple</h2>
   <p class="gist">
     Bead est un protocole binaire pour les appels entre un client et un serveur. Une requête
@@ -4207,8 +4314,8 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>Un courtier est un transport de plus</strong
-      ><span>Sur MQTT 5, et sur AMQP 1.0 côtés TypeScript et C#, les deux bouts gardent l’API qu’ils
-        ont sur un WebSocket.</span>
+      ><span>Sur MQTT 5 de tous les côtés, et sur AMQP 1.0 avec RabbitMQ 4 côtés TypeScript et C#,
+        les deux bouts gardent l’API qu’ils ont sur un WebSocket.</span>
     </li>
     <li>
       <strong>Un même crédit cadence un abonnement comme un transfert</strong
@@ -4217,14 +4324,14 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     </li>
     <li>
       <strong>Les fichiers de conformance sont la forme exécutable de la spécification</strong
-      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui, et le côté Rust en joue la
-        part qu’il atteint.</span>
+      ><span>Chaque côté joue ces fichiers plutôt qu’une copie à lui. Le côté Rust en a les cas
+        d’AMQP 1.0 à venir, avec sa liaison.</span>
     </li>
   </ul>
   <p class="space">
     Le guide d’architecture place Bead
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/guides/architecture-overview.md#bead-beside-grpc-web-connect-and-signalr">à côté de gRPC-Web, Connect et SignalR</a>.
-    Les cases des autres projets citent ou résument leurs propres pages. Ce qui manque à Bead à côté
+    Son tableau cite ou résume les pages propres aux trois autres projets. Ce qui manque à Bead à côté
     d’eux : ses paquets ne sont pas publiés, et il parle trois langages.
   </p>
 </section>
@@ -4291,12 +4398,12 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
   </p>
   <p>
     Un compagnon de la spécification, <code>spec/transcoding.md</code>, la décrit sous sa propre
-    version, 0.7.0. La passerelle écoute sur son propre port,
+    version, 0.8.0. La passerelle écoute sur son propre port,
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <p>
-    Ce que le fil peut et qu’une passerelle ne porte pas est listé, pas caché : la session d’une
-    connexion, une commande et la fenêtre d’un flux, chacune une ligne du registre
+    La session d’une connexion, une commande et la fenêtre d’un flux sont portées par le fil et non
+    par une passerelle. Chacune est une ligne du registre
     <a href="https://github.com/francisdesjardins/bead/blob/main/docs/support.md#leveled-down">« Leveled down »</a> de la matrice (§2.5,
     §2.6 et §8.8 du compagnon). La reprise d’un flux y a aussi sa ligne (§8.3) : les Server-Sent
     Events l’offrent, et un abonnement Bead ne garde aucune notification après sa fin.
@@ -4350,17 +4457,18 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     <code>raw</code> en <code>application/octet-stream</code>. Les bibliothèques protobuf courantes
     ne s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, de
     chaque côté. Il écrit une seule forme : aucun blanc, les membres dans l’ordre des numéros de
-    champ, les entrées d’une map triées. Dans la CI, la suite de conformité de protobuf joue ce
+    champ, les entrées d’une map triées. Dans la CI, la suite de conformance de protobuf joue ce
     mapping de chaque côté par ses tests JSON, et le codec de chaque côté par ses tests binaires.
   </p>
   <h3 id="transcodage-echecs">Un échec, un problème</h3>
   <p>
-    Chaque échec répond un problème de la RFC 9457, <code>application/problem+json</code>.
-    <code>code</code> et <code>scope</code> portent ce que le fil porte, et <code>detail</code> le
-    détail de l’échec. Le statut dépend de là où le code est né : ce que l’appelant peut réparer
-    donne un 4xx, ce qui se passe entre la passerelle et son serveur un 5xx.
+    La passerelle répond à chaque échec par un problème de la RFC 9457,
+    <code>application/problem+json</code>. <code>code</code> et <code>scope</code> portent ce que le
+    fil porte, et <code>detail</code> le détail de l’échec. Le statut dépend de là où l’échec est
+    né : ce que l’appelant peut réparer donne un 4xx, et ce qu’il ne peut pas réparer, dans le
+    serveur, dans la passerelle ou entre les deux, un 5xx.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED, et ce qui ne se dit qu’entre la passerelle et son serveur</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="errors"><thead><tr><th scope="col">Statut</th><th scope="col">Ce qui l’a levé</th></tr></thead><tbody><tr><td class="code-num">400</td><td>PAYLOAD_UNDECODABLE d’un corps, d’une chaîne de requête ou d’une variable, ou d’une requête json, text ou raw ; un échec de l’application</td></tr><tr><td class="code-num">401</td><td>SESSION_REQUIRED, son défi dans www-authenticate</td></tr><tr><td class="code-num">403</td><td>ACCESS_DENIED</td></tr><tr><td class="code-num">413</td><td>ENVELOPE_TOO_LARGE, PAYLOAD_TOO_LARGE</td></tr><tr><td class="code-num">422</td><td>PAYLOAD_INVALID, ses violations dans errors</td></tr><tr><td class="code-num">429</td><td>CAPACITY_EXCEEDED, retry-after: 1</td></tr><tr><td class="code-num">431</td><td>un JWT de plus de 1004 octets, sous bearer-jwt</td></tr><tr><td class="code-num">500</td><td>PROCEDURE_FAILED ; ce qui ne se dit qu’entre la passerelle et son serveur ; un code de protocole que la spécification ne nomme pas ; la configuration de la passerelle elle-même ; un résultat que sa forme JSON ne peut tenir, ou ce qu’aucune porte n’a prévu</td></tr><tr><td class="code-num">501</td><td>SERVICE_UNKNOWN, PROCEDURE_UNKNOWN</td></tr><tr><td class="code-num">502</td><td>une réponse que la passerelle n’a pas pu prendre ; DESTINATION_LOST, ou la connexion de l’échange fermée avant sa réponse ; LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED ; PAYLOAD_UNDECODABLE d’une requête proto</td></tr><tr><td class="code-num">503</td><td>DESTINATION_UNREACHABLE, retry-after: 1</td></tr><tr><td class="code-num">504</td><td>TRANSFER_STALLED, ou le délai de l’appel, 5 s par défaut</td></tr></tbody></table></div>
   <p class="space">
     Un <code>PAYLOAD_INVALID</code> donne un 422 dont <code>errors</code> place chaque violation :
     <code>pointer</code> dans le corps, ou <code>parameter</code> pour une variable du chemin ou de
@@ -4508,7 +4616,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
 </section>
 
-<section id="transports">
+<section id="transports" data-bead-face="listening">
   <h2 id="transports-h">Les transports</h2>
   <p class="gist">
     Les deux bouts gardent la même API, quel que soit ce qui porte les enveloppes, si bien qu’une
@@ -4522,21 +4630,22 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
 </section>
 
-<section id="implantations">
+<section id="implantations" data-bead-face="focused">
   <h2 id="implantations-h">Le même comportement de chaque côté</h2>
   <p class="gist">
     Les trois côtés répondent à une même spécification, et aux fichiers de conformance qui en sont
     la forme exécutable : chaque unité de la spécification est citée par un fichier, ou porte la
     raison pour laquelle aucun ne la cite. Chaque côté joue ces fichiers depuis <code>spec/</code>,
-    le côté Rust la part qu’il atteint, et les trois s’appellent les uns les autres dans la CI. Là
-    où ils diffèrent encore, chaque écart est une ligne de la matrice de support, avec le test qui le
-    montre.
+    et les trois s’appellent les uns les autres dans la CI. Le côté Rust en a les cas d’AMQP 1.0 à
+    venir, avec sa liaison. Là où les côtés diffèrent encore, chaque écart est une ligne de la
+    matrice de support, avec le test qui le montre.
   </p>
   <p>
-    TypeScript et C# sont à parité de comportement. Le côté Rust a les parties ci-dessous, et ce
-    qui lui manque est à venir.
+    TypeScript et C# sont à parité de comportement, sauf le cœur du côté C# dans une page et dans un
+    worker, à venir avec son transport Web Worker. Le côté Rust a les parties ci-dessous, et ce qui
+    lui manque est à venir.
   </p>
-  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
+  <div class="table-wrap" tabindex="0"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints ; un Web Worker à venir, avec son cœur dans une page</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints ; AMQP 1.0 et un Web Worker à venir</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
     La parité tient jusqu’au champ. Là où une plateforme ne peut pas ce qu’une autre peut, l’écart
     reste entre les côtés ou il est nivelé, tous les côtés s’en tenant à ce que cette plateforme
@@ -4549,7 +4658,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     Les côtés se mesurent aussi. TypeScript et C# mesurent les mêmes couches dans les mêmes
     unités : le codec de l’enveloppe, une charge JSON, le mapping JSON de protobuf, un
     <code>echo</code> sur HTTP, sur WebSocket et en mémoire, des notifications cadencées et un
-    transfert de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
+    écho de 20 Mio. Rust mesure son codec, son mapping JSON et son <code>echo</code> en
     mémoire ; ses couches sur la boucle locale sont à venir. Sur la
     branche de chaque sortie, la CI mesure chaque côté contre la sortie précédente. Elle fait
     tourner les deux arbres tour à tour sur une même machine et les compare. Une régression est lue
@@ -4563,7 +4672,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
     <ul>
-      <li><strong>Les unités</strong> : 412 pour la spécification,
+      <li><strong>Les unités</strong> : 414 pour la spécification,
         185 pour le débogage et 193 pour le
         transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
       <li><strong>Les vecteurs</strong> : 474, en 17
@@ -4573,7 +4682,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         à l’octet ; et les Reason Codes que nomme chaque accusé de MQTT 5.</li>
       <li><strong>Les conversations</strong> : 210, chacune un script entre
         des clients et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 312, chacun au bord
+      <li><strong>Les cas des transports</strong> : 318, chacun au bord
         d’un transport, sur HTTP, sur WebSocket et sur un courtier, écrit octet par octet.</li>
       <li><strong>Les durées</strong> : 36 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
@@ -4585,7 +4694,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <li><strong>Le transcodage</strong> : 26 gabarits,
         192 lectures, 78 écritures,
         66 liaisons, 45 échecs,
-        10 flux d’évènements et 103 échanges.</li>
+        10 flux d’évènements et 107 échanges.</li>
       <li><strong>Le fuzzing</strong> : chaque suite passe ses lecteurs au fuzzing sur des
         mutations des vecteurs.</li>
     </ul>
@@ -4755,7 +4864,7 @@ disallowed-types = [
       Un échec arrive en <code>error</code>, une <code>FailureError</code> qui dit qui l’a levé et
       où. Une notification entendue n’est qu’une étape qui entre, sans options ni durée.
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo('') : le serveur répond l'échec 21 de la procédure</span>
+    <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-comment">// echo('') : le serveur répond l'échec EMPTY_TEXT de la procédure, code 21</span>
 FailureError {
   code: <span class="tok-number">21</span>,
   detail: <span class="tok-string">'nothing to echo'</span>,
@@ -4866,7 +4975,7 @@ router.on(<span class="tok-string">'debug'</span>, filterEnvelopeDebug(({ direct
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">const</span> metricsRegistry = createMetricsRegistry();
 <span class="tok-keyword">const</span> server = createServer({ transport }, { metricsRegistry });
 
-<span class="tok-comment">// à /metrics, pour Prometheus, et un Grafana derrière lui</span>
+<span class="tok-comment">// servi à /metrics, dans le texte que lit Prometheus</span>
 <span class="tok-keyword">const</span> { contentType, text } = metricsRegistry.exposition();
 <span class="tok-comment">// contentType: 'text/plain; version=0.0.4; charset=utf-8'</span></code></pre>
   <details class="more" id="debogage-durci">
@@ -4911,7 +5020,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </details>
 </section>
 
-<section id="securite">
+<section id="securite" data-bead-face="surprised">
   <h2 id="securite-h">La sécurité, simplement</h2>
   <p class="gist">
     Un serveur Bead se garde par six portes, de la plus extérieure à la plus intérieure. Chaque
@@ -4983,8 +5092,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       ouvert la session. Il tient le rôle d’un cookie de session, lié à sa connexion.
     </li>
     <li>
-      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie sur
-      place, avec les clés que son application lui donne.
+      <strong><code>JWT</code></strong> : un jeton d’accès signé, que chaque serveur vérifie
+      lui-même, avec les clés ou le jeu de clés que son application lui donne.
     </li>
     <li>
       <strong><code>ELSEWHERE</code></strong> : le justificatif voyage dans le transport, et le
@@ -5074,8 +5183,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more" id="securite-relais">
     <summary>Un relais</summary>
     <p>
-      Un relais termine chaque jambe et fait suivre un JWT tel quel à la destination de son
-      audience, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
+      Un relais termine chaque jambe et fait suivre un justificatif porteur tel quel à la
+      destination que choisit le demandeur, qui le vérifie. Il refuse par défaut un appel sans justificatif, ou OPAQUE, pour ne pas prêter
       sa propre session à n’importe quel demandeur. <a href="#relais">Les relais</a> détaillent le
       tout.
     </p>
@@ -5120,8 +5229,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <code>unnamedProxies</code>.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused : autorité "rebind.example:8080", origine "http://rebind.example:8080",</span>
-  <span class="tok-comment">// de 127.0.0.1:53114</span>
+  <span class="tok-comment">// une page d'un autre site, par rebinding DNS, écrit :</span>
+  <span class="tok-comment">// refusé 403 host-refused : autorité "rebind.example:8080",</span>
+  <span class="tok-comment">//   origine "http://rebind.example:8080", de 127.0.0.1:53114</span>
   console.warn(
     <span class="tok-string">`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, `</span> +
       <span class="tok-string">`origine ${JSON.stringify(origin)}, de ${address}:${port}`</span>
@@ -5142,8 +5252,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
   <span class="tok-string">'accessRefused'</span>,
   ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-    <span class="tok-comment">// credential 32 exp : un JWT expiré, schéma 2, service 1, procédure 4,</span>
-    <span class="tok-comment">// de 203.0.113.7:53114</span>
+    <span class="tok-comment">// un JWT expiré écrit :</span>
+    <span class="tok-comment">// refusé credential 32 exp : schéma 2, 1/4, de 203.0.113.7:53114</span>
     console.warn(
       <span class="tok-string">`refusé ${stage} ${code} ${reason ?? ''} : schéma ${credentialScheme}, `</span> +
         <span class="tok-string">`${serviceId}/${procedureId}, de ${address}:${port}`</span>
@@ -5227,7 +5337,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </p>
 </section>
 
-<section id="protocole">
+<section id="protocole" data-bead-face="focused">
   <h2 id="protocole-h">Le protocole en détail</h2>
   <p class="gist">
     Pour qui implante un côté, en audite un, ou veut les octets. Chaque section suit la
@@ -5237,7 +5347,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <ul class="chips space" aria-label="En chiffres">
     <li>8 octets de préfixe</li>
     <li>23 codes d’échec</li>
-    <li>412 unités dans la spécification</li>
+    <li>414 unités dans la spécification</li>
   </ul>
   <p class="space">
     Trois buts guident chaque choix. Un décodeur écrit à la main lit chaque champ à sa place, sans
@@ -5297,7 +5407,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </p>
 </section>
 
-<section id="enveloppe">
+<section id="enveloppe" data-bead-face="focused">
   <h2 id="enveloppe-h">L’enveloppe</h2>
   <p class="gist">
     Chaque enveloppe commence par le même préfixe de 8 octets. Le genre et les drapeaux y ajoutent
@@ -5437,7 +5547,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </figure>
 </section>
 
-<section id="echecs">
+<section id="echecs" data-bead-face="surprised">
   <h2 id="echecs-h">Un échec voyage une fois</h2>
   <p class="gist">
     Un échec est la charge d’une FAILURE, et nulle part ailleurs. Il tient un code sur 2 octets, le
@@ -5471,32 +5581,34 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="echecs-code">Côté code</h3>
   <p>
     Côté TypeScript, le demandeur reçoit une <code>FailureError</code> : <code>isProtocol</code>
-    teste un code du protocole, <code>isApplication</code> un code de la procédure. La
-    <code>FailureException</code> du côté C# et la <code>Failure</code> du côté Rust posent les
-    mêmes questions.
+    teste un code du protocole. Un échec propre à la procédure se teste par le catalogue que beadc
+    génère depuis le <code>.proto</code>, ici <code>EchoFailures.is</code>. Ce test vérifie aussi
+    que l’échec vient de ce service. La <code>FailureException</code> du côté C# et la
+    <code>Failure</code> du côté Rust posent les mêmes questions.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-typescript"><span class="tok-keyword">import</span> { FailureError, ProtocolCode } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/client'</span>;
 <span class="tok-keyword">import</span> { violationsOf } <span class="tok-keyword">from</span> <span class="tok-string">'@francisdesjardins/bead/service'</span>;
+<span class="tok-keyword">import</span> { EchoFailures } <span class="tok-keyword">from</span> <span class="tok-string">'../gen/echo/v1/echo_bead.ts'</span>;
 
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
-
-  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
-    <span class="tok-comment">// le code 21 de la procédure elle-même : elle refuse un texte vide</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    <span class="tok-comment">// le code 32 du protocole : ouvrir une session, ou renouveler son justificatif,</span>
-    <span class="tok-comment">// puis rappeler</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    <span class="tok-comment">// le code 52 : chaque violation nomme son champ et sa règle,</span>
-    <span class="tok-comment">// more compte celles laissées de côté</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
+  <span class="tok-keyword">if</span> (EchoFailures.is(reason, <span class="tok-string">'EMPTY_TEXT'</span>)) {
+    <span class="tok-comment">// la procédure refuse un texte vide : en demander un</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (!(reason <span class="tok-keyword">instanceof</span> FailureError)) {
+    <span class="tok-keyword">throw</span> reason;
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    <span class="tok-comment">// ouvrir une session, ou renouveler son justificatif, puis rappeler</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    <span class="tok-comment">// chaque violation nomme son champ et sa règle ; more compte celles laissées de côté</span>
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+  } <span class="tok-keyword">else</span> {
+    <span class="tok-keyword">throw</span> reason;
   }
 }</code></pre>
 </section>
 
-<section id="porte">
+<section id="porte" data-bead-face="surprised">
   <h2 id="porte-h">Ce qui ne se lit pas</h2>
   <p class="gist">
     Une enveloppe illisible n’a pas de callId sûr. Y répondre au hasard pourrait régler l’appel de
@@ -5516,7 +5628,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   </figure>
 </section>
 
-<section id="regles">
+<section id="regles" data-bead-face="focused">
   <h2 id="regles-h">Les règles d’une charge</h2>
   <p class="gist">
     Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
@@ -5567,7 +5679,8 @@ message CountDownRequest {
       définies d’une énumération ; les règles d’une liste et d’une map ; et le <code>oneof</code>.
       Il refuse toute autre règle avec <code>VALIDATE_RULE_UNSUPPORTED</code>, CEL et le motif
       d’octets parmi elles. Il n’en ignore aucune : une règle écrite et non jouée laisserait passer
-      ce qu’un serveur protovalidate refuse.
+      ce qu’un serveur protovalidate refuse. Bead ne juge que les requêtes : les règles d’un message
+      qu’aucune requête n’atteint valent un avertissement, <code>VALIDATE_RULES_UNPLAYED</code>.
       <a href="#suite">Les règles en CEL sont à venir, puis le reste des règles qu’il refuse.</a>
     </p>
     <p>
@@ -5619,9 +5732,9 @@ message CountDownRequest {
   <h3 id="abonnements-rythme">Au rythme du client</h3>
   <p>
     Avec PACED à côté de SUBSCRIPTION, le serveur n’envoie que les notifications que le client a
-    accordées. Le client accorde à mesure que ses rappels finissent, un rappel asynchrone une fois
-    son travail fini. Avec une fenêtre d’une notification, il accorde la suivante quand ils ont
-    fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
+    accordées. Le client accorde à mesure que ses rappels finissent. Un rappel asynchrone finit une
+    fois son travail fait. Avec une fenêtre d’une notification, le client accorde la suivante quand
+    ses rappels ont fini avec la précédente. Avec une fenêtre plus large, il accorde aussi loin que la fenêtre
     porte au-delà de ce qu’ils ont fini, et accorde de nouveau à la moitié de la fenêtre. Il
     accorde par un CREDIT qui porte PACED. Ce crédit compte des notifications, comme le
     <code>REQUEST_N</code> de RSocket. Mais il est absolu, comme le crédit d’un transfert.
@@ -5629,11 +5742,11 @@ message CountDownRequest {
   <p>
     Au-delà de son crédit, une notification attend dans une file. Le serveur peut lui donner une
     clé. Une notification de même clé remplace celle qui attend, et l’état d’une entité ne garde
-    ainsi que sa dernière valeur : quarante-cinq changements d’un article, pendant qu’un rappel va
-    chercher ses données, arrivent en deux notifications. Sans clé, chaque événement est gardé,
-    dans l’ordre. Une file pleine, 64 notifications ou 1 Mio par défaut, termine l’abonnement par
-    <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en silence : le client se réabonne et relit
-    l’état.
+    ainsi que sa dernière valeur. Si un article change quarante-cinq fois pendant qu’un rappel va
+    chercher ses données, le client reçoit deux notifications : le premier changement, puis le
+    dernier. Sans clé, chaque événement est gardé, dans l’ordre. Une file pleine, 64 notifications
+    ou 1 Mio par défaut, termine l’abonnement par <code>CAPACITY_EXCEEDED</code>. Rien ne se perd en
+    silence : l’application du client se réabonne et relit l’état.
   </p>
   <figure class="figure">
     <figcaption>Un abonnement cadencé, son rappel qui va chercher</figcaption>
@@ -6026,8 +6139,7 @@ message CountDownRequest {
     </table>
   </div>
   <p class="space">
-    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP. Les règles
-    de reprise de gRPC reposent sur la même différence : si la procédure a pu tourner.
+    La passerelle de Bead rend ces deux codes en 503 et 502, comme une passerelle HTTP.
   </p>
   <details class="more">
     <summary>Ce qu’un relais ne fait pas, et ce que ses demandeurs partagent</summary>
@@ -6053,7 +6165,7 @@ message CountDownRequest {
   </details>
 </section>
 
-<section id="http">
+<section id="http" data-bead-face="listening">
   <h2 id="http-h">Sur HTTP</h2>
   <p class="gist">
     Sur WebSocket, chaque enveloppe est un message binaire, dans les deux sens. HTTP sert là où
@@ -6061,10 +6173,10 @@ message CountDownRequest {
     <code>POST</code> porte une enveloppe (§15.4 à §15.12).
   </p>
   <p>
-    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un PING sur une connexion
-    restée silencieuse 30 s, et la coupe si aucun PONG ne lui fait écho. Un pair parti
+    Là où sa plateforme le permet, chaque bout d’un WebSocket envoie un ping sur une connexion
+    restée silencieuse 30 s, et la coupe si aucun pong ne lui fait écho. Un pair parti
     sans un mot est ainsi coupé. Le <code>WebSocket</code> global, celui d’une
-    page ou de Node, n’en envoie aucun, et les PING du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
+    page ou de Node, n’en envoie aucun, et les pings du serveur en tiennent lieu. Un message au-delà de <code>maximumMessageBytes</code> ferme la connexion
     avec le code 1009 (RFC 6455), un message au-delà de <code>maximumMessageFrames</code> avec 1008, et une trame que la RFC 6455 interdit avec 1002. Chaque bout lit la tête de chaque trame là où sa plateforme le permet, et la juge là.
   </p>
   <p>
@@ -6076,10 +6188,10 @@ message CountDownRequest {
     pour remettre chaque réponse à l’échange de sa requête.
   </p>
   <p>
-    Le serveur marque chacun de ses refus dans le champ <code>bead-refusal</code>, et seul un refus
-    marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut, le 502 d’une
-    passerelle par exemple, a pu venir après que la requête a tourné, et compte comme un échange
-    perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
+    Le transport marque chacun de ses propres refus dans le champ <code>bead-refusal</code>, et seul
+    un refus marqué fait échouer l’envoi sans doute : rien n’a été tenté. Tout autre statut qu’un
+    2xx, le 502 d’une passerelle par exemple, a pu venir après que la requête a tourné, et compte
+    comme un échange perdu. Un relais distingue ainsi toujours <code>DESTINATION_UNREACHABLE</code> de
     <code>DESTINATION_LOST</code>. Un client ne suit aucune redirection : elle porterait le jeton de
     la connexion là où personne ne l’a jugé.
   </p>
@@ -6116,7 +6228,7 @@ message CountDownRequest {
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur répond 408, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
       reste, 400 non marqué sur HTTP/1.1 (§15.12).
@@ -6133,7 +6245,7 @@ message CountDownRequest {
   </details>
 </section>
 
-<section id="memoire">
+<section id="memoire" data-bead-face="listening">
   <h2 id="memoire-h">En mémoire, et plusieurs transports</h2>
   <p class="gist">
     Le transport en mémoire joint le routeur d’un client et celui d’un serveur dans un même
@@ -6180,10 +6292,10 @@ offerHello(server);
 
 <span class="tok-keyword">await</span> memory.start();
 <span class="tok-keyword">await</span> webSocket.start({ port: <span class="tok-number">8080</span> });
-<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost : les deux boucles locales</span></code></pre>
+<span class="tok-keyword">await</span> gateway.start({ port: <span class="tok-number">8081</span> }); <span class="tok-comment">// localhost par défaut : 127.0.0.1 et ::1</span></code></pre>
 </section>
 
-<section id="courtier">
+<section id="courtier" data-bead-face="listening">
   <h2 id="courtier-h">Sur un courtier</h2>
   <p class="gist">
     Un courtier de publication-abonnement à sujets est un transport de plus, et Bead n’y devient
@@ -6253,7 +6365,7 @@ offerHello(server);
   </details>
 </section>
 
-<section id="suite">
+<section id="suite" data-bead-face="serene">
   <h2 id="suite-h">Ce qui vient</h2>
   <p class="gist">
     Les quatre premiers viennent dans cet ordre, les autres sans ordre fixé.
@@ -6290,9 +6402,10 @@ offerHello(server);
         DevTools.</span>
     </li>
     <li>
-      <strong>Plus de conformance</strong
-      ><span>La partie client sur HTTP et WebSocket, un relais entre langages, et un même corpus lu
-        pareil par les analyseurs de chaque côté.</span>
+      <strong>Plus de tests partagés</strong
+      ><span>La partie client des transports dans la conformance, sur HTTP et WebSocket, un relais
+        entre langages dans l’interop, et un même corpus lu pareil par les analyseurs de chaque
+        côté.</span>
     </li>
     <li>
       <strong>L’âge d’une connexion</strong
@@ -6502,14 +6615,22 @@ offerHello(server);
     return found;
   };
 
+  // the section read, marked in the contents and named by the bar's button: its entry's words, or
+  // Bead's name above the first section. ! The button's name changes and nothing announces it
   const mark = () => {
     const section = current();
-    for (const link of page.querySelectorAll('.toc a')) {
+    let named = 'Bead';
+    for (const link of page.querySelectorAll('.toc ol a')) {
       if (section !== null && link.getAttribute('href') === `#${section.id}`) {
         link.setAttribute('aria-current', 'location');
+        named = link.textContent;
       } else {
         link.removeAttribute('aria-current');
       }
+    }
+    const reading = page.querySelector('[data-reading]');
+    if (reading !== null && reading.textContent !== named) {
+      reading.textContent = named;
     }
   };
 
@@ -6534,7 +6655,6 @@ offerHello(server);
     const button = page.querySelector('[data-action="menu"]');
     root.toggleAttribute('data-menu-open', open);
     button.setAttribute('aria-expanded', String(open));
-    button.setAttribute('aria-label', button.getAttribute(open ? 'data-close' : 'data-open'));
   };
 
   const settle = () => {
@@ -6552,7 +6672,14 @@ offerHello(server);
         menu(!root.hasAttribute('data-menu-open'));
       } else if (action === 'language') {
         event.preventDefault();
-        const next = shown() === 'en' ? 'fr' : 'en';
+        const next = control.getAttribute('data-lang') ?? (shown() === 'en' ? 'fr' : 'en');
+        // the contents' foot offers the page's own language too: chosen, it only closes them
+        if (next === shown()) {
+          menu(false);
+          page.querySelector('[data-action="menu"]').focus();
+          return;
+        }
+        const fromContents = control.closest('.toc') !== null;
         // the section being read stays where it was on the screen
         const reading = current();
         const before = reading === null ? 0 : reading.getBoundingClientRect().top;
@@ -6571,7 +6698,10 @@ offerHello(server);
           const again = document.getElementById(reading.id);
           window.scrollBy({ top: again.getBoundingClientRect().top - before, behavior: 'instant' });
         }
-        page.querySelector('[data-action="language"]').focus();
+        // the focus where the choice was made: the bar's tool, or, the contents closed, their button
+        page
+          .querySelector(fromContents ? '[data-action="menu"]' : '.tools [data-action="language"]')
+          .focus();
       }
       return;
     }
@@ -6616,6 +6746,1103 @@ offerHello(server);
     landed.scrollIntoView({ behavior: 'instant' });
   }
 })();
+    </script>
+    <script type="module">
+// Bead's mascot: the mark, `site/src/favicon.svg`, the Moon's disc and three of Baily's beads on
+// its rim, with a face engraved in light strokes in the beads' colour. One source for the page, the
+// demo and the DevTools panel: the page's build inlines it as a module, the demo and the panel
+// bundle it. Its geometry and its timing are pure and exported, so a test reads them in Node; what
+// draws and moves it touches the document only when it is called.
+
+// ── The faces ─────────────────────────────────────────────────────────────────
+
+// every face on one skeleton, so that any two interpolate point by point: an eye `[cx, cy, rx, top,
+// bottom]`, its two halves a cubic each (a circle of r: top = bottom = 4r/3; an arc: top =
+// -bottom); a pupil `[x, y, r]`; a brow `[x1, y1, cx, cy, x2, y2, opacity]`, a quadratic; the
+// mouth `[lx, ly, rx, ry, ux, uy, dx, dy]`, two quadratics from corner to corner; the monocle
+// `[opacity]`, on the right eye as seen
+const faceOf = (parts) => {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(parts).map(([part, values]) => {
+        return [part, Object.freeze(values)];
+      })
+    )
+  );
+};
+
+export const FACES = Object.freeze({
+  // the default, and the transports: the eyes raised to the beads, waiting for what comes
+  listening: faceOf({
+    eL: [10.2, 18, 1.45, 1.93, 1.93],
+    eR: [16.6, 18, 1.45, 1.93, 1.93],
+    pL: [10.8, 17.4, 0.55],
+    pR: [17.2, 17.4, 0.55],
+    bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
+    bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
+    m: [12.2, 22.4, 14.6, 22.4, 13.4, 23.1, 13.4, 23.1],
+    g: [0],
+  }),
+  // the spec and its conformance: the monocle, the brows flat, the eyes on the line
+  focused: faceOf({
+    eL: [10.2, 18.1, 1.25, 1.67, 1.67],
+    eR: [16.6, 18.1, 1.25, 1.67, 1.67],
+    pL: [9.85, 18.55, 0.52],
+    pR: [16.25, 18.55, 0.52],
+    bL: [8.7, 15.1, 10.2, 14.7, 11.7, 15.1, 1],
+    bR: [15.1, 15.1, 16.6, 14.7, 18.1, 15.1, 1],
+    m: [12.4, 22.5, 14.7, 22.1, 13.5, 22.7, 13.5, 22.7],
+    g: [1],
+  }),
+  // refusals, errors, security: round eyes, the brows high, the mouth an o
+  surprised: faceOf({
+    eL: [10.2, 18, 1.75, 2.33, 2.33],
+    eR: [16.6, 18, 1.75, 2.33, 2.33],
+    pL: [10.2, 18, 0.45],
+    pR: [16.6, 18, 0.45],
+    bL: [8.7, 15.0, 10.2, 14.0, 11.7, 15.0, 1],
+    bR: [15.1, 15.0, 16.6, 14.0, 18.1, 15.0, 1],
+    m: [12.5, 22.6, 14.3, 22.6, 13.4, 21.2, 13.4, 24.0],
+    g: [0],
+  }),
+  // a call that succeeded: the eyes two arcs, a wide smile
+  happy: faceOf({
+    eL: [10.2, 18.4, 1.3, 1.0, -1.0],
+    eR: [16.6, 18.4, 1.3, 1.0, -1.0],
+    pL: [10.2, 18.0, 0],
+    pR: [16.6, 18.0, 0],
+    bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
+    bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
+    m: [11.0, 21.5, 15.8, 21.5, 13.4, 22.6, 13.4, 24.3],
+    g: [0],
+  }),
+  // the click: a wink, a brow raised, a smile at one corner
+  mischief: faceOf({
+    eL: [10.2, 18.3, 1.3, 0.8, -0.8],
+    eR: [16.6, 18, 1.45, 1.93, 1.93],
+    pL: [10.2, 18.0, 0],
+    pR: [17.1, 17.6, 0.55],
+    bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
+    bR: [15.2, 15.4, 16.7, 14.5, 18.2, 15.1, 1],
+    m: [11.6, 22.1, 16.2, 21.5, 13.6, 23.6, 13.6, 23.6],
+    g: [0],
+  }),
+  // the end of the page, what is ahead, and totality: the eyes closed, a small smile
+  serene: faceOf({
+    eL: [10.2, 17.8, 1.3, -1.0, 1.0],
+    eR: [16.6, 17.8, 1.3, -1.0, 1.0],
+    pL: [10.2, 18.0, 0],
+    pR: [16.6, 18.0, 0],
+    bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
+    bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
+    m: [11.9, 21.9, 14.9, 21.9, 13.4, 23.2, 13.4, 23.2],
+    g: [0],
+  }),
+});
+
+export const FACE_NAMES = Object.freeze(Object.keys(FACES));
+
+export const DEFAULT_FACE = 'listening';
+
+const PARTS = Object.freeze(['eL', 'eR', 'pL', 'pR', 'bL', 'bR', 'm', 'g']);
+
+const clamp = (t) => {
+  return Math.max(0, Math.min(1, t));
+};
+
+const smooth = (t) => {
+  return t * t * (3 - 2 * t);
+};
+
+/** The face `by` of the way from `from` to `to`, each value of each part interpolated alone. */
+export const blend = (from, to, { by }) => {
+  return Object.fromEntries(
+    PARTS.map((part) => {
+      return [
+        part,
+        from[part].map((value, index) => {
+          return value + ((to[part][index] ?? value) - value) * by;
+        }),
+      ];
+    })
+  );
+};
+
+// ── Reading ───────────────────────────────────────────────────────────────────
+
+/**
+ * The keyframes on the page's axis, from its sections in their order: each section's centre holds
+ * its face, and a section with none the default.
+ */
+export const keyframesOf = (sections) => {
+  return sections.map(({ top, height, face }) => {
+    return { at: top + height / 2, face: face ?? DEFAULT_FACE };
+  });
+};
+
+/**
+ * The face at the reading line: the two keyframes nearest it and how far it is from the first to
+ * the second, smoothstepped; with reduced motion, the face changes at once at mid-way.
+ */
+export const readingAt = (keyframes, line, options = {}) => {
+  const first = keyframes[0];
+  if (first === undefined) {
+    return { from: DEFAULT_FACE, to: DEFAULT_FACE, t: 0 };
+  }
+  let from = first;
+  let to = first;
+  keyframes.forEach((keyframe, index) => {
+    if (keyframe.at <= line) {
+      from = keyframe;
+      to = keyframes[index + 1] ?? keyframe;
+    }
+  });
+  const t = to.at > from.at ? smooth(clamp((line - from.at) / (to.at - from.at))) : 0;
+  if (options.reduced === true) {
+    return { from: from.face, to: to.face, t: t < 0.5 ? 0 : 1 };
+  }
+  return { from: from.face, to: to.face, t };
+};
+
+// ── The eclipse ───────────────────────────────────────────────────────────────
+
+// the mark's three beads, where they stand, and when each has gone out: the smallest first
+const BEADS = Object.freeze([
+  Object.freeze({ x: 15.94, y: 6.97, r: 1.8, out: 1500 }),
+  Object.freeze({ x: 21.64, y: 9.81, r: 2.5, out: 1950 }),
+  Object.freeze({ x: 24.87, y: 15.29, r: 1.5, out: 1250 }),
+]);
+// the largest, which alone flares
+const LARGEST = 1;
+const FADE_MS = 250;
+const TWINKLE_MS = 1250;
+const RETURN_AT = 5500;
+const RETURN_STEP = 180;
+const RETURN_MS = 350;
+const REDUCED_TOTALITY_MS = 3000;
+
+/** The eclipse's length: until the last bead is back where it was. */
+export const ECLIPSE_MS = RETURN_AT + (BEADS.length - 1) * RETURN_STEP + RETURN_MS;
+
+const AT_REST = Object.freeze({
+  beads: Object.freeze(
+    BEADS.map(({ r }) => {
+      return Object.freeze({ opacity: 1, radius: r });
+    })
+  ),
+  flare: 0,
+  corona: 0,
+  mischief: 0,
+  serene: 0,
+});
+
+/**
+ * The eclipse `elapsed` ms after its click. The beads twinkle, then go out one by one, the
+ * smallest first, until the largest alone flares, the diamond ring; at totality the corona opens
+ * and the face goes serene; then the three beads come back one after another where they were. It
+ * adds no bead of its own, and the flare never comes back with them. With reduced motion, it is the
+ * corona alone.
+ */
+export const eclipseAt = (elapsed, options = {}) => {
+  if (!(elapsed >= 0 && elapsed < ECLIPSE_MS)) {
+    return AT_REST;
+  }
+  if (options.reduced === true) {
+    const corona = elapsed < REDUCED_TOTALITY_MS ? 1 : 0;
+    return { ...AT_REST, corona, serene: corona };
+  }
+  const flare = clamp((elapsed - 1500) / 300) * (1 - clamp((elapsed - 1950) / 250));
+  const total = clamp((elapsed - 1900) / 500) * (1 - clamp((elapsed - 4100) / 400));
+  const beads = BEADS.map(({ r, out }, index) => {
+    const twinkle = elapsed < TWINKLE_MS ? 0.75 + 0.25 * Math.cos(elapsed / 160 + index * 2.1) : 1;
+    const goes = clamp((elapsed - out + FADE_MS) / FADE_MS);
+    const back = clamp((elapsed - (RETURN_AT + index * RETURN_STEP)) / RETURN_MS);
+    return {
+      opacity: clamp(twinkle * (1 - goes) + back * goes),
+      radius: r * (1 - 0.35 * goes * (1 - back)),
+    };
+  });
+  // the click's wink, gone before totality
+  const mischief = smooth(clamp(elapsed / FADE_MS)) * (1 - smooth(clamp((elapsed - 1250) / 650)));
+  return { beads, flare, corona: total, mischief, serene: smooth(total) };
+};
+
+// ── Drawing ───────────────────────────────────────────────────────────────────
+
+const SVG = 'http://www.w3.org/2000/svg';
+// the mark's box, and a wider one that holds the corona
+const MARK_BOX = '2.6 4.7 25 25';
+const CORONA_BOX = '-1 1 30 31';
+const CENTRE = Object.freeze({ x: 14, y: 18 });
+const RIM = 'M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46';
+// the face's centre, between its eyes and halfway from its brows to its mouth, and the one factor
+// every face is drawn at about it
+const FACE_CENTRE = Object.freeze({ x: 13.4, y: 19 });
+const FACE_SCALE = 1.2;
+const MONOCLE =
+  'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 20.5 19.9 21.3 21.9';
+const STYLE_ID = 'bead-mascot-style';
+
+// the mark's colours in either theme, as `favicon.svg` has them: its own drawing's; the bar's mark
+// keeps the colours its page gives it
+const MARK_LIGHT = Object.freeze([
+  ['.moon', 'fill: #17111d;'],
+  ['.rim', 'fill: none; stroke: #c13584; stroke-width: 0.9;'],
+  ['.bead', 'fill: #c13584;'],
+]);
+const MARK_DARK = Object.freeze([
+  ['.moon', 'fill: #15111c; stroke: #6d6278; stroke-width: 0.9;'],
+  ['.rim', 'stroke: #ff8bc4;'],
+  ['.bead', 'fill: #ff8bc4;'],
+]);
+// the face in the beads' colour, its flare and its corona, on its own drawing and on the bar's mark
+const FACE_LIGHT = Object.freeze([
+  ['.flare', 'fill: #fde7f2;'],
+  ['.halo', 'fill: none; stroke: #f3a6cd; stroke-width: 2.4; stroke-opacity: 0.35;'],
+  ['.ray', 'fill: none; stroke: #f3a6cd; stroke-width: 0.35; stroke-linecap: round;'],
+  ['.line', 'fill: none; stroke: #f3a6cd; stroke-linecap: round; stroke-linejoin: round;'],
+  ['.pupil', 'fill: #f3a6cd;'],
+]);
+const FACE_DARK = Object.freeze([
+  ['.flare', 'fill: #ffe3f1;'],
+  ['.halo', 'stroke: #ff8bc4;'],
+  ['.ray', 'stroke: #ff8bc4;'],
+  ['.line', 'stroke: #ff8bc4;'],
+  ['.pupil', 'fill: #ff8bc4;'],
+]);
+
+// each rule of `rules` on each drawing of `drawings`, under `scope`: the dark scheme as a script
+// chose it, or as the system gives it where no script chose
+const rulesOf = (rules, { scope, drawings }) => {
+  return rules
+    .map(([part, declarations]) => {
+      const selector = drawings
+        .map((drawing) => {
+          return `${scope}${drawing} ${part}`;
+        })
+        .join(', ');
+      return `${selector} { ${declarations} }`;
+    })
+    .join('\n');
+};
+
+const CHOSEN_DARK = ":root[data-color-scheme='dark'] ";
+const SYSTEM_DARK = ':root:not([data-color-scheme]) ';
+const OWN = Object.freeze(['.bead-moon']);
+const BOTH = Object.freeze(['.bead-moon', '.bead-mark']);
+
+// ! no custom property of its own: the page's build holds every one its page draws with to a sheet
+// that defines it, and this sheet is a script's
+const STYLE = `
+.bead-moon { display: block; overflow: visible; }
+${rulesOf(MARK_LIGHT, { scope: '', drawings: OWN })}
+${rulesOf(FACE_LIGHT, { scope: '', drawings: BOTH })}
+${rulesOf(MARK_DARK, { scope: CHOSEN_DARK, drawings: OWN })}
+${rulesOf(FACE_DARK, { scope: CHOSEN_DARK, drawings: BOTH })}
+@media (prefers-color-scheme: dark) {
+${rulesOf(MARK_DARK, { scope: SYSTEM_DARK, drawings: OWN })}
+${rulesOf(FACE_DARK, { scope: SYSTEM_DARK, drawings: BOTH })}
+}
+/* * the bar's mark, taken over where no room is left beside the text: 36 px, so the face reads and
+   the mark still sits with the name and the tools, its target the brand's link, a finger's size;
+   its face coming and going with the marked sections, its strokes about 1.2 px whatever its scale */
+:root[data-bead-mark] .bead-mark {
+  width: 36px;
+  height: 36px;
+  overflow: visible;
+}
+.bead-mark .bead-face {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+.bead-mark[data-face-shown] .bead-face {
+  opacity: 1;
+}
+.bead-mark .line {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.2px;
+}
+.bead-mark .ray {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1px;
+}
+.bead-mark .halo {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 3px;
+}
+.bead-mascot {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--app-z-mascot, 10);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    left 450ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 450ms ease;
+}
+.bead-mascot:focus-visible {
+  outline: 2px solid var(--focus, var(--app-accent, #c13584));
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+.bead-mascot[data-state='hidden'],
+.bead-mascot[data-state='leaving'] {
+  left: 48px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* ! away, it stays in the tab order, as a skip link does, and comes as it is focused: a control
+   that came and went with the scroll would be one the Tab key misses */
+.bead-mascot > .bead-moon {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bead-mascot,
+  .bead-mascot[data-state='hidden'],
+  .bead-mascot[data-state='leaving'] {
+    left: 0;
+    transition: none;
+  }
+  .bead-mark .bead-face {
+    transition: none;
+  }
+}
+`;
+
+const styled = () => {
+  if (document.getElementById(STYLE_ID) !== null) {
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = STYLE;
+  document.head.append(style);
+};
+
+const element = (name, attributes) => {
+  const made = document.createElementNS(SVG, name);
+  for (const [attribute, value] of Object.entries(attributes)) {
+    made.setAttribute(attribute, String(value));
+  }
+  return made;
+};
+
+const fixed = (value) => {
+  return value.toFixed(3);
+};
+
+const eyeOf = ([cx, cy, rx, top, bottom]) => {
+  const left = fixed(cx - rx);
+  const right = fixed(cx + rx);
+  const y = fixed(cy);
+  const up = fixed(cy - top);
+  const down = fixed(cy + bottom);
+  return `M ${left} ${y} C ${left} ${up} ${right} ${up} ${right} ${y} C ${right} ${down} ${left} ${down} ${left} ${y} Z`;
+};
+
+const browOf = ([x1, y1, cx, cy, x2, y2]) => {
+  return `M ${fixed(x1)} ${fixed(y1)} Q ${fixed(cx)} ${fixed(cy)} ${fixed(x2)} ${fixed(y2)}`;
+};
+
+const mouthOf = ([lx, ly, rx, ry, ux, uy, dx, dy]) => {
+  return `M ${fixed(lx)} ${fixed(ly)} Q ${fixed(ux)} ${fixed(uy)} ${fixed(rx)} ${fixed(ry)} Q ${fixed(dx)} ${fixed(dy)} ${fixed(lx)} ${fixed(ly)} Z`;
+};
+
+// the diamond ring's flare, an eight-pointed star of `size` at the largest bead
+const flareOf = (size) => {
+  const { x, y } = BEADS[LARGEST] ?? CENTRE;
+  const points = Array.from({ length: 8 }, (_, index) => {
+    const angle = (index * Math.PI) / 4;
+    const length = index % 2 === 0 ? 4.2 * size : 1.1 * size;
+    return `${fixed(x + length * Math.cos(angle))} ${fixed(y + length * Math.sin(angle))}`;
+  });
+  return `M ${points.join(' L ')} Z`;
+};
+
+const onRim = (degrees, radius) => {
+  const angle = (degrees * Math.PI) / 180;
+  return { x: CENTRE.x + radius * Math.cos(angle), y: CENTRE.y + radius * Math.sin(angle) };
+};
+
+// the corona, its halo and its rays, shut
+const coronaOf = () => {
+  const corona = element('g', { opacity: 0 });
+  corona.append(element('circle', { class: 'halo', cx: CENTRE.x, cy: CENTRE.y, r: 12.6 }));
+  for (let index = 0; index < 16; index += 1) {
+    const inner = onRim(index * 22.5, 11.3);
+    const outer = onRim(index * 22.5, index % 2 === 0 ? 14.6 : 13.2);
+    corona.append(
+      element('path', {
+        class: 'ray',
+        d: `M ${fixed(inner.x)} ${fixed(inner.y)} L ${fixed(outer.x)} ${fixed(outer.y)}`,
+      })
+    );
+  }
+  return corona;
+};
+
+// the face's parts by name, the flare beside them
+const facePartsOf = () => {
+  const parts = {
+    eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    pL: element('circle', { class: 'pupil' }),
+    pR: element('circle', { class: 'pupil' }),
+    bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
+    g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
+    m: element('path', { class: 'line', 'stroke-width': 0.6 }),
+  };
+  // * every face drawn FACE_SCALE times its skeleton's size about its centre, one factor for all six
+  const face = element('g', {
+    class: 'bead-face',
+    transform: `translate(${String(FACE_CENTRE.x)} ${String(FACE_CENTRE.y)}) scale(${String(FACE_SCALE)}) translate(${String(-FACE_CENTRE.x)} ${String(-FACE_CENTRE.y)})`,
+  });
+  face.append(...Object.values(parts));
+  return { flare: element('path', { class: 'flare', d: flareOf(0.6), opacity: 0 }), face, parts };
+};
+
+// the drawing, its parts by name, and the corona's when it has one
+const drawingOf = (hasCorona) => {
+  styled();
+  const svg = element('svg', {
+    class: 'bead-moon',
+    viewBox: hasCorona ? CORONA_BOX : MARK_BOX,
+    'aria-hidden': 'true',
+    focusable: 'false',
+  });
+  const corona = coronaOf();
+  if (hasCorona) {
+    svg.append(corona);
+  }
+  const rim = element('path', { class: 'rim', d: RIM, 'stroke-opacity': 0.6 });
+  const beads = BEADS.map(({ x, y, r }) => {
+    return element('circle', { class: 'bead', cx: x, cy: y, r });
+  });
+  const { flare, face, parts } = facePartsOf();
+  svg.append(
+    element('circle', { class: 'moon', cx: CENTRE.x, cy: CENTRE.y, r: 10.5 }),
+    rim,
+    ...beads,
+    flare,
+    face
+  );
+  return { svg, corona, rim, beads, flare, parts };
+};
+
+// what the mascot drew into a mark it took over, so it gives the mark back as it was
+const TAKEN = 'data-bead-part';
+
+/** The mark `svg` as it was before the mascot took it over: its own drawing, its beads whole. */
+const giveBack = (svg) => {
+  for (const part of svg.querySelectorAll(`[${TAKEN}]`)) {
+    part.remove();
+  }
+  svg.querySelectorAll('.bead').forEach((bead, index) => {
+    bead.removeAttribute('opacity');
+    bead.setAttribute('r', String(BEADS[index]?.r ?? 1));
+  });
+  svg.querySelector('.rim')?.style.removeProperty('stroke-opacity');
+  svg.classList.remove('bead-mark');
+  svg.removeAttribute('data-face');
+  svg.removeAttribute('data-face-shown');
+};
+
+// ! the bar's mark taken over, the favicon's own drawing: its moon, rim and beads are the mascot's,
+// the corona goes under the moon, and the flare and the face over it; a mark of another drawing is
+// left as it is
+const markDrawingOf = (svg) => {
+  const moon = svg.querySelector('.moon');
+  const rim = svg.querySelector('.rim');
+  const beads = [...svg.querySelectorAll('.bead')];
+  if (moon === null || rim === null || beads.length !== BEADS.length) {
+    return null;
+  }
+  styled();
+  giveBack(svg);
+  const corona = coronaOf();
+  const { flare, face, parts } = facePartsOf();
+  for (const part of [corona, flare, face]) {
+    part.setAttribute(TAKEN, '');
+  }
+  moon.before(corona);
+  svg.append(flare, face);
+  svg.classList.add('bead-mark');
+  return { svg, corona, rim, beads, flare, parts };
+};
+
+// the face and the eclipse written into the drawing
+const paint = (drawing, { face, eclipse }) => {
+  const { parts } = drawing;
+  parts.eL.setAttribute('d', eyeOf(face.eL));
+  parts.eR.setAttribute('d', eyeOf(face.eR));
+  for (const [part, [x, y, r]] of [
+    [parts.pL, face.pL],
+    [parts.pR, face.pR],
+  ]) {
+    part.setAttribute('cx', fixed(x));
+    part.setAttribute('cy', fixed(y));
+    part.setAttribute('r', fixed(Math.max(0, r)));
+  }
+  parts.bL.setAttribute('d', browOf(face.bL));
+  parts.bL.setAttribute('opacity', fixed(face.bL[6]));
+  parts.bR.setAttribute('d', browOf(face.bR));
+  parts.bR.setAttribute('opacity', fixed(face.bR[6]));
+  parts.g.setAttribute('opacity', fixed(face.g[0]));
+  parts.m.setAttribute('d', mouthOf(face.m));
+  drawing.beads.forEach((bead, index) => {
+    const { opacity, radius } = eclipse.beads[index] ?? { opacity: 1, radius: 1 };
+    bead.setAttribute('opacity', fixed(opacity));
+    bead.setAttribute('r', fixed(radius));
+  });
+  drawing.flare.setAttribute('opacity', fixed(eclipse.flare));
+  drawing.flare.setAttribute('d', flareOf(0.6 + 0.6 * eclipse.flare));
+  drawing.corona.setAttribute('opacity', fixed(eclipse.corona));
+  // ! a style, not an attribute: the bar's mark takes its rim's from its page's sheet
+  drawing.rim.style.strokeOpacity = fixed(0.6 * (1 - eclipse.corona));
+};
+
+/** The mark with face `name`, still, for a page to place: an empty state's, say. */
+export const drawFace = (name) => {
+  const drawing = drawingOf(false);
+  paint(drawing, { face: FACES[name] ?? FACES[DEFAULT_FACE], eclipse: AT_REST });
+  drawing.svg.setAttribute('data-face', name);
+  return drawing.svg;
+};
+
+// ── On a page ─────────────────────────────────────────────────────────────────
+
+const LABELS = Object.freeze({
+  en: 'Bead’s moon: click for an eclipse',
+  fr: 'La lune de Bead : cliquer pour une éclipse',
+});
+// what the page leaves free around it, and the least room beside the text that holds it
+const GAP = 16;
+const LEAST = 96;
+const MOST = 168;
+const ARRIVE_MS = 500;
+const LEAVE_MS = 450;
+// how long it stays outside every marked section before it leaves
+const LINGER_MS = 6000;
+const SHY_MS = 1400;
+// once back, how long before a pointer sends it away again, so a click can reach it
+const SHY_REST_MS = 4000;
+// how far above and below it a wide block sends it away: a fast wheel's step in one frame
+const REACH = 128;
+// how fast it comes back once clear of a wide block, in px a millisecond
+const DODGE_BACK = 0.6;
+const REACT_IN_MS = 300;
+const REACT_HOLD_MS = 2200;
+const REACT_OUT_MS = 600;
+
+/**
+ * The mascot on the page. Where the page leaves room beside the text, a button at the end of the
+ * body, hidden until the reading line, the middle of the viewport, first enters a section with a
+ * face (`data-bead-face`) after a scroll; a click on it starts an eclipse. Where it leaves none,
+ * the bar's mark itself, its face shown while the reading line is in such a section; the brand's
+ * link to the top starts the eclipse. One or the other, never both. Its face follows the scroll
+ * from section to section, and `react` gives it one for a moment.
+ */
+export const mountMascot = (options = {}) => {
+  const sectionsSelector = options.sections ?? 'main section[id]';
+  const contentSelector = options.content ?? 'main';
+  const avoidSelector =
+    options.avoid ?? 'main pre, main details, main .excerpt, main table, main figure';
+  const dockSelector = options.dock ?? '.topbar';
+  const markSelector = options.mark ?? '.topbar .brand .mark';
+
+  styled();
+  const root = document.documentElement;
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const drawing = drawingOf(true);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'bead-mascot';
+  button.dataset['state'] = 'hidden';
+  button.dataset['face'] = DEFAULT_FACE;
+  button.append(drawing.svg);
+  document.body.append(button);
+
+  let state = 'hidden';
+  let hasScrolled = false;
+  let keyframes = [];
+  let obstacles = [];
+  let marked = new Set();
+  let place = { dock: 'none', size: 0, left: 0, room: 0, band: { top: 0, bottom: 0 } };
+  let scrollMax = 1;
+  let eclipseStart = null;
+  let reaction = null;
+  let restUntil = 0;
+  let frame = null;
+  let lastFace = '';
+  // the bar's mark while the mascot holds it
+  let mark = null;
+  // how far it stands clear of a wide block, and when it was last drawn
+  let dodged = 0;
+  let drawn = 0;
+  const timers = new Map();
+
+  // each timer by its name, and how long it waits
+  const DELAYS = Object.freeze({
+    arrive: ARRIVE_MS,
+    leave: LINGER_MS,
+    hide: LEAVE_MS,
+    shy: SHY_MS,
+  });
+
+  const later = (name, run) => {
+    window.clearTimeout(timers.get(name));
+    timers.set(
+      name,
+      window.setTimeout(() => {
+        timers.delete(name);
+        run();
+      }, DELAYS[name])
+    );
+  };
+
+  const cancel = (name) => {
+    window.clearTimeout(timers.get(name));
+    timers.delete(name);
+  };
+
+  const isReduced = () => {
+    return motion.matches;
+  };
+
+  const set = (next) => {
+    state = next;
+    button.dataset['state'] = next;
+  };
+
+  const label = () => {
+    const language = (root.getAttribute('lang') ?? 'en').toLowerCase().startsWith('fr')
+      ? 'fr'
+      : 'en';
+    button.setAttribute('aria-label', LABELS[language]);
+  };
+
+  // ── Its states ──
+
+  const isShown = () => {
+    return state !== 'hidden' && state !== 'leaving';
+  };
+
+  const arrive = () => {
+    if (place.dock !== 'margin') {
+      return;
+    }
+    cancel('leave');
+    if (isShown()) {
+      return;
+    }
+    set('arriving');
+    schedule();
+    later('arrive', () => {
+      if (state === 'arriving') {
+        set('reading');
+      }
+    });
+  };
+
+  const leave = () => {
+    if (!isShown()) {
+      return;
+    }
+    if (state === 'eclipse' || document.activeElement === button) {
+      later('leave', leave);
+      return;
+    }
+    set('leaving');
+    later('hide', () => {
+      if (state === 'leaving') {
+        set('hidden');
+      }
+    });
+  };
+
+  // in a marked section, it comes after the first scroll and stays; outside every one, it leaves
+  // after a while
+  const settle = () => {
+    if (place.dock !== 'margin') {
+      schedule();
+      return;
+    }
+    if (marked.size > 0 && hasScrolled) {
+      arrive();
+    } else if (marked.size === 0 && reaction === null) {
+      if (isShown() && !timers.has('leave')) {
+        later('leave', leave);
+      }
+    }
+  };
+
+  // ── Where it is ──
+
+  const visible = (element) => {
+    return element.getClientRects().length > 0;
+  };
+
+  // the mark taken over, or given back: the one that stands in the bar now, or none
+  const holdMark = (svg) => {
+    if (mark !== null && mark.svg === svg) {
+      return;
+    }
+    if (mark !== null) {
+      giveBack(mark.svg);
+    }
+    mark = svg === null ? null : markDrawingOf(svg);
+    root.toggleAttribute('data-bead-mark', mark !== null);
+  };
+
+  // * read once per change of the layout, never per frame: the sections' centres, what is wider
+  // than the text, and where the mascot stands
+  const measure = () => {
+    const scrollY = window.scrollY;
+    const sections = [...document.querySelectorAll(sectionsSelector)].filter(visible);
+    keyframes = keyframesOf(
+      sections.map((section) => {
+        const box = section.getBoundingClientRect();
+        const face = section.getAttribute('data-bead-face');
+        return {
+          top: box.top + scrollY,
+          height: box.height,
+          face: face !== null && face in FACES ? face : null,
+        };
+      })
+    );
+    scrollMax = Math.max(1, root.scrollHeight - window.innerHeight);
+    const content = document.querySelector(contentSelector);
+    const right = content === null ? window.innerWidth : content.getBoundingClientRect().right;
+    obstacles = [...document.querySelectorAll(avoidSelector)]
+      .filter(visible)
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top + scrollY, bottom: box.bottom + scrollY, right: box.right };
+      })
+      .filter((box) => {
+        return box.right > right + 1;
+      });
+    const bar = document.querySelector(dockSelector);
+    const barBottom = bar === null ? 0 : bar.getBoundingClientRect().bottom;
+    const room = root.clientWidth - right;
+    const markSvg = document.querySelector(markSelector);
+    if (room >= LEAST + 2 * GAP) {
+      const size = Math.min(MOST, room - 2 * GAP);
+      place = {
+        dock: 'margin',
+        size,
+        left: right,
+        room,
+        band: { top: barBottom + GAP, bottom: window.innerHeight - GAP },
+      };
+      holdMark(null);
+    } else {
+      // * no room beside the text: the mascot is the bar's mark, and no button of its own
+      holdMark(markSvg !== null && visible(markSvg) ? markSvg : null);
+      place = { dock: mark === null ? 'none' : 'mark', size: 0, left: 0, room, band: place.band };
+      if (isShown() && state !== 'eclipse') {
+        set('hidden');
+      }
+    }
+    button.hidden = place.dock !== 'margin';
+    button.dataset['dock'] = place.dock;
+    button.style.width = `${String(place.size)}px`;
+    button.style.height = `${String(place.size)}px`;
+    lastFace = '';
+    schedule();
+  };
+
+  const positionOf = () => {
+    const { size, room, band } = place;
+    const travel = isReduced() ? 0 : clamp(window.scrollY / scrollMax);
+    const swayX = Math.min(26, Math.max(0, (room - size) / 2 - GAP));
+    const swayY = 0.56 * Math.max(0, (band.bottom - band.top - size) / 2);
+    const x = place.left + (room - size) / 2 + swayX * Math.sin(travel * Math.PI * 3);
+    const y = (band.top + band.bottom - size) / 2 + swayY * Math.sin(travel * Math.PI * 2);
+    // ! whatever is wider than the text, a block of code, it moves clear of in the same frame, a
+    // scroll faster than any transition; it comes back at DODGE_BACK px a millisecond
+    let dodge = 0;
+    for (const obstacle of obstacles) {
+      const top = obstacle.top - window.scrollY;
+      const bottom = obstacle.bottom - window.scrollY;
+      if (top < y + size + REACH && bottom > y - REACH && obstacle.right + GAP > x) {
+        dodge = Math.max(dodge, obstacle.right + GAP - x);
+      }
+    }
+    const shy = state === 'shy' ? size * 0.7 : 0;
+    return { x, y, dodge, shove: shy };
+  };
+
+  // ── Each frame ──
+
+  const draw = (now) => {
+    frame = null;
+    const reduced = isReduced();
+    const reading = readingAt(keyframes, window.scrollY + window.innerHeight / 2, { reduced });
+    let face = blend(FACES[reading.from], FACES[reading.to], { by: reading.t });
+    let named = reading.t < 0.5 ? reading.from : reading.to;
+    let isMoving = false;
+    if (reaction !== null) {
+      const since = now - reaction.at;
+      const weight = reduced
+        ? Number(since < REACT_IN_MS + REACT_HOLD_MS)
+        : smooth(clamp(since / REACT_IN_MS)) *
+          (1 - smooth(clamp((since - REACT_IN_MS - REACT_HOLD_MS) / REACT_OUT_MS)));
+      face = blend(face, FACES[reaction.face], { by: weight });
+      if (weight >= 0.5) {
+        named = reaction.face;
+      }
+      if (since < REACT_IN_MS + REACT_HOLD_MS + REACT_OUT_MS) {
+        isMoving = true;
+      } else {
+        reaction = null;
+        settle();
+      }
+    }
+    let eclipse = AT_REST;
+    if (eclipseStart !== null) {
+      const since = now - eclipseStart;
+      eclipse = eclipseAt(since, { reduced });
+      face = blend(blend(face, FACES.mischief, { by: eclipse.mischief }), FACES.serene, {
+        by: eclipse.serene,
+      });
+      if (eclipse.serene >= 0.5) {
+        named = 'serene';
+      } else if (eclipse.mischief >= 0.5) {
+        named = 'mischief';
+      }
+      if (since < ECLIPSE_MS) {
+        isMoving = true;
+      } else {
+        eclipseStart = null;
+        set(place.dock === 'margin' ? 'reading' : 'hidden');
+        settle();
+      }
+    }
+    const key = PARTS.map((part) => {
+      return face[part].map(fixed).join(',');
+    })
+      .concat(
+        eclipse.beads.map(({ opacity, radius }) => {
+          return `${fixed(opacity)}:${fixed(radius)}`;
+        }),
+        [fixed(eclipse.flare), fixed(eclipse.corona)]
+      )
+      .join(';');
+    if (place.dock === 'mark' && mark !== null) {
+      if (key !== lastFace) {
+        lastFace = key;
+        paint(mark, { face, eclipse });
+      }
+      // * the face comes with a marked section, a reaction or an eclipse, and goes with them
+      const isFaceShown = marked.size > 0 || reaction !== null || eclipseStart !== null;
+      mark.svg.toggleAttribute('data-face-shown', isFaceShown);
+      mark.svg.setAttribute('data-face', named);
+      if (isMoving) {
+        schedule();
+      }
+      return;
+    }
+    if (place.dock !== 'margin') {
+      return;
+    }
+    if (key !== lastFace) {
+      lastFace = key;
+      paint(drawing, { face, eclipse });
+    }
+    if (button.dataset['face'] !== named) {
+      button.dataset['face'] = named;
+    }
+    const { x, y, dodge, shove } = positionOf();
+    dodged =
+      dodge >= dodged ? dodge : Math.max(dodge, dodged - DODGE_BACK * Math.max(0, now - drawn));
+    drawn = now;
+    if (dodged > dodge) {
+      isMoving = true;
+    }
+    button.style.translate = `${fixed(x + dodged)}px ${fixed(y)}px`;
+    button.style.transform = `translateX(${fixed(shove)}px)`;
+    if (isMoving) {
+      schedule();
+    }
+  };
+
+  const schedule = () => {
+    if (frame === null) {
+      frame = window.requestAnimationFrame(draw);
+    }
+  };
+
+  // ── What it hears ──
+
+  // the sections that cross the reading line
+  let crossing = null;
+  const observeSections = () => {
+    crossing?.disconnect();
+    marked = new Set();
+    crossing = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.target.hasAttribute('data-bead-face')) {
+            marked.add(entry.target);
+          } else {
+            marked.delete(entry.target);
+          }
+        }
+        settle();
+      },
+      { rootMargin: '-50% 0px -50% 0px' }
+    );
+    for (const section of document.querySelectorAll(sectionsSelector)) {
+      crossing.observe(section);
+    }
+  };
+
+  const sized = new ResizeObserver(() => {
+    measure();
+  });
+  const observeContent = () => {
+    sized.disconnect();
+    sized.observe(root);
+    const content = document.querySelector(contentSelector);
+    if (content !== null) {
+      sized.observe(content);
+    }
+  };
+
+  // a page that swaps its language swaps its sections with it
+  const languages = new MutationObserver(() => {
+    label();
+    observeSections();
+    observeContent();
+    measure();
+  });
+  languages.observe(root, { attributes: true, attributeFilter: ['lang'] });
+
+  // * a scroll schedules a frame, and nothing else
+  const onScroll = () => {
+    if (!hasScrolled) {
+      hasScrolled = true;
+      settle();
+    }
+    schedule();
+  };
+
+  const onEnter = (event) => {
+    if (
+      event.pointerType !== 'mouse' ||
+      state !== 'reading' ||
+      place.dock !== 'margin' ||
+      isReduced() ||
+      performance.now() < restUntil
+    ) {
+      return;
+    }
+    set('shy');
+    schedule();
+    later('shy', () => {
+      if (state === 'shy') {
+        set('reading');
+        restUntil = performance.now() + SHY_REST_MS;
+        schedule();
+      }
+    });
+  };
+
+  // the keyboard brings it, and it stays while it holds the focus
+  const onFocus = () => {
+    cancel('leave');
+    arrive();
+  };
+
+  const onBlur = () => {
+    settle();
+  };
+
+  const eclipse = () => {
+    if (eclipseStart !== null) {
+      return;
+    }
+    cancel('shy');
+    set('eclipse');
+    eclipseStart = performance.now();
+    schedule();
+  };
+
+  const onClick = () => {
+    if (isShown()) {
+      eclipse();
+    }
+  };
+
+  // the brand's link to the top, where the mascot is the bar's mark: the page goes up as the link
+  // says, and the mark plays the eclipse; a link that leaves the page plays none
+  const onLink = (event) => {
+    const link = event.target instanceof Element ? event.target.closest('a') : null;
+    if (
+      place.dock === 'mark' &&
+      mark !== null &&
+      link !== null &&
+      link.contains(mark.svg) &&
+      (link.getAttribute('href') ?? '').startsWith('#')
+    ) {
+      eclipse();
+    }
+  };
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', measure);
+  button.addEventListener('pointerenter', onEnter);
+  button.addEventListener('click', onClick);
+  button.addEventListener('focus', onFocus);
+  button.addEventListener('blur', onBlur);
+  document.addEventListener('click', onLink);
+  label();
+  observeSections();
+  observeContent();
+  measure();
+
+  return {
+    react: (face) => {
+      if (!(face in FACES)) {
+        return;
+      }
+      reaction = { face, at: performance.now() };
+      cancel('leave');
+      arrive();
+      schedule();
+    },
+    destroy: () => {
+      for (const timer of timers.values()) {
+        window.clearTimeout(timer);
+      }
+      timers.clear();
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      crossing?.disconnect();
+      sized.disconnect();
+      languages.disconnect();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', measure);
+      document.removeEventListener('click', onLink);
+      holdMark(null);
+      button.remove();
+    },
+  };
+};
+
+mountMascot();
     </script>
   </body>
 </html>

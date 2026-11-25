@@ -190,9 +190,9 @@ public sealed record WebSocketTransportServerOptions
     /// <c>messageBytesBudget</c>: 268,435,456 by default (spec 15.12). Each byte read from a message's
     /// first head to the end of its last frame is charged as it comes, the control frames between
     /// them among it, and each head 128 more once whole; never what a head announces. A charge that
-    /// would pass it casts off connections, as few as fit it: those whose message is past
-    /// <see cref="BodyGracePeriod"/> first, then the one that holds the most, then the one whose
-    /// message began first, the asking one only when it comes first. Each fails with 1013, reported
+    /// would pass it casts off connections, as few as fit it: the one whose message holds the most
+    /// first, then, among equal sums, the one whose message began first, the asking one only when it
+    /// comes first. Each fails with 1013, reported
     /// through <see cref="WebSocketTransportServer.Error"/> naming the bound. A whole number above 0;
     /// any other is an <see cref="ArgumentOutOfRangeException"/> as the transport is built.
     /// </summary>
@@ -577,6 +577,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         {
             var builder = WebApplication.CreateSlimBuilder();
 
+            // ! Kestrel's socket transport reads a connection on below its gate, a paused one's
+            // among them: bounded at 64 KiB, so a paused connection holds its gate's buffer, charged,
+            // and 64 KiB more at most, uncharged (spec 15.12)
+            builder.WebHost.UseSockets((sockets) =>
+            {
+                sockets.MaxReadBufferSize = ServerBounds.SocketReadBufferBytes;
+            });
             builder.Logging.ClearProviders();
             builder.Services.Configure<HostOptions>((host) =>
             {

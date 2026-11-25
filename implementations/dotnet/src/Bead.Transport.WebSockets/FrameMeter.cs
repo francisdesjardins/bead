@@ -9,9 +9,10 @@ namespace Bead.Transport.WebSockets;
 /// socket before .NET's reader sees it, it parses each frame's head (RFC 6455 §5.2), its bytes as
 /// they come across reads, and never unmasks a payload. It judges each frame at its head: past
 /// <c>maximumMessageBytes</c>, 1009; past <c>maximumMessageFrames</c>, 1008; a head RFC 6455 forbids,
-/// 1002. A server's charges each byte of a message partway to its budget, and 128 a head, and holds
-/// the message to its rate, 1008 past it. A verdict cuts its read at the first byte of the frame that
-/// draws it, what came before handed on; from it on, nothing more is handed on or charged.
+/// 1002. A server's charges a message partway to its budget as it comes, each byte of payload as it
+/// is read and each head once whole, its bytes and 128 more, and holds the message to its rate, 1008
+/// past it. A verdict cuts its read at the first byte of the frame that draws it, what came before
+/// handed on and charged first; from it on, nothing more is handed on or charged.
 /// </summary>
 internal sealed class FrameMeter
 {
@@ -69,7 +70,7 @@ internal sealed class FrameMeter
     public FrameMeter(MeterOptions options)
     {
         _options = options;
-        _holder = options.Budget is null ? null : new MessageBudget.Holder((IsPastGrace, CastOff));
+        _holder = options.Budget is null ? null : new MessageBudget.Holder(CastOff);
     }
 
     /// <summary>Its verdict, once one is drawn; none before.</summary>
@@ -135,15 +136,23 @@ internal sealed class FrameMeter
 
                 var drawn = Head(bytes[at]);
 
+                // * a head that draws a verdict is never whole, so nothing of it is charged; what the
+                // read brought before it is, first, and a cast-off there wins over the verdict
                 if (drawn is not null)
                 {
+                    if (charge > 0 && !_options.Budget!.Charge((_holder!, charge)))
+                    {
+                        return Cut((FrameVerdict.CastOff(_options.Budget.Budget), chargedFrom));
+                    }
+
                     return Cut((drawn, StartIn()));
                 }
 
-                if (_isCharged)
+                // * a head charged once whole, at its last byte: its bytes and 128 (spec 15.12)
+                if (_isInPayload && _isCharged)
                 {
-                    chargedFrom = chargedFrom < 0 ? at : chargedFrom;
-                    charge += 1 + (_isInPayload ? PerFrame : 0);
+                    chargedFrom = chargedFrom < 0 ? StartIn() : chargedFrom;
+                    charge += _headLength + PerFrame;
                 }
 
                 at += 1;
@@ -370,20 +379,6 @@ internal sealed class FrameMeter
         Fail(FrameVerdict.CastOff(_options.Budget!.Budget));
     }
 
-    // whether its message is past its grace, on the rate's clock (spec 15.12): under the budget's lock
-    private bool IsPastGrace()
-    {
-        if (_options.Rate is not { } rate)
-        {
-            return false;
-        }
-
-        lock (_gate)
-        {
-            return _isTimed && ElapsedLocked() > rate.BodyGracePeriod;
-        }
-    }
-
     // a byte of a head, judged at the byte that draws a verdict (spec 15.3): its verdict, or none
     private FrameVerdict? Head(byte octet)
     {
@@ -537,12 +532,18 @@ internal sealed class FrameMeter
         return !IsControl(_opcode) && _isFinal;
     }
 
-    // a message begins, at its first frame's first byte: its rate's clock started
+    // a message begins, at its first frame's first byte: its rank among equal sums taken, and its
+    // rate's clock started
     private void Begin()
     {
         _isUnderWay = true;
         _announced = 0;
         _frames = 0;
+
+        if (_holder is not null)
+        {
+            _options.Budget!.Begin(_holder);
+        }
 
         lock (_gate)
         {

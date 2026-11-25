@@ -20,8 +20,10 @@ repeating it. Commands run from the repository's root unless a step names a fold
 
 ## The gates
 
-Each gate is a command that fails. CI runs every job on every push and pull request, and `ci-ok`
-stands for all of them ([CI](../README.md#ci), [`ci.yml`](../.github/workflows/ci.yml)).
+Each gate is a command that fails. CI runs the jobs a change reaches: on a feature branch and a pull
+request into `develop`, those `tools/ci-scope.mjs` maps its changed paths to; on `develop`, `main`,
+a release or a hotfix branch and by hand, every job. `ci-ok` stands for all of them
+([CI](../README.md#ci), [`ci.yml`](../.github/workflows/ci.yml)).
 
 | Gate                     | Command                                                                                                            | What it refuses                                                                                                                               | CI job                         |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
@@ -36,7 +38,7 @@ stands for all of them ([CI](../README.md#ci), [`ci.yml`](../.github/workflows/c
 | Versions                 | `node tools/check-versions.mjs`                                                                                    | versions that disagree; a released CHANGELOG section changed; on a release branch, a version its changes owe and did not get                  | `commits`                      |
 | The root's tools         | `node --test "tools/__tests__/*.test.mjs"`                                                                         | a root tool that fails its own tests                                                                                                          | `commits`                      |
 | Supply chain             | the last three steps of the `commits` job in `ci.yml`, a `grep` then two scanners by Docker                        | an action not pinned by its commit's full sha; a known advisory in a lockfile (OSV-Scanner); a Semgrep finding                                | `commits`                      |
-| Format                   | `node tools/check-format.mjs`                                                                                      | a root file off the TypeScript side's formatter; it needs `yarn install` in `implementations/typescript`                                      | `typescript`                   |
+| Format                   | `node tools/check-format.mjs`                                                                                      | a root file off the TypeScript side's formatter; it needs `yarn install` in `implementations/typescript`                                      | `commits`                      |
 | Conformance files        | the eleven generators, `git diff --exit-code -- spec`, then `python spec/check.py`                                 | a conformance file its generator does not write byte for byte; a unit whose text moved unacknowledged; a count or a schema that does not hold | `spec`                         |
 | Generated code           | `node builder/src/cli.ts generate --check`, `node tools/check-validations.mjs`, `node tools/check-transcoding.mjs` | an interop, a validator or a route table that is not what beadc writes; they need `builder/` installed                                        | `builder`                      |
 | Rust descriptor set      | `node tools/check-protobuf.mjs`, from `implementations/rust`; `--write` writes it                                  | a `tests.binpb` of `bead-protobuf` that is not what protoc writes at its pin                                                                  | `rust`                         |
@@ -54,18 +56,16 @@ Each side's own gates and suites are its section of the README: [TypeScript](../
 
 ### The order before a push
 
-1. The `commits` job's checks, which need Node alone: commits, links, cited tests, details, the
-   page and its deploy's tests, names, durations, twins, versions, the root's tools' tests.
-   `check-citations.mjs` and `check-details.mjs` read the files git lists, so a new file counts once
-   it is tracked (`git add -N <file>`).
-2. `node tools/check-format.mjs`.
-3. When `spec/` moved, or a side's harness that plays it: the generators, the diff and
-   `python spec/check.py`.
-4. Each side that changed, from its own folder, as its README section says: its checks, then its
-   whole suite. When a transport or the interop moved, the interop both ways; when a broker's
-   adapter moved, its suites under `tools/mqtt-broker.mjs run --` or `tools/amqp-broker.mjs run --`.
-5. The builder's and the examples' gates when `builder/`, `beadc.yaml` or `examples/` moved.
-6. Push, then follow the run (below).
+1. `node tools/ci-scope.mjs --local`, which prints the commands of the jobs the branch's changes
+   reach, against its merge base with `origin/develop`, the working tree included: the `commits`
+   job's checks first, then each job's, each from its folder. `check-citations.mjs` and
+   `check-details.mjs` read the files git lists, so a new file counts once it is tracked
+   (`git add -N <file>`).
+2. Run them in their order; `--gates` leaves out the whole suites, for a branch that leaves them to
+   CI.
+3. Push, then follow the run (below).
+
+A merge into `develop` and a release run everything: `node tools/ci-scope.mjs --local --all`.
 
 ## The workflows, by hand
 
@@ -77,7 +77,7 @@ can follow in its place.
 | Workflow                                                  | When                                                                 | What it produces                                                                  |
 | --------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | [`bead-tenth-man-round`](#bead-tenth-man-round)           | a change that reaches across the languages, before it is implemented | a design, its reasons and the Tenth Man's table; the decisions left open          |
-| [`bead-implement-both-sides`](#bead-implement-both-sides) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
+| [`bead-implement-every-side`](#bead-implement-every-side) | a settled design, on its feature branch                              | the spec, each side and the integration, every gate run, the commits              |
 | [`bead-adversarial-review`](#bead-adversarial-review)     | before a freeze: a release, a version of the spec or a companion     | findings by severity and a verdict; nothing in the repository changes             |
 | [`bead-release-documents`](#bead-release-documents)       | on a release branch, after `prepare` and before the finish           | the documents as of the release, one commit                                       |
 | [`bead-page-audit`](#bead-page-audit)                     | at each release, and whenever the page may have drifted              | the page's findings in both languages; with `apply`, the fixes and the build      |
@@ -116,7 +116,7 @@ By hand:
 5. Decide. What a standard or a decision already taken settles is settled; the rest is the
    maintainer's choice.
 
-### bead-implement-both-sides
+### bead-implement-every-side
 
 The workflow implements a settled design in stages: the spec and its conformance first, then the
 sides together, then an integration that runs every gate and the interop once over the settled
@@ -132,9 +132,9 @@ By hand, on the design's feature branch:
 2. Each side, in its own folder, with its tests. A test on one side has its twin on the others,
    named by the same sentence: `Underscored_sentence` in C#, `snake_case_sentence` in Rust. Run
    the tests of what changes while working, then the side's checks and its whole suite.
-3. The integration: the generators again, with nothing more moving; every gate, in the order
-   above; the interop both ways; each side's coverage held to its floor; the brokers' suites where
-   an adapter moved.
+3. The integration: the generators again, with nothing more moving; every command
+   `node tools/ci-scope.mjs --local` prints, in the order above, each side's coverage held to its
+   floor and the brokers' suites among them; the interop both ways.
 4. The commits, each a slice with a Conventional Commit subject, each one building and passing the
    fast gates. A feature branch may also leave the whole suites to CI: push it and follow its run.
 
@@ -410,13 +410,14 @@ file, a key or a property was added
 10. **The push, on the maintainer's word.** The one line `tag` prints:
     `git push --atomic origin main develop vX.Y.Z <document tags> :release/X.Y.Z`. Then follow the
     runs of `main` and `develop`.
-11. **The image.** The tag starts `image.yml`, which publishes beadc's image under the release's
-    version, attested and signed, and prints its digest
+11. **The image.** The tag starts `image.yml`, which builds beadc's image from the tag's commit,
+    publishes it under the release's version, attested and signed, verifies it by the builder's
+    README's block and prints its digest
     ([0055](decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)):
     `gh run list --workflow image.yml --limit 1`. GitHub starts no run when more than three tags are
-    pushed at once; then `gh workflow run image.yml --ref develop -f tag=vX.Y.Z`. A run that failed
-    once its index was pushed, at the attestation or the signature, takes
-    `gh run rerun <run> --failed`: a new dispatch refuses the version the registry holds.
+    pushed at once; then dispatch it on the tag, `gh workflow run image.yml --ref vX.Y.Z`. A run
+    that failed once its index was pushed, at the attestation, the signature or the verification,
+    takes `gh run rerun <run> --failed`: a new dispatch refuses the version the registry holds.
 
 A hotfix starts from `main` with `git flow hotfix start X.Y.Z` and follows the same steps;
 `prepare` also takes every `beadc breaking` waiver out of `ci.yml`, each moot since the release

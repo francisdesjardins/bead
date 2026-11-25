@@ -425,24 +425,35 @@
                 }
               },
               "expect": {
-                "type": "object",
-                "required": ["status", "fields"],
-                "additionalProperties": false,
+                "description": "The next response on the socket of the exchange named, in the order of the requests written on it; or end, that socket ended, its server's FIN read, nothing more come on it past the responses read, as spec/transports.json's end reads it.",
                 "oneOf": [
-                  { "required": ["body"] },
-                  { "required": ["bodyBytes"] },
-                  { "required": ["stream"] }
-                ],
-                "properties": {
-                  "status": { "type": "integer", "minimum": 100, "maximum": 599 },
-                  "fields": {
+                  {
                     "type": "object",
-                    "additionalProperties": { "$ref": "#/$defs/field" }
+                    "required": ["status", "fields"],
+                    "additionalProperties": false,
+                    "oneOf": [
+                      { "required": ["body"] },
+                      { "required": ["bodyBytes"] },
+                      { "required": ["stream"] }
+                    ],
+                    "properties": {
+                      "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+                      "fields": {
+                        "type": "object",
+                        "additionalProperties": { "$ref": "#/$defs/field" }
+                      },
+                      "body": { "type": "string" },
+                      "bodyBytes": { "$ref": "common.schema.json#/$defs/bytes" },
+                      "stream": { "type": "string", "minLength": 1 }
+                    }
                   },
-                  "body": { "type": "string" },
-                  "bodyBytes": { "$ref": "common.schema.json#/$defs/bytes" },
-                  "stream": { "type": "string", "minLength": 1 }
-                }
+                  {
+                    "type": "object",
+                    "required": ["end"],
+                    "additionalProperties": false,
+                    "properties": { "end": { "const": true } }
+                  }
+                ]
               },
               "on": { "type": "string", "pattern": "^[a-z]$" },
               "close": { "type": "string", "pattern": "^[a-z]$" },

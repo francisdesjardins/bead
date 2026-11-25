@@ -195,7 +195,116 @@ async fn cancels_the_attempts_left_once_one_connects() {
     );
 }
 
-// spec 13.4
+#[tokio::test]
+async fn keeps_an_attempt_that_has_not_connected_by_its_delay_while_the_next_one_starts_the_first_to_connect_winning_and_the_other_closed()
+ {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (told, given_up) = oneshot::channel::<()>();
+    let told = Arc::new(Mutex::new(Some(told)));
+    let (started, second_started) = oneshot::channel::<()>();
+    let started = Arc::new(Mutex::new(Some(started)));
+    let second_started = Arc::new(Mutex::new(Some(second_started)));
+    let options = RacingOptions {
+        attempt_delay: Duration::from_millis(50),
+        attempt: Some(Arc::new(move |address: SocketAddr| {
+            if address.is_ipv6() {
+                // * the second attempt, started at the first's delay, connects to nothing
+                let guard = Dropped(told.lock().unwrap().take());
+
+                let starting = started.lock().unwrap().take();
+
+                if let Some(started) = starting {
+                    started.send(()).ok();
+                }
+
+                return Box::pin(async move {
+                    let _guard = guard;
+
+                    core::future::pending::<io::Result<TcpStream>>().await
+                });
+            }
+
+            // * the first attempt connects once the second started, past its delay
+            let waited = second_started.lock().unwrap().take();
+
+            Box::pin(async move {
+                if let Some(waited) = waited {
+                    waited.await.ok();
+                }
+
+                TcpStream::connect(address).await
+            })
+        })),
+        ..RacingOptions::on(platform())
+    };
+    let socket = patience(PATIENCE, connect_racing(("localhost", port), &options))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        socket.peer_addr().unwrap().ip(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        "the first attempt, kept while the second started, connected"
+    );
+    assert!(
+        patience(PATIENCE, given_up).await.unwrap().is_ok(),
+        "the second closed"
+    );
+}
+
+#[tokio::test]
+async fn ends_every_attempt_leaving_no_socket_once_its_connect_is_given_up() {
+    let (told, ended) = oneshot::channel::<()>();
+    let told: Arc<Mutex<Vec<oneshot::Sender<()>>>> = Arc::new(Mutex::new(vec![told]));
+    let (second, second_ended) = oneshot::channel::<()>();
+
+    told.lock().unwrap().push(second);
+
+    let attempts: Arc<Mutex<Vec<IpAddr>>> = Arc::default();
+    let recording = Arc::clone(&attempts);
+    let options = RacingOptions {
+        attempt_delay: Duration::from_millis(50),
+        attempt: Some(Arc::new(move |address: SocketAddr| {
+            recording.lock().unwrap().push(address.ip());
+
+            // * each attempt pends, nothing answering it, until it is given up
+            let guard = Dropped(told.lock().unwrap().pop());
+
+            Box::pin(async move {
+                let _guard = guard;
+
+                core::future::pending::<io::Result<TcpStream>>().await
+            })
+        })),
+        ..RacingOptions::on(platform())
+    };
+
+    // given up by its patience, once both attempts started
+    let given_up = patience(
+        Duration::from_millis(300),
+        connect_racing(("localhost", 9), &options),
+    )
+    .await;
+
+    assert!(given_up.is_err(), "given up");
+    assert_eq!(
+        *attempts.lock().unwrap(),
+        [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        ],
+        "both started"
+    );
+    assert!(
+        patience(PATIENCE, ended).await.unwrap().is_ok()
+            && patience(PATIENCE, second_ended).await.unwrap().is_ok(),
+        "each ended"
+    );
+}
+
+// spec 13.4.2
 #[tokio::test]
 async fn connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -222,7 +331,7 @@ async fn connects_a_localhost_name_to_the_loopback_asking_its_resolver_nothing()
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn tries_the_ipv4_loopback_first_for_a_localhost_name_then_the_ipv6_one_an_attempt_delay_after()
  {
@@ -281,7 +390,7 @@ async fn tries_the_ipv4_loopback_first_for_a_localhost_name_then_the_ipv6_one_an
     );
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_among_them() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -312,7 +421,7 @@ async fn asks_its_resolver_for_any_other_name_localhost_with_a_trailing_dot_amon
     assert_eq!(*asked.lock().unwrap(), names, "each asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
