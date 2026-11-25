@@ -55,12 +55,12 @@ work/
 Clone Bead at the tag of the release you pin, then verify beadc's image of that release and pin it
 by its digest. The image holds beadc with everything it runs (buf, protoc-gen-es, protoc), so your
 machine needs no protobuf toolchain of its own
-([the image](../../builder/README.md#the-image-and-its-wrappers)). For 0.16.0, from `work/`:
+([the image](../../builder/README.md#the-image-and-its-wrappers)). For 0.17.0, from `work/`:
 
 <!-- verify-image -->
 
 ```sh
-v=0.16.0
+v=0.17.0
 git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
 commit="$(git -C bead-pinned rev-parse HEAD)"
 digest="$(docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}')"
@@ -69,32 +69,30 @@ image="ghcr.io/francisdesjardins/beadc@$digest"
   git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
   gh attestation verify "oci://$image" --repo francisdesjardins/bead \
     --signer-workflow francisdesjardins/bead/.github/workflows/image.yml \
-    --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+    --source-ref "refs/tags/v$v" --source-digest "$commit" --deny-self-hosted-runners &&
   cosign verify "$image" \
-    --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop \
+    --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
-  [ "$(docker buildx imagetools inspect "$image" --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}')" = "$commit" ] &&
+    --certificate-github-workflow-sha "$commit" &&
   export BEADC_IMAGE="$image"
 ```
 
 ```powershell
 # in PowerShell 7.6 (pwsh)
-$v = '0.16.0'
+$v = '0.17.0'
 git clone --branch "v$v" https://github.com/francisdesjardins/bead bead-pinned
 $commit = git -C bead-pinned rev-parse HEAD
 $digest = docker buildx imagetools inspect "ghcr.io/francisdesjardins/beadc:$v" --format '{{.Manifest.Digest}}'
 $image = "ghcr.io/francisdesjardins/beadc@$digest"
-$revision = docker buildx imagetools inspect $image --format '{{ index .Manifest.Annotations "org.opencontainers.image.revision" }}'
-if ($digest -and $commit -and $revision -eq $commit) {
+if ($digest -and $commit) {
   git -C bead-pinned merge-base --is-ancestor HEAD origin/main &&
     gh attestation verify "oci://$image" --repo francisdesjardins/bead `
       --signer-workflow francisdesjardins/bead/.github/workflows/image.yml `
-      --source-ref refs/heads/develop --source-digest 576bf11182b4a0f65b26680ef394cc7e0ea6801c --deny-self-hosted-runners &&
+      --source-ref "refs/tags/v$v" --source-digest $commit --deny-self-hosted-runners &&
     cosign verify $image `
-      --certificate-identity https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/heads/develop `
+      --certificate-identity "https://github.com/francisdesjardins/bead/.github/workflows/image.yml@refs/tags/v$v" `
       --certificate-oidc-issuer https://token.actions.githubusercontent.com `
-      --certificate-github-workflow-sha 576bf11182b4a0f65b26680ef394cc7e0ea6801c &&
+      --certificate-github-workflow-sha $commit &&
     Set-Item Env:BEADC_IMAGE $image
 }
 ```
@@ -103,13 +101,9 @@ The block reads the digest of the image's index once, the one name that cannot m
 the image by it. `gh attestation verify` checks the build provenance GitHub attested for it, and
 `cosign verify` its signature, made keylessly. Each passes only for this repository's
 `.github/workflows/image.yml`, run on GitHub's runners on the release's tag and its commit, and the
-`merge-base` line holds that commit to `main`. 0.16.0 is the one exception: its image was built by
-a run from `develop`, at develop's commit `576bf111`, which built the tag `v0.16.0`. Its provenance
-and its certificate name that branch and that commit, which the block names in their place, and the
-block also holds the index's `org.opencontainers.image.revision` to the tag's commit, the one the
-clone holds. `BEADC_IMAGE` is set
-only once every check passes; a check that fails says why and leaves it unset. For 0.16.0 it names
-`ghcr.io/francisdesjardins/beadc@sha256:6bc1b8921e2dad2304bd24d40d818703414a1f9a77b11f7d11dfce612e35b5ff`.
+`merge-base` line holds that commit to `main`. `BEADC_IMAGE` is set only once every check passes; a
+check that fails says why and leaves it unset. For 0.17.0 it names
+`ghcr.io/francisdesjardins/beadc@sha256:70367c3dc31e24f0cea5790ac1156579a40cc27c24c218ed7109b81e67e03afa`.
 
 Pull the image by it:
 
@@ -126,7 +120,7 @@ docker pull $env:BEADC_IMAGE
 `version` names beadc and every tool the image holds at its pin, and the protocol it writes for:
 
 ```text
-beadc 0.16.0
+beadc 0.17.0
 buf 1.75.0
 protobuf-es 2.17.0
 protoplugin 2.17.0
@@ -134,11 +128,11 @@ protoc-gen-es 2.17.0
 protoc 36.2
 protoc-gen-buffa 0.9.2
 format bead-blueprint/1
-spec 0.17.0
+spec 0.18.0
 options 58500
 ```
 
-A later release's image is built from its own tag: its block is
+Another release's block is
 [the image's general one](../../builder/README.md#the-image-and-its-wrappers), set to its version.
 
 Or build the image from the clone, and name it instead:
@@ -179,7 +173,7 @@ the project, `git add --chmod=+x beadc.sh` keeps the wrapper executable, since g
 records no mode.
 
 Without `BEADC_IMAGE`, the wrappers pull the image by the version they name,
-`ghcr.io/francisdesjardins/beadc:0.16.0` for 0.16.0. A tag can be moved to another image and a
+`ghcr.io/francisdesjardins/beadc:0.17.0` for 0.17.0. A tag can be moved to another image and a
 digest cannot, so `BEADC_IMAGE` names the digest. `./beadc.sh version` prints what the wrapper
 runs. Where an execution policy refuses `beadc.ps1`, `pwsh -ExecutionPolicy Bypass -File
 ./beadc.ps1 generate` runs it.
@@ -537,6 +531,12 @@ server's own or one `Origins` lists, exactly; a client outside a browser sends n
 port for its metrics, so the host serves the registry's text on `/metrics`, from a small ASP.NET
 Core application on a port apart.
 
+The transport also bounds what each connection sends it, with nothing to set. A message is held
+to `MaximumMessageBytes` and to 16,384 frames. The bytes of the messages still arriving are held
+to `MessageBytesBudget`, 256 MiB across the connections. A message must come at 240 bytes a
+second at least, once its first 5 seconds have passed. A connection that breaks one is closed, as
+[Survive a dropped connection](cookbook-realtime.md#survive-a-dropped-connection) tells.
+
 `dotnet/Program.cs`:
 
 ```csharp
@@ -615,7 +615,7 @@ dotnet run -c Release -- 8080
 Its first line says its two ports, the metrics port chosen free:
 
 ```text
-{"port":8080,"metrics":54268}
+{"port":8080,"metrics":61811}
 ```
 
 It serves until its standard input closes.
@@ -684,7 +684,10 @@ The client registers its answer to `promptOperator` before it connects, since th
 as soon as a call is under way. A call stays curried, `station.getStationStatus(payload)()`: the
 second call sends it, with its options when it has any. The window of 1 credits the next sample
 only once the callback before it has settled, the promise it returns included. It connects by
-`127.0.0.1`, the address the server listens on.
+`127.0.0.1`, the address the server listens on. With undici installed, a connect by `localhost`
+goes to `127.0.0.1`, then to `::1`, and asks no resolver. This project installs no undici, so
+Node's global `WebSocket` would resolve `localhost` as the platform does
+([the transport](../../implementations/typescript/README.md#the-transport)).
 
 `typescript/src/main.ts`:
 
@@ -823,7 +826,7 @@ client: promptOperator asked "Read ST-001's status?"
 client: getStationStatus ST-001 answered online=true operatorAnswer="acknowledged: checked by Node" (prompts so far: 1)
 client: getStationStatus "station one" refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"pattern\":\"^ST-[0-9]{3}$\"},\"fieldPath\":\"station_id\",\"message\":\"does not match regex pattern `^ST-[0-9]{3}$`\",\"ruleId\":\"string.pattern\"}\n{\"more\":0}" (prompts so far: 1)
 client: getStationStatus ST-999 failed UNKNOWN_STATION, detail: no station ST-999 (prompts so far: 1)
-client: watchTelemetry ST-001 received sequences 1 5 9 13 17 20 of 20 sent, at most 1 callback at a time
+client: watchTelemetry ST-001 received sequences 1 6 10 14 18 20 of 20 sent, at most 1 callback at a time
 client: watchTelemetry samples=50 refused PAYLOAD_INVALID, detail: "{\"bounds\":{\"gte\":1,\"lte\":20},\"fieldPath\":\"samples\",\"message\":\"must be greater than or equal to 1 and less than or equal to 20\",\"ruleId\":\"int32.gte_lte\"}\n{\"more\":0}"
 ```
 

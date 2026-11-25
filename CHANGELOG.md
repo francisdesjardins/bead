@@ -7,6 +7,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Bead has a mascot: its mark, the Moon's disc and three of Baily's beads, with a face engraved in
+  the beads' colour. On the page, it reads beside the text, its face following the section read,
+  and a click plays an eclipse; where the page leaves no room, the bar's own mark takes the face,
+  and its link to the top plays the eclipse. The demo's mascot shows each call's end, and the
+  DevTools panel's waits, listening, until a client announces itself. One module, `implementations/typescript/skin/mascot.js`, serves all three.
+
+### Changed
+
+- The page's bar, where its contents are a sheet, holds the mark alone at its left, then the
+  section being read, a button that opens the contents, then the demo and the theme. The language
+  moves to the contents' foot, English and Français written out, the page's own marked; on a
+  desktop, the bar's language reads EN or FR.
+- CI runs the jobs a change reaches. `tools/ci-scope.mjs` maps each path a feature branch or a pull
+  request into `develop` changes to the jobs that read it, a path no rule names reaching every job;
+  `develop`, `main`, a release, a hotfix and a run by hand run every job, and `CI ok` holds each
+  job to its scope. `node tools/ci-scope.mjs --local` prints the same jobs' commands before a push,
+  and the root's format check moves to the `commits` job, which every change runs.
+- CI's TypeScript job runs in parallel: its tests in two shards on each Node line, the DevTools
+  extension's tests and the demo's, with the page's accessibility, in legs of their own beside
+  them, and the shards' coverage, which c8 reports as one run's, held to the same floor after them.
+- CI's slowest jobs run in parallel. The Rust job's lints and documentation, its tests under
+  coverage, its fuzz targets' build and its tests on Windows each run in a job of its own, beside
+  its format, its build, the interop's binaries and cargo-deny, which the interop with the Rust
+  side alone waits for. The Rust side's cases and interop over MQTT 5 run beside the other sides',
+  against a broker of their own, and beadc's tests on its image beside its wrappers' tests.
+- The guides for teams pin 0.17.0 and its image, their scenario built and run again against its
+  runtimes: getting started says how a client in Node connects by `localhost` and what the
+  WebSocket server bounds, and the recipes tell the closes those bounds make and read the
+  transport's `messageBytes` gauge.
+- The spec says what every side already does where its words fell short. A request's answer and a
+  gateway call's are among the writes by which a server learns its client went. A server holds a
+  fixed bound of what it reads ahead on an HTTP/1 socket, never what its memory allows, and the
+  two ways a socket is not kept are named. A transfer coding's name is compared in any ASCII
+  case. Three platforms' answers to a `Content-Length` past 2⁶³ − 1 are named, and 13.4's connect
+  rule is an item of its own. The conformance files hold:
+  - a coding named in any case;
+  - a `Content-Length` of 2⁶⁴ − 2 and 2⁶⁴ − 1;
+  - a name under `.localhost.` at every server;
+  - a field with no auth-scheme at the gateway;
+  - what a WebSocket server reports as it fails a connection.
+
+### Fixed
+
+- The C# side's WebSocket connection grew a new writer for each message of several reads, so a
+  message of 64 KiB allocated about two-thirds more than in 0.16.0. It now gathers such a message
+  in a buffer rented from the shared pool, given back once the message is whole, and copies a
+  message of one read straight.
+
 ## [0.17.0] - 2026-11-24
 
 ### Added

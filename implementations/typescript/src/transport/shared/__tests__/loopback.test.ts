@@ -1,9 +1,9 @@
 import { EventEmitter, once } from 'node:events';
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
 import { createServer as createTlsServer } from 'node:tls';
-import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
+import * as undici from 'undici';
 import {
   isConnectFailure,
   isLocalhostName,
@@ -13,7 +13,6 @@ import {
   loopbackConnector,
   loopbackCreateConnection,
   loopbackFailureOf,
-  loopbackLookup,
   raceLoopback,
   type UndiciConnector,
 } from '../loopback';
@@ -74,16 +73,6 @@ const connectOf = async (port: number): Promise<{ address: string } | Error> => 
   } catch (reason) {
     return reason as Error;
   }
-};
-
-/** What `loopbackLookup` answers `hostname` with, asked with `options`. */
-const lookedUp = (hostname: string, options: { all?: boolean; family?: number | string }) => {
-  return promisify((callback: (error: Error | null, answer: unknown) => void) => {
-    // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback
-    loopbackLookup(hostname, options, (error, address, family) => {
-      callback(error, options.all === true ? address : { address, family });
-    });
-  })();
 };
 
 /** A socket of the test's to `address`, which connects or fails as the test says. */
@@ -177,8 +166,8 @@ const heldRaceOf = ({
 
 // definition
 
-test.describe('loopbackLookup', () => {
-  // spec 13.4
+test.describe('loopback', () => {
+  // spec 13.4.2
   test('connects a localhost name to the loopback, asking its resolver nothing', async () => {
     await using listener = await listenOn('127.0.0.1');
     using resolver = replaceResolver();
@@ -194,7 +183,7 @@ test.describe('loopbackLookup', () => {
     expect([resolver.asked, listener.accepted.length]).toEqual([[], 3]);
   });
 
-  // spec 13.4, RFC 8305 §5, RFC 6724 §2.1
+  // spec 13.4.2, RFC 8305 §5, RFC 6724 §2.1
   test('tries the IPv4 loopback first for a localhost name, then the IPv6 one an attempt delay after', async () => {
     // * a listener on each, on one port: the IPv4 one is reached, and the IPv6 one never is
     await using ipv4 = await listenOn('127.0.0.1');
@@ -231,7 +220,7 @@ test.describe('loopbackLookup', () => {
     expect(await race.outcome).toEqual({ address: '127.0.0.1' });
   });
 
-  // spec 13.4, RFC 8305 §5
+  // spec 13.4.2, RFC 8305 §5
   test('connects by the next family 250 ms after an attempt that has not connected', async () => {
     const race = heldRaceOf({});
 
@@ -271,7 +260,7 @@ test.describe('loopbackLookup', () => {
     ]);
   });
 
-  // spec 13.4, RFC 8305 §5
+  // spec 13.4.2, RFC 8305 §5
   test('cancels the attempts left once one connects', async () => {
     // both begun: the one that connects wins, the other pending is destroyed
     const both = heldRaceOf({});
@@ -298,7 +287,7 @@ test.describe('loopbackLookup', () => {
     ]);
   });
 
-  // spec 13.4, RFC 8305 §5
+  // spec 13.4.2, RFC 8305 §5
   test('keeps an attempt that has not connected by its delay while the next one starts, the first to connect winning and the other closed', async () => {
     const race = heldRaceOf({});
 
@@ -322,7 +311,7 @@ test.describe('loopbackLookup', () => {
     expect(race.attemptOf('::1').destroyed).toBe(true);
   });
 
-  // spec 13.4, RFC 8305 §5
+  // spec 13.4.2, RFC 8305 §5
   test('ends every attempt, leaving no socket, once its connect is given up', async () => {
     // at its timeout: each attempt still open ended, and counted as a connect that timed out
     const timed = heldRaceOf({ timeout: 1_000 });
@@ -402,7 +391,7 @@ test.describe('loopbackLookup', () => {
     ]);
   });
 
-  // spec 13.4: Node's event loop held past the attempt delay as the race begins
+  // spec 13.4.2: Node's event loop held past the attempt delay as the race begins
   test('connects to a server on 127.0.0.1 alone with its event loop held past the attempt delay', async () => {
     await using listener = await listenOn('127.0.0.1');
     const pending = connectOf(listener.port);
@@ -416,59 +405,36 @@ test.describe('loopbackLookup', () => {
     expect(await pending).toEqual({ address: '127.0.0.1' });
   });
 
-  // spec 13.4
+  // spec 13.4.1 and 13.4.2
   test('asks its resolver for any other name, localhost with a trailing dot among them', async () => {
-    using resolver = replaceResolver();
+    // * the replaced resolver answers the loopback, where the test listens
+    using resolver = replaceResolver('127.0.0.1');
+    await using listener = await listenOn('127.0.0.1');
+    const connector = loopbackConnector(undici as unknown as IUndici, {});
+    const connectedOf = (hostname: string) => {
+      return new Promise<Error | Socket | null>((resolve) => {
+        connector({ hostname, port: String(listener.port), protocol: 'http:' }, (error, socket) => {
+          resolve(error ?? socket);
+        });
+      });
+    };
 
     for (const host of ['localhost.', 'a.localhost.', 'localhost.example', '127.0.0.1', '::1']) {
       expect([host, isLocalhostName(host)]).toEqual([host, false]);
     }
 
-    // * handed on to Node's own lookup, which the replaced resolver answers
-    expect(await lookedUp('a.localhost.', { all: true })).toEqual([
-      { address: '192.0.2.7', family: 4 },
-    ]);
+    // * handed on to undici's own connector, which asks Node's resolver
+    for (const hostname of ['localhost.', 'a.localhost.']) {
+      const socket = (await connectedOf(hostname)) as Socket;
 
-    // and asked with its callback alone, as `dns.lookup` may be
-    const answered = await new Promise((resolve) => {
-      // oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback
-      loopbackLookup('localhost.', (error, address, family) => {
-        resolve([error, address, family]);
-      });
-    });
+      expect([hostname, socket.remoteAddress]).toEqual([hostname, '127.0.0.1']);
+      socket.destroy();
+    }
 
-    expect([answered, resolver.asked]).toEqual([
-      [null, '192.0.2.7', 4],
-      ['a.localhost.', 'localhost.'],
-    ]);
+    expect(resolver.asked).toEqual(['localhost.', 'a.localhost.']);
   });
 
-  test('answers a lookup of one family with that family’s loopback alone', async () => {
-    expect([
-      await lookedUp(PROBE, { family: 4 }),
-      await lookedUp(PROBE, { family: 6 }),
-      await lookedUp(PROBE, { all: true, family: 'IPv6' }),
-      await lookedUp(PROBE, { all: true, family: 4 }),
-      await lookedUp(PROBE, { family: 'IPv4' }),
-      await lookedUp(PROBE, {}),
-    ]).toEqual([
-      { address: '127.0.0.1', family: 4 },
-      { address: '::1', family: 6 },
-      [{ address: '::1', family: 6 }],
-      [{ address: '127.0.0.1', family: 4 }],
-      { address: '127.0.0.1', family: 4 },
-      // * of either family, the IPv4 loopback first
-      { address: '127.0.0.1', family: 4 },
-    ]);
-
-    // a family the loopback has no address of answers none, as a resolver does
-    await expect(lookedUp(PROBE, { family: 5 })).rejects.toMatchObject({
-      code: 'ENOTFOUND',
-      message: 'no loopback address of family 5',
-    });
-  });
-
-  // spec 13.4
+  // spec 13.4.2
   test('says that a localhost name it could not connect went to the loopback, no resolver asked', async () => {
     await using closed = await closedPort();
     using resolver = replaceResolver();
@@ -495,7 +461,7 @@ test.describe('loopbackLookup', () => {
     ]).toEqual([fetchFailure, failure, reason]);
   });
 
-  // spec 13.4
+  // spec 13.4.2
   test('says nothing of the loopback once a localhost name’s connect opened a socket', () => {
     // * as a fetch fails once its socket opened: reset as it read, closed unanswered, or no cause
     for (const cause of [
@@ -509,7 +475,7 @@ test.describe('loopbackLookup', () => {
     }
   });
 
-  // spec 13.4; RFC 6066 §3
+  // spec 13.4.2; RFC 6066 §3
   test('lays TLS over the winner under wss with the server name ws would set, and lets the winner go where TLS throws as it is laid', async () => {
     // * the name each handshake sent, false for none, and each connection's close
     const named: (string | false | null)[] = [];
@@ -570,7 +536,7 @@ test.describe('loopbackLookup', () => {
     }
   });
 
-  // spec 13.4
+  // spec 13.4.2
   test('hands the winner to undici’s own connector under https, and lets the winner go where that connector throws', async () => {
     await using listener = await listenOn('127.0.0.1');
     // * undici's connector, which notes what it is handed, and throws once told to

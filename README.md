@@ -222,7 +222,7 @@ procedures, each under a version of its own. Beside them:
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                             | 474 named vectors in 17 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, a broker's parcels and the messages refused as parcels, an MQTT 5 PUBLISH counted to its every byte under a bound, the Reason Codes each MQTT 5 acknowledgement's table names, and an AMQP 1.0 message written and counted to its every byte |
 | [`conversations.json`](spec/conversations.json)                 | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                                                                                                                                                   |
-| [`transports.json`](spec/transports.json)                       | 315 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
+| [`transports.json`](spec/transports.json)                       | 318 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send, and the brokers the cases over MQTT 5 and AMQP 1.0 play against                                                                                                                      |
 | [`clocks.json`](spec/clocks.json)                               | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                                                                                                                                                       |
 | [`durations.json`](spec/durations.json)                         | 36 places that take a duration an application gives a side, by 58 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                                                                                                                                                        |
 | [`identities.json`](spec/identities.json)                       | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                                                                                                                                                          |
@@ -232,7 +232,7 @@ procedures, each under a version of its own. Beside them:
 | [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 61 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 45 failures, 10 events and 104 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                   |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 45 failures, 10 events and 107 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                   |
 | [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
 | [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
@@ -704,7 +704,10 @@ floor, when it measured nothing, or on a measure the floor names and no report m
 rises with `--raise`, never down but by a decision
 ([0006](docs/decisions/0006-a-rule-has-its-gate.md)). A run that fails keeps its reports 14 days,
 among its artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`,
-the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's. Locally, the same commands as CI's:
+the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's.
+CI runs the TypeScript side's tests in shards, each under c8, and c8 reports the raw coverage of
+every shard as one run's, so the floor counts the lines and branches one run counts. Locally, the
+same commands as CI's, the TypeScript side's tests in one run:
 
 ```sh
 cd implementations/typescript
@@ -896,7 +899,7 @@ requires review. At N=5, simulations on the transcoding measurements give roughl
 per unchanged measure and 70–90% detection at a +35% change. These rates depend on the
 measurement's distribution; 112 measures can give about one false flag per side, with noisier
 tails. The threshold and p test screen findings, each read and judged. CI's `dotnet` job builds the
-C# bench in Release on every push, so that a release's measure finds it whole, and measures
+C# bench in Release whenever it runs, so that a release's measure finds it whole, and measures
 nothing; `bench.yml` measures, and no regression fails it.
 
 `--tree` builds and runs a checkout of the baseline, alternating the trees process by process in
@@ -1130,6 +1133,11 @@ against each server.
 - `node tools/check-a11y.mjs [--serve <folder>] <address…>`: those pages held to WCAG 2.2 AA, by
   axe and by the checks axe cannot make ([The page](#the-page)). It needs the TypeScript side
   installed, with Playwright's Chromium.
+- `node tools/ci-scope.mjs --local [<base>]`: the commands of the CI jobs what the branch changes
+  reaches, against its merge base with `origin/develop` by default, the working tree included, the
+  `commits` job's first, each from its folder; `--gates` leaves out the whole suites, and `--all`
+  gives every job's, for a release and a merge into `develop`. One table maps each path to the jobs
+  that read it, a path no rule names reaching every job; CI's `scope` job applies it.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
   saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
@@ -1232,36 +1240,45 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 
 ## CI
 
-[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned runner
-images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
+[`ci.yml`](.github/workflows/ci.yml) runs the jobs a change reaches. Its `scope` job maps each path
+a feature branch or a pull request into `develop` changes to the jobs that read it, by the rules of
+`tools/ci-scope.mjs`, a path no rule names reaching every job; a push to `develop`, `main`, a
+release or a hotfix branch, and a run by hand, run every job. The jobs run on pinned runner images,
+`ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of `@playwright/test`
 the TypeScript side pins, which names Microsoft's image of it, the one the `typescript` and `dotnet`
 jobs run in, its Chromium already there); `typescript` on Node 26 and on the floor, 24.9 (install,
-the builder's packages too, which the demo's Packages tab reaches, check, the public surface held
-to its list among it, test, under coverage on Node 26, held to the side's floor, the demo's static
-build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on
-Node 26, and the root's files under the same formatter); `dotnet`
+the builder's packages too, which the type-check reaches, check, the public surface held to its
+list among it, the demo's static build and the DevTools extension built, then the tests, in two
+shards by Playwright's `--shard`, each under c8 on Node 26), with `typescript-apps` beside it on
+Node 26 (the DevTools extension tested in Chromium, the demo's tests, and the page and the demo
+held to WCAG 2.2 AA) and `typescript-coverage` after it (the shards' raw coverage reported by c8 as
+one run's, held to the side's floor); `dotnet`
 (every C# package audited by NuGetAudit as it restores, format, build, the builder's C# goldens
 among its projects and each `src` project's public surface held to its `PublicAPI` lists, the C#
 bench built in Release, test under coverage, held to the side's floor, the interop both ways with
 `BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the other's gateway among it,
 and a page of another origin in Chromium against both HTTP servers); `mqtt` (on the runner's host, a
 Mosquitto 2.1.2 by its digest and a password drawn for the run, with `BEAD_MQTT_REQUIRED=1` and
-`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on every side, each adapter against it over TCP
-and WebSocket, the interop over MQTT 5 both ways, the Rust side's built from the `rust` job's cache,
-the demo's server and its page's client over it, a page's client in Chromium, and the DevTools
-extension following the demo's client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by
+`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on the TypeScript and C# sides, each adapter
+against it over TCP and WebSocket, the interop over MQTT 5 both ways, the demo's server and its
+page's client over it, a page's client in Chromium, and the DevTools extension following the
+demo's client over it), with `mqtt-rust` beside it, against a broker of its own (the Rust side's
+cases over MQTT 5, its adapter's, and the interop over MQTT 5 both ways with the Rust side);
+`amqp` (on the runner's host, a RabbitMQ 4.4.0 by
 its digest, its heartbeat lowered, and a password and TLS certificates drawn for the run, with
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
-AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and
-`gateway` each alone, `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's
-target with `transcoding`, the documentation, a build on the default features alone,
-the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
-descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
+AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` (on Linux,
+the toolchain its file pins, format, a build on the default features alone, the interop's server
+and its trials' test binary built and handed on, and cargo-deny), with four jobs beside it:
+`rust-windows` (the tests on Windows), `rust-lints` (clippy, the core's library linted
+with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and `gateway` each alone,
+`bead-protobuf`'s with `transcoding`, the core's clippy for the browser's target with
+`transcoding`, and the documentation), `rust-coverage` (the tests under coverage, `bead-house`'s
 holding each library crate's public surface to its list among them, lines and regions held to the
-side's floor, and the fuzz targets built on the nightly pinned by its date; on Windows, the tests); `interop-rust` (in the
+side's floor, and the tests' descriptor set held to what protoc writes at its pin) and `rust-fuzz`
+(the fuzz targets built on the nightly pinned by its date); `interop-rust` (in the
 Playwright image, once `rust` ends, with no Rust toolchain and `BEAD_INTEROP_REQUIRED=1`: the Rust
 client against each side's server, the TypeScript and C# clients against the Rust server, and a page
 of another origin in Chromium against every HTTP server, the Rust one among them); `builder`
@@ -1274,9 +1291,10 @@ side's route table and document of `spec/transcoding.proto` held to what beadc
 writes, on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
 among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node 26,
-amd64 and arm64, each natively: beadc's image built, its test stage run on the image itself, each
-wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and `examples/hello`, and
-the wrappers' lint, each linter at its pin); `examples` on Node 26 and on 24.9, the floor the
+amd64 and arm64, each natively: beadc's image built, each wrapper run against it with
+`BEADC_IMAGE_REQUIRED=1`, over the repository and `examples/hello`, and the wrappers' lint, each
+linter at its pin), with `builder-image` beside it on both architectures (the image's test stage
+run on the image itself); `examples` on Node 26 and on 24.9, the floor the
 TypeScript half declares (what each example copies, or takes from beadc's wrapper and init, held to
 its source; beadc on Node holding `examples/hello`'s generated files; buf's lint and layout over its
 `.proto`; each half's gates and both its builds; then each client against each server, both modes of
@@ -1288,12 +1306,14 @@ codec and its JSON, each held to its failure list and the floor, the C# and Rust
 then one corpus of `Probe` through every side's testee); `protovalidate-differential`
 (protovalidate-es, by its pin's sha512, over the verdicts of `spec/validations.json`, then those
 verdicts and a corpus mutated from them through every side's generated validators and through
-protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`
-(the subjects, the links, the cited tests, the details, the page and its deploy's tests, the names,
-the durations' members, the twins, the versions, the root's tools' own tests, then the supply chain:
-every action pinned by its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's
-community rules for TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok`
-needs them all, so one check stands for every job.
+protovalidate-es, the violations compared, and the C# and Rust testees' format); and `commits`, on
+every change (the subjects, the links, the cited tests, the details, the page and its deploy's
+tests, the names, the durations' members, the twins, the versions, the root's tools' own tests, the
+root's files under the TypeScript side's formatter, then the supply chain: every action pinned by
+its commit's full sha, OSV-Scanner over every lockfile, and Semgrep's community rules for
+TypeScript, C#, GitHub Actions and secrets, each scanner at its digest). `ci-ok` needs them all, so
+one check stands for every job: it passes when every job in scope passed and every other was
+skipped.
 
 Dependabot, by [`dependabot.yml`](.github/dependabot.yml), brings the dependency updates each week to
 `develop` as grouped pull requests, which CI judges as any other, each release waiting out its first

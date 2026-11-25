@@ -117,8 +117,8 @@ jobs:
             exit 1
           fi
 
-  # Each platform on its own runner, as CI's image legs build it: the test stage first, beadc's
-  # tests on the image itself, then the image, pushed by its digest alone.
+  # Each platform on its own runner: the test stage first, beadc's tests on the image itself, as
+  # CI's builder-image job builds it, then the image, pushed by its digest alone.
   build:
     name: The image (${{ matrix.platform }})
     needs: release

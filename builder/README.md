@@ -318,7 +318,8 @@ docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.ps1 > be
 ```
 
 A team verifies the image a version names, its provenance by GitHub's CLI and its signature by
-cosign 3, then pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
+cosign 3, which reads the signature as the workflow stores it, where cosign 2 finds none. It then
+pins it by its digest in `BEADC_IMAGE`, in its CI and its shells. The block clones
 Bead at the version's tag, reads the digest of the image's index once, and checks the image by it:
 each check passes only for this repository's `image.yml`, run on GitHub's runners from the tag
 `v<version>` at the commit the clone holds, a commit on `main`. It sets `BEADC_IMAGE` only once
@@ -365,9 +366,11 @@ if ($digest -and $commit) {
 }
 ```
 
-0.16.0's image alone is `develop`'s, built from its tag, and passes the
-[getting-started guide's block](../docs/guides/getting-started.md#1-pin-bead-and-beadcs-image)
-instead.
+0.16.0's image alone is `develop`'s, built from its tag by a run at develop's commit
+`576bf11182b4a0f65b26680ef394cc7e0ea6801c`: its block names `refs/heads/develop` and that commit
+where the general one names the tag and its commit, in `--source-ref`, `--source-digest`,
+`--certificate-identity` and `--certificate-github-workflow-sha`, and holds the index's
+`org.opencontainers.image.revision` annotation to the tag's commit instead.
 
 The wrappers name the version, not the digest: the digest exists once the release's tag is built,
 after the commit that names the version, and an image cannot print its own digest ([decision 0055](../docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
@@ -1365,12 +1368,13 @@ carries, and prints the commit before the one push, which carries `develop`'s ti
 `prepare`, on a hotfix, which starts from `main`, writes it without every waiver, each moot since
 the release `main` holds. A branch behind a release's merge-back merges `develop` first, or meets
 the release's moot waivers. On the image's legs, Linux on Node 26, amd64 on `ubuntu-26.04` and arm64
-on `ubuntu-26.04-arm`, each natively: the image's test stage, beadc's tests on the image's own Node,
-protoc and environment; then the image, which `yarn test` runs through each wrapper under
+on `ubuntu-26.04-arm`, each natively: the image, which `yarn test` runs through each wrapper under
 `BEADC_IMAGE_REQUIRED=1`: `beadc version`, `generate --check` over the root's `beadc.yaml` and over
 [`examples/hello`](../examples/hello/README.md)'s, the messages fixture in both languages, a
 project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
-by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
+by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. Beside them, on both architectures,
+`builder-image` builds the image's test stage: beadc's tests on the image's own Node, protoc and
+environment. The C# side's `dotnet` job builds the
 C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
 generator. The Rust side's `rust` job compiles the Rust goldens whole under that side's lints, as an
 application mounts them, through `bead-goldens`.

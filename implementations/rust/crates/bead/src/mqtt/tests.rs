@@ -527,7 +527,7 @@ async fn first_bytes_by_a_localhost_name((scheme, path): (&str, &str)) -> (u16, 
     (port, read)
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_tcp()
 {
@@ -536,7 +536,7 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     assert_eq!(read.first(), Some(&0x10), "a CONNECT: {read:?}");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers_over_a_websocket()
  {
@@ -553,7 +553,7 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     );
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
  {

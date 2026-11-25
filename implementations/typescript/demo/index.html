@@ -2066,7 +2066,7 @@
             <li data-step="glyph">Send a glyph, or start a slow call and cancel it</li>
           </ol>
 
-          <section class="card scene-card" aria-labelledby="identity-h">
+          <section class="card scene-card" aria-labelledby="identity-h" data-bead-face="listening">
             <div class="card-do">
               <h2 id="identity-h">Who you are</h2>
               <p class="note">
@@ -2087,7 +2087,7 @@
             </div>
           </section>
 
-          <section class="card scene-card" aria-labelledby="counter-h">
+          <section class="card scene-card" aria-labelledby="counter-h" data-bead-face="listening">
             <div class="card-do">
               <h2 id="counter-h">A counter, paced</h2>
               <p class="note">
@@ -2111,7 +2111,7 @@
             </div>
           </section>
 
-          <section class="card scene-card" aria-labelledby="transfers-h">
+          <section class="card scene-card" aria-labelledby="transfers-h" data-bead-face="listening">
             <div class="card-do">
               <h2 id="transfers-h">8 MiB, in chunks</h2>
               <p class="note">
@@ -2138,7 +2138,7 @@
             </div>
           </section>
 
-          <section class="card scene-card" aria-labelledby="calls-h">
+          <section class="card scene-card" aria-labelledby="calls-h" data-bead-face="surprised">
             <div class="card-do">
               <h2 id="calls-h">Calls that end otherwise</h2>
               <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
@@ -2162,7 +2162,7 @@
             <li>Break several fields, and sign up</li>
             <li>Validate before sending: the client refuses it first</li>
           </ol>
-          <section class="card" aria-labelledby="sign-up-h">
+          <section class="card" aria-labelledby="sign-up-h" data-bead-face="focused">
             <h2 id="sign-up-h">Payload rules</h2>
             <p class="note">
               A sign-up whose <code>.proto</code> holds protovalidate's rules, compiled by beadc:
@@ -2280,7 +2280,12 @@
             </form>
           </section>
 
-          <section id="sign-up-http" class="card" aria-labelledby="sign-up-http-h">
+          <section
+            id="sign-up-http"
+            class="card"
+            aria-labelledby="sign-up-http-h"
+            data-bead-face="listening"
+          >
             <h2 id="sign-up-http-h">The same sign-up over HTTP and JSON</h2>
             <p class="note">
               A gateway answers it as one more client of the server, its route
@@ -2304,7 +2309,12 @@ What it answers shows once the sign-up is sent.</pre>
           aria-labelledby="scene-openapi"
           hidden
         >
-          <section id="sign-up-openapi" class="card" aria-labelledby="sign-up-openapi-h">
+          <section
+            id="sign-up-openapi"
+            class="card"
+            aria-labelledby="sign-up-openapi-h"
+            data-bead-face="focused"
+          >
             <h2 id="sign-up-openapi-h">The sign-up's OpenAPI document</h2>
             <p class="note">
               What beadc wrote of the sign-up's routes, OpenAPI 3.1.1: what its HTTP form takes, and
@@ -2317,7 +2327,7 @@ What it answers shows once the sign-up is sent.</pre>
         </div>
 
         <div id="server-scene" class="scene" role="tabpanel" aria-labelledby="scene-server" hidden>
-          <section class="card" aria-labelledby="server-h">
+          <section class="card" aria-labelledby="server-h" data-bead-face="listening">
             <div class="server-head">
               <h2 id="server-h">The server, every second</h2>
               <span id="health">—</span>
@@ -2403,7 +2413,7 @@ What it answers shows once the sign-up is sent.</pre>
         </div>
 
         <div id="code-scene" class="scene" role="tabpanel" aria-labelledby="scene-code" hidden>
-          <section id="sides" class="card" aria-labelledby="sides-h">
+          <section id="sides" class="card" aria-labelledby="sides-h" data-bead-face="focused">
             <h2 id="sides-h">The same service, in TypeScript, C# and Rust</h2>
             <p class="note">
               <code>examples/hello</code>'s HelloService in each language, as the repository builds
@@ -2465,7 +2475,12 @@ What it answers shows once the sign-up is sent.</pre>
             </div>
           </section>
 
-          <section id="go-deeper" class="card" aria-labelledby="go-deeper-h">
+          <section
+            id="go-deeper"
+            class="card"
+            aria-labelledby="go-deeper-h"
+            data-bead-face="serene"
+          >
             <h2 id="go-deeper-h">Go deeper</h2>
             <p class="note">
               What the wire shows goes to the console too, with no reload:
@@ -2484,7 +2499,7 @@ What it answers shows once the sign-up is sent.</pre>
           aria-labelledby="scene-packages"
           hidden
         >
-          <section class="card" aria-labelledby="planner-h">
+          <section class="card" aria-labelledby="planner-h" data-bead-face="focused">
             <h2 id="planner-h">One contract, several packages</h2>
             <p class="note">
               Cut a blueprint into the outputs of <code>beadc.yaml</code>: each writes a

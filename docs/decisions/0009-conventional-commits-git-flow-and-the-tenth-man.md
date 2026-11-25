@@ -79,7 +79,8 @@ does not keep.
   CI's `commits` job, and `.githooks/commit-msg` holds a commit's subject to it before git records
   it, once a clone opts in. A subject that does not parse fails the run.
 - The branches are checked by nothing but review ([0006](0006-a-rule-has-its-gate.md)): CI runs on
-  every branch alike, and `ci-ok` stands for every job.
+  every branch, the jobs a feature branch's changes reach and every job elsewhere, and `ci-ok`
+  stands for every job.
 - A version's entries are only as complete as the commits that wrote them: a change that skips the
   CHANGELOG is missing from the release it ships in.
 - The TypeScript side's comment budget refuses a comment in its sources that narrates the past;

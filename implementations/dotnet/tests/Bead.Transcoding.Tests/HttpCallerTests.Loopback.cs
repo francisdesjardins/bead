@@ -19,7 +19,7 @@ public sealed partial class HttpCallerTests
 
         private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
 
-        // spec 13.4
+        // spec 13.4.2
         [Fact]
         public async Task Reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers()
         {
@@ -35,7 +35,7 @@ public sealed partial class HttpCallerTests
             Assert.Empty(resolver.Asked);
         }
 
-        // spec 13.4
+        // spec 13.4.2
         [Fact]
         public async Task Sends_nothing_through_the_platforms_proxy_to_a_host_on_the_loopback()
         {
@@ -59,7 +59,7 @@ public sealed partial class HttpCallerTests
             Assert.Empty(proxy.Listener.Heads);
         }
 
-        // spec 13.4
+        // spec 13.4.2
         [Fact]
         public async Task Says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked()
         {
@@ -76,7 +76,7 @@ public sealed partial class HttpCallerTests
             Assert.Empty(resolver.Asked);
         }
 
-        // spec 13.4
+        // spec 13.4.2
         [Fact]
         public async Task Connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
         {

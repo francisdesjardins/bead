@@ -785,7 +785,7 @@ export const prepare = (root, options = {}) => {
   if (existsSync(join(root, OXFMT))) {
     run(process.execPath, ['tools/check-format.mjs']);
   } else {
-    log(`skipped: the root's format check (no ${OXFMT}); CI's typescript job holds it`);
+    log(`skipped: the root's format check (no ${OXFMT}); CI's commits job holds it`);
   }
 
   // what follows, which it does none of

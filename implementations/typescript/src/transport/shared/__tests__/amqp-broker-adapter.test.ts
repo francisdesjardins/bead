@@ -3323,7 +3323,7 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
   });
 });
 
-// spec 13.4: a connection to a localhost name, connected by Bead to the loopback itself
+// spec 13.4.2: a connection to a localhost name, connected by Bead to the loopback itself
 test.describe('createAmqpBrokerAdapter, on the loopback', () => {
   test('reaches a localhost name on the loopback whatever the platform’s resolver answers', async () => {
     const headers: Buffer[] = [];

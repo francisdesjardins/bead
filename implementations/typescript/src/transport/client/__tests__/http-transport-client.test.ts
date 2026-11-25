@@ -3894,7 +3894,7 @@ test.describe('createHTTPTransportClient, a client certificate', () => {
   });
 });
 
-// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+// spec 13.4.2: a client connects a host it judges on the loopback to the loopback itself
 test.describe('createHTTPTransportClient, on the loopback', () => {
   /** A server on 127.0.0.1 that draws a connection on a POST, answers an exchange on it with 204, and notes each. */
   const startDrawing = () => {
@@ -3976,7 +3976,7 @@ test.describe('createHTTPTransportClient, on the loopback', () => {
     expect(resolver.asked).toEqual([]);
   });
 
-  // spec 13.4; RFC 7301
+  // spec 13.4.2; RFC 7301
   test('negotiates the HTTP version with a localhost name that it negotiates with 127.0.0.1', async () => {
     // * a server that offers h2 and http/1.1 by ALPN, its certificate naming both
     const versions: string[] = [];
@@ -4069,7 +4069,7 @@ test.describe('createHTTPTransportClient, on the loopback', () => {
     expect(resolver.asked).toEqual([]);
   });
 
-  // spec 13.4, 15.39
+  // spec 13.4.2, 15.39
   test('keeps a localhost name in its Host and its TLS server name while it connects the loopback', async () => {
     await using server = await startDrawing();
     await using front = await createTlsFront(server.port, { serves: 'named' });

@@ -105,6 +105,60 @@ import {
 /** HTTP/2's error code of a malformed request (RFC 9113 §7). */
 const PROTOCOL_ERROR = http2Constants.NGHTTP2_PROTOCOL_ERROR;
 
+// A CANCEL in one chunk, followed by a canary: each platform's outcome is a support matrix row.
+const platformFramingOf = async ({
+  coding = 'chunked',
+  ending = '\r\n',
+  isTaken = false,
+  size = '8',
+}: {
+  coding?: string;
+  ending?: string;
+  isTaken?: boolean;
+  size?: string;
+} = {}): Promise<void> => {
+  await using started = await startTransport();
+  const { connectionHandle, connectionToken } = await connect(started.url, started.server);
+  const cancel = envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 });
+  const head = [
+    'POST /bead HTTP/1.1',
+    `Host: ${host}`,
+    `Content-Type: ${BEAD_MEDIA_TYPE}`,
+    `${CONNECTION_TOKEN_HEADER}: ${connectionToken}`,
+    `Transfer-Encoding: ${coding}`,
+    '',
+    '',
+  ].join(ending);
+  const { read, socket } = await rawSocketOn(portOf(started.url));
+
+  try {
+    socket.write(
+      `${head}${size}\r\n${Buffer.from(cancel).toString('latin1')}\r\n0\r\n\r\n` +
+        `GET /other HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
+      'latin1'
+    );
+    await expect
+      .poll(() => {
+        return read.isClosed;
+      })
+      .toBe(true);
+    expect(statusesOf(read.text)).toEqual(isTaken ? ['204', '404'] : ['400']);
+    const first = read.text.split('\r\n\r\n')[0]?.toLowerCase() ?? '';
+
+    expect(first).not.toContain(REFUSAL_HEADER);
+    expect(namesOf(started.events, 'message')).toEqual(
+      isTaken ? [['message', [...cancel], connectionHandle]] : []
+    );
+    if (isTaken) {
+      expect(read.text.toLowerCase()).toContain(`${REFUSAL_HEADER}: path-unknown`);
+    } else {
+      expect(first).toContain('connection: close');
+    }
+  } finally {
+    socket.destroy();
+  }
+};
+
 // definition
 
 test.describe('createHTTPTransportServer', () => {
@@ -189,6 +243,24 @@ test.describe('createHTTPTransportServer', () => {
     server.resume(connectionHandle);
     await sleep(50);
     expect(namesOf(events, 'message')).toEqual([]);
+  });
+
+  test('shows how the platform reads chunked with trailing space and tab', async () => {
+    await platformFramingOf({ coding: 'chunked \t' });
+  });
+
+  test('shows how the platform reads a chunk extension after whitespace', async () => {
+    await platformFramingOf({ size: '8 ;name' });
+  });
+
+  test('shows how the platform reads leading zeros in a nine digit chunk size', async () => {
+    for (const size of ['00000008', '000000008', '0000000008', '0000000000000000000008']) {
+      await platformFramingOf({ isTaken: true, size });
+    }
+  });
+
+  test('shows how the platform reads bare LF head lines', async () => {
+    await platformFramingOf({ ending: '\n' });
   });
 
   test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields, over HTTP', async () => {
@@ -2975,6 +3047,66 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect([read.isClosed, taken.octets]).toEqual([false, stalledAt]);
     expect((await post(started.url)).status).toBe(201);
     socket.destroy();
+  });
+
+  // spec 15.12: a listen's answer frees its place even when the read stop hides its client's close
+  test('frees a listen within maximumWait once its client leaves with requests pipelined past the read stop', async () => {
+    const clock = createTestClock();
+    await using started = await startTransport({ clock, maximumWait: 1_000 });
+    const drawn = await post(started.url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(listenOf(connectionToken, 60_000), 'latin1');
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['listens'];
+        })
+        .toBe(1);
+      expect(
+        clock.armed.some(({ delay }) => {
+          return delay === 1_000;
+        })
+      ).toBe(true);
+
+      const taken = await takenUntilStalled(
+        socket,
+        `GET /other HTTP/1.1\r\nHost: ${host}\r\n\r\n`.repeat(1_000)
+      );
+
+      expect(taken.octets).toBeLessThan(MOST_TAKEN);
+      expect(read.isClosed).toBe(false);
+      socket.destroy();
+      clock.tick(1_000);
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['listens'];
+        })
+        .toBe(0);
+
+      const gauges = started.server.gauges();
+
+      expect([
+        gauges.counts['connections'],
+        gauges.counts['waitingExchanges'],
+        gauges.counts['bodyBytes'],
+      ]).toEqual([1, 0, 0]);
+      expect(gauges.anomalies).toEqual([]);
+      const next = await fetch(started.url, {
+        headers: {
+          [CONNECTION_TOKEN_HEADER]: connectionToken,
+          [AFTER_HEADER]: '0',
+          [WAIT_HEADER]: '0',
+        },
+      });
+
+      expect(next.status).toBe(204);
+      await started.server.stop();
+      expect(started.server.gauges().counts['connections']).toBe(0);
+    } finally {
+      socket.destroy();
+    }
   });
 
   // spec 15.12; RFC 9112 §9.3

@@ -327,7 +327,7 @@
       "pattern": "^[a-z][a-z0-9]*$"
     },
     "step": {
-      "description": "What the test does — send, behind, close, until, stop, wait — or what the server under test does next — expect, report: one of them, on the exchange it names, where it has one.",
+      "description": "What the test does — send, behind, close, until, stop, wait — or what the server under test does next — expect, report, reported: one of them, on the exchange it names, where it has one.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -337,6 +337,7 @@
         { "required": ["close", "on"] },
         { "required": ["until"] },
         { "required": ["report"] },
+        { "required": ["reported"] },
         { "required": ["stop"] },
         { "required": ["advance"] },
         { "required": ["wall"] },
@@ -399,6 +400,11 @@
           "if": { "type": "integer" },
           "then": { "$ref": "common.schema.json#/$defs/code" },
           "else": { "const": "exception" }
+        },
+        "reported": {
+          "description": "The next error the transport under test reported of the connection on names, or of any with no on, its message holding each word.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "stop": { "const": true }
       }

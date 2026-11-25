@@ -4625,7 +4625,7 @@ test.describe('createWebSocketTransportClient, a client certificate', () => {
   });
 });
 
-// spec 13.4: a client connects a host it judges on the loopback to the loopback itself
+// spec 13.4.2: a client connects a host it judges on the loopback to the loopback itself
 test.describe('WebSocketTransportClient, on the loopback', () => {
   /** A `ws` server on 127.0.0.1 that notes the `Host` of each upgrade it takes. */
   const startNoting = async () => {

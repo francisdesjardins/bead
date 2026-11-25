@@ -2088,7 +2088,7 @@ fn resolving_client(asked: &Arc<Mutex<Vec<String>>>) -> WebSocketTransportClient
     .unwrap()
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolver_answers() {
     let server = hearing(None).await;
@@ -2115,7 +2115,7 @@ async fn reaches_a_localhost_name_on_the_loopback_whatever_the_platforms_resolve
     client.dispose();
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no_resolver_asked() {
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -2134,7 +2134,7 @@ async fn says_that_a_localhost_name_it_could_not_connect_went_to_the_loopback_no
     assert_eq!(*asked.lock().unwrap(), Vec::<String>::new(), "none asked");
 }
 
-// spec 13.4
+// spec 13.4.2
 #[tokio::test]
 async fn connects_a_host_written_127_0_0_1_or_127_1_to_the_loopback_asking_no_resolver_and_names_it_127_0_0_1()
  {

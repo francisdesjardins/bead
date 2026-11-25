@@ -128,7 +128,7 @@ export const SIDES = Object.freeze({
   rust: join(ROOT, 'implementations', 'rust', 'fuzz'),
 });
 
-// ! the nightly cargo-fuzz builds on, by its date: CI's `rust` job builds the targets on the same,
+// ! the nightly cargo-fuzz builds on, by its date: CI's `rust-fuzz` job builds the targets on the same,
 // its NIGHTLY, and both move together, by hand
 export const RUST_NIGHTLY = 'nightly-2026-10-27';
 

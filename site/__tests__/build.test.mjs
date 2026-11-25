@@ -6,6 +6,7 @@ import { TRANSPORTS, TRANSPORTS_OFF } from '../src/data.mjs';
 import {
   buildPrivacy,
   contentsOf,
+  facesOf,
   policyRefusals,
   transportsRefusals,
   typeset,
@@ -72,6 +73,17 @@ describe('the contents', () => {
       content,
       '<section id="a" class="status"><section id="b"><section id="c"><section id="d">'
     );
+  });
+
+  test('keeps the face a section gives the mascot, and refuses one the mascot has not', () => {
+    const { content } = contentsOf(
+      '<section id="a" data-toc="A" data-part="" data-bead-face="serene"><section id="b" data-toc="B">'
+    );
+    assert.equal(content, '<section id="a" data-bead-face="serene"><section id="b">');
+    assert.equal(facesOf(content), 'a=serene');
+    assert.throws(() => {
+      return contentsOf('<section id="a" data-toc="A" data-bead-face="bored">');
+    }, /the face bored, which the mascot has not/u);
   });
 
   test('refuses a data-toc it cannot take, so no section drops out unseen', () => {

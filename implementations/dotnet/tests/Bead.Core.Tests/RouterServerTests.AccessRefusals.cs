@@ -117,14 +117,23 @@ public sealed partial class RouterServerTests
                 return response.Answer("admitted");
             });
 
-        // a scheme to come, an OPAQUE of another session, a JWT whose exp passed, a call presenting
-        // none its admission refuses, and one to a destination of a relay given no beforeRoute
-        DeliverFrom(First, Presenting(RequestOf(1), Credential.Of((CredentialScheme)4, [])));
-        DeliverFrom(First, Presenting(RequestOf(3), OtherToken));
-        DeliverFrom(First, Presenting(RequestOf(5), Credential.Jwt(expired)));
-        DeliverFrom(First, RequestOf(7));
-        DeliverFrom(First, new Envelope { Header = (RequestHeader)RequestOf(9).Header with { DestinationId = 4 } });
-        await Settle();
+        // ! the router held while all five come, so that each is read before the JWT's later turn:
+        // read as they come, the JWT's turn may run before the calls after it are handed over
+        using (var release = new ManualResetEventSlim())
+        {
+            Hold(release);
+
+            // a scheme to come, an OPAQUE of another session, a JWT whose exp passed, a call
+            // presenting none its admission refuses, and one to a destination of a relay given no
+            // beforeRoute
+            DeliverFrom(First, Presenting(RequestOf(1), Credential.Of((CredentialScheme)4, [])));
+            DeliverFrom(First, Presenting(RequestOf(3), OtherToken));
+            DeliverFrom(First, Presenting(RequestOf(5), Credential.Jwt(expired)));
+            DeliverFrom(First, RequestOf(7));
+            DeliverFrom(First, new Envelope { Header = (RequestHeader)RequestOf(9).Header with { DestinationId = 4 } });
+            release.Set();
+            await Settle();
+        }
 
         // told in the turn each is answered, a JWT's in a later turn, each answered as it would be
         // untold

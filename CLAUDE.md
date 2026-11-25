@@ -100,7 +100,9 @@ standard it follows.
 ## Style
 
 Comments are written in the voice of the code around them. Keep each implementation's inside as it
-is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder.
+is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder. The
+tests run by what changes, by `tools/ci-scope.mjs`: in CI on a feature branch, and before a push by
+`node tools/ci-scope.mjs --local`; a merge into develop and a release run everything.
 
 **Plain prose.** A sentence of a document or a comment says one thing a reader needs, plainly: no
 chain of appositives and asides hung on it, no reason a reader does not need ("a character, since

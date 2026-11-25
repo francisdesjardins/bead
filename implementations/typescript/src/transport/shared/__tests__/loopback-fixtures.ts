@@ -10,13 +10,29 @@ import { once } from 'node:events';
 import { createServer as createHttpServer, type IncomingMessage } from 'node:http';
 import { connect, createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { getGlobalDispatcher, ProxyAgent, setGlobalDispatcher } from 'undici';
-import type { loopbackLookup } from '../loopback';
 
 // interfaces
 
-// the part of `node:dns` a test replaces: its lookup, of the shape `loopbackLookup` has
+// an address `dns.lookup` answers with, when it is asked for all of them
+interface ILookupAddress {
+  address: string;
+  family: number;
+}
+
+// what `dns.lookup` answers with: an error, or one address and its family, or all of them
+// oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own callback, which Node calls
+type Answer = (error: Error | null, address: string | ILookupAddress[], family?: number) => void;
+
+// what `dns.lookup` is asked: its options, the family alone, or nothing but its callback
+type Asked = { all?: boolean } | number | Answer;
+
+// `dns.lookup`'s own shape
+// oxlint-disable-next-line max-params, bead/options-last -- dns.lookup's own shape, which Node calls
+type Lookup = (hostname: string, options: Asked, callback?: Answer) => void;
+
+// the part of `node:dns` a test replaces: its lookup
 interface IDnsLike {
-  lookup: typeof loopbackLookup;
+  lookup: Lookup;
 }
 
 /** What a request that reached a server or a proxy said: its first line and its fields. */
