@@ -35,17 +35,61 @@ const failureOf = (read: () => unknown): FailureError => {
 test.describe.configure({ retries: 0 });
 
 test.describe('writeHeader and readHeader', () => {
-  for (const { bytes, header, name } of VECTORS.headers) {
-    test(`reads ${name}, and writes it back`, () => {
-      const expected = fromHexadecimal(bytes);
-      const written = new Uint8Array(expected.length);
+  test('writes a session announced as the token it was given', () => {
+    const bytes = new Uint8Array(28);
 
-      expect(writeHeader(header, written)).toBe(expected.length);
-      expect(written).toEqual(expected);
-      expect(headerBytesOf(header)).toBe(expected.length);
-      expect(readHeader(expected, SERVER_FAILURES)).toEqual({
-        header,
-        headerBytes: expected.length,
+    expect(writeHeader({ callId: 3, credential: OPAQUE, kind: 0x12 }, bytes)).toBe(28);
+    expect(bytes).toEqual(
+      fromHexadecimal(
+        'A1 12 08 07 00 00 00 03 00 01 00 10 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
+      )
+    );
+  });
+
+  test('a wire opaque credential reads with its token and never as a redacted value', () => {
+    const token = 'CQkJCQkJCQkJCQkJCQkJCQ' as SessionToken;
+    const credential = { scheme: CredentialScheme.OPAQUE, token } as const;
+
+    for (const header of [
+      { callId: 1, credential, kind: 0x10, procedureId: 1, serviceId: 1 },
+      { callId: 2, credential, kind: 0x11 },
+      { callId: 3, credential, kind: 0x12 },
+    ] as const) {
+      const bytes = new Uint8Array(headerBytesOf(header));
+
+      writeHeader(header, bytes);
+
+      const read = readHeader(bytes, SERVER_FAILURES)?.header;
+
+      expect(read).toEqual(header);
+      expect(read).toHaveProperty('credential', credential);
+    }
+
+    const bytes = fromHexadecimal('A1 11 08 03 00 00 00 02 00 01 00 00');
+
+    expect(
+      failureOf(() => {
+        return readHeader(bytes, CLIENT_FAILURES);
+      })
+    ).toMatchObject({
+      code: CLIENT_FAILURES.envelopeMalformed.code,
+      detail: 'an OPAQUE token is 16 bytes, not 0',
+    });
+  });
+
+  for (const { bytes, header, name } of VECTORS.headers) {
+    test.describe(name, () => {
+      test('reads a header and writes it back', () => {
+        const expected = fromHexadecimal(bytes);
+        const written = new Uint8Array(expected.length);
+
+        expect(writeHeader(header, written)).toBe(expected.length);
+        expect(written).toEqual(expected);
+        expect(headerBytesOf(header)).toBe(expected.length);
+        expect(readHeader(expected, SERVER_FAILURES)).toEqual({
+          header,
+          headerBytes: expected.length,
+        });
       });
     });
   }
@@ -454,35 +498,41 @@ test.describe('writeHeader', () => {
 
 test.describe('readPrefix', () => {
   for (const { bytes, name, prefix } of VECTORS.prefixes) {
-    test(`reads ${name}`, () => {
-      expect(readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES)).toEqual(prefix);
+    test.describe(name, () => {
+      test('reads the prefix of any layout', () => {
+        expect(readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES)).toEqual(prefix);
+      });
     });
   }
 
   for (const { bytes, code, name } of VECTORS.prefixRefusals) {
-    test(`refuses ${name}`, () => {
-      const failure = failureOf(() => {
-        return readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES);
-      });
+    test.describe(name, () => {
+      test('refuses a prefix', () => {
+        const failure = failureOf(() => {
+          return readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES);
+        });
 
-      expect(failure.code).toBe(code);
-      expect(failure.side).toBe('client');
+        expect(failure.code).toBe(code);
+        expect(failure.side).toBe('client');
+      });
     });
   }
 });
 
 test.describe('readHeader', () => {
   for (const { bytes, header, name, side } of VECTORS.reads) {
-    test(`reads ${name}`, () => {
-      const read = readHeader(
-        fromHexadecimal(bytes),
-        side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES
-      );
+    test.describe(name, () => {
+      test('reads what a writer need not write', () => {
+        const read = readHeader(
+          fromHexadecimal(bytes),
+          side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES
+        );
 
-      expect(read).toEqual(
-        // * the bytes the header took as it was read, which a writer may write fewer of
-        header === null ? undefined : { header, headerBytes: fromHexadecimal(bytes).length }
-      );
+        expect(read).toEqual(
+          // * the bytes the header took as it was read, which a writer may write fewer of
+          header === null ? undefined : { header, headerBytes: fromHexadecimal(bytes).length }
+        );
+      });
     });
   }
 
@@ -490,21 +540,23 @@ test.describe('readHeader', () => {
     ...VECTORS.prefixRefusals,
     ...VECTORS.headerRefusals,
   ]) {
-    test(`refuses ${name}`, () => {
-      const failure = failureOf(() => {
-        return readHeader(fromHexadecimal(bytes), SERVER_FAILURES);
-      });
+    test.describe(name, () => {
+      test('refuses a header', () => {
+        const failure = failureOf(() => {
+          return readHeader(fromHexadecimal(bytes), SERVER_FAILURES);
+        });
 
-      expect(failure).toMatchObject({
-        code,
-        origin: 'local',
-        scope: FailureScope.PROTOCOL,
-        side: 'server',
-      });
+        expect(failure).toMatchObject({
+          code,
+          origin: 'local',
+          scope: FailureScope.PROTOCOL,
+          side: 'server',
+        });
 
-      if (detail !== undefined) {
-        expect(failure.detail).toBe(detail);
-      }
+        if (detail !== undefined) {
+          expect(failure.detail).toBe(detail);
+        }
+      });
     });
   }
 
@@ -534,4 +586,51 @@ test.describe('readHeader', () => {
 
     expect(failure).toMatchObject({ origin: 'local', side: 'client' });
   });
+});
+
+test('refuses to write a header and writes nothing', () => {
+  const request = { callId: 3, kind: 0x10, procedureId: 1, serviceId: 2 } as const;
+  const cases: { header: EnvelopeHeader; words: string }[] = [
+    {
+      header: { callId: 0, kind: 0x11 },
+      words: 'callId is an integer from 1 to 4294967295, got 0',
+    },
+    {
+      header: { ...request, serviceId: 0 },
+      words: 'serviceId is an integer from 1 to 65535, got 0',
+    },
+    {
+      header: { ...request, procedureId: 0 },
+      words: 'procedureId is an integer from 1 to 65535, got 0',
+    },
+    {
+      header: { ...request, destinationId: 0 },
+      words: 'destinationId is an integer from 1 to 4294967295, got 0',
+    },
+    {
+      header: { ...request, paced: true },
+      words: 'a 0x10 header paces nothing: a request that opens a subscription does, or a credit',
+    },
+    {
+      header: { callId: 7, isLast: true, kind: 0x14, offset: 2 ** 53 },
+      words: 'offset is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+    {
+      header: { callId: 7, creditEnd: 2 ** 53, kind: 0x15 },
+      words: 'creditEnd is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+    {
+      header: { callId: 3, kind: 0x11, total: 2 ** 53 },
+      words: 'total is a whole number from 0 to 2⁵³ − 1, got 9007199254740992',
+    },
+  ];
+
+  for (const { header, words } of cases) {
+    const bytes = new Uint8Array(1_024).fill(0x55);
+
+    expect(() => {
+      return writeHeader(header, bytes);
+    }).toThrow(new ProgrammerError(words));
+    expect(bytes).toEqual(new Uint8Array(1_024).fill(0x55));
+  }
 });

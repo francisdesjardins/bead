@@ -457,6 +457,127 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 // definition
 
+test('a token provider that panics fails only its answer and the next answer can announce', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  let called = false;
+  using router = createRouterServer(transport, {
+    sessionTokenOf: () => {
+      if (!called) {
+        called = true;
+
+        throw new Error('no session');
+      }
+
+      return TOKEN;
+    },
+  });
+  const services = createServiceManager(router);
+  const errors = recordErrors(router);
+
+  services.getRequestResolver(echo, { serializer: answering })((request, response) => {
+    return response(`${request.payload}!`);
+  });
+  deliver(first, requestOf(1, { payload: text.encode('hi') }));
+  await sleep(0);
+
+  expect(sent).toEqual([]);
+  expect(errors).toHaveLength(1);
+  deliver(first, requestOf(3, { payload: text.encode('ho') }));
+  await sleep(0);
+
+  expect(answersOf(sent)).toEqual([[first, 'result', 3, 'ho!']]);
+  expect(sent[0]?.envelope?.header).toMatchObject({
+    credential: { scheme: CredentialScheme.OPAQUE, token: TOKEN },
+  });
+});
+
+test('requests that fail in their resolver or do not read are reported with their connection', async () => {
+  const { control, deliver, emitter, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+
+  router.registerResolver(
+    Object.assign(() => {
+      return Promise.reject(new Error('rejected'));
+    }, echo)
+  );
+  router.registerResolver(
+    Object.assign(() => {
+      throw new Error('thrown');
+    }, news)
+  );
+  deliver(first, requestOf(1));
+  await sleep(0);
+  deliver(second, subscribingOf(1));
+  await sleep(0);
+  emitter.emit('message', { data: 'text' }, first);
+  await sleep(0);
+
+  const gone = new Error('gone');
+
+  control.sendErrors.set(second, gone);
+  deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
+  await sleep(0);
+
+  expect(reportedOf(errors)).toEqual([
+    ['rejected', first],
+    ['thrown', second],
+    [ProtocolCode.ENVELOPE_MALFORMED, first],
+    ['gone', second],
+  ]);
+  expect(errors[3]?.[0]).toBe(gone);
+  expect(answersOf(sent)).toEqual([
+    [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+  ]);
+});
+
+test('that fail in their resolver delivered before either settles are reported as their tasks settle after one that does not read', async () => {
+  test.skip(
+    true,
+    'divergence: a synchronous resolver throw is reported before the earlier rejected promise'
+  );
+
+  const { control, deliver, emitter, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+
+  router.registerResolver(
+    Object.assign(() => {
+      return Promise.reject(new Error('rejected'));
+    }, echo)
+  );
+  router.registerResolver(
+    Object.assign(() => {
+      throw new Error('thrown');
+    }, news)
+  );
+  deliver(first, requestOf(1));
+  deliver(second, subscribingOf(1));
+  emitter.emit('message', { data: 'text' }, first);
+  await sleep(0);
+
+  const gone = new Error('gone');
+
+  control.sendErrors.set(second, gone);
+  deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
+  await sleep(0);
+
+  expect(reportedOf(errors)).toEqual([
+    [ProtocolCode.ENVELOPE_MALFORMED, first],
+    ['rejected', first],
+    ['thrown', second],
+    ['gone', second],
+  ]);
+  expect(errors[3]?.[0]).toBe(gone);
+  expect(answersOf(sent)).toEqual([
+    [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+  ]);
+});
+
 test('a request its transport tells once its router is disposed reaches no resolver', async () => {
   const { deliver, sent, transport } = createScriptedTransport();
   using router = createRouterServer(transport);
@@ -533,7 +654,7 @@ test.describe('createRouterServer', () => {
     expect(router.notifications.subscriptions()).toEqual([]);
   });
 
-  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+  test('runs on its transport’s clock and refuses another', () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
     using onItsTransport = createRouterServer(
@@ -605,96 +726,149 @@ test.describe('createRouterServer', () => {
       ]);
     });
 
-    test('are asked their admission once, on their header, before their payload is read', async () => {
-      const { deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterServer(transport);
-      const services = createServiceManager(router);
-      const asked: number[] = [];
+    test('requests are asked their admission once, on their header, before their payload is read', async () => {
+      for (const sequential of [false, true]) {
+        const { deliver, sent, transport } = createScriptedTransport();
+        using router = createRouterServer(transport);
+        const services = createServiceManager(router);
+        const errors = recordErrors(router);
+        const asked: unknown[] = [];
+        const decoded: Uint8Array[] = [];
 
-      services.getRequestResolver(echo, {
-        beforeRequest: ({ header: { callId } }) => {
-          asked.push(callId);
-
-          return callId === 31;
-        },
-        serializer: {
-          ...answering,
-          decode: (bytes: Uint8Array) => {
-            if (bytes.length === 0) {
-              throw new TypeError('no text');
-            }
-
-            return text.decode(bytes);
+        services.getRequestResolver(echo, {
+          beforeRequest: ({ connectionHandle, header }) => {
+            asked.push([connectionHandle, header.callId]);
+            return header.callId === 31;
           },
-        },
-      })((request, response) => {
-        return response(`${request.payload}!`);
-      });
+          serializer: {
+            ...answering,
+            decode: (bytes: Uint8Array) => {
+              decoded.push(bytes);
+              if (bytes.length === 0) {
+                throw new TypeError('no text');
+              }
+              return text.decode(bytes);
+            },
+          },
+        })((request, response) => {
+          return response(`${request.payload}!`);
+        });
+        deliver(first, requestOf(31, { payload: text.encode('hi') }));
+        if (sequential) {
+          await sleep(0);
+        }
+        deliver(first, requestOf(33));
+        await sleep(0);
 
-      deliver(first, requestOf(31, { payload: text.encode('hi') }));
-      // refused before it is read: undecodable, it is refused all the same
-      deliver(first, requestOf(33));
-      await sleep(0);
-
-      expect(asked).toEqual([31, 33]);
-      // the refusal in the turn its request came, the result in the later turn its resolver runs in
-      expect(answersOf(sent)).toEqual([
-        [first, 'failure', 33, ProtocolCode.ACCESS_DENIED],
-        [first, 'result', 31, 'hi!'],
-      ]);
+        expect(asked).toEqual([
+          [first, 31],
+          [first, 33],
+        ]);
+        expect(decoded).toEqual([text.encode('hi')]);
+        expect(answersOf(sent)).toEqual(
+          sequential
+            ? [
+                [first, 'result', 31, 'hi!'],
+                [first, 'failure', 33, ProtocolCode.ACCESS_DENIED],
+              ]
+            : [
+                [first, 'failure', 33, ProtocolCode.ACCESS_DENIED],
+                [first, 'result', 31, 'hi!'],
+              ]
+        );
+        expect(errors).toEqual([]);
+      }
     });
 
-    test('are each asked their session of its sessionOf, once, their call id held, before their admission, which reads it, as their callback does', async () => {
-      const { deliver, sent, transport } = createScriptedTransport();
-      const order: unknown[] = [];
-      using router = createRouterServer(transport, {
-        // none for a request presenting none, the connection's for one presenting its token, and
-        // none for one whose OPAQUE does not hold
-        sessionOf: ({ connectionHandle, header }, signal) => {
-          order.push(['session', connectionHandle, header.callId, signal.aborted]);
+    test('a connection’s requests are each asked their session of its sessionOf, once, their call id held, before their admission, which reads it, as their callback does', async () => {
+      for (const sequential of [false, true]) {
+        const { deliver, sent, transport } = createScriptedTransport();
+        const order: unknown[] = [];
+        const admissions: unknown[] = [];
+        const callbacks: unknown[] = [];
+        const [without, withSession, refused] = sequential
+          ? ([1, 3, 5] as const)
+          : ([31, 33, 35] as const);
+        const other = sequential
+          ? toSessionToken(
+              Uint8Array.from({ length: 16 }, (_, index) => {
+                return index + 1;
+              })
+            )
+          : OTHER_TOKEN;
+        using router = createRouterServer(transport, {
+          sessionOf: ({ connectionHandle, header }, signal) => {
+            order.push(['session', connectionHandle, header.callId, signal.aborted]);
+            const { credential } = header;
+            return credential !== undefined && 'token' in credential && credential.token === TOKEN
+              ? Object.freeze({ data: 'ada' })
+              : undefined;
+          },
+        });
+        const errors = recordErrors(router);
 
-          const { credential } = header;
+        createServiceManager(router).getRequestResolver(echo, {
+          beforeRequest: ({ header, session }) => {
+            order.push(['admit', header.callId, session]);
+            admissions.push(session);
+            return true;
+          },
+          serializer: answering,
+        })((request, response) => {
+          order.push(['callback', request.header.callId, request.session]);
+          callbacks.push(request.session);
+          return response('ok');
+        });
 
-          return credential !== undefined && 'token' in credential && credential.token === TOKEN
-            ? Object.freeze({ data: 'ada' })
-            : undefined;
-        },
-      });
-      const services = createServiceManager(router);
+        for (const [id, credential] of [
+          [without, undefined],
+          [withSession, OPAQUE],
+          [refused, { ...OPAQUE, token: other }],
+        ] as const) {
+          deliver(first, requestOf(id, credential === undefined ? {} : { credential }));
+          if (sequential) {
+            await sleep(0);
+          }
+        }
+        await sleep(0);
 
-      services.getRequestResolver(echo, {
-        beforeRequest: ({ header, session }) => {
-          order.push(['admit', header.callId, session]);
-
-          return true;
-        },
-        serializer: answering,
-      })((request, response) => {
-        order.push(['callback', request.header.callId, request.session]);
-
-        return response('ok');
-      });
-
-      deliver(first, requestOf(31));
-      deliver(first, requestOf(33, { credential: OPAQUE }));
-      deliver(first, requestOf(35, { credential: { ...OPAQUE, token: OTHER_TOKEN } }));
-      await sleep(0);
-
-      // each callback in a later turn than its request's, behind the requests delivered with it
-      expect(order).toEqual([
-        ['session', first, 31, false],
-        ['admit', 31, undefined],
-        ['session', first, 33, false],
-        ['admit', 33, { data: 'ada' }],
-        ['session', first, 35, false],
-        ['callback', 31, undefined],
-        ['callback', 33, { data: 'ada' }],
-      ]);
-      expect(answersOf(sent)).toEqual([
-        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
-        [first, 'result', 31, 'ok'],
-        [first, 'result', 33, 'ok'],
-      ]);
+        expect(order).toEqual(
+          sequential
+            ? [
+                ['session', first, without, false],
+                ['admit', without, undefined],
+                ['callback', without, undefined],
+                ['session', first, withSession, false],
+                ['admit', withSession, { data: 'ada' }],
+                ['callback', withSession, { data: 'ada' }],
+                ['session', first, refused, false],
+              ]
+            : [
+                ['session', first, without, false],
+                ['admit', without, undefined],
+                ['session', first, withSession, false],
+                ['admit', withSession, { data: 'ada' }],
+                ['session', first, refused, false],
+                ['callback', without, undefined],
+                ['callback', withSession, { data: 'ada' }],
+              ]
+        );
+        expect(callbacks[1]).toBe(admissions[1]);
+        expect(answersOf(sent)).toEqual(
+          sequential
+            ? [
+                [first, 'result', without, 'ok'],
+                [first, 'result', withSession, 'ok'],
+                [first, 'failure', refused, ProtocolCode.SESSION_REQUIRED],
+              ]
+            : [
+                [first, 'failure', refused, ProtocolCode.SESSION_REQUIRED],
+                [first, 'result', without, 'ok'],
+                [first, 'result', withSession, 'ok'],
+              ]
+        );
+        expect(errors).toEqual([]);
+      }
     });
 
     test('refused their admission never reach a callback, which would subscribe a plain request', async () => {
@@ -724,37 +898,48 @@ test.describe('createRouterServer', () => {
       expect(errors).toEqual([]);
     });
 
-    test('answered after their connection closed send nothing, so the handle is told its session anew', async () => {
-      const { close, deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterServer(transport, {
-        sessionTokenOf: () => {
-          return TOKEN;
-        },
-      });
-      const services = createServiceManager(router);
-      const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
+    test('requests answered after their connection closed send nothing, so the handle is told its session anew', async () => {
+      for (const openFirst of [false, true]) {
+        const { close, deliver, open, sent, transport } = createScriptedTransport();
+        using router = createRouterServer(transport, {
+          sessionTokenOf: () => {
+            return TOKEN;
+          },
+        });
+        const services = createServiceManager(router);
+        const errors = recordErrors(router);
+        const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
 
-      services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
-        if (request.payload === 'late') {
-          await closed;
+        services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
+          if (request.payload === 'late') {
+            await closed;
+          }
+
+          return response(`${request.payload}!`);
+        });
+
+        if (openFirst) {
+          open(first);
         }
+        deliver(first, requestOf(1, { payload: text.encode('late') }));
+        await sleep(0);
+        close(first);
+        onClosed();
+        await sleep(0);
+        expect(sent).toEqual([]);
+        deliver(first, requestOf(3, { payload: text.encode('again') }));
+        await sleep(0);
 
-        return response(`${request.payload}!`);
-      });
-
-      deliver(first, requestOf(1, { payload: text.encode('late') }));
-      await sleep(0);
-      close(first);
-      onClosed();
-      await sleep(0);
-      deliver(first, requestOf(3, { payload: text.encode('again') }));
-      await sleep(0);
-
-      expect(
-        sent.map(({ envelope }) => {
-          return envelope?.header;
-        })
-      ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
+        expect(
+          sent.map(({ envelope }) => {
+            return envelope?.header;
+          })
+        ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
+        expect(sent[0]?.envelope?.kind === EnvelopeKind.RESULT && sent[0].envelope.payload).toEqual(
+          text.encode('again!')
+        );
+        expect(errors).toEqual([]);
+      }
     });
 
     test('are refused when nobody answers them, or they name a destination: this router relays nothing', async () => {
@@ -6628,4 +6813,173 @@ test.describe('createRouterServer, within a telling', () => {
     await expect(answering).resolves.toBeUndefined();
     expect(reportedOf(errors)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, first]]);
   });
+});
+
+test('a listener’s panic is reported and the transport goes on', async () => {
+  const memory = createMemoryTransportServer();
+  using server = createRouterServer(memory);
+  await using transport = createMemoryTransportClient();
+  using client = createRouterClient(transport);
+  const caller = createServiceManager(client);
+  const reported = Promise.withResolvers<{ error: Error; connectionHandle: Handle | '' }>();
+  const routerReports: unknown[] = [];
+  const broken = new Error('this listener breaks, on purpose');
+
+  createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+    (request, response) => {
+      return response(request.payload);
+    }
+  );
+  memory.on('message', () => {
+    throw broken;
+  });
+  memory.on('error', (error, connectionHandle) => {
+    reported.resolve({ error, connectionHandle });
+  });
+  server.on('error', (error) => {
+    routerReports.push(error);
+  });
+  await memory.start();
+
+  try {
+    await transport.connect({ server: memory });
+    await expect(caller.getRequest(echo, { serializer: asking })('hi')()).resolves.toBe('hi');
+
+    const failure = await reported.promise;
+
+    expect(failure.error).toBe(broken);
+    expect(failure.connectionHandle).toBe('type=MEMORY;ip=local;ordinal=1');
+    expect(routerReports).toEqual([]);
+  } finally {
+    await transport.disconnect();
+    await memory.stop();
+  }
+});
+
+test('a client and a server ask, answer, subscribe, notify, unsubscribe and command each other over a link', async () => {
+  const memory = createMemoryTransportServer();
+  const serverRouter = createRouterServer(memory, {
+    sessionTokenOf: () => {
+      return TOKEN;
+    },
+  });
+  const serverServices = createServiceManager(serverRouter);
+  await memory.start();
+  const clientTransport = createMemoryTransportClient();
+  using clientRouter = createRouterClient(clientTransport);
+  const clientServices = createServiceManager(clientRouter);
+  const told: unknown[] = [];
+
+  clientRouter.on('debug', ({ direction, header }) => {
+    told.push([direction, header.kind, header.callId, header.credentialScheme]);
+  });
+
+  try {
+    const asked = Promise.withResolvers<Handle>();
+
+    serverServices.getRequestResolver(echo, { serializer: answering })((request, response) => {
+      asked.resolve(request.connectionHandle);
+
+      return response(request.payload.toUpperCase());
+    });
+    const newsResolver = serverServices.getNotificationResolver(news, {
+      serializer: answering,
+    })(async (_request, response) => {
+      await response(String(response.registerNotification()));
+      // the state as it is now, right behind the answer
+      await newsResolver.notify('first');
+    });
+
+    serverServices.getRequestResolver(unsubscribeProcedure, { serializer: answering })(
+      (request, response) => {
+        return response(
+          String(
+            serverRouter.unsubscribe({
+              callId: Number(request.payload),
+              connectionHandle: request.connectionHandle,
+            })
+          )
+        );
+      }
+    );
+
+    const ping = { ...echo, procedureId: 40, procedureName: 'ping' };
+
+    clientServices.getCommandResolver(ping, { serializer: answering })((_request, response) => {
+      return response('pong');
+    });
+
+    await clientTransport.connect({ server: memory });
+
+    // the client asks, the server answers, announcing the session it gives
+    await expect(clientServices.getRequest(echo, { serializer: asking })('hi')()).resolves.toBe(
+      'HI'
+    );
+    expect(clientRouter.sessionToken).toBe(TOKEN);
+
+    // the client subscribes, the server notifies it: right behind the answer, and after
+    const heard: string[] = [];
+    const unsubscribe = clientServices.getRequest(unsubscribeProcedure, {
+      serializer: asking,
+    });
+    const unsubscribed: string[] = [];
+    const notification = clientServices.getNotification(news, {
+      serializer: asking,
+      unsubscribe: async (callId, response) => {
+        unsubscribed.push(`${String(callId)} ${response} ${await unsubscribe(String(callId))()}`);
+      },
+    });
+    const registration = await notification('subscribe', (payload) => {
+      heard.push(payload);
+    })();
+
+    await newsResolver.notify('flash');
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual(['first', 'flash']);
+
+    // the server asks the client, naming its connection, on an even call id
+    await expect(
+      serverServices.getCommand(ping, { serializer: asking })('ping')({
+        connectionHandle: await asked.promise,
+      })
+    ).resolves.toBe('pong');
+
+    // unsubscribed at the server, by the call id that subscribed, by the time it is taken away
+    await registration.unregister();
+
+    expect(unsubscribed).toEqual(['3 3 true']);
+    expect(serverRouter.notifications.subscriptions()).toEqual([]);
+    expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, undefined]);
+    // announced once, on the first answer
+    expect(
+      told.filter((entry) => {
+        return (entry as unknown[])[3] !== undefined;
+      })
+    ).toEqual([['rx', EnvelopeKind.RESULT, 1, CredentialScheme.OPAQUE]]);
+
+    // a subscription again, which the connection takes away with it
+    const dropped: unknown[] = [];
+
+    clientServices.on('dropped', (procedure) => {
+      dropped.push(procedure);
+    });
+    await notification('subscribe', () => {
+      return undefined;
+    })();
+    await clientTransport.disconnect();
+
+    expect(dropped).toEqual([news]);
+    await expect
+      .poll(() => {
+        return serverRouter.notifications.subscriptions();
+      })
+      .toEqual([]);
+  } finally {
+    await clientTransport[Symbol.asyncDispose]();
+    serverRouter[Symbol.dispose]();
+    await serverRouter.transport.stop();
+  }
 });

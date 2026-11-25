@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { CLIENT_FAILURES, SERVER_FAILURES } from '../constants';
+import { CALL_ID_RANGES, CLIENT_FAILURES, SERVER_FAILURES } from '../constants';
 import { createPendingCalls, type IPendingRequest } from '../pending-calls';
 
 // helpers
@@ -251,4 +251,28 @@ test.describe('createPendingCalls', () => {
     expect(calls.gauges().connectionHandles).toEqual(new Set());
     expect(calls.gauges().counts).toEqual({ pendingCalls: 0, reservedCallIds: 0 });
   });
+});
+
+test('draws a side’s own range by default to its last unsigned', () => {
+  expect(CALL_ID_RANGES.client).toEqual({ first: 1, last: 0xffffffff, step: 2 });
+  expect(CALL_ID_RANGES.server).toEqual({ first: 2, last: 0xfffffffe, step: 2 });
+
+  const client = createPendingCalls({ failures: CLIENT_FAILURES }, { clock: createTestClock() });
+  const server = createPendingCalls({ failures: SERVER_FAILURES }, { clock: createTestClock() });
+
+  expect(client.draw('a')).toBe(1);
+  expect(server.draw('a')).toBe(2);
+});
+
+test('refuses a last call id of the other parity or before its first', () => {
+  for (const [failures, lastCallId] of [
+    [CLIENT_FAILURES, 4],
+    [CLIENT_FAILURES, 0],
+    [SERVER_FAILURES, 3],
+    [SERVER_FAILURES, 0],
+  ] as const) {
+    expect(() => {
+      return createPendingCalls({ failures }, { clock: createTestClock(), lastCallId });
+    }).toThrow(ProgrammerError);
+  }
 });

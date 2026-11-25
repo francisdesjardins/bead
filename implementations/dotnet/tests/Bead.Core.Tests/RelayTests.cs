@@ -1046,7 +1046,7 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public void Draws_a_destination_again_when_0_or_in_use()
+    public void Are_drawn_again_when_all_zero_or_in_use_so_are_destinations_when_0_or_in_use()
     {
         // the relay's own draw, from the bytes the test fills
         var fills = new Queue<byte[]>([[0, 0, 0, 0], [0, 0, 0, 5], [0, 0, 1, 7]]);
@@ -1061,8 +1061,24 @@ public sealed class RelayTests
 
         relay.Register(target, new DestinationOptions { DestinationId = 5 });
 
+        Assert.Equal(3, fills.Count);
         Assert.Equal(263u, relay.Register(target, null).Destination.DestinationId);
         Assert.Empty(fills);
+
+        var random = new TestRelay().Relay;
+        var drawn = new HashSet<uint>();
+
+        for (var index = 0; index < 100; index += 1)
+        {
+            var id = random.Register(target, null).Destination.DestinationId;
+
+            Assert.NotEqual(0u, id);
+            Assert.True(drawn.Add(id));
+        }
+
+        Assert.Equal(100, drawn.Count);
+        Assert.Equal(100, random.Destinations().Count);
+        Assert.Empty(target.Asked);
     }
 
     [Fact]

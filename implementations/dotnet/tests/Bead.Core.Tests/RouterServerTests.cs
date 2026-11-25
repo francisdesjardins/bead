@@ -15,6 +15,175 @@ namespace Bead.Tests;
 public sealed partial class RouterServerTests : IDisposable
 {
     [Fact]
+    public async Task Ask_answer_subscribe_notify_unsubscribe_and_command_each_other_over_the_wire()
+    {
+        await using var transport = new Bead.Transport.WebSockets.WebSocketTransportServer();
+        var loop = new SerialScheduler();
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)7, 16).ToArray());
+        using var server = new RouterServer(transport, new RouterServerOptions
+        {
+            SessionTokenOf = (_) => { return token; },
+            Scheduler = loop,
+            ResolverScheduler = loop,
+        });
+        await using var client = new Bead.Transport.WebSockets.WebSocketClient();
+        var services = new ServiceManager(server);
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var traces = new System.Collections.Concurrent.ConcurrentQueue<(DebugDirection Direction, EnvelopeKind Kind, uint CallId, CredentialScheme? Scheme)>();
+        var heard = System.Threading.Channels.Channel.CreateUnbounded<string>();
+        var dropped = new TaskCompletionSource<Procedure>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unsubscribed = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var ping = Echo with { ProcedureId = 40, ProcedureName = "ping" };
+        INotificationResolver<string>? news = null;
+
+        server.Error += (reason, _) => { reports.Enqueue(reason); };
+        client.Router.Error += reports.Enqueue;
+        transport.Error += (reason, _) => { reports.Enqueue(reason); };
+        transport.Close += (_, _) => { closed.TrySetResult(); };
+        client.Router.Debug += (direction, envelope) =>
+        {
+            var credential = envelope.Header switch
+            {
+                RequestHeader request => request.Credential,
+                ResultHeader result => result.Credential,
+                FailureHeader failure => failure.Credential,
+                _ => null,
+            };
+            traces.Enqueue((direction, envelope.Header.Kind, envelope.Header.CallId, credential?.Scheme));
+        };
+        services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            asked.TrySetResult(request.ConnectionHandle);
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        news = services.GetNotificationResolver(News, new NotificationResolverDependencies<string, string, string> { Serializer = Text })(async (_, response) =>
+        {
+            await response.Answer((await response.RegisterNotification()).ToString(CultureInfo.InvariantCulture));
+            await news!.Notify("first");
+            firstSent.TrySetResult();
+        });
+        services.GetRequestResolver(UnsubscribeProcedure, new RequestResolverDependencies<string, string> { Serializer = Text })(async (request, response) =>
+        {
+            var id = uint.Parse(request.Payload, CultureInfo.InvariantCulture);
+            var removed = await server.Unsubscribe(new CallAddress(id, request.ConnectionHandle));
+            await response.Answer(removed.ToString(CultureInfo.InvariantCulture));
+        });
+        client.Services.GetCommandResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) => { return response.Answer("pong"); });
+
+        var bound = await transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+        await client.Connect(new Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled });
+        Assert.Equal("HI", await client.Services.GetRequest(Echo, new RequestDependencies<string, string> { Serializer = Text })("hi")().WaitAsync(Patience, Cancelled));
+        Assert.Equal(token, client.Router.SessionToken);
+
+        var unsubscribe = client.Services.GetRequest(UnsubscribeProcedure, new RequestDependencies<string, string> { Serializer = Text });
+        var notification = client.Services.GetNotification(News, new NotificationDependencies<string, string, string>
+        {
+            Serializer = Text,
+            Unsubscribe = async (id, response) =>
+            {
+                unsubscribed.Enqueue($"{id} {response} {await unsubscribe(id.ToString(CultureInfo.InvariantCulture))()}");
+            },
+        });
+        var registration = await notification.Register("subscribe", (payload) =>
+        {
+            Assert.True(heard.Writer.TryWrite(payload));
+            return Task.CompletedTask;
+        })().WaitAsync(Patience, Cancelled);
+
+        await firstSent.Task.WaitAsync(Patience, Cancelled);
+        await news.Notify("flash").WaitAsync(Patience, Cancelled);
+        Assert.Equal("first", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("flash", await heard.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("pong", await services.GetCommand(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
+            new CommandOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
+        await registration.Unregister().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["3 3 True"], unsubscribed);
+        Assert.Equal(0, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Contains((DebugDirection.Rx, EnvelopeKind.Request, 2u, (CredentialScheme?)null), traces);
+        Assert.Equal([(DebugDirection.Rx, EnvelopeKind.Result, 1u, (CredentialScheme?)CredentialScheme.Opaque)], traces.Where((entry) => { return entry.Scheme is not null; }));
+
+        client.Services.Dropped += (procedure, _) => { dropped.TrySetResult(procedure); };
+        await notification.Register("subscribe", (_) => { return Task.CompletedTask; })().WaitAsync(Patience, Cancelled);
+        Assert.Equal(1, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Contains((DebugDirection.Tx, EnvelopeKind.Request, 7u, (CredentialScheme?)null), traces);
+        await client.Disconnect().WaitAsync(Patience, Cancelled);
+        Assert.Equal(News, await dropped.Task.WaitAsync(Patience, Cancelled));
+        await closed.Task.WaitAsync(Patience, Cancelled);
+        await loop.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal(0, (await server.Gauges().WaitAsync(Patience, Cancelled)).Counts["notifiedSubscriptions"]);
+        Assert.Empty(reports);
+    }
+
+    [Fact]
+    public async Task A_listener_s_panic_is_reported_and_the_transport_goes_on()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new InvalidOperationException("this listener breaks, on purpose");
+        var reported = new TaskCompletionSource<(Exception Reason, string ConnectionHandle)>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        link.Server.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        link.Transport.Message += (_, _) => { throw broken; };
+        link.Transport.Error += (reason, connectionHandle) =>
+        {
+            reported.TrySetResult((reason, connectionHandle));
+        };
+
+        Assert.Equal("hi", await link.Client.Services.GetRequest(Echo, new RequestDependencies<string, string> { Serializer = Text })("hi")().WaitAsync(Patience, Cancelled));
+
+        var failure = await reported.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Same(broken, failure.Reason);
+        Assert.Equal(ServiceLink.Handle, failure.ConnectionHandle);
+        Assert.Empty(link.Reported);
+    }
+
+    [Fact]
+    public async Task A_token_provider_that_panics_fails_only_its_answer_and_the_next_answer_can_announce()
+    {
+        var called = false;
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                if (!called)
+                {
+                    called = true;
+
+                    throw new InvalidOperationException("no session");
+                }
+
+                return Token;
+            },
+        });
+        EchoOf((request, response) =>
+        {
+            return response.Answer($"{request.Payload}!");
+        });
+        Deliver(First, RequestOf(1, payload: "hi"));
+        await Settle();
+
+        Assert.Empty(_transport.Sent);
+        Assert.Single(_errors);
+
+        Deliver(First, RequestOf(3, payload: "ho"));
+        await Settle();
+
+        var envelope = Assert.Single(_transport.Sent).Envelope;
+        var header = Assert.IsType<ResultHeader>(envelope.Header);
+
+        Assert.Equal(3u, header.CallId);
+        Assert.Equal(Credential.Opaque(Token), header.Credential);
+        Assert.Equal("ho!", Encoding.UTF8.GetString(envelope.Payload.Span));
+    }
+
+    [Fact]
     public async Task A_request_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
     {
         Start();
@@ -457,7 +626,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
+    public async Task Go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
     {
         Start(new RouterServerOptions
         {
@@ -488,42 +657,53 @@ public sealed partial class RouterServerTests : IDisposable
             }));
     }
 
-    [Fact]
-    public async Task Requests_are_asked_their_admission_once_on_their_header_before_their_payload_is_read()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Requests_are_asked_their_admission_once_on_their_header_before_their_payload_is_read(bool sequential)
     {
-        var asked = new List<uint>();
+        var asked = new List<AdmissionRequest>();
+        var decoded = new List<ReadOnlyMemory<byte>>();
 
         Start();
-        Services.GetRequestResolver(
-            Echo,
-            new RequestResolverDependencies<string, string>
+        Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+        {
+            Serializer = new NonEmptyText(decoded.Add),
+            BeforeRequest = new BeforeRequest((request) =>
             {
-                Serializer = new NonEmptyText(),
-                BeforeRequest = new BeforeRequest((request) =>
-                {
-                    asked.Add(request.Header.CallId);
+                asked.Add(request);
+                return request.Header.CallId == 31;
+            }),
+        })((request, response) => { return response.Answer($"{request.Payload}!"); });
 
-                    return request.Header.CallId == 31;
-                }),
-            })((request, response) =>
+        if (sequential)
+        {
+            Deliver(First, RequestOf(31, payload: "hi"));
+            await Settle();
+            Deliver(First, RequestOf(33));
+        }
+        else
+        {
+            _scheduler.Post(() =>
             {
-                return response.Answer($"{request.Payload}!");
+                Deliver(First, RequestOf(31, payload: "hi"));
+                Deliver(First, RequestOf(33));
             });
-
-        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
-        Deliver(First, RequestOf(31, payload: "hi"));
+        }
         await Settle();
+        Assert.Equal([31u, 33u], asked.Select((request) => { return request.Header.CallId; }));
+        Assert.Equal([First, First], asked.Select((request) => { return request.ConnectionHandle; }));
+        Assert.Equal(["6869"], decoded.Select((bytes) => { return Convert.ToHexString(bytes.Span); }));
+        string[] expected = sequential
+            ? ["first result 31 hi!", "first failure 33 AccessDenied"]
+            : ["first failure 33 AccessDenied", "first result 31 hi!"];
 
-        // refused before it is read: undecodable, it is refused all the same
-        Deliver(First, RequestOf(33));
-        await Settle();
-
-        Assert.Equal([31u, 33u], asked);
-        Assert.Equal(["first result 31 hi!", "first failure 33 AccessDenied"], SentSince());
+        Assert.Equal(expected, SentSince());
+        Assert.Empty(_errors);
     }
 
     [Fact]
-    public async Task Requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
+    public async Task Refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
     {
         var reached = new List<string>();
 
@@ -552,8 +732,10 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
-    [Fact]
-    public async Task Requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew(bool openFirst)
     {
         var closed = new TaskCompletionSource();
 
@@ -574,12 +756,18 @@ public sealed partial class RouterServerTests : IDisposable
             await response.Answer($"{request.Payload}!");
         });
 
+        if (openFirst)
+        {
+            _transport.Open(First);
+        }
+
         Deliver(First, RequestOf(1, payload: "late"));
         await Settle();
         _transport.Closed(First);
         await Settle();
         closed.SetResult();
         await Settle();
+        Assert.Empty(_transport.Sent);
         Deliver(First, RequestOf(3, payload: "again"));
         await Settle();
 
@@ -589,10 +777,12 @@ public sealed partial class RouterServerTests : IDisposable
             {
                 return entry.Envelope.Header;
             }));
+        Assert.Equal("again!", Encoding.UTF8.GetString(Assert.Single(_transport.Sent).Envelope.Payload.Span));
+        Assert.Empty(_errors);
     }
 
     [Fact]
-    public async Task Requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+    public async Task Are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
     {
         Start();
         Router.RegisterResolver(new RawResolver(Echo with { ProcedureId = 9 }, (_) =>
@@ -619,7 +809,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_are_the_only_envelopes_answered_any_other_is_reported()
+    public async Task Are_the_only_envelopes_answered_any_other_is_reported()
     {
         Start();
 
@@ -672,7 +862,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_that_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
+    public async Task That_fail_in_their_resolver_delivered_before_either_settles_are_reported_as_their_tasks_settle_after_one_that_does_not_read()
     {
         var gone = new IOException("gone");
 
@@ -708,7 +898,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_of_the_server_s_own_parity_or_on_a_subscription_s_call_id_are_reported_on_their_connection_and_taken_on_another()
+    public async Task Of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
     {
         Start();
         _transport.Open(First);
@@ -732,7 +922,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_whose_answer_s_session_cannot_be_told_are_answered_by_nothing_and_reported()
+    public async Task Whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported()
     {
         var failure = new InvalidOperationException("no session");
 
@@ -755,58 +945,79 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Same(failure, _errors[0].Reason);
     }
 
-    [Fact]
-    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does(bool sequential)
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var other = sequential ? SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA") : SessionToken.FromBytes(Enumerable.Repeat((byte)2, 16).ToArray());
         var order = new List<string>();
+        var admissions = new List<CallSession?>();
+        var callbacks = new List<CallSession?>();
+        var without = sequential ? 1u : 31u;
+        var withSession = sequential ? 3u : 33u;
+        var refused = sequential ? 5u : 35u;
 
         Start(new RouterServerOptions
         {
-            // none for a request presenting none, the connection's for one presenting its token, and
-            // none for one whose OPAQUE does not hold
             SessionOf = (request, signal) =>
             {
                 var (connectionHandle, header) = (request.ConnectionHandle, request.Header);
-
                 order.Add($"session {NameOf(connectionHandle)} {header.CallId} {(signal.IsCancellationRequested ? "aborted" : "live")}");
-
                 return ValueTask.FromResult(header.Credential is null ? null : CallSession.ConnectionSessionOf(header.Credential, (token, "ada")));
             },
         });
-        Services.GetRequestResolver(
-            Echo,
-            new RequestResolverDependencies<string, string>
+        Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+        {
+            Serializer = Text,
+            BeforeRequest = new BeforeRequest((request) =>
             {
-                Serializer = Text,
-                BeforeRequest = new BeforeRequest((request) =>
-                {
-                    order.Add($"admit {request.Header.CallId} {request.Session?.Data ?? "none"}");
+                order.Add($"admit {request.Header.CallId} {request.Session?.Data ?? "none"}");
+                admissions.Add(request.Session);
+                return true;
+            }),
+        })((request, response) =>
+        {
+            order.Add($"callback {request.Header.CallId} {request.Session?.Data ?? "none"}");
+            callbacks.Add(request.Session);
+            return response.Answer("ok");
+        });
 
-                    return true;
-                }),
-            })((request, response) =>
+        if (sequential)
+        {
+            Deliver(First, RequestOf(without));
+            await Settle();
+            Deliver(First, Presenting(RequestOf(withSession), token));
+            await Settle();
+            Deliver(First, Presenting(RequestOf(refused), other));
+        }
+        else
+        {
+            _scheduler.Post(() =>
             {
-                order.Add($"callback {request.Header.CallId} {request.Session?.Data ?? "none"}");
-
-                return response.Answer("ok");
+                Deliver(First, RequestOf(without));
+                Deliver(First, Presenting(RequestOf(withSession), token));
+                Deliver(First, Presenting(RequestOf(refused), other));
             });
-        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
-        Deliver(First, RequestOf(1));
+        }
         await Settle();
-        Deliver(First, Presenting(RequestOf(3), token));
-        await Settle();
-        Deliver(First, Presenting(RequestOf(5), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
-        await Settle();
-
-        Assert.Equal(
-            [
-                "session first 1 live", "admit 1 none", "callback 1 none",
-                "session first 3 live", "admit 3 ada", "callback 3 ada",
-                "session first 5 live",
-            ],
-            order);
-        Assert.Equal(["first result 1 ok", "first result 3 ok", "first failure 5 SessionRequired"], SentSince());
+        Assert.Equal(sequential ? new[]
+        {
+            $"session first {without} live", $"admit {without} none", $"callback {without} none",
+            $"session first {withSession} live", $"admit {withSession} ada", $"callback {withSession} ada",
+            $"session first {refused} live",
+        } : [
+            $"session first {without} live", $"admit {without} none",
+            $"session first {withSession} live", $"admit {withSession} ada", $"session first {refused} live",
+            $"callback {without} none", $"callback {withSession} ada",
+        ], order);
+        Assert.NotNull(admissions[1]);
+        Assert.Same(admissions[1], callbacks[1]);
+        Assert.Equal(sequential
+            ? new[] { $"first result {without} ok", $"first result {withSession} ok", $"first failure {refused} SessionRequired" }
+            : [$"first failure {refused} SessionRequired", $"first result {without} ok", $"first result {withSession} ok"], SentSince());
+        Assert.Empty(_errors);
     }
 
     [Fact]
@@ -835,7 +1046,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public void Requests_refuse_a_second_resolver_for_one_procedure()
+    public void Refuse_a_second_resolver_for_one_procedure()
     {
         Start();
 
@@ -881,7 +1092,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connection_s_result_alone()
+    public async Task Go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connections_result_alone()
     {
         Start(new RouterServerOptions
         {
@@ -917,7 +1128,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_name_their_connection_and_it_must_be_open_a_server_holds_no_subscription()
+    public async Task Name_their_connection_and_it_must_be_open_a_server_holds_no_subscription()
     {
         Start();
 
@@ -951,7 +1162,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_reach_a_connection_that_spoke_before_the_router_saw_it_open()
+    public async Task Reach_a_connection_that_spoke_before_the_router_saw_it_open()
     {
         Start();
 
@@ -968,7 +1179,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
+    public async Task Reject_with_the_failure_answered_time_out_and_are_rejected_when_their_connection_closes()
     {
         Start();
         _transport.Open(First);
@@ -1024,7 +1235,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Its_own_requests_present_OPAQUE_when_they_ask_their_connection_s_session_as_sessionTokenOf_gives_it_and_fail_before_they_go_SESSION_REQUIRED_when_it_has_none()
+    public async Task Present_opaque_when_they_ask_their_connections_session_as_session_token_of_gives_it_and_fail_before_they_go_session_required_when_it_has_none()
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
         SessionToken? held = null;
@@ -1080,7 +1291,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Commands_refuse_a_payload_too_large_here()
+    public async Task Refuse_a_payload_too_large_here()
     {
         Start();
         _transport.Open(First);
@@ -1793,7 +2004,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_call_that_holds_it_fails_and_hears_what_comes()
+    public async Task Takes_the_place_when_that_call_fails_and_hears_what_comes()
     {
         var news = StartHolding(Outcome.Fail);
 
@@ -1811,7 +2022,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_call_that_holds_it_is_cancelled()
+    public async Task Takes_the_place_when_that_call_is_cancelled()
     {
         StartHolding(Outcome.Cancel);
         await Settle();
@@ -1822,7 +2033,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_the_place_when_the_answer_of_the_call_that_holds_it_cannot_go_out()
+    public async Task Takes_the_place_when_the_answer_of_that_call_cannot_go_out()
     {
         StartHolding(Outcome.Answer);
         await Settle();
@@ -1835,7 +2046,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_stays_out_once_the_call_that_holds_its_place_is_answered_and_does_not_take_a_place_it_leaves_later()
+    public async Task Stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leaves_later()
     {
         StartHolding(Outcome.Answer);
         await Settle();
@@ -1854,7 +2065,7 @@ public sealed partial class RouterServerTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task A_waiting_subscription_takes_nothing_once_cancelled_or_unsubscribed_itself(bool isCancelled)
+    public async Task Takes_nothing_once_cancelled_or_unsubscribed_itself(bool isCancelled)
     {
         StartHolding(Outcome.Fail);
         await Settle();
@@ -1877,7 +2088,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over()
+    public async Task Waits_by_procedure_two_held_on_one_connection_each_hand_their_own_place_over()
     {
         Procedure[] procedures = [News, Other];
 
@@ -1917,7 +2128,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_is_the_first_answered_one_answered_after_it_waits_for_nothing()
+    public async Task Is_the_first_answered_one_answered_after_it_waits_for_nothing()
     {
         StartHolding(Outcome.Fail);
         Deliver(First, SubscribingOf(5, "subscribe"));
@@ -1929,7 +2140,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_takes_no_place_on_a_connection_that_closed_as_the_answer_of_the_call_that_holds_it_failed_to_go_out()
+    public async Task Takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_failed_to_go_out()
     {
         var sending = new TaskCompletionSource();
 
@@ -1952,7 +2163,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_waiting_subscription_is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after()
+    public async Task Is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_after()
     {
         StartHolding(Outcome.Fail);
         await Settle();
@@ -1986,7 +2197,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_callback_that_subscribes_as_the_router_is_disposed_hears_a_DisconnectException()
+    public async Task A_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect_error()
     {
         var thrown = new List<Exception>();
 
@@ -2193,7 +2404,7 @@ public sealed partial class RouterServerTests : IDisposable
 
     // debugging 5.1
     [Fact]
-    public async Task Tells_debug_each_envelope_with_its_connection_and_its_header_without_its_token()
+    public async Task Tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_without_its_token()
     {
         var seen = new List<(DebugDirection Direction, TracedEnvelope Envelope)>();
 
@@ -2225,9 +2436,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Equal(new ResultHeader { CallId = 9, Credential = Token }, _transport.Sent[0].Envelope.Header);
     }
 
-    // the TypeScript side links a WebSocket client and server over the wire, both sockets real;
-    // the test project references no transport, so a client's router is linked to this server's in
-    // memory
+    // a scripted client and server linked in memory
     [Fact]
     public async Task A_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_command_each_other_over_a_link()
     {
@@ -2364,7 +2573,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_paced_subscription_is_sent_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
+    public async Task Sends_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
     {
         var news = StartPaced();
 
@@ -2856,10 +3065,12 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     // text, in UTF-8, either way, which reads no empty payload
-    private sealed class NonEmptyText : IRequestSerializerServer<string, string>
+    private sealed class NonEmptyText(Action<ReadOnlyMemory<byte>>? decoded = null) : IRequestSerializerServer<string, string>
     {
         public string Decode(ReadOnlyMemory<byte> request)
         {
+            decoded?.Invoke(request);
+
             if (request.IsEmpty)
             {
                 throw new FormatException("no text");

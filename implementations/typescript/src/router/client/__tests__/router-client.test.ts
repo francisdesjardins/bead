@@ -10,6 +10,7 @@ import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
 import { createServiceManager } from '../../shared/service-manager';
+import { PAYLOAD_CODECS } from '../../shared/payloads';
 import type {
   Announcement,
   CallId,
@@ -454,7 +455,7 @@ test.describe('createRouterClient', () => {
     expect(router.failures.side).toBe('client');
   });
 
-  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+  test('runs on its transport’s clock and refuses another', () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
     using onItsTransport = createRouterClient(createWebSocketTransportClient({ clock }));
@@ -840,21 +841,39 @@ test.describe('createRouterClient', () => {
       expect(router.sessionToken).toBeUndefined();
     });
 
-    test('rejects every request still waiting when the connection closes', async () => {
-      const { close, deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+    test('rejects what waits once its connection closed, and forgets its session', async () => {
+      for (const usesServices of [false, true]) {
+        const { close, deliver, sent, transport } = createScriptedTransport();
+        using router = createRouterClient(transport);
+        const reported = recordErrors(router);
 
-      deliver(resultOf(9, { credential: OPAQUE }));
+        deliver(resultOf(9, { credential: OPAQUE }));
 
-      const waiting = router.request(new Uint8Array(0), { options, procedure: service });
+        const waiting = usesServices
+          ? createServiceManager(router).getRequest(
+              {
+                serviceId: 1,
+                procedureId: 3,
+                procedureName: 'slow',
+                serviceRevision: 2,
+              },
+              { serializer: PAYLOAD_CODECS.json }
+            )({ milliseconds: 3_600_000 })(options)
+          : router.request(new Uint8Array(0), { options, procedure: service });
 
-      await Promise.resolve();
-      expect(router.sessionToken).toBe(TOKEN);
-      close();
-
-      // and the session it learned is forgotten with its connection
-      await expect(waiting).rejects.toBeInstanceOf(DisconnectError);
-      expect(router.sessionToken).toBeUndefined();
+        await Promise.resolve();
+        expect(router.sessionToken).toBe(TOKEN);
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({ kind: EnvelopeKind.REQUEST, header: { callId: 1 } });
+        expect(sent[0]?.kind === EnvelopeKind.REQUEST && sent[0].payload).toEqual(
+          usesServices ? encoder.encode('{"milliseconds":3600000}') : new Uint8Array(0)
+        );
+        close();
+        await expect(waiting).rejects.toBeInstanceOf(DisconnectError);
+        expect(router.sessionToken).toBeUndefined();
+        expect(reported).toHaveLength(1);
+        expect(reported[0]).toMatchObject({ code: ProtocolCode.CALL_UNKNOWN });
+      }
     });
 
     test('rejects when the transport cannot send, and when the payload is too large', async () => {
@@ -3835,4 +3854,130 @@ test.describe('createRouterClient, within a telling', () => {
       return undefined;
     });
   });
+});
+
+test('calls a procedure with a payload then options, and gives its result decoded', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const reported = recordErrors(router);
+  const request = createServiceManager(router).getRequest(service, {
+    serializer: PAYLOAD_CODECS.json,
+  });
+  const calling = request({ a: [1, 'two'] })(options);
+
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    kind: EnvelopeKind.REQUEST,
+    header: { callId: 1, serviceId: 2, procedureId: 1 },
+  });
+  expect(sent[0]?.kind === EnvelopeKind.REQUEST && sent[0].payload).toEqual(
+    encoder.encode('{"a":[1,"two"]}')
+  );
+  deliver(resultOf(1, { payload: encoder.encode('{"a":[1,"two"]}') }));
+  await expect(calling).resolves.toEqual({ a: [1, 'two'] });
+  expect(reported).toEqual([]);
+});
+
+test('fails a result that does not decode here as undecodable', async () => {
+  const { deliver, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const reported = recordErrors(router);
+  const calling = createServiceManager(router).getRequest(service, {
+    serializer: {
+      encode: PAYLOAD_CODECS.json.encode,
+      decode: () => {
+        throw new SyntaxError('this result does not decode here');
+      },
+    },
+  })(1)(options);
+
+  deliver(resultOf(1, { payload: encoder.encode('1') }));
+  await expect(calling).rejects.toMatchObject({
+    code: ProtocolCode.PAYLOAD_UNDECODABLE,
+    origin: 'local',
+    side: 'client',
+    procedureAddress: { serviceId: 2, procedureId: 1 },
+  });
+  expect(reported).toEqual([]);
+});
+
+test('answers the command its server asks it on an even call id', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const seen: unknown[] = [];
+
+  router.registerResolver(
+    Object.assign(async (props: IRequestResolverProps<'server'>) => {
+      seen.push({ connectionHandle: props.connectionHandle, payload: props.payload });
+
+      await router.respond({ payload: Uint8Array.of(7) }, props);
+    }, service)
+  );
+
+  deliver({
+    header: requestHeaderOf(30),
+    kind: EnvelopeKind.REQUEST,
+    payload: Uint8Array.of(3),
+  });
+  await sleep(0);
+
+  expect(seen).toEqual([{ connectionHandle: 'server', payload: Uint8Array.of(3) }]);
+  expect(sent).toEqual([
+    {
+      header: { callId: 30, kind: EnvelopeKind.RESULT },
+      kind: EnvelopeKind.RESULT,
+      payload: Uint8Array.of(7),
+    },
+  ]);
+
+  const pipe = createPipedTransports({ connectionHandle: 'type=MEMORY;ip=local;ordinal=1' });
+  using server = createRouterServer(pipe.server);
+  using client = createRouterClient(pipe.client);
+  const json = PAYLOAD_CODECS.json;
+  const ask: IProcedure = {
+    serviceId: 1,
+    procedureId: 8,
+    procedureName: 'ask',
+    serviceRevision: 1,
+  };
+  const clockOf: IProcedure = {
+    serviceId: 1,
+    procedureId: 9,
+    procedureName: 'clock',
+    serviceRevision: 1,
+  };
+  const serverServices = createServiceManager(server);
+  const clientServices = createServiceManager(client);
+  const command = serverServices.getCommand(clockOf, { serializer: json });
+  const received: number[] = [];
+  const reports: unknown[] = [];
+
+  server.on('error', (error) => {
+    reports.push(error);
+  });
+  client.on('error', (error) => {
+    reports.push(error);
+  });
+  serverServices.getRequestResolver(ask, { serializer: json })(
+    async ({ connectionHandle }, response) => {
+      return response(
+        await command('What time is it where you are?')({ connectionHandle, timeout: 1_000 })
+      );
+    }
+  );
+  clientServices.getCommandResolver(clockOf, { serializer: json })((request, response) => {
+    expect(request.payload).toBe('What time is it where you are?');
+    return response('noon');
+  });
+  client.on('debug', ({ direction, header }) => {
+    if (direction === 'rx' && header.kind === EnvelopeKind.REQUEST) {
+      received.push(header.callId);
+    }
+  });
+  pipe.open();
+  await expect(clientServices.getRequest(ask, { serializer: json })(null)(options)).resolves.toBe(
+    'noon'
+  );
+  expect(received).toEqual([2]);
+  expect(reports).toEqual([]);
 });

@@ -56,16 +56,18 @@ test.describe.configure({ retries: 0 });
 
 test.describe('readEnvelope and writeEnvelope', () => {
   for (const { bytes, chunkBytes, envelope, name } of VECTORS.envelopes) {
-    test(`reads ${name}, and writes it back`, () => {
-      const expected = envelopeOf(envelope);
+    test.describe(name, () => {
+      test('reads an envelope and writes it back', () => {
+        const expected = envelopeOf(envelope);
 
-      expect(
-        readEnvelope(fromHexadecimal(bytes), {
-          ...limits,
-          ...(chunkBytes === undefined ? {} : { chunkBytes }),
-        })
-      ).toEqual(expected);
-      expect(writeEnvelope(expected as OutgoingEnvelope)).toEqual(fromHexadecimal(bytes));
+        expect(
+          readEnvelope(fromHexadecimal(bytes), {
+            ...limits,
+            ...(chunkBytes === undefined ? {} : { chunkBytes }),
+          })
+        ).toEqual(expected);
+        expect(writeEnvelope(expected as OutgoingEnvelope)).toEqual(fromHexadecimal(bytes));
+      });
     });
   }
 
@@ -77,21 +79,23 @@ test.describe('readEnvelope and writeEnvelope', () => {
     maximumEnvelopeBytes,
     name,
   } of VECTORS.envelopeRefusals) {
-    test(`refuses ${name}`, () => {
-      expect(
-        failureOf(() => {
-          return readEnvelope(fromHexadecimal(bytes), {
-            ...limits,
-            ...(chunkBytes === undefined ? {} : { chunkBytes }),
-            ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
-          });
-        })
-      ).toMatchObject({
-        code,
-        origin: 'local',
-        scope: FailureScope.PROTOCOL,
-        side: 'server',
-        ...(detail === undefined ? {} : { detail }),
+    test.describe(name, () => {
+      test('refuses an envelope', () => {
+        expect(
+          failureOf(() => {
+            return readEnvelope(fromHexadecimal(bytes), {
+              ...limits,
+              ...(chunkBytes === undefined ? {} : { chunkBytes }),
+              ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
+            });
+          })
+        ).toMatchObject({
+          code,
+          origin: 'local',
+          scope: FailureScope.PROTOCOL,
+          side: 'server',
+          ...(detail === undefined ? {} : { detail }),
+        });
       });
     });
   }
@@ -234,20 +238,24 @@ test.describe('readFailure', () => {
   const options = { failures: SERVER_FAILURES };
 
   for (const { failure, maximumDetailBytes, name, record } of VECTORS.failures) {
-    test(`reads ${name}`, () => {
-      expect(readFailure(fromHexadecimal(record), { ...options, maximumDetailBytes })).toEqual(
-        failure
-      );
+    test.describe(name, () => {
+      test('reads a failure', () => {
+        expect(readFailure(fromHexadecimal(record), { ...options, maximumDetailBytes })).toEqual(
+          failure
+        );
+      });
     });
   }
 
   for (const { code, name, record } of VECTORS.failureRefusals) {
-    test(`refuses ${name}`, () => {
-      expect(
-        failureOf(() => {
-          return readFailure(fromHexadecimal(record), options);
-        })
-      ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
+    test.describe(name, () => {
+      test('refuses a failure', () => {
+        expect(
+          failureOf(() => {
+            return readFailure(fromHexadecimal(record), options);
+          })
+        ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
+      });
     });
   }
 
@@ -275,6 +283,21 @@ test.describe('readFailure', () => {
 });
 
 test.describe('writeFailure', () => {
+  test('writes the relays and the scope of an application failure', () => {
+    expect(writeFailure({ code: 21, relays: 2, scope: FailureScope.APPLICATION })).toEqual(
+      Uint8Array.of(0, 21, 2, 1)
+    );
+
+    for (const relays of [0, 1, 255]) {
+      const crossed = writeFailure({ code: 19, relays, scope: FailureScope.PROTOCOL });
+
+      expect(crossed[2]).toBe(relays);
+      expect(readFailure(crossed, { failures: SERVER_FAILURES }).relays).toBe(relays);
+    }
+
+    expect(writeFailure({ code: 19, scope: FailureScope.PROTOCOL })[2]).toBe(0);
+  });
+
   test('refuses a code that is not an integer from 1 to 65535, or a scope that is neither', () => {
     for (const code of [0, 65_536, 1.5, -1, Number.NaN]) {
       expect(() => {

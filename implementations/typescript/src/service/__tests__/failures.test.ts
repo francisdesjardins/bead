@@ -18,6 +18,23 @@ const receivedOf = (code: number, serviceId: number): FailureError => {
 // definition
 
 test.describe('failuresOf', () => {
+  test('keeps a catalogue of failures, each of its own code, refusing one of 0 or one twice', () => {
+    const catalogue = failuresOf(1, { ON_PURPOSE: 7, REGISTERED_ALREADY: 8 });
+
+    expect(catalogue.serviceId).toBe(1);
+    expect(catalogue.codes).toEqual({ ON_PURPOSE: 7, REGISTERED_ALREADY: 8 });
+    expect(Object.keys(catalogue.codes)).toHaveLength(2);
+    expect(() => {
+      return failuresOf(1, { ON_PURPOSE: 0 });
+    }).toThrow(ProgrammerError);
+    expect(() => {
+      return failuresOf(0, { ON_PURPOSE: 7 });
+    }).toThrow(ProgrammerError);
+    expect(() => {
+      return failuresOf(1, { AGAIN: 7, ON_PURPOSE: 7 });
+    }).toThrow(ProgrammerError);
+  });
+
   test('makes a failure of a name, its code and its detail', () => {
     const catalogue = failuresOf(7, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
 

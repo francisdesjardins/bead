@@ -46,6 +46,79 @@ class Thing {
 
 // definition
 
+test('writes an integer past 2 to the 53 from its digits as the double nearest them', () => {
+  const value = PAYLOAD_CODECS.json.decode(utf8('9007199254740993'));
+
+  expect(written(value)).toBe('9007199254740992');
+});
+
+test('writes a string as written when it holds no escape and is UTF-8, and from its characters otherwise', () => {
+  for (const [text, expected] of [
+    ['"é<\u007f"', '"é<\u007f"'],
+    ['"\\u0041\\u003e"', '"A>"'],
+  ]) {
+    expect(written(PAYLOAD_CODECS.json.decode(utf8(text!)))).toBe(expected);
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.decode(Uint8Array.of(0x22, 0xff, 0x22));
+    })
+  ).toEqual(['SyntaxError', 'not UTF-8']);
+});
+
+test('refuses a number past the largest double that an element parsed leniently holds as it is written', () => {
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    expect(
+      refusalOf(() => {
+        return PAYLOAD_CODECS.json.encode(value);
+      })
+    ).toEqual(['TypeError', 'not a finite number']);
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.decode(utf8('[1E400]'));
+    })
+  ).toEqual(['SyntaxError', 'a number past a double']);
+});
+
+test('gives spec 17’s codecs by their encoding’s name', () => {
+  const raw = PAYLOAD_CODECS.raw.decode(new Uint8Array([1, 2]));
+
+  expect(PAYLOAD_CODECS.raw.encode(raw)).toEqual(new Uint8Array([1, 2]));
+  expect(PAYLOAD_CODECS.text.decode(utf8('Josée'))).toBe('Josée');
+  expect(() => {
+    return PAYLOAD_CODECS.text.decode(new Uint8Array([0xff]));
+  }).toThrow();
+  expect(PAYLOAD_CODECS.json.encode(PAYLOAD_CODECS.json.decode(utf8('{"b":2,"a":1}')))).toEqual(
+    utf8('{"a":1,"b":2}')
+  );
+  expect(() => {
+    return PAYLOAD_CODECS.json.decode(utf8('{"a":1,"a":2}'));
+  }).toThrow('a name twice');
+});
+
+test('hands on the document it read when canonical, and the canonical form’s otherwise', () => {
+  for (const [text, canonical] of [
+    ['{"a":1,"b":[-1.5,"x"]}', '{"a":1,"b":[-1.5,"x"]}'],
+    ['1.0', '1'],
+    ['-0', '0'],
+    ['[-0,{"a":-0}]', '[0,{"a":0}]'],
+    ['12345678901234567890', '12345678901234567000'],
+    [
+      '{"__prot\\u006f__":{"a":[1,-0,1E2,"\\n",true,null]},"2":false,"1":0}',
+      '{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\\n",true,null]}}',
+    ],
+  ]) {
+    const read = PAYLOAD_CODECS.json.decode(utf8(text!));
+
+    expect(written(read)).toBe(canonical);
+  }
+
+  expect(PAYLOAD_CODECS.json.decode(utf8('1.0'))).toBe(1);
+});
+
 test.describe('the json codec', () => {
   // spec 17.2
   test('refuses what it does not read, each in its own words, with a SyntaxError', () => {
@@ -319,4 +392,59 @@ test('carries raw bytes as they are, and text in UTF-8 read strictly, its byte o
       return PAYLOAD_CODECS.text.decode(refused);
     }).toThrow();
   }
+});
+
+test('writes a JSON value in its canonical form and a type through it', () => {
+  const value = { b: 1, a: [true, null, 'x'] };
+
+  expect(written(value)).toBe('{"a":[true,null,"x"],"b":1}');
+  expect(PAYLOAD_CODECS.json.decode(PAYLOAD_CODECS.json.encode(value))).toEqual(value);
+
+  const reading: { name: string; value: number } = { name: 't', value: 0.5 };
+  const bytes = PAYLOAD_CODECS.json.encode(reading);
+
+  expect(new TextDecoder().decode(bytes)).toBe('{"name":"t","value":0.5}');
+  expect(PAYLOAD_CODECS.json.decode(bytes)).toEqual(reading);
+});
+
+test('refuses what a JSON payload does not read in its own words', () => {
+  const cases: [Uint8Array, string][] = [
+    [Uint8Array.of(0x22, 0xff, 0x22), 'not UTF-8'],
+    [Uint8Array.of(0xef, 0xbb, 0xbf, 0x31), 'a byte order mark'],
+    [new Uint8Array(), 'not JSON'],
+    [utf8('[1,]'), 'not JSON'],
+    [utf8('{"a":1,"a":2}'), 'a name twice'],
+    [utf8('"abc'), 'not JSON'],
+    [utf8(`"${BACKSLASH}ud800"`), 'a surrogate alone'],
+    [utf8(`{"${BACKSLASH}udc00":1}`), 'a surrogate alone'],
+    [utf8('1E400'), 'a number past a double'],
+    [utf8(`${'['.repeat(65)}${']'.repeat(65)}`), 'nested past 64'],
+  ];
+
+  for (const [bytes, words] of cases) {
+    expect(
+      refusalOf(() => {
+        return PAYLOAD_CODECS.json.decode(bytes);
+      })
+    ).toEqual(['SyntaxError', words]);
+  }
+});
+
+test('refuses a JSON value that does not write and a text either way in its own words', () => {
+  let deep: unknown = [];
+
+  for (let depth = 1; depth < 65; depth += 1) {
+    deep = [deep];
+  }
+
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.json.encode(deep);
+    })
+  ).toEqual(['TypeError', 'nested past 64']);
+  expect(
+    refusalOf(() => {
+      return PAYLOAD_CODECS.text.decode(Uint8Array.of(0xc3));
+    })
+  ).toEqual(['SyntaxError', 'not UTF-8']);
 });

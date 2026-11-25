@@ -727,7 +727,7 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void RequireSession_admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
+    public void Admits_a_call_with_a_session_its_calls_whatever_its_header_presents_and_refuses_one_in_none_session_required()
     {
         Start(new ServerOptions());
 
@@ -749,7 +749,7 @@ public sealed class ServerTests : IAsyncLifetime
 
     // spec 14.3.1
     [Fact]
-    public void RequireCredential_admits_a_call_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_none_and_OPAQUE_in_a_session_or_in_none_ACCESS_DENIED_with_its_detail()
+    public void Admits_a_call_presenting_a_jwt_or_an_elsewhere_by_its_scheme_alone_and_refuses_none_and_opaque_in_a_session_or_in_none_access_denied_with_its_detail()
     {
         Start(new ServerOptions());
 
@@ -835,7 +835,7 @@ public sealed class ServerTests : IAsyncLifetime
 
     // spec 14.3.1
     [Fact]
-    public void ShareLegBSession_admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()
+    public void Admits_a_call_in_a_session_or_presenting_a_jwt_or_an_elsewhere_by_its_scheme_alone_and_refuses_any_other_in_none_session_required()
     {
         Start(new ServerOptions());
 

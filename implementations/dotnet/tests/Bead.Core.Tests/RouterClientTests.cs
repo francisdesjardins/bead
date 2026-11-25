@@ -10,6 +10,48 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterClientTests
 {
+    [Fact]
+    public async Task Go_to_the_resolver_registered_for_their_procedure_on_even_call_ids_which_answers()
+    {
+        using var scripted = new ScriptedRouter();
+        var seen = new List<(string ConnectionHandle, string Payload)>();
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            seen.Add((props.ConnectionHandle, Convert.ToHexString(props.Payload.Span)));
+            return scripted.Router.Respond(RouterAnswer.OfPayload(new byte[] { 7 }), new AnswerTarget(props.ConnectionHandle, props.Header));
+        }));
+        scripted.Transport.Deliver(new Envelope { Header = RequestHeaderOf(30), Payload = new byte[] { 3 } });
+        await scripted.Settle();
+
+        var answer = Assert.Single(scripted.Transport.Envelopes);
+
+        Assert.Equal([(RouterClient.ServerConnectionHandle, "03")], seen);
+        Assert.Equal((EnvelopeKind.Result, 30u, (Credential?)null, "07"), (answer.Kind, answer.Header.CallId, Assert.IsType<ResultHeader>(answer.Header).Credential, Convert.ToHexString(answer.Payload.Span)));
+        Assert.Empty(scripted.Errors);
+
+        using var link = new Link();
+        var ask = Service with { ProcedureId = 2, ProcedureName = "ask" };
+        var clock = Service with { ProcedureId = 3, ProcedureName = "clock" };
+        var command = link.ServerServices.GetCommand(clock, new RequestDependencies<string, string> { Serializer = Text });
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+        link.Server.Error += (reason, _) => { reports.Enqueue(reason); };
+        link.Client.Error += reports.Enqueue;
+        link.ServerServices.GetRequestResolver(ask, new RequestResolverDependencies<string, string> { Serializer = Text })(async (request, response) =>
+        {
+            await response.Answer(await command("now")(new CommandOptions { ConnectionHandle = request.ConnectionHandle, Timeout = TimeSpan.FromSeconds(1) }));
+        });
+        link.ClientServices.GetCommandResolver(clock, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
+        {
+            return response.Answer("noon");
+        });
+
+        Assert.Equal("noon", await link.ClientServices.GetRequest(ask, new RequestDependencies<string, string> { Serializer = Text })("")().WaitAsync(Patience, Cancelled));
+        Assert.Equal([2u], link.ClientReceived.OfType<RequestHeader>().Select((header) => { return header.CallId; }));
+        Assert.Empty(reports);
+    }
+
     // constants
 
     private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
@@ -391,23 +433,32 @@ public sealed partial class RouterClientTests
     [Fact]
     public async Task Rejects_what_waits_once_its_connection_closed_and_forgets_its_session()
     {
-        var transport = new ScriptedTransport();
-        var scheduler = new SerialScheduler();
-
-        using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
-
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
-
-        var waiting = RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))();
-
-        await scheduler.WhenIdle();
-        Assert.Equal(Token, router.SessionToken);
-        transport.CloseConnection();
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        foreach (var usesServices in new[] { false, true })
         {
-            return waiting.WaitAsync(Patience, Cancelled);
-        });
-        Assert.Null(router.SessionToken);
+            var transport = new ScriptedTransport();
+            var scheduler = new SerialScheduler();
+
+            using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
+
+            var reported = new List<Exception>();
+
+            router.Error += reported.Add;
+            transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
+
+            Task waiting = usesServices
+                ? RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))()
+                : router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+            await scheduler.WhenIdle();
+            Assert.Equal(Token, router.SessionToken);
+            transport.CloseConnection();
+            await Assert.ThrowsAsync<DisconnectException>(() =>
+            {
+                return waiting.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Null(router.SessionToken);
+            Assert.Equal((ushort)ProtocolCode.CallUnknown, Assert.IsType<FailureException>(Assert.Single(reported)).Code);
+        }
     }
 
     [Fact]
@@ -549,7 +600,7 @@ public sealed partial class RouterClientTests
 
     // spec 12.1, 12.3
     [Fact]
-    public async Task Takes_a_result_s_opening_that_carries_an_announcement_OPAQUE_or_NONE_counted_as_its_sender_placed_it()
+    public async Task Take_a_result_s_opening_that_carries_an_announcement_opaque_or_none_counted_as_its_sender_placed_it()
     {
         using var scripted = new ScriptedRouter(SmallChunks);
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -620,7 +671,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Times_out_and_cancels_its_call_and_a_result_too_late_says_nothing_while_its_call_id_is_reserved()
+    public async Task Times_out_and_cancels_its_call_a_result_too_late_says_nothing_while_its_call_id_is_reserved()
     {
         var time = new FakeTimeProvider();
 
@@ -697,7 +748,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Writes_the_destination_a_request_names_refuses_a_destination_of_0_and_writes_none_left_null()
+    public async Task Writes_the_destination_a_request_names_refuses_a_destination_of_0_and_writes_none_left_undefined()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -719,7 +770,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Requests_are_held_to_the_limits_the_router_is_built_with_which_must_hold_together_and_show_them()
+    public async Task Are_held_to_the_limits_the_router_is_built_with_which_must_hold_together_and_show_them()
     {
         var limits = RouterLimits.Default with { MaximumPayloadBytes = 8 };
 
@@ -1567,7 +1618,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task The_server_s_requests_resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_SESSION_REQUIRED_a_JWT_CREDENTIAL_UNSUPPORTED()
+    public async Task Resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_session_required_a_jwt_credential_unsupported()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -1617,7 +1668,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task The_server_s_requests_cancelled_by_the_server_abort_their_resolver_s_signal_and_are_answered_by_nothing()
+    public async Task Cancelled_by_the_server_abort_their_resolvers_signal_and_are_answered_by_nothing()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -1748,7 +1799,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task The_server_s_requests_of_the_client_s_own_parity_are_reported_and_never_answered()
+    public async Task Of_the_clients_own_parity_are_reported_and_never_answered()
     {
         using var scripted = new ScriptedRouter();
         var transport = scripted.Transport;
@@ -1764,7 +1815,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task The_server_s_requests_for_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused_with_the_client_s_failures()
+    public async Task For_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused_with_the_clients_failures()
     {
         using var scripted = new ScriptedRouter();
         var transport = scripted.Transport;
@@ -1855,7 +1906,7 @@ public sealed partial class RouterClientTests
 
     // debugging 1.1 and 5.1
     [Fact]
-    public async Task Tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
+    public async Task Tells_each_envelope_out_and_in_with_its_connection_server_a_copy_of_its_header_and_never_its_session_token()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -2386,7 +2437,7 @@ public sealed partial class RouterClientTests
     }
 
     // text in UTF-8, a request, its result and a notification alike
-    private sealed class TextPayloads : INotificationSerializerClient<string, string, string>
+    private sealed class TextPayloads : INotificationSerializerClient<string, string, string>, IRequestSerializerServer<string, string>
     {
         public ReadOnlyMemory<byte> Encode(string request)
         {

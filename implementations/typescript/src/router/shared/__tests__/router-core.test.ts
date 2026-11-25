@@ -86,6 +86,107 @@ const PACKAGE = JSON.parse(
 // definition
 
 test.describe('createRouterCore', () => {
+  test('answers a resolver that panics PROCEDURE_FAILED with no detail and reported', async () => {
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+    const broken = new Error('this resolver breaks, on purpose');
+
+    core.registerResolver(
+      Object.assign(() => {
+        return Promise.reject(broken);
+      }, echo)
+    );
+    core.receive(requestOf(1, { payload: new TextEncoder().encode('hi') }), 'a');
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(sent[0]?.envelope).toMatchObject({ failure: { detail: '' } });
+    expect(reported).toEqual([[broken, 'a']]);
+  });
+
+  test('a hook that panics fails its own call and the router answers the next', async () => {
+    test.skip(
+      true,
+      'divergence: a throwing onSent hook also throws on the failed handoff, unhandled'
+    );
+
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+
+    for (const hook of ['onCallId', 'onSent'] as const) {
+      const broken = new Error(`this ${hook} breaks, on purpose`);
+      const asking = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+        [hook]: () => {
+          throw broken;
+        },
+      });
+
+      await expect(asking).rejects.toBe(broken);
+
+      if (hook === 'onCallId') {
+        expect(sent).toEqual([]);
+      }
+    }
+
+    const next = core.request(new TextEncoder().encode('hi'), {
+      connectionHandle: 'a',
+      options,
+      procedure: echo,
+    });
+    const callId = sent.at(-1)?.envelope?.header.callId;
+
+    expect(callId).toBeDefined();
+    core.receive(resultOf(callId!), 'a');
+    await expect(next).resolves.toMatchObject({ header: { callId } });
+    expect(reported).toEqual([]);
+  });
+
+  test('a request whose send panics fails as its transport’s throw would and the router answers the next', async () => {
+    for (const asynchronous of [false, true]) {
+      const { port, sent, reported } = createPort();
+      const broken = new Error('the transport breaks');
+      let refuses = true;
+      using core = createRouterCore({
+        ...port,
+        send: (message, connectionHandle) => {
+          if (refuses) {
+            if (asynchronous) {
+              return Promise.reject(broken);
+            }
+
+            throw broken;
+          }
+
+          return port.send(message, connectionHandle);
+        },
+      });
+
+      await expect(
+        core.request(new TextEncoder().encode('hi'), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+        })
+      ).rejects.toBe(broken);
+      refuses = false;
+
+      const next = core.request(new TextEncoder().encode('hi'), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+      const callId = sent.at(-1)?.envelope?.header.callId;
+
+      expect(callId).toBeDefined();
+      core.receive(resultOf(callId!), 'a');
+      await expect(next).resolves.toMatchObject({ header: { callId } });
+      expect(reported).toEqual([]);
+    }
+  });
+
   test('refuses a last call id of zero or its peer’s parity before a router starts', () => {
     for (const [failures, refused, accepted] of [
       [CLIENT_FAILURES, [0, 2, 8, 0xfffffffe], [1, 0xffffffff]],
@@ -299,7 +400,7 @@ test.describe('createRouterCore', () => {
 
   test.describe('takes what comes in', () => {
     // debugging 5.2
-    test('read, traced, then dispatched; what does not read is reported, not traced', async () => {
+    test('reads, traces, then dispatches what comes in, and reports what does not read untraced', async () => {
       const { port, reported, traced } = createPort();
       using core = createRouterCore(port);
       const seen: IRequestResolverProps<Handle>[] = [];
@@ -1548,71 +1649,97 @@ test.describe('createRouterCore', () => {
       });
     };
 
-    test('of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
-      const asked: string[] = [];
-      const sessionOf = ({ header }: ISessionRequest<Handle>) => {
-        asked.push(`resolve ${String(header.callId)}`);
-
-        return undefined;
-      };
-      const resolver = Object.assign(resolverOf(echo), {
-        admit: ({ header }: IAdmissionRequest<Handle>) => {
-          asked.push(`admit ${String(header.callId)}`);
+    test('a credential of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
+      for (const sourceOrder of [false, true]) {
+        const asked: string[] = [];
+        const sessionOf = ({ header }: ISessionRequest<Handle>) => {
+          asked.push(`resolve ${String(header.callId)}`);
 
           return undefined;
-        },
-      });
-      const opaqueOnly = createPort({ sessionOf });
-      const every = createPort({
-        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
-        sessionOf,
-      });
-      using first = createRouterCore(opaqueOnly.port);
-      using second = createRouterCore(every.port);
+        };
+        const resolver = Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            asked.push(`admit ${String(header.callId)}`);
 
-      first.registerResolver(resolver);
-      second.registerResolver(resolver);
+            return undefined;
+          },
+        });
+        const opaqueOnly = createPort({ sessionOf });
+        const every = createPort({
+          credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+          sessionOf,
+        });
+        using first = createRouterCore(opaqueOnly.port);
+        using second = createRouterCore(every.port);
 
-      for (const [callId, credential] of [
-        [1, JWT],
-        [3, ELSEWHERE],
-        [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
-      ] as const) {
-        first.receive(requestOf(callId, { credential }), 'a');
+        first.registerResolver(resolver);
+        second.registerResolver(resolver);
+
+        for (const [callId, credential] of [
+          [1, JWT],
+          [3, ELSEWHERE],
+          [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
+        ] as const) {
+          first.receive(requestOf(callId, { credential }), 'a');
+        }
+
+        // a scheme to come, to a procedure no route reaches: the route refuses it first
+        if (sourceOrder) {
+          first.receive(
+            requestOf(7, {
+              credential: { bytes: new Uint8Array(0), scheme: 7 },
+              procedure: unknown,
+            }),
+            'a'
+          );
+        }
+        second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
+        first.receive(
+          requestOf(11, { credential: { bytes: Uint8Array.of(1, 2), scheme: 7 } }),
+          'a'
+        );
+        if (!sourceOrder) {
+          first.receive(
+            requestOf(7, {
+              credential: { bytes: new Uint8Array(0), scheme: 7 },
+              procedure: unknown,
+            }),
+            'a'
+          );
+        }
+        second.receive(
+          requestOf(3, { credential: { bytes: new Uint8Array(0), scheme: 0xffff } }),
+          'a'
+        );
+        first.receive(
+          requestOf(9, {
+            credential: { bytes: new Uint8Array(0), scheme: 7 },
+            procedure: { ...echo, serviceId: 9 },
+          }),
+          'a'
+        );
+
+        expect(failuresOf(opaqueOnly.sent)).toEqual([
+          [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+          ...(sourceOrder
+            ? [
+                [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+                [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+              ]
+            : [
+                [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+                [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+              ]),
+          [9, ProtocolCode.SERVICE_UNKNOWN, 'no service 9'],
+        ]);
+        expect(failuresOf(every.sent)).toEqual([
+          [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+          [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+        ]);
+        expect(asked).toEqual([]);
       }
-
-      // a scheme to come, to a procedure no route reaches: the route refuses it first
-      first.receive(
-        requestOf(7, { credential: { bytes: new Uint8Array(0), scheme: 7 }, procedure: unknown }),
-        'a'
-      );
-      second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
-      first.receive(requestOf(11, { credential: { bytes: Uint8Array.of(1, 2), scheme: 7 } }), 'a');
-      second.receive(
-        requestOf(3, { credential: { bytes: new Uint8Array(0), scheme: 0xffff } }),
-        'a'
-      );
-      first.receive(
-        requestOf(9, {
-          credential: { bytes: new Uint8Array(0), scheme: 7 },
-          procedure: { ...echo, serviceId: 9 },
-        }),
-        'a'
-      );
-
-      expect(failuresOf(opaqueOnly.sent)).toEqual([
-        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
-        [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-        [9, ProtocolCode.SERVICE_UNKNOWN, 'no service 9'],
-      ]);
-      expect(failuresOf(every.sent)).toEqual([
-        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
-        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
-      ]);
-      expect(asked).toEqual([]);
     });
 
     test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', async () => {
@@ -2093,7 +2220,7 @@ test.describe('createRouterCore', () => {
       }
     });
 
-    test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
+    test('a credential of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
       const order: string[] = [];
       const carried: unknown[] = [];
       const { port, reported, sent } = createPort({
@@ -3040,7 +3167,7 @@ test.describe('createRouterCore', () => {
   });
 
   test.describe('cancels', () => {
-    test('forget a call its requester cancels, then abort its signal: nothing answers it, and its call id is free', async () => {
+    test('forgets a call its requester cancels, then cancels its signal: nothing answers it, and its call id is free', async () => {
       const offered: string[] = [];
       const { port, reported, sent } = createPort({
         onCancel: (callId, connectionHandle) => {
@@ -3267,7 +3394,7 @@ test.describe('createRouterCore', () => {
       }
     };
 
-    test('detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once', async () => {
+    test('detaches calls before settling an incoming resolver awaiting an outgoing call, and counts its incoming close once', async () => {
       const { atReturn, before, caught, reported, sentAfter, settled, snapshots, steps, text } =
         await closeAwaiting({ forward: false, incoming: 1 });
 
@@ -5241,9 +5368,13 @@ test.describe('createRouterCore', () => {
       expect(codesOf(reported)).toEqual([['failed behind its answer', 'a']]);
     });
 
-    test('free the call of an answer that could not go out, so its call id opens again', async () => {
-      for (const message of ['the transport is closing', 'the transport refused the result']) {
-        const { port, reported } = createPort();
+    test('an answer whose send panics fails as its transport’s throw would, and its call id opens again', async () => {
+      for (const message of [
+        'the transport is closing',
+        'the transport refused the result',
+        'the transport breaks',
+      ]) {
+        const { port, reported, sent } = createPort();
         const seen: IRequestResolverProps<Handle>[] = [];
         let isRefusing = true;
         const refused = new Error(message);
@@ -5285,7 +5416,18 @@ test.describe('createRouterCore', () => {
         );
         await sleep(0);
 
-        expect(seen).toHaveLength(2);
+        expect(
+          seen.map(({ header }) => {
+            return header.callId;
+          })
+        ).toEqual([1, 1]);
+        await answerOf({ core, seen }, { index: 1, payload: Uint8Array.of(2) });
+        expect(sent).toHaveLength(1);
+        expect(sent[0]?.envelope).toMatchObject({
+          kind: EnvelopeKind.RESULT,
+          header: { callId: 1 },
+          payload: Uint8Array.of(2),
+        });
         expect(reported).toEqual([]);
       }
     });
@@ -5554,7 +5696,7 @@ test.describe('createRouterCore', () => {
     });
 
     // spec 12.10
-    test('end the transfers it sends on a connection that goes, and on a router disposed, sending nothing more', async () => {
+    test('ends the transfers it sends on a connection that goes, and on a router disposed, sending nothing more', async () => {
       const answering = createAnswering();
       using core = answering.core;
       const { reported, sent } = answering;
@@ -5950,4 +6092,329 @@ test.describe('createRouterCore', () => {
       }
     });
   });
+});
+
+// The linked cores share a clock; each send reaches its peer in a microtask.
+const createCoreLink = (lastCallId?: number) => {
+  const clock = createTestClock();
+  const callIds: number[] = [];
+  const received: Uint8Array[] = [];
+  const reported: Error[] = [];
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const ids = { echo: 1, fail: 2, slow: 3, cancellations: 4 };
+  type Name = keyof typeof ids;
+  const procedureOf = (name: Name): IProcedure => {
+    return { serviceId: 1, procedureId: ids[name], procedureName: name, serviceRevision: 1 };
+  };
+  const common = {
+    activity: noop,
+    isTracing: () => {
+      return false;
+    },
+    pause: noop,
+    report: (error: Error) => {
+      reported.push(error);
+    },
+    resume: noop,
+    trace: noop,
+  };
+  const client: IRouterCore<'server'> = createRouterCore(
+    {
+      ...common,
+      failures: CLIENT_FAILURES,
+      send: ({ data }) => {
+        queueMicrotask(() => {
+          received.push(data);
+          server.receive(data, 'a');
+        });
+        return Promise.resolve();
+      },
+    },
+    { clock, lastCallId }
+  );
+  const server: IRouterCore<'a'> = createRouterCore(
+    {
+      ...common,
+      failures: SERVER_FAILURES,
+      send: ({ data }) => {
+        queueMicrotask(() => {
+          client.receive(data, 'server');
+        });
+        return Promise.resolve();
+      },
+    },
+    { clock }
+  );
+  let cancellations = 0;
+
+  for (const name of Object.keys(ids) as Name[]) {
+    server.registerResolver(
+      Object.assign(async (props: IRequestResolverProps<'a'>) => {
+        if (name === 'slow') {
+          await new Promise<void>((resolve) => {
+            props.signal.addEventListener(
+              'abort',
+              () => {
+                cancellations += 1;
+                resolve();
+              },
+              { once: true }
+            );
+          });
+          return;
+        }
+
+        if (name === 'fail') {
+          await server.respond(
+            {
+              failure: {
+                code: 7,
+                scope: FailureScope.APPLICATION,
+                detail: 'this procedure fails, on purpose',
+              },
+            },
+            props
+          );
+          return;
+        }
+
+        await server.respond(
+          {
+            payload:
+              name === 'cancellations' ? encoder.encode(String(cancellations)) : props.payload,
+          },
+          props
+        );
+      }, procedureOf(name))
+    );
+  }
+
+  const call = (
+    name: Name,
+    given?: {
+      payload?: Uint8Array;
+      timeout?: number;
+      signal?: AbortSignal;
+      maximumPayloadBytes?: number;
+    }
+  ) => {
+    return client.request(
+      given?.payload ?? encoder.encode(name === 'slow' ? '{"milliseconds":3600000}' : 'null'),
+      {
+        connectionHandle: 'server',
+        onCallId: (callId) => {
+          callIds.push(callId);
+        },
+        options: { timeout: given?.timeout ?? 5_000, signal: given?.signal },
+        procedure: { ...procedureOf(name), maximumPayloadBytes: given?.maximumPayloadBytes },
+      }
+    );
+  };
+
+  return {
+    call,
+    callIds,
+    client,
+    clock,
+    received,
+    reported,
+    textOf: (bytes: Uint8Array) => {
+      return decoder.decode(bytes);
+    },
+    [Symbol.dispose]: () => {
+      client[Symbol.dispose]();
+      server[Symbol.dispose]();
+    },
+  };
+};
+
+test.describe('a linked client and server core', () => {
+  test('requests and resolves with the result', async () => {
+    using link = createCoreLink();
+    const payload = new TextEncoder().encode('{"a":1}');
+    const result = await link.call('echo', { payload });
+
+    expect(result.payload).toEqual(payload);
+    expect(result.header.callId).toBe(1);
+    expect(link.reported).toEqual([]);
+  });
+
+  test('throws the failure the peer answered with, saying it raised it', async () => {
+    using link = createCoreLink();
+    const failure = await link.call('fail').catch((reason: unknown) => {
+      return reason;
+    });
+
+    expect(failure).toBeInstanceOf(FailureError);
+    expect(failure).toMatchObject({
+      code: 7,
+      scope: FailureScope.APPLICATION,
+      origin: 'peer',
+      side: 'server',
+      procedureAddress: { serviceId: 1, procedureId: 2 },
+      detail: 'this procedure fails, on purpose',
+      message:
+        'server application failure 7 (service 1, procedure 2): this procedure fails, on purpose',
+    });
+  });
+
+  test('times out, cancels its call and reserves its call id as long as it was given', async () => {
+    using link = createCoreLink(3);
+    const slow = link.call('slow', { timeout: 1_000 });
+    const timedOut = expect(slow).rejects.toBeInstanceOf(TimeoutError);
+
+    await sleep(0);
+    await link.clock.tickAsync(1_000);
+    await timedOut;
+    expect(link.textOf((await link.call('cancellations')).payload)).toBe('1');
+    await link.call('echo');
+    expect(link.callIds).toEqual([1, 3, 3]);
+    await link.clock.tickAsync(1_000);
+    await link.call('echo');
+    expect(link.callIds).toEqual([1, 3, 3, 1]);
+  });
+
+  test('cancels its call once its token is cancelled after it went out', async () => {
+    using link = createCoreLink();
+    const cancelling = new AbortController();
+    const slow = link.call('slow', { signal: cancelling.signal });
+    const cancelled = expect(slow).rejects.toBeInstanceOf(CancelError);
+
+    await sleep(0);
+    cancelling.abort();
+    await cancelled;
+    expect(link.callIds).toEqual([1]);
+    expect(link.textOf((await link.call('cancellations')).payload)).toBe('1');
+  });
+
+  test('draws nothing for a token cancelled already', async () => {
+    using link = createCoreLink();
+
+    await expect(link.call('echo', { signal: AbortSignal.abort() })).rejects.toBeInstanceOf(
+      CancelError
+    );
+    expect(link.callIds).toEqual([]);
+    expect(link.received).toEqual([]);
+  });
+
+  test('is CAPACITY_EXCEEDED once every call id is in use', async () => {
+    using link = createCoreLink(1);
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toBeInstanceOf(DisconnectError);
+
+    await expect(link.call('echo')).rejects.toMatchObject({
+      code: ProtocolCode.CAPACITY_EXCEEDED,
+      origin: 'local',
+    });
+    link[Symbol.dispose]();
+    await stopped;
+  });
+
+  test('rejects what waits on a connection that closed', async () => {
+    using link = createCoreLink();
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toThrow(
+      new DisconnectError('the connection closed before the answer')
+    );
+
+    link.client.rejectPending('the connection closed before the answer', 'server');
+    await stopped;
+  });
+
+  test('rejects what waits once disposed and sends nothing more', async () => {
+    using link = createCoreLink();
+    const slow = link.call('slow');
+    const stopped = expect(slow).rejects.toBeInstanceOf(DisconnectError);
+
+    await sleep(0);
+    link.client[Symbol.dispose]();
+    await stopped;
+    const received = link.received.length;
+
+    await expect(link.call('echo')).rejects.toBeInstanceOf(DisconnectError);
+    await sleep(0);
+    expect(link.received).toHaveLength(received);
+  });
+
+  test('refuses a payload past its procedure’s limit before it sends or tells its call id', async () => {
+    using link = createCoreLink();
+
+    await expect(
+      link.call('echo', { payload: new TextEncoder().encode('"too long"'), maximumPayloadBytes: 4 })
+    ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+    expect(link.callIds).toEqual([]);
+    await sleep(0);
+    expect(link.received).toEqual([]);
+  });
+});
+
+test('sends nothing of a call whose timer its clock cannot arm, no request and no cancel', async () => {
+  for (const size of [8, 200]) {
+    const clock = createTestClock();
+    const broken = new Error('the call timer broke');
+    const { port, sent } = createPort();
+
+    clock.setTimeout = () => {
+      throw broken;
+    };
+    using core = createRouterCore(port, {
+      clock,
+      limits: { ...limits, transferInactivityTimeout: 30_000 },
+    });
+    const call = core.request(new Uint8Array(size).fill(7), {
+      connectionHandle: 'a',
+      options: { timeout: 60_000 },
+      procedure: echo,
+    });
+
+    await expect(call).rejects.toBe(broken);
+    await sleep(0);
+    expect(sent).toEqual([]);
+  }
+});
+
+test('holds a duration in whole microseconds, its fraction dropped, a TimeSpan’s ticks over 10', async () => {
+  const registry = createMetricsRegistry();
+  const metrics = registry.attach('client');
+  const series = metrics.declareRequester(echo);
+  const { port, reported } = createPort({ failures: CLIENT_FAILURES });
+  const time = createTestClock();
+  let instant = 0;
+  const clock = {
+    ...time,
+    performance: {
+      now: () => {
+        return instant;
+      },
+    },
+  };
+  using core = createRouterCore(port, { clock, metrics });
+
+  // * each tick is 100 ns: 1.9 us, then 30.6 ms
+  for (const [callId, ticks] of [
+    [1, 19],
+    [3, 306_000],
+  ] as const) {
+    const asking = core.request(Uint8Array.of(0), {
+      connectionHandle: 'a',
+      procedure: echo,
+      options,
+      series,
+    });
+
+    instant += ticks / 10_000;
+    core.receive(resultOf(callId), 'a');
+    await asking;
+  }
+
+  const samples = registry.exposition().text.split('\n');
+
+  expect(samples).toContain(
+    'bead_client_call_duration_seconds_sum{service="2",procedure="echo",type="request"} 0.030601'
+  );
+  expect(samples).toContain(
+    'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="request",le="1e-05"} 1'
+  );
+  expect(reported).toEqual([]);
 });

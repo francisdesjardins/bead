@@ -43,6 +43,123 @@ public sealed class PayloadsTests
 
     // definition
 
+    [Fact]
+    public void Builds_a_payload_whose_name_holds_an_escape_as_JSON_parse_builds_one_a_member_named_proto_its_own()
+    {
+        var text = """{"__prot\u006f__":{"a":[1,-0,1E2,"\n",true,null]},"2":false,"1":0}""";
+        var read = PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+
+        Assert.True(read.TryGetProperty("__proto__", out _));
+        Assert.Equal(["1", "2", "__proto__"], NamesOf(text));
+        Assert.Equal(
+            """{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\n",true,null]}}""",
+            Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(read).Span));
+    }
+
+    [Fact]
+    public void Writes_an_object_of_no_prototype_and_a_member_named_proto_as_a_member()
+    {
+        var value = JsonElement.Parse("""{"b":true,"__proto__":"x"}""");
+
+        Assert.Equal("""{"__proto__":"x","b":true}""", Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(value).Span));
+    }
+
+    [Fact]
+    public void Refuses_a_value_nested_deeper_than_64_a_cycle_among_them()
+    {
+        foreach (var depth in new[] { 64, 65 })
+        {
+            var text = new string('[', depth) + "1" + new string(']', depth);
+            using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 65 });
+
+            if (depth == 64)
+            {
+                Assert.Equal(text, Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(document.RootElement).Span));
+            }
+            else
+            {
+                Assert.Equal("nested past 64", RefusalOf(() =>
+                {
+                    return PayloadCodecs.Json.Encode(document.RootElement);
+                }));
+            }
+        }
+    }
+
+
+    [Fact]
+    public void Refuses_a_string_never_closed_as_not_JSON_its_scan_bounded_by_the_text()
+    {
+        Assert.Equal("not JSON", RefusalOf(() =>
+        {
+            return Payloads.ReadJson(Encoding.UTF8.GetBytes("\"" + new string('x', 1_000)));
+        }));
+    }
+
+    [Fact]
+    public void Writes_each_objects_names_sorted_by_their_UTF_16_code_units_an_array_indexs_among_them()
+    {
+        foreach (var (text, expected) in new[]
+        {
+            ("{\"b\":1,\"10\":2,\"9\":3,\"1a\":4}", "{\"10\":2,\"1a\":4,\"9\":3,\"b\":1}"),
+            ("{\"z\":[{\"b\":1,\"a\":2}],\"a\":null}", "{\"a\":null,\"z\":[{\"a\":2,\"b\":1}]}"),
+        })
+        {
+            using var document = JsonDocument.Parse(text);
+
+            Assert.Equal(expected, Encoding.UTF8.GetString(Payloads.WriteJson(document.RootElement).Span));
+        }
+    }
+
+    [Fact]
+    public void Reads_UTF_8_strictly_a_leading_U_FEFF_kept_and_writes_a_string()
+    {
+        Assert.Equal("not UTF-8", RefusalOf(() =>
+        {
+            return PayloadCodecs.Text.Decode(new byte[] { 0xC3 });
+        }));
+        Assert.Equal("\uFEFF1", PayloadCodecs.Text.Decode(new byte[] { 0xEF, 0xBB, 0xBF, 0x31 }));
+        Assert.Equal(new byte[] { 0x6F, 0x6B }, PayloadCodecs.Text.Encode("ok").ToArray());
+    }
+
+    [Fact]
+    public void Tells_whether_each_object_names_each_member_once_by_a_well_formed_name_its_escapes_read()
+    {
+        foreach (var (text, held) in new[]
+        {
+            ("[{\"a\":1},{\"a\":{\"a\":2}},\"a\",\"a\"]", true),
+            ("{\"a\":1,\"b\":{\"c\":1,\"c\":2}}", false),
+            ("{\"a\":1,\"\\u0061\":2}", false),
+            ("{\"\\ud800\":1}", false),
+        })
+        {
+            var refusal = Record.Exception(() =>
+            {
+                PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+            });
+
+            Assert.Equal(held, refusal is null);
+            if (!held)
+            {
+                Assert.IsType<FormatException>(refusal);
+            }
+        }
+    }
+
+    [Fact]
+    public void Reads_0_as_0_at_every_depth_and_a_member_named_proto_as_a_member()
+    {
+        var read = PayloadCodecs.Json.Decode("[-0,{\"a\":-0}]"u8.ToArray());
+
+        Assert.Equal(0, BitConverter.DoubleToInt64Bits(read[0].GetDouble()));
+        Assert.Equal(0, BitConverter.DoubleToInt64Bits(read[1].GetProperty("a").GetDouble()));
+
+        var member = PayloadCodecs.Json.Decode("{\"__proto__\":{\"a\":1},\"b\":2}"u8.ToArray());
+
+        Assert.True(member.TryGetProperty("__proto__", out _));
+        Assert.Equal("{\"__proto__\":{\"a\":1},\"b\":2}", Encoding.UTF8.GetString(PayloadCodecs.Json.Encode(member).Span));
+    }
+
     /// <summary>Bytes a json reader refuses, in hexadecimal, and the reason it refuses them for (spec 17.2).</summary>
     public static TheoryData<string, string> Unread { get; } = new()
     {
@@ -230,4 +347,88 @@ public sealed class PayloadsTests
 
         Assert.Equal("\"a\uFFFDb\"", Encoding.UTF8.GetString(Payloads.WriteJson(JsonSerializer.SerializeToElement("a\ud800b")).Span));
     }
+    [Fact]
+    public void Writes_a_json_value_in_its_canonical_form_and_a_type_through_it()
+    {
+        var value = JsonElement.Parse("""{"b":1,"a":[true,null,"x"]}""");
+        var written = PayloadCodecs.Json.Encode(value);
+
+        Assert.Equal("""{"a":[true,null,"x"],"b":1}""", Encoding.UTF8.GetString(written.Span));
+        Assert.Equal("""{"a":[true,null,"x"],"b":1}""", PayloadCodecs.Json.Decode(written).GetRawText());
+
+        var reading = new Reading { Name = "t", Value = 0.5 };
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var encoded = PayloadCodecs.Json.Encode(JsonSerializer.SerializeToElement(reading, options));
+
+        Assert.Equal("""{"name":"t","value":0.5}""", Encoding.UTF8.GetString(encoded.Span));
+        Assert.Equal(reading, PayloadCodecs.Json.Decode(encoded).Deserialize<Reading>(options));
+    }
+
+    private sealed record Reading
+    {
+        public required string Name { get; init; }
+
+        public required double Value { get; init; }
+    }
+
+    [Fact]
+    public void Refuses_what_it_does_not_read_each_in_its_own_words_with_a_syntax_error()
+    {
+        (byte[] Bytes, string Words)[] cases =
+        [
+            ([0x22, 0xff, 0x22], "not UTF-8"),
+            ([0xef, 0xbb, 0xbf, 0x31], "a byte order mark"),
+            (Encoding.UTF8.GetBytes(new string('[', 65) + new string(']', 65)), "nested past 64"),
+            ("""{"a":1,"a":2}"""u8.ToArray(), "a name twice"),
+            ("\"\\ud800\""u8.ToArray(), "a surrogate alone"),
+            ("{\"\\udc00\":1}"u8.ToArray(), "a surrogate alone"),
+            ("1E400"u8.ToArray(), "a number past a double"),
+        ];
+
+        foreach (var (bytes, words) in cases)
+        {
+            Assert.Equal(words, RefusalOf(() =>
+            {
+                return PayloadCodecs.Json.Decode(bytes);
+            }));
+        }
+
+        foreach (var text in new[] { "", "[1,]" })
+        {
+            var refused = Assert.Throws<FormatException>(() =>
+            {
+                return PayloadCodecs.Json.Decode(Encoding.UTF8.GetBytes(text));
+            });
+
+            Assert.Equal("not JSON", refused.Message);
+            Assert.IsAssignableFrom<JsonException>(refused.InnerException);
+        }
+    }
+
+    [Fact]
+    public void Refuses_what_json_has_no_value_for_each_in_its_own_words_with_a_type_error()
+    {
+        Assert.Equal("no JSON value", RefusalOf(() =>
+        {
+            return PayloadCodecs.Json.Encode(default);
+        }));
+
+        foreach (var text in new[] { "1E400", "[-1E400]" })
+        {
+            Assert.Equal("not a finite number", RefusalOf(() =>
+            {
+                return PayloadCodecs.Json.Encode(JsonElement.Parse(text));
+            }));
+        }
+    }
+
+    [Fact]
+    public void Refuses_what_does_not_write_within_an_object_one_of_whose_names_may_be_an_array_index()
+    {
+        Assert.Equal("not a finite number", RefusalOf(() =>
+        {
+            return PayloadCodecs.Json.Encode(JsonElement.Parse("""{"1":1E400}"""));
+        }));
+    }
+
 }

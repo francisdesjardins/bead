@@ -70,26 +70,28 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
   });
 
   for (const seed of [1, 2]) {
-    test(`reads or refuses with a failure every mutation of a vector, seed ${String(seed)}`, () => {
-      const below = generatorOf(seed);
-      const defects: (string | undefined)[] = [];
+    test.describe(`seed ${String(seed)}`, () => {
+      test('reads or refuses with a failure every mutation of a vector', () => {
+        const below = generatorOf(seed);
+        const defects: (string | undefined)[] = [];
 
-      for (let count = 0; count < INPUTS; count++) {
-        const input = mutate(seeds[below(seeds.length)]!, { below, seeds });
+        for (let count = 0; count < INPUTS; count++) {
+          const input = mutate(seeds[below(seeds.length)]!, { below, seeds });
 
-        for (const failures of [SERVER_FAILURES, CLIENT_FAILURES]) {
-          defects.push(
-            defectOf(() => {
-              return readEnvelope(input, { failures, ...LIMITS });
-            }, input),
-            defectOf(() => {
-              return readFailure(input, { failures });
-            }, input)
-          );
+          for (const failures of [SERVER_FAILURES, CLIENT_FAILURES]) {
+            defects.push(
+              defectOf(() => {
+                return readEnvelope(input, { failures, ...LIMITS });
+              }, input),
+              defectOf(() => {
+                return readFailure(input, { failures });
+              }, input)
+            );
+          }
         }
-      }
 
-      expect(defects.filter(Boolean)).toEqual([]);
+        expect(defects.filter(Boolean)).toEqual([]);
+      });
     });
   }
 
