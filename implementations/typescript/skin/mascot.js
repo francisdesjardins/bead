@@ -481,6 +481,10 @@ const LINGER_MS = 6000;
 const SHY_MS = 1400;
 // once back, how long before a pointer sends it away again, so a click can reach it
 const SHY_REST_MS = 4000;
+// how far above and below it a wide block sends it away: a fast wheel's step in one frame
+const REACH = 128;
+// how fast it comes back once clear of a wide block, in px a millisecond
+const DODGE_BACK = 0.6;
 const REACT_IN_MS = 300;
 const REACT_HOLD_MS = 2200;
 const REACT_OUT_MS = 600;
@@ -523,6 +527,9 @@ export const mountMascot = (options = {}) => {
   let restUntil = 0;
   let frame = null;
   let lastFace = '';
+  // how far it stands clear of a wide block, and when it was last drawn
+  let dodged = 0;
+  let drawn = 0;
   const timers = new Map();
 
   // each timer by its name, and how long it waits
@@ -622,7 +629,8 @@ export const mountMascot = (options = {}) => {
     return element.getClientRects().length > 0;
   };
 
-  // the widest stretch the bar's controls leave free, the mascot at its far end
+  // the widest stretch the bar's children leave free, its brand, a label and its tools, the mascot
+  // at its far end
   const barPlaceOf = (bar) => {
     const none = { dock: 'none', size: TOUCH, left: 0, top: 0 };
     if (bar === null) {
@@ -630,7 +638,7 @@ export const mountMascot = (options = {}) => {
     }
     const box = bar.getBoundingClientRect();
     const style = window.getComputedStyle(bar);
-    const edges = [...bar.querySelectorAll('a, button, [role="status"], .tools > *, nav')]
+    const edges = [...bar.children]
       .filter(visible)
       .map((control) => {
         const at = control.getBoundingClientRect();
@@ -718,7 +726,7 @@ export const mountMascot = (options = {}) => {
 
   const positionOf = () => {
     if (place.dock !== 'margin') {
-      return { x: place.left, y: place.top, shove: 0 };
+      return { x: place.left, y: place.top, dodge: 0, shove: 0 };
     }
     const { size, room, band } = place;
     const travel = isReduced() ? 0 : clamp(window.scrollY / scrollMax);
@@ -726,17 +734,18 @@ export const mountMascot = (options = {}) => {
     const swayY = 0.56 * Math.max(0, (band.bottom - band.top - size) / 2);
     const x = place.left + (room - size) / 2 + swayX * Math.sin(travel * Math.PI * 3);
     const y = (band.top + band.bottom - size) / 2 + swayY * Math.sin(travel * Math.PI * 2);
-    // ! whatever is wider than the text, a block of code, it slides clear of, as from a pointer
+    // ! whatever is wider than the text, a block of code, it moves clear of in the same frame, a
+    // scroll faster than any transition; it comes back at DODGE_BACK px a millisecond
     let dodge = 0;
     for (const obstacle of obstacles) {
       const top = obstacle.top - window.scrollY;
       const bottom = obstacle.bottom - window.scrollY;
-      if (top < y + size + GAP && bottom > y - GAP && obstacle.right + GAP > x) {
+      if (top < y + size + REACH && bottom > y - REACH && obstacle.right + GAP > x) {
         dodge = Math.max(dodge, obstacle.right + GAP - x);
       }
     }
     const shy = state === 'shy' ? size * 0.7 : 0;
-    return { x, y, shove: Math.max(dodge, shy) };
+    return { x, y, dodge, shove: shy };
   };
 
   // ── Each frame ──
@@ -802,8 +811,14 @@ export const mountMascot = (options = {}) => {
     if (button.dataset['face'] !== named) {
       button.dataset['face'] = named;
     }
-    const { x, y, shove } = positionOf();
-    button.style.translate = `${fixed(x)}px ${fixed(y)}px`;
+    const { x, y, dodge, shove } = positionOf();
+    dodged =
+      dodge >= dodged ? dodge : Math.max(dodge, dodged - DODGE_BACK * Math.max(0, now - drawn));
+    drawn = now;
+    if (dodged > dodge) {
+      isMoving = true;
+    }
+    button.style.translate = `${fixed(x + dodged)}px ${fixed(y)}px`;
     button.style.transform = `translateX(${fixed(shove)}px)`;
     if (isMoving) {
       schedule();
