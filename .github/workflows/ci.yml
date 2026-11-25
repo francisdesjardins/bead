@@ -435,6 +435,8 @@ jobs:
     defaults:
       run:
         working-directory: implementations/rust
+        # ! bash by name, which runs with pipefail: a cargo failing inside a pipe fails its step
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -526,6 +528,7 @@ jobs:
     defaults:
       run:
         working-directory: implementations/rust
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -572,6 +575,7 @@ jobs:
     defaults:
       run:
         working-directory: implementations/rust
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -633,6 +637,7 @@ jobs:
     defaults:
       run:
         working-directory: implementations/rust/fuzz
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
       # ! the nightly of the fuzz build alone, by its date: tools/fuzz.mjs's RUST_NIGHTLY names the
