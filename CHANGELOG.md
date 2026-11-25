@@ -29,10 +29,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI's TypeScript job runs in parallel: its tests in two shards on each Node line, the DevTools
   extension's tests and the demo's, with the page's accessibility, in legs of their own beside
   them, and the shards' coverage, which c8 reports as one run's, held to the same floor after them.
-- CI's Rust job runs in parallel: its lints and its documentation, its tests under coverage and
-  its fuzz targets' build each run in a job of its own on Linux, beside its format, its build, the
-  interop's binaries and cargo-deny. The Rust side's cases and interop over MQTT 5 run beside the
-  other sides', against a broker of their own.
+- CI's Rust job runs in parallel: its lints and its documentation, its tests under coverage, its
+  fuzz targets' build and its tests on Windows each run in a job of its own, beside its format, its
+  build, the interop's binaries and cargo-deny, which the interop with the Rust side alone waits
+  for. The Rust side's cases and interop over MQTT 5 run beside the other sides', against a broker
+  of their own.
 - The guides for teams pin 0.17.0 and its image, their scenario built and run again against its
   runtimes: getting started says how a client in Node connects by `localhost` and what the
   WebSocket server bounds, and the recipes tell the closes those bounds make and read the

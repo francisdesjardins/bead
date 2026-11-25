@@ -419,29 +419,22 @@ jobs:
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
-  # an error by its .cargo/config.toml, `[build] warnings = "deny"`. On Linux, its format, a build
-  # on the default features alone, where what the test kit alone reaches is left out, the interop's
-  # server and its trials' test binary, built once and handed to the interop-rust job, and its
-  # dependencies' advisories, licences, bans and sources; on Windows, its tests alone, as the user's
-  # MSVC toolchain builds them. Its lints and its documentation are rust-lints', its tests under
-  # coverage rust-coverage's, and its fuzz targets rust-fuzz's, each beside this job. The registry
-  # and the target are cached by the lock and the toolchain, each job's under a key of its own;
-  # every build is `--locked`.
+  # an error by its .cargo/config.toml, `[build] warnings = "deny"`. Here, on Linux, its format, a
+  # build on the default features alone, where what the test kit alone reaches is left out, the
+  # interop's server and its trials' test binary, built once and handed to the interop-rust job,
+  # and its dependencies' advisories, licences, bans and sources. Its lints and its documentation
+  # are rust-lints', its tests under coverage rust-coverage's, its fuzz targets rust-fuzz's, and its
+  # tests on Windows rust-windows', each beside this job. The registry and the target are cached by
+  # the lock and the toolchain, each job's under a key of its own; every build is `--locked`.
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust
     needs: scope
     if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-26.04, windows-2025]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: implementations/rust
-        # Git Bash on Windows, so every step reads alike on both
-        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -449,31 +442,24 @@ jobs:
       # 1.99.1, its components, clippy, rustfmt and llvm-tools, and its target
       # wasm32-unknown-unknown, as rust-toolchain.toml names them
       - run: rustup toolchain install
-      # ! the key the mqtt job restores on Linux: the debug build and the interop's server it reuses
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             implementations/rust/target
-          key: rust-${{ matrix.os }}-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
-          restore-keys: rust-${{ matrix.os }}-
-      - if: matrix.os == 'windows-2025'
-        run: cargo test --workspace --all-features --locked
+          key: rust-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-ubuntu-26.04-
       # cargo-deny's prebuilt release, checked by its SHA-256 against the action's manifest
-      - if: matrix.os == 'ubuntu-26.04'
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-deny@0.20.2
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo fmt --all -- --check
+      - run: cargo fmt --all -- --check
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo build --workspace --locked
+      - run: cargo build --workspace --locked
       # the interop's server and its trials' test binary, for the interop-rust job, which has no
       # Rust toolchain: each one's path read from cargo's JSON, the test binary's named by a hash,
       # both copied to one folder under the names that job runs them by
-      - if: matrix.os == 'ubuntu-26.04'
-        name: The interop's server and its trials, built
+      - name: The interop's server and its trials, built
         run: |
           server="$(cargo build -p francisdesjardins-bead-interop-server --locked --message-format=json \
             | jq -r 'select(.reason == "compiler-artifact" and .target.name == "bead-interop-server" and .executable != null) | .executable')"
@@ -485,26 +471,45 @@ jobs:
           cp "$server" "$RUNNER_TEMP/rust-interop/bead-interop-server"
           cp "$trials" "$RUNNER_TEMP/rust-interop/interop"
       # kept a day: the interop-rust job of the same run reads it, nothing after
-      - if: matrix.os == 'ubuntu-26.04'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rust-interop
           path: ${{ runner.temp }}/rust-interop/
           if-no-files-found: error
           retention-days: 1
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo deny --locked check
+      - run: cargo deny --locked check
       # the projects outside the workspace, each by its own lock, held to the workspace's deny.toml,
       # cargo-deny's default, the one in the folder it runs from: the fuzz targets, the conformance
       # player, the protovalidate differential's testee and hello's Rust half
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
-      - if: matrix.os == 'ubuntu-26.04'
-        run: cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
+      - run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
+      - run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
+      - run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
+      - run: cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
+
+  # The Rust side's tests on Windows, as the user's MSVC toolchain builds them.
+  rust-windows:
+    name: Rust's tests on Windows
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.areas), 'rust')
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: implementations/rust
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/target
+          key: rust-windows-2025-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-windows-2025-
+      - run: cargo test --workspace --all-features --locked
 
   # The Rust side's lints, by its workspace's `[lints]` table: clippy over every member and target
   # with every feature, then on each member's default features; the core's library with no
@@ -647,12 +652,11 @@ jobs:
   # gateway (decisions 0049, 0052): the Rust client's trials against each side's server and its
   # gateway, the TypeScript client and the C# one against the Rust server and its gateway, then a
   # page of another origin in Chromium against its HTTP server, what proves a browser reads its CORS
-  # answer. The Rust server and the trials' test binary are the Rust job's, built once on its Linux
-  # leg, so no Rust toolchain and no C compiler here; it needs both of that job's legs, the Windows
-  # one's tests among them. In the Playwright image the .NET job runs, Ubuntu 26.04 as the Rust
-  # job's runner, so the binaries find the glibc they were linked against; .NET and the TypeScript
-  # side installed as the .NET job has them, for the servers the trials start and for the clients
-  # against the Rust one, the C# server built first so that no trial waits on its build.
+  # answer. The Rust server and the trials' test binary are the Rust job's, built once there, so no
+  # Rust toolchain and no C compiler here. In the Playwright image the .NET job runs, Ubuntu 26.04
+  # as the Rust job's runner, so the binaries find the glibc they were linked against; .NET and the
+  # TypeScript side installed as the .NET job has them, for the servers the trials start and for
+  # the clients against the Rust one, the C# server built first so that no trial waits on its build.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails, and
   # `BEAD_INTEROP_RUST=1` asks for the Rust trials, which are ignored otherwise.
@@ -1569,6 +1573,7 @@ jobs:
         rust-lints,
         rust-coverage,
         rust-fuzz,
+        rust-windows,
         interop-rust,
         mqtt,
         mqtt-rust,

@@ -1269,10 +1269,10 @@ cases over MQTT 5, its adapter's, and the interop over MQTT 5 both ways with the
 its digest, its heartbeat lowered, and a password and TLS certificates drawn for the run, with
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
-AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux
-and Windows (on Linux, the toolchain its file pins, format, a build on the default features alone,
-the interop's server and its trials' test binary built and handed on, and cargo-deny; on Windows,
-the tests), with three jobs beside it on Linux: `rust-lints` (clippy, the core's library linted
+AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` (on Linux,
+the toolchain its file pins, format, a build on the default features alone, the interop's server
+and its trials' test binary built and handed on, and cargo-deny), with four jobs beside it:
+`rust-windows` (the tests on Windows), `rust-lints` (clippy, the core's library linted
 with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and `gateway` each alone,
 `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's target with
 `transcoding`, and the documentation), `rust-coverage` (the tests under coverage, `bead-house`'s
