@@ -6927,12 +6927,12 @@ ${rulesOf(FACE_DARK, { scope: CHOSEN_DARK, drawings: BOTH })}
 ${rulesOf(MARK_DARK, { scope: SYSTEM_DARK, drawings: OWN })}
 ${rulesOf(FACE_DARK, { scope: SYSTEM_DARK, drawings: BOTH })}
 }
-/* * the bar's mark, taken over where no room is left beside the text: a finger's size, so the face
-   reads, its face coming and going with the marked sections, its strokes about 1.3 px whatever
-   its scale */
+/* * the bar's mark, taken over where no room is left beside the text: 36 px, so the face reads and
+   the mark still sits with the name and the tools, its target the brand's link, a finger's size;
+   its face coming and going with the marked sections, its strokes about 1.2 px whatever its scale */
 :root[data-bead-mark] .bead-mark {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   overflow: visible;
 }
 .bead-mark .bead-face {
@@ -6944,7 +6944,7 @@ ${rulesOf(FACE_DARK, { scope: SYSTEM_DARK, drawings: BOTH })}
 }
 .bead-mark .line {
   vector-effect: non-scaling-stroke;
-  stroke-width: 1.3px;
+  stroke-width: 1.2px;
 }
 .bead-mark .ray {
   vector-effect: non-scaling-stroke;
