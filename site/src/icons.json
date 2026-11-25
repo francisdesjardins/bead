@@ -1,11 +1,11 @@
 {
-  "mark": "6485e57587363c89a730a328c5eb529a04b2e3dc5a96299f4d646a1e98ac97d9",
+  "mark": "7f7ba6fc7d8beb4e6dccf9b78aff030faa43fc0589499206786de9a150f9150b",
   "files": {
-    "site/src/favicon.ico": "71918203f9c59237eccbbba189cc4e1d7fb595d7abd62f91b68d0b5de334ac1f",
-    "site/src/apple-touch-icon.png": "de8cee851bda55da3830d4f0d6757957e15495c5a9cfd407b622ae8d627e432f",
-    "implementations/typescript/devtools/chrome/icons/icon-16.png": "0abd2fa4d0590e816a61dec6d33e326f1684852d599a5372e099fa688d08c9a4",
-    "implementations/typescript/devtools/chrome/icons/icon-32.png": "05f0bff55bdf4171dccf781829101dfe5217d0f2e1cec11263b6f65f78a8a05e",
-    "implementations/typescript/devtools/chrome/icons/icon-48.png": "c2336e589b01c4a7d8d09bcf9e62aae87df6be22e04538f19e7014d600cd1fb8",
-    "implementations/typescript/devtools/chrome/icons/icon-128.png": "e1d6d97cf7b9c143cd78087eebea3087529de31d42b2fa56bf397e994f5fad60"
+    "site/src/favicon.ico": "439b97b93944ccb1be3fc4b5585930e1a6956e562b03054603e2eac990ef53c3",
+    "site/src/apple-touch-icon.png": "b293a9c70a458757af3f7816c048980adf288da9c568291b46902f6222242209",
+    "implementations/typescript/devtools/chrome/icons/icon-16.png": "e423e55387222b2354551b5a27b0c7de9846cbd16c72689eed73dd0c108bfde1",
+    "implementations/typescript/devtools/chrome/icons/icon-32.png": "19face360259732ae9ffbafe76efe441ee52097dafbb4686cd817409bc98e5a4",
+    "implementations/typescript/devtools/chrome/icons/icon-48.png": "305629e98c98562dfc6e7e87fa126a97d4d608bb59ea90ea17510c652cae9552",
+    "implementations/typescript/devtools/chrome/icons/icon-128.png": "d5b7005612c5576e564ebd0bd96fbf607adf66fc4624e2f63ef6a14a3a2cdbbc"
   }
 }

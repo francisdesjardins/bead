@@ -230,7 +230,7 @@ const RIM = 'M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46';
 const FACE_CENTRE = Object.freeze({ x: 13.4, y: 19 });
 const FACE_SCALE = 1.2;
 const MONOCLE =
-  'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 20.5 19.9 21.3 21.9';
+  'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 19.9 19.6 20.3 20.7';
 const STYLE_ID = 'bead-mascot-style';
 
 // the mark's colours in either theme, as `favicon.svg` has them: its own drawing's; the bar's mark
@@ -474,7 +474,7 @@ const drawingOf = (hasCorona) => {
   if (hasCorona) {
     svg.append(corona);
   }
-  const rim = element('path', { class: 'rim', d: RIM, 'stroke-opacity': 0.6 });
+  const rim = element('path', { class: 'rim', d: RIM });
   const beads = BEADS.map(({ x, y, r }) => {
     return element('circle', { class: 'bead', cx: x, cy: y, r });
   });
@@ -558,7 +558,7 @@ const paint = (drawing, { face, eclipse }) => {
   drawing.flare.setAttribute('d', flareOf(0.6 + 0.6 * eclipse.flare));
   drawing.corona.setAttribute('opacity', fixed(eclipse.corona));
   // ! a style, not an attribute: the bar's mark takes its rim's from its page's sheet
-  drawing.rim.style.strokeOpacity = fixed(0.6 * (1 - eclipse.corona));
+  drawing.rim.style.strokeOpacity = fixed(1 - eclipse.corona);
 };
 
 /** The mark with face `name`, still, for a page to place: an empty state's, say. */
