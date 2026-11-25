@@ -29,6 +29,9 @@ env:
   YARN: node .yarn/releases/yarn-4.18.1.cjs
   # The TypeScript suite is unit tests without a browser: nothing to download.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+  # ! the shards the TypeScript side's tests run in: the `typescript` job's matrix lists one entry a
+  # shard, and typescript-coverage waits for the coverage of each
+  TYPESCRIPT_SHARDS: 2
 
 jobs:
   # ── Scope ────────────────────────────────────────────────────────────────────
@@ -127,19 +130,25 @@ jobs:
           console.log('site=' + exact(require('./site/package.json').devDependencies['playwright-core'], 'playwright-core'))" >> "$GITHUB_OUTPUT"
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
-  # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
-  # examples, the generated `Probe` held to its generator, its public surface held to
-  # `surface.txt` with its options parameters, the generated interop's types and lint, then its
-  # tests, on the current line under coverage, held to the side's floor. The interop against the C#
-  # server runs in the .NET job, against the Rust one in the interop-rust job. On the current line
-  # and on the floor `engines.node` declares, so the floor holds by a run.
+  # The TypeScript side's gate, in three jobs: `typescript` checks the side and runs its tests,
+  # `typescript-apps` tests the demo, the DevTools extension and the page beside it, and
+  # `typescript-coverage`, once the tests end, holds what they ran to the side's floor.
+  # tools/ci-scope.mjs counts the last two as `typescript`'s own: they run in its scope, and its
+  # verdict reads their results.
+  #
+  # `typescript`: types, lint and its plugin's cases, format, comment budget, doc examples, the
+  # generated `Probe` held to its generator, its public surface held to `surface.txt` with its
+  # options parameters, the generated interop's types and lint, the demo's static build and the
+  # DevTools extension's, then its tests, cut into shards by Playwright's `--shard`. On the current
+  # line and on the floor `engines.node` declares, so the floor holds by a run; on the current line,
+  # each shard runs under c8 and hands on the raw V8 coverage it wrote. The interop against the C#
+  # server runs in the .NET job, against the Rust one in the interop-rust job.
   typescript:
-    name: TypeScript (Node ${{ matrix.node }})
+    name: TypeScript (Node ${{ matrix.node }}, shard ${{ matrix.shard }})
     needs: [scope, playwright]
     if: contains(fromJSON(needs.scope.outputs.areas), 'typescript')
     runs-on: ubuntu-26.04
-    # the WCAG 2.2 AA sweeps of the page, the demo and the panel take some five minutes of it
-    timeout-minutes: 20
+    timeout-minutes: 10
     # the image of the Playwright the side pins, Chromium in it: no browser to install
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
@@ -148,6 +157,8 @@ jobs:
       fail-fast: false
       matrix:
         node: ['26', '24.9']
+        # ! one entry a shard: TYPESCRIPT_SHARDS is its length
+        shard: [1, 2]
     defaults:
       run:
         working-directory: implementations/typescript
@@ -167,54 +178,97 @@ jobs:
           restore-keys: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
-      # the builder's packages too: the demo's Packages tab runs the builder's selection and its
-      # reading of beadc.yaml, whose types the type-check and whose `yaml` the demo's tests reach
-      # from builder/
+      # the builder's packages too: the type-check reaches the builder's types from the demo
       - run: $YARN install --immutable
         working-directory: builder
-      - run: $YARN check
+      # What a line checks once, in its first shard: the side's gates, then bundling the demo's
+      # static build, the folder beadproto.dev serves at /playground/, and the DevTools extension.
+      - if: matrix.shard == 1
+        run: $YARN check
+      - if: matrix.shard == 1
+        run: $YARN playground:build:file
+      - if: matrix.shard == 1
+        run: $YARN devtools:build
       - if: matrix.node != '26'
-        run: $YARN test --grep-invert "the (C#|Rust) server of the interop service"
-      # On the current line, the same tests under c8, then what they ran held to the TypeScript
-      # side's floor in tools/coverage-floors.json, the report in the run's summary.
-      - if: matrix.node == '26'
-        run: $YARN test:coverage --grep-invert "the (C#|Rust) server of the interop service"
-      - if: matrix.node == '26'
-        name: Coverage, held to its floor
-        working-directory: .
         run: >-
-          node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
-          --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
-      # the report to browse, c8's HTML and its lcov, kept with the run where it failed, the floor
-      # among it: a green run's figures are its summary's
-      - if: ${{ failure() && matrix.node == '26' }}
+          $YARN test --shard "${{ matrix.shard }}/$TYPESCRIPT_SHARDS"
+          --grep-invert "the (C#|Rust) server of the interop service"
+      # On the current line, the same tests under c8, which writes no report: the raw V8 coverage of
+      # each process, in coverage/tmp/, goes to typescript-coverage.
+      - if: matrix.node == '26'
+        run: >-
+          $YARN c8 --reporter none playwright test --shard "${{ matrix.shard }}/$TYPESCRIPT_SHARDS"
+          --grep-invert "the (C#|Rust) server of the interop service"
+      - if: matrix.node == '26'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: coverage-typescript
-          path: implementations/typescript/coverage/
-          retention-days: 14
-      # The demo's static build, the folder beadproto.dev serves at /playground/: bundling it is the
-      # check.
+          name: coverage-v8-typescript-${{ matrix.shard }}
+          path: implementations/typescript/coverage/tmp/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The demo, the DevTools extension and the page, on the current line, each in a leg of its own.
+  typescript-apps:
+    name: TypeScript, ${{ matrix.title }}
+    needs: [scope, playwright]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'typescript')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # the image of the Playwright the side pins, Chromium in it: no browser to install
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: devtools
+            title: the DevTools extension
+          - part: page
+            title: the demo and the page
+    defaults:
+      run:
+        working-directory: implementations/typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+      # the builder's packages too: the demo's Packages tab runs the builder's selection and its
+      # reading of beadc.yaml, whose `yaml` the demo's tests reach from builder/
+      - run: $YARN install --immutable
+        working-directory: builder
+      # The demo's static build, which both legs load.
       - run: $YARN playground:build:file
-      # The DevTools extension, built, then tested on the current line: its pure modules, and itself
-      # loaded in Chromium against the static build above, the image's own browser.
-      - run: $YARN devtools:build
-      - if: matrix.node == '26'
+      # The DevTools extension, built, then tested: its pure modules, and itself loaded in Chromium
+      # against the static build above, the image's own browser.
+      - if: matrix.part == 'devtools'
+        run: $YARN devtools:build
+      - if: matrix.part == 'devtools'
         run: $YARN test:devtools
-      # The demo's own tests on the current line: its procedures in Node, and its page, the static
-      # build above, in Chromium.
-      - if: matrix.node == '26'
+      # The demo's own tests: its procedures in Node, and its page, the static build above, in
+      # Chromium.
+      - if: matrix.part == 'page'
         run: $YARN test:demo
       # The page, the privacy policy, the not-found page and every scene of the demo, as
       # beadproto.dev serves them from out/, held to WCAG 2.2 AA by tools/check-a11y.mjs, after its
       # own tests, which fail here rather than skip.
-      - if: matrix.node == '26'
+      - if: matrix.part == 'page'
         name: WCAG 2.2 AA, the check's own tests
         working-directory: .
         env:
           BEAD_A11Y_REQUIRED: '1'
         run: node --test tools/__tests__/check-a11y.test.mjs
-      - if: matrix.node == '26'
+      - if: matrix.part == 'page'
         name: WCAG 2.2 AA, the page and the demo as served
         working-directory: .
         run: >-
@@ -223,6 +277,70 @@ jobs:
           /nowhere /playground/
           '/playground/#calls' '/playground/#rules' '/playground/#openapi' '/playground/#server'
           '/playground/#code' '/playground/#packages'
+
+  # The shards' raw coverage, reported by c8 as one run's: c8 merges the V8 coverage of every
+  # process, whichever shard ran it, as it merges one run's workers. Then what the tests ran, held
+  # to the TypeScript side's floor in tools/coverage-floors.json, the report in the run's summary.
+  typescript-coverage:
+    name: TypeScript's coverage
+    needs: [scope, playwright, typescript]
+    if: contains(fromJSON(needs.scope.outputs.areas), 'typescript')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    # ! the shards' image, so the checkout sits at their path: the raw coverage names each file by
+    # its absolute path, and c8 reads the sources there
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+    defaults:
+      run:
+        working-directory: implementations/typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+      # each shard's in a folder of its own name
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-v8-typescript-*
+          path: implementations/typescript/coverage/shards
+      # ! c8 reads its folder flat and passes over a file it cannot read: every shard is there, and
+      # each file takes its shard's name before its own, so no two collide
+      - name: The shards' raw coverage, in one folder
+        run: |
+          test "$(ls coverage/shards | wc -l)" -eq "$TYPESCRIPT_SHARDS"
+          mkdir -p coverage/tmp
+          for shard in coverage/shards/*; do
+            for file in "$shard"/*.json; do
+              cp "$file" "coverage/tmp/$(basename "$shard")-$(basename "$file")"
+            done
+          done
+      - run: $YARN c8 report
+      - name: Coverage, held to its floor
+        working-directory: .
+        run: >-
+          node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
+          --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
+      # the report to browse, c8's HTML and its lcov, kept with the run where it failed, the floor
+      # among it: a green run's figures are its summary's
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-typescript
+          path: |
+            implementations/typescript/coverage/
+            !implementations/typescript/coverage/shards/
+            !implementations/typescript/coverage/tmp/
+          retention-days: 14
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
@@ -1357,6 +1475,8 @@ jobs:
         spec,
         playwright,
         typescript,
+        typescript-apps,
+        typescript-coverage,
         dotnet,
         rust,
         interop-rust,

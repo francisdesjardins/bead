@@ -2,8 +2,9 @@
 // The tests run by what changes: one table of rules, written once, that CI on a feature branch, the
 // maintainer before a push and the workflows' integration all apply. A rule names path patterns
 // and the areas a path it matches reaches. An area is a job of `.github/workflows/ci.yml`, by its
-// id, and the commands that play that job from a clone. The first rule a path matches is its rule,
-// so a narrow rule stands before a broad one; a path no rule matches reaches every area.
+// id, with the jobs `PARTS` names its own, and the commands that play them from a clone. The first
+// rule a path matches is its rule, so a narrow rule stands before a broad one; a path no rule
+// matches reaches every area.
 //
 // The rules follow what each job reads, not the folders' names: `spec` reads every side's tests,
 // the builder's, `docs/support.md` and the README; `typescript` reads the builder's sources, which
@@ -12,7 +13,8 @@
 // conformance jobs build every side's runtime. A side's runtime reaches the jobs that make the sides
 // talk, `dotnet`'s interop, `interop-rust`, `mqtt` and `amqp`; its demo, its DevTools extension and
 // one side's own tests reach fewer. `commits` runs always. An area pulls in the jobs it needs:
-// `interop-rust` takes the binaries `rust` builds, and five jobs run in the image `playwright` names.
+// `interop-rust` takes the binaries `rust` builds, and five areas' jobs run in the image `playwright`
+// names.
 //
 //   node tools/ci-scope.mjs [<base> [<head>]]         the areas, one a line
 //   node tools/ci-scope.mjs --local [<base> [<head>]] the commands of those areas, from the root,
@@ -42,8 +44,8 @@ export const ROOT = resolve(import.meta.dirname, '..');
 
 // ── The areas ──────────────────────────────────────────────────────────────────
 
-// ! one a job of ci.yml, by its id, `scope` and `ci-ok` aside: the test holds both lists to each
-// other
+// ! one a job of ci.yml, by its id, `scope`, `ci-ok` and the parts aside: the test holds both lists
+// to each other
 export const AREAS = Object.freeze([
   'spec',
   'playwright',
@@ -71,6 +73,15 @@ export const NEEDS = Object.freeze({
   'interop-rust': ['playwright', 'rust'],
   mqtt: ['playwright'],
   site: ['playwright'],
+});
+
+// a job that does part of an area's work, apart so it runs beside the area's job or after it: the
+// area whose scope it runs in, and the jobs it `needs` beside `scope`, as ci.yml writes them
+export const PARTS = Object.freeze({
+  // the demo, the DevTools extension and the page, beside the tests
+  'typescript-apps': Object.freeze({ area: 'typescript', needs: ['playwright'] }),
+  // the coverage of the tests' shards, merged and held to the floor
+  'typescript-coverage': Object.freeze({ area: 'typescript', needs: ['playwright', 'typescript'] }),
 });
 
 // ── The rules ──────────────────────────────────────────────────────────────────
@@ -547,8 +558,9 @@ export const modeOf = (env) => {
   return { all: `a run of ${event || 'no event'}` };
 };
 
-// each job's result against its scope: one in scope succeeded, one out of it was skipped, and the
-// scope itself succeeded; a job skipped because one it needs failed is in scope, so it fails here
+// each job's result against its scope, a part's its area's: one in scope succeeded, one out of it
+// was skipped, and the scope itself succeeded; a job skipped because one it needs failed is in scope,
+// so it fails here
 export const verdictOf = (needs, areas) => {
   const problems = [];
   const scope = needs.scope ? needs.scope.result : 'absent';
@@ -559,7 +571,8 @@ export const verdictOf = (needs, areas) => {
     if (job === 'scope') {
       continue;
     }
-    if (ALWAYS.includes(job) || areas.includes(job)) {
+    const area = PARTS[job] ? PARTS[job].area : job;
+    if (ALWAYS.includes(area) || areas.includes(area)) {
       if (result !== 'success') {
         problems.push(`${job}: ${result}, in scope`);
       }

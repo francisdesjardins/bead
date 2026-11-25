@@ -13,6 +13,7 @@ import {
   LOCAL,
   modeOf,
   NEEDS,
+  PARTS,
   patternOf,
   reachOf,
   ROOT,
@@ -53,8 +54,11 @@ const jobsOf = (text) => {
 const CI = jobsOf(readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8'));
 
 describe('ci.yml', () => {
-  test('its jobs are the areas, the scope and CI ok, each way', () => {
-    assert.deepEqual([...CI.keys()].sort(), [...AREAS, 'scope', 'ci-ok'].sort());
+  test('its jobs are the areas, their parts, the scope and CI ok, each way', () => {
+    assert.deepEqual(
+      [...CI.keys()].sort(),
+      [...AREAS, ...Object.keys(PARTS), 'scope', 'ci-ok'].sort()
+    );
   });
 
   test('each scoped job needs the scope and runs when its area is in it, and commits runs always', () => {
@@ -79,9 +83,28 @@ describe('ci.yml', () => {
     }
   });
 
+  test('each part runs when its area is in the scope, and needs what it is given, within its area', () => {
+    for (const [job, part] of Object.entries(PARTS)) {
+      assert.ok(AREAS.includes(part.area), job);
+      assert.ok(CI.get(job).needs.includes('scope'), job);
+      assert.equal(
+        CI.get(job).if,
+        `contains(fromJSON(needs.scope.outputs.areas), '${part.area}')`,
+        job
+      );
+      const needed = CI.get(job).needs.filter((each) => {
+        return each !== 'scope';
+      });
+      assert.deepEqual(needed.sort(), [...part.needs].sort(), job);
+      for (const each of part.needs) {
+        assert.ok(closureOf([part.area]).includes(each), `${job} needs ${each}`);
+      }
+    }
+  });
+
   test('CI ok needs every job and runs always', () => {
     const ok = CI.get('ci-ok');
-    assert.deepEqual(ok.needs.sort(), [...AREAS, 'scope'].sort());
+    assert.deepEqual(ok.needs.sort(), [...AREAS, ...Object.keys(PARTS), 'scope'].sort());
     assert.equal(ok.if, 'always()');
   });
 });
@@ -469,6 +492,67 @@ describe('verdictOf', () => {
         'commits',
       ]),
       ['commits: cancelled, in scope', 'site: success, out of scope, where it is skipped']
+    );
+  });
+
+  test("reads a part's result against its area's scope", () => {
+    assert.deepEqual(
+      verdictOf(
+        {
+          scope: ran('success'),
+          commits: ran('success'),
+          typescript: ran('success'),
+          'typescript-apps': ran('success'),
+          'typescript-coverage': ran('success'),
+        },
+        ['typescript', 'commits']
+      ),
+      []
+    );
+    assert.deepEqual(
+      verdictOf(
+        {
+          scope: ran('success'),
+          commits: ran('success'),
+          typescript: ran('skipped'),
+          'typescript-apps': ran('skipped'),
+          'typescript-coverage': ran('skipped'),
+        },
+        ['commits']
+      ),
+      []
+    );
+  });
+
+  test('fails on a part in scope that failed or was skipped, and on one out of scope that ran', () => {
+    assert.deepEqual(
+      verdictOf(
+        {
+          scope: ran('success'),
+          commits: ran('success'),
+          typescript: ran('failure'),
+          'typescript-apps': ran('failure'),
+          'typescript-coverage': ran('skipped'),
+        },
+        ['typescript', 'commits']
+      ),
+      [
+        'typescript: failure, in scope',
+        'typescript-apps: failure, in scope',
+        'typescript-coverage: skipped, in scope',
+      ]
+    );
+    assert.deepEqual(
+      verdictOf(
+        {
+          scope: ran('success'),
+          commits: ran('success'),
+          typescript: ran('skipped'),
+          'typescript-apps': ran('success'),
+        },
+        ['commits']
+      ),
+      ['typescript-apps: success, out of scope, where it is skipped']
     );
   });
 
