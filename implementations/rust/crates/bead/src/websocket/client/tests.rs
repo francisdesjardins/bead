@@ -2410,6 +2410,25 @@ async fn messages_within(recorder: &Recorder, count: usize) -> Vec<Bytes> {
     .expect("the messages within patience")
 }
 
+// waits until the heartbeat of `client`'s open connection has the echo of its ping read
+async fn answered(client: &WebSocketTransportClient) {
+    patience(PATIENCE, async {
+        while !client
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .current
+            .as_ref()
+            .is_some_and(|open| open.heartbeat.is_answered())
+        {
+            yield_now().await;
+        }
+    })
+    .await
+    .expect("its ping answered within patience");
+}
+
 // a client whose timers that bound its socket run on `platform`, a test's clock
 fn on_platform(
     platform: &Arc<SteppingClock>,
@@ -3962,7 +3981,7 @@ async fn pings_its_server_once_silent_for_its_heartbeat_over_a_socket_that_can_a
             socket.write_all(&frame_of(0xa, &payload)).await.unwrap();
 
             // its pong read before the next beat
-            crate::testing::rest(Duration::from_millis(50)).await;
+            answered(&client).await;
         }
     }
 
@@ -4086,6 +4105,30 @@ async fn stops_beating_once_disconnected_dropped_or_closed_by_its_server_and_pin
         patience(PATIENCE, frame_from(&mut socket)).await.unwrap(),
         None,
         "no ping"
+    );
+}
+
+#[tokio::test]
+async fn runs_on_its_platform_s_clock_when_given_none_and_on_a_test_s_once_one_replaces_it() {
+    let platform = stepping();
+    let replaced: SharedClock = Arc::<SteppingClock>::clone(&platform);
+    let on_its_platform = client();
+    let on_a_test = on_platform(&platform, &WebSocketTransportClientOptions::default());
+
+    assert_eq!(
+        on_its_platform.inner.clock.description(),
+        "the platform's",
+        "its platform's clock when given none"
+    );
+    assert!(
+        Arc::ptr_eq(&on_a_test.inner.clock, &replaced),
+        "the test's once it replaces the platform's"
+    );
+    // * a replaced platform clock is one of its own, as any clock that is not the platform's
+    assert_eq!(
+        on_a_test.inner.clock.description(),
+        "one of its own",
+        "named as one of its own"
     );
 }
 

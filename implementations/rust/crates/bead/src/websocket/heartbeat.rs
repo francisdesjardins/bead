@@ -151,6 +151,12 @@ impl Heartbeat {
         }
     }
 
+    /// Whether no ping of its waits for its echo: none went, or the last one's came.
+    #[cfg(test)]
+    pub(crate) fn is_answered(&self) -> bool {
+        locked(&self.inner.state).pinged.is_none()
+    }
+
     /// It beats no more: its connection ended.
     pub(crate) fn stop(&self) {
         let timer = {
