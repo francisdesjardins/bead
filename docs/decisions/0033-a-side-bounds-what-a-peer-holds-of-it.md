@@ -279,8 +279,8 @@ in full as its last answer settles. Every client Bead builds lets an idle pooled
 `PooledConnectionIdleTimeout`, undici's own 4 s on the TypeScript side, `POOL_IDLE_TIMEOUT` on the
 Rust side. A `headersTimeout` under 5 s races a pool that no `Keep-Alive` hint tells, as Kestrel and
 hyper send none. One bound for a head and an idle span is Bead's leveling to hyper's one timer, a
-row of `docs/support.md`'s "Leveled down"; a bound of its own for the idle span, as Go's
-`IdleTimeout` and Envoy's `idle_timeout`, is ahead, on every side at once.
+row of `docs/support.md`'s "Leveled down"; a bound of its own for the idle span is ahead, on
+every side at once.
 
 **Over HTTP/1, a server reads a socket no further than a bound of its own behind the answer under
 way, and keeps it** (spec 15.12, transcoding 10.2). Requests pipelined behind an answer under way
