@@ -15,12 +15,16 @@ from the template each rule formats in builder/proto/buf/validate/validate.proto
 for the rules beadc compiles alone. A backslash is
 chr(92), so that no escape this file builds is read before it is built."""
 import base64
+import email.utils
 import hashlib
+import http.client
 import json
 import math
 import os
+import queue
 import re
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -43,17 +47,64 @@ with open(os.path.join(HERE, 'ucd.json'), encoding='utf-8') as file:
     UCD = json.load(file)
 
 
-def fetched(url):
-    """A URL's bytes, asked up to three times: unicode.org answers a 5xx now and then, which a moment
-    later it does not."""
-    for attempt in range(3):
+def download_once(url, timeout):
+    """One try's bytes, with headers and body together bounded by timeout seconds."""
+    answer = queue.Queue(maxsize=1)
+
+    def read():
         try:
-            with urllib.request.urlopen(url, timeout=60) as response:
-                return response.read()
-        except (urllib.error.URLError, TimeoutError):
-            if attempt == 2:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                answer.put(response.read())
+        except Exception as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            answer.put(error)
+
+    # ! urllib's timeout bounds socket waits, not the whole body or DNS. A daemon's private
+    # answer is discarded past the bound, and a late read cannot hold the generator open.
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        result = answer.get(timeout=timeout)
+    except queue.Empty:
+        raise TimeoutError(f'{url}: its download try exceeds {timeout} s') from None
+    if isinstance(result, Exception):
+        raise result
+    return result
+
+
+def fetched(url, *, tries=4, timeout=60, pause=None):
+    """A URL's bytes under fetch-pinned.mjs's policy: four tries, each bounded by 60 s, pauses of
+    2, 4 and 8 s, or Retry-After's seconds or HTTP date, capped at 60 s. Network errors, a cut body,
+    408, 429 and 5xx are tried again; another failed status is refused at once."""
+    if not isinstance(tries, int) or tries < 1:
+        raise ValueError('a download makes one try at least')
+    if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError('a download try has a finite positive timeout in seconds')
+    pause = time.sleep if pause is None else pause
+
+    for attempt in range(tries):
+        wait = None
+        try:
+            return download_once(url, timeout)
+        except urllib.error.HTTPError as error:
+            if error.code not in (408, 429) and not 500 <= error.code <= 599:
                 raise
-            time.sleep(5 * 3 ** attempt)
+            value = error.headers.get('Retry-After', '').strip()
+            if re.fullmatch(r'[0-9]+', value):
+                wait = float(value)
+            else:
+                try:
+                    date = email.utils.parsedate_tz(value)
+                    if date is not None:
+                        wait = max(0, email.utils.mktime_tz(date) - time.time())
+                except (OverflowError, ValueError):
+                    pass
+            if attempt == tries - 1:
+                raise
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
+            if attempt == tries - 1:
+                raise
+        pause(min(2 * 2 ** attempt if wait is None else wait, 60))
     raise AssertionError('unreachable')
 
 
