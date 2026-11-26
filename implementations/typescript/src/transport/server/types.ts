@@ -2,7 +2,7 @@
 
 import type { Server } from 'node:http';
 import type { IProcedureAddress } from '../../router/shared/types';
-import type { IClock } from '../shared/clock';
+import type { IClock, PLATFORM } from '../shared/clock';
 import type {
   CLOSE_EVENT,
   CONNECTION_EVENT,
@@ -536,6 +536,14 @@ export interface IWebSocketServerConstructor {
 }
 
 export interface IWebSocketTransportServerOptions extends ITransportServerOptions {
+  /**
+   * The clock its own bounds of its platform run on, its heartbeat, its close handshake's bound,
+   * its pace and its linger, and its `clock` when none is given: the platform's, which only a test
+   * replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
@@ -547,7 +555,7 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
   bodyGracePeriod?: number | undefined;
   /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close`,
-   * `stop` and each close a failure sends, its 1009 among them, on the real clock whatever
+   * `stop` and each close a failure sends, its 1009 among them, on its platform's clock whatever
    * `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its own. From
    * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end, which the
    * timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
@@ -653,9 +661,9 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
    * The slowest, in bytes a second, a connection's socket may take what waits for it, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`: each
    * envelope handed moves the connection's deadline by the time its bytes take at it, and one whose
-   * socket holds something past its deadline, judged each second on the real clock, is dropped,
-   * reported on `error` naming it, its close unclean (spec 15.12). A whole number; 0 holds none.
-   * Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   * socket holds something past its deadline, judged each second on its platform's clock, is
+   * dropped, reported on `error` naming it, its close unclean (spec 15.12). A whole number; 0 holds
+   * none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
    */
   minimumSendBytesPerSecond?: number | undefined;
   /**
@@ -851,6 +859,13 @@ export interface IHTTPServerLike extends IHeadBoundServerLike {
  */
 export interface IHTTPTransportServerOptions extends ITransportServerOptions, IHTTPPolicyOption {
   /**
+   * The clock its own bounds of its platform run on, its pace and its linger, and its `clock` when
+   * none is given: the platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
+  /**
    * The bytes of body the exchanges under way may hold together, counted as they come; past them,
    * an exchange is refused 503. Defaults to {@link BODY_BYTES_BUDGET}.
    */
@@ -953,9 +968,10 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions, IH
   /**
    * The slowest, in bytes a second, a socket may take an answer, or a listen's batch, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`, judged each
-   * second on the real clock: an answer or a batch past its deadline is lost, its connection dropped
-   * at both ends and reported on `error` naming it and `sendGracePeriod` with their values (spec
-   * 15.7, 15.12). A whole number; 0 holds none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   * second on its platform's clock: an answer or a batch past its deadline is lost, its connection
+   * dropped at both ends and reported on `error` naming it and `sendGracePeriod` with their values
+   * (spec 15.7, 15.12). A whole number; 0 holds none. Defaults to
+   * {@link MINIMUM_SEND_BYTES_PER_SECOND}.
    */
   minimumSendBytesPerSecond?: number | undefined;
   /**

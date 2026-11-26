@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -40,7 +41,7 @@ public sealed record WebSocketTransportClientOptions
     /// to 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
     /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
     /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
-    /// the platform's close, on the real clock.
+    /// the platform's close, on its platform's clock.
     /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -49,6 +50,9 @@ public sealed record WebSocketTransportClientOptions
     /// them; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
 
     /// <summary>
     /// What sends its opening handshakes, one of its own when none, which races the address families
@@ -163,13 +167,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 {
     // constants
 
-    // what sends the opening handshake of every client given neither a handler nor a TLS: a
-    // handler with no cookie, credential or certificate of its own, as a ClientWebSocket builds it,
-    // which follows the platform's proxy for a host off the machine and none for one on the
-    // loopback, and races a name's families, as RFC 8305 asks, where the platform's tries each
-    // address in turn and waits out a family's refusal, two seconds on Windows, connecting a
-    // localhost name to the loopback itself (spec 13.4). A client under its own TLS sends its
-    // handshakes through a handler of these settings, and of its TLS.
+    // what sends the opening handshake of every client given neither a handler, a TLS nor a test's
+    // platform clock: a handler with no cookie, credential or certificate of its own, as a
+    // ClientWebSocket builds it, which follows the platform's proxy for a host off the machine and
+    // none for one on the loopback, and races a name's families, as RFC 8305 asks, where the
+    // platform's tries each address in turn and waits out a family's refusal, two seconds on
+    // Windows, connecting a localhost name to the loopback itself (spec 13.4). A client under its
+    // own TLS, or on a test's platform clock, sends its handshakes through a handler of these
+    // settings, and of its TLS and its clock.
     // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
     // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
     // credential and its security were never judged
@@ -183,11 +188,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     });
 
     private readonly WebSocketTransportClientOptions _options;
+    // * the platform's clock its own bounds of a platform run on, its close timeout and its race
+    private readonly TimeProvider _platform;
     private readonly TimeProvider _clock;
     // what sends its handshakes through the handler it was given, which it never disposes
     private readonly HttpMessageInvoker? _handed;
-    // what sends them under its own TLS, built as a connect needs it and let go of at its dispose,
-    // with what that TLS holds, its key among it
+    // what sends them under its own TLS or a test's platform clock, built as a connect needs it and
+    // let go of at its dispose, with what that TLS holds, its key among it
     private HttpMessageInvoker? _own;
     private TlsCredentials? _ownTls;
     // what every move from one state to another decides by
@@ -239,7 +246,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportClientOptions.Heartbeat)),
             CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportClientOptions.CloseTimeout)),
         };
-        _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _clock = _options.Clock ?? _platform;
         _handed = _options.Handler is { } handler ? new HttpMessageInvoker(handler, disposeHandler: false) : null;
         _listeners = new ListenerGuard((reason, _) =>
         {
@@ -696,7 +706,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         tls?.Dispose();
     }
 
-    // what sends a handshake: the handler given, its own under its TLS, or what every client shares
+    // what sends a handshake: the handler given, its own under its TLS or a test's platform clock,
+    // or what every client shares
     // ! ClientWebSocket's ClientCertificates and RemoteCertificateValidationCallback are never set:
     // each throws beside an invoker
     private HttpMessageInvoker InvokerOf()
@@ -706,7 +717,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             return _handed;
         }
 
-        if (_options.Tls is not { } given)
+        // * what every client shares races on the platform's clock, never on a test's
+        if (_options.Tls is null && _options.Platform is null)
         {
             return Racing;
         }
@@ -715,14 +727,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         {
             if (_own is null)
             {
-                _ownTls = Bead.Tls.CredentialsOf(given);
+                _ownTls = _options.Tls is { } given ? Bead.Tls.CredentialsOf(given) : null;
                 _own = new HttpMessageInvoker(new SocketsHttpHandler
                 {
                     AllowAutoRedirect = false,
-                    ConnectCallback = HappyEyeballs.ConnectCallback,
+                    ConnectCallback = HappyEyeballs.ConnectCallbackOn(_platform),
                     PooledConnectionLifetime = TimeSpan.Zero,
                     Proxy = LoopbackBypassProxy.Instance,
-                    SslOptions = _ownTls.SslOptions(),
+                    SslOptions = _ownTls?.SslOptions() ?? new SslClientAuthenticationOptions(),
                     UseCookies = false,
                 });
             }
@@ -1097,6 +1109,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     MaximumMessageBytes = MaximumMessageBytes,
                     CloseTimeout = CloseTimeout,
+                    Platform = _platform,
                     Gate = gate,
                 });
 

@@ -250,10 +250,13 @@ scripted refusal stands in for what the wire can show.
 
 **A WebSocket's ping and a broker's heartbeat play on the real clock.** Every side pings a peer
 once nothing of it has been read for its `heartbeat`, and drops it once the echo of that ping has
-not come within another (section 15.3); the C# side's platform times it, and the Rust side's
-`SystemClock`, which no clock given reaches. Over a broker, each side pings a connection silent for
-its `heartbeat`, and closes with 4001 one whose peer answers nothing, on its platform's clock
-(section 15.21). A few cases are marked as played in real time. Over a WebSocket, at a heartbeat of
+not come within another (section 15.3); the C# side's platform library times it, and the
+TypeScript and Rust sides' own heartbeat on their platform's clock, which no clock given reaches
+and their own tests may step
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). Over a broker, each side
+pings a connection silent for its `heartbeat`, and closes with 4001 one whose peer answers
+nothing, on its platform's clock (section 15.21). A few cases are marked as played in real time,
+on the platform's clock unreplaced, on every side. Over a WebSocket, at a heartbeat of
 200 ms: a silent peer pinged, again after each echo; and a peer dropped that leaves a ping
 unanswered, whose pong carries other data or none, or that, once pinged, sends a message but no
 echo. At a heartbeat of 400 ms, a peer is never pinged that sends an unsolicited pong within each

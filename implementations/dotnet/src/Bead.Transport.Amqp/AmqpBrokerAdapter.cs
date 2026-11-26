@@ -35,6 +35,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private static readonly TimeSpan LongestIdleTimeout = TimeSpan.FromMilliseconds(1_073_741_823);
 
     private readonly AmqpBrokerAdapterOptions _options;
+    // * the platform's clock its own bounds of a platform run on: its connect timeout, its stop and
+    // its race
+    private readonly TimeProvider _platform;
     private readonly bool _isSecure;
     // what its TLS holds, its key among it, read once and let go of at its dispose
     private readonly TlsCredentials? _tls;
@@ -125,6 +128,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             IdleTimeout = Clocks.AssertHeldWithin((nameof(AmqpBrokerAdapterOptions.IdleTimeout), nameof(AmqpBrokerAdapterOptions.IdleTimeout)), (options.IdleTimeout, LongestIdleTimeout)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(AmqpBrokerAdapterOptions.ConnectTimeout), nameof(AmqpBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme == "amqps", host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
     }
@@ -279,7 +285,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var token = start?.CancellationToken ?? CancellationToken.None;
 
         // * one connectTimeout from its call: its password's ask, then its OPEN and its sessions
-        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
 
         // its provider's token, its start's, its timeout's and its stop's, cancelled once its start ends, linked or not
         var asking = _options.PasswordProvider is null ? null : CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
@@ -606,7 +612,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private async Task LetGo((Incarnation Link, Receiving Receiving) letting, Losing losing)
     {
         var (link, receiving) = letting;
-        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, link.Life.Token);
 
         Drain(receiving);
@@ -697,7 +703,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     {
         var (link, key) = deleting;
 
-        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, link.Life.Token);
 
         try
@@ -715,7 +721,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
             finally
             {
-                await management.Close(_options.ConnectTimeout);
+                await management.Close((_options.ConnectTimeout, _platform));
             }
         }
         catch (OperationCanceledException reason) when (timeout.IsCancellationRequested && !link.IsEnded)
@@ -861,12 +867,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             // * one connect timeout from its call, its whole stop: what is not answered within it
             // is not waited for, each end still sent
-            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
-            var began = TimeProvider.System.GetTimestamp();
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, _platform);
+            var began = _platform.GetTimestamp();
 
             TimeSpan Left()
             {
-                var left = _options.ConnectTimeout - TimeProvider.System.GetElapsedTime(began);
+                var left = _options.ConnectTimeout - _platform.GetElapsedTime(began);
 
                 return left > TimeSpan.Zero ? left : TimeSpan.Zero;
             }
@@ -927,7 +933,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
                 await Task.WhenAll(receivings.Select((receiving) =>
                 {
-                    return AmqpEndpoints.Ending(receiving.Receiver!, Left());
+                    return AmqpEndpoints.Ending(receiving.Receiver!, (Left(), _platform));
                 }));
                 sessions.AddRange(receivings.Select((receiving) =>
                 {
@@ -938,9 +944,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
                 await Task.WhenAll(sessions.Select((session) =>
                 {
-                    return AmqpEndpoints.Ending(session, Left());
+                    return AmqpEndpoints.Ending(session, (Left(), _platform));
                 }));
-                await AmqpEndpoints.Ending(connection, Left());
+                await AmqpEndpoints.Ending(connection, (Left(), _platform));
             }
         }
         finally
@@ -1167,7 +1173,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // * a connect of Bead's: its broker's name raced, a localhost name connected to the loopback
         // asking no resolver (spec 13.4), its TLS the settings set on its factory below
-        var connecting = new RacingTransportProvider(token);
+        var connecting = new RacingTransportProvider(_platform, token);
         var factory = new ConnectionFactory([connecting]);
 
         factory.AMQP.ContainerId = Id;
@@ -1370,7 +1376,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private async Task<Receiving> Declared((Incarnation Link, IReadOnlyList<string> Topic, string Queue) declared, CancellationToken token)
     {
         var (link, topic, queue) = declared;
-        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
 
         try
@@ -1407,7 +1413,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
             finally
             {
-                await management.Close(_options.ConnectTimeout);
+                await management.Close((_options.ConnectTimeout, _platform));
             }
 
             return await ReceiverOf((link, topic, queue), linked.Token);
@@ -1568,7 +1574,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, link.Life.Token);
             var again = await ReceiverOf((link, topic, key), linked.Token);
             bool isLetGo;

@@ -18,7 +18,13 @@ import {
   TRANSPORT_HTTP,
   WAIT_HEADER,
 } from '../shared/constants';
-import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
+import {
+  assertHeld,
+  assertHeldFinite,
+  PLATFORM,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { byteCountOf, GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
@@ -356,7 +362,6 @@ export const createHTTPTransportServer = (
   const {
     bodyBytesBudget = BODY_BYTES_BUDGET,
     bodyGracePeriod: givenBodyGracePeriod = BODY_GRACE_PERIOD,
-    clock = PLATFORM_CLOCK,
     createServer,
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     headersTimeout: givenHeadersTimeout = HEADERS_TIMEOUT,
@@ -378,6 +383,9 @@ export const createHTTPTransportServer = (
     trustedProxies,
     unnamedProxies,
   } = options;
+  // * its own bounds of its platform run on its platform's clock, and so does a server given none
+  const platform = options[PLATFORM] ?? PLATFORM_CLOCK;
+  const clock = options.clock ?? platform;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
   const exchangeTimeout = assertHeld('exchangeTimeout', givenExchangeTimeout);
@@ -459,7 +467,7 @@ export const createHTTPTransportServer = (
               };
 
         if (isClosing) {
-          endClosing({ request, response }, end);
+          endClosing({ request, response }, end, { clock: platform });
         } else {
           endWith(response, end);
         }
@@ -524,7 +532,7 @@ export const createHTTPTransportServer = (
           if (exchange.response.headersSent) {
             exchange.response.destroy();
           } else {
-            endClosing(exchange, UNKNOWN_CONNECTION);
+            endClosing(exchange, UNKNOWN_CONNECTION, { clock: platform });
           }
         }
 
@@ -576,6 +584,7 @@ export const createHTTPTransportServer = (
 
         const paced = createSendPace(
           {
+            clock: platform,
             late: () => {
               late(lateOf(pace));
             },
@@ -1403,7 +1412,9 @@ export const createHTTPTransportServer = (
               response.writeHead(200, {
                 ...RESPONSE_HEADERS,
                 // its body still coming: its connection closed in stages behind it
-                ...(exchange.request.complete === false ? closingOf(exchange) : {}),
+                ...(exchange.request.complete === false
+                  ? closingOf(exchange, { clock: platform })
+                  : {}),
                 'content-length': String(bytes.length),
                 'content-type': BEAD_MEDIA_TYPE,
               });

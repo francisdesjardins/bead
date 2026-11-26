@@ -12,7 +12,15 @@ import mqtt, {
   type MqttClient,
   type Packet,
 } from 'mqtt';
-import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import {
+  assertHeldFinite,
+  assertHeldWithin,
+  type IClock,
+  LONGEST_TIMER,
+  PLATFORM,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 import { createEmitter } from './emitter';
 import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -63,6 +71,13 @@ export type {
 // interfaces
 
 export interface IMqttBrokerAdapterOptions {
+  /**
+   * The clock its own bounds of its platform run on, its waits and a localhost name's race: the
+   * platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
   /**
    * How long it waits, in milliseconds: its start, for its password, where it asks its provider,
    * and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed
@@ -431,6 +446,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     passwordProvider,
     url,
   } = options;
+  // * its own bounds of its platform run on its platform's clock
+  const platform = options[PLATFORM] ?? PLATFORM_CLOCK;
   // * a tls of no member is none
   const tls = tlsOf(options.tls);
   const keepAlive = assertHeldWithin('keepAlive', options.keepAlive ?? KEEP_ALIVE, {
@@ -650,11 +667,11 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   const drain = (incarnation: IIncarnation): Promise<void> => {
     return new Promise<void>((resolve) => {
       const done = (): void => {
-        PLATFORM_CLOCK.clearTimeout(timer);
+        platform.clearTimeout(timer);
         incarnation.drained = undefined;
         resolve();
       };
-      const timer = PLATFORM_CLOCK.setTimeout(done, Math.min(connectTimeout, LONGEST_TIMER));
+      const timer = platform.setTimeout(done, Math.min(connectTimeout, LONGEST_TIMER));
 
       incarnation.drained = () => {
         if (
@@ -691,10 +708,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     });
 
     return new Promise<void>((resolve) => {
-      const timer = PLATFORM_CLOCK.setTimeout(resolve, Math.min(within, LONGEST_TIMER));
+      const timer = platform.setTimeout(resolve, Math.min(within, LONGEST_TIMER));
 
       void Promise.all(answered).then(() => {
-        PLATFORM_CLOCK.clearTimeout(timer);
+        platform.clearTimeout(timer);
         resolve();
       });
     });
@@ -704,7 +721,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   // was handed sent first, what is left failed, each filter let go, then its DISCONNECT of 0x00 sent
   const endOf = async (incarnation: IIncarnation): Promise<void> => {
     // * one connectTimeout from its stop's call: what it was handed, then its UNSUBACKs
-    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const deadline = platform.performance.now() + connectTimeout;
 
     incarnation.isLinked = false;
 
@@ -726,7 +743,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     // Receive Maximum; and before it retires, so that a message that comes meanwhile is still handed
     // on and settled: MQTT.js reads no UNSUBACK behind a PUBLISH it holds unacknowledged
     if (!incarnation.isRetired && incarnation.client.connected) {
-      await letGo(incarnation, Math.max(0, deadline - PLATFORM_CLOCK.performance.now()));
+      await letGo(incarnation, Math.max(0, deadline - platform.performance.now()));
     }
 
     // ! its link lost meanwhile, a packet its client cannot read among it: its stop ends where it
@@ -753,7 +770,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       // * its DISCONNECT within a connectTimeout of its own, though the drain spent the first: then
       // its network connection ended at once, its broker never answering
       await new Promise<void>((resolve) => {
-        const timer = PLATFORM_CLOCK.setTimeout(
+        const timer = platform.setTimeout(
           () => {
             try {
               incarnation.client.stream.destroy();
@@ -767,7 +784,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         );
 
         incarnation.client.end(false, { reasonCode: 0 }, () => {
-          PLATFORM_CLOCK.clearTimeout(timer);
+          platform.clearTimeout(timer);
           resolve();
         });
       });
@@ -823,7 +840,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         }
 
         isSettled = true;
-        PLATFORM_CLOCK.clearTimeout(timer);
+        platform.clearTimeout(timer);
         signal?.removeEventListener('abort', cancel);
         ask.signal.removeEventListener('abort', giveUp);
 
@@ -837,7 +854,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       const cancel = (): void => {
         ask.abort(toCancelError(signal as AbortSignal));
       };
-      const timer = PLATFORM_CLOCK.setTimeout(
+      const timer = platform.setTimeout(
         () => {
           ask.abort(
             new GenericError(
@@ -889,7 +906,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   ): Promise<void> => {
     const asked = starts;
     // * one connectTimeout from its start's call: its password's ask, then its CONNACK
-    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const deadline = platform.performance.now() + connectTimeout;
     const secret =
       passwordProvider === undefined
         ? password
@@ -900,7 +917,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     }
 
     const leftOf = (): number => {
-      return Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+      return Math.max(0, Math.min(deadline - platform.performance.now(), LONGEST_TIMER));
     };
     // * what gives a localhost name's race up: its start's signal, and its stop
     const giveUp = signal === undefined ? ask.signal : AbortSignal.any([ask.signal, signal]);
@@ -910,7 +927,11 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
     if (isStreamOwned && isLocalhostName(hostname)) {
       try {
-        raced = await raceLoopback(mqttPortOf(url), { signal: giveUp, timeout: leftOf() });
+        raced = await raceLoopback(mqttPortOf(url), {
+          clock: platform,
+          signal: giveUp,
+          timeout: leftOf(),
+        });
       } catch (reason) {
         if (signal?.aborted === true) {
           throw toCancelError(signal);
@@ -957,6 +978,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                 ? {
                     // ! `http`'s callback form, which `ws` hands its request, and its types leave out
                     createConnection: loopbackCreateConnection(hostname, {
+                      clock: platform,
                       signal: giveUp,
                       timeout: Math.max(1, left),
                     }) as never,
@@ -1121,7 +1143,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         // whether its first CONNACK was read, and whether its start settled
         let isJudged = false;
         let isSettled = false;
-        const timer = PLATFORM_CLOCK.setTimeout(() => {
+        const timer = platform.setTimeout(() => {
           fail(
             new GenericError(
               `the link of ${id} had no CONNACK within ${String(connectTimeout)} ms, its connectTimeout`
@@ -1130,7 +1152,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         }, left);
         const fail = (error: Error): void => {
           isSettled = true;
-          PLATFORM_CLOCK.clearTimeout(timer);
+          platform.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
           reject(error);
         };
@@ -1213,7 +1235,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           }
 
           isSettled = true;
-          PLATFORM_CLOCK.clearTimeout(timer);
+          platform.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
           held.maximumPacketSize = properties.maximumPacketSize ?? LARGEST_PACKET_SIZE;
           held.receiveMaximum = properties.receiveMaximum ?? RECEIVE_MAXIMUM;
@@ -1469,7 +1491,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         // ! its provider's signal aborted once its start ended, linked or not, in a later turn,
         // so that its listeners run outside the start's own stack
         if (passwordProvider !== undefined) {
-          PLATFORM_CLOCK.setTimeout(() => {
+          // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+          globalThis.setTimeout(() => {
             ask.abort();
           }, 0);
         }
@@ -1569,13 +1592,13 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       const key = topicOf(topic);
       const record = incarnation.filters.get(key);
       const filter = record?.filter ?? key;
-      let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
+      let timer: TimeoutId | undefined;
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
           // * its UNSUBACK awaited within connectTimeout, past which it fails, its link kept so that
           // no will goes, and its filter kept, which its stop lets go (spec 15.27)
-          timer = PLATFORM_CLOCK.setTimeout(
+          timer = platform.setTimeout(
             () => {
               reject(
                 new GenericError(
@@ -1614,7 +1637,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           });
         },
       }).finally(() => {
-        PLATFORM_CLOCK.clearTimeout(timer);
+        platform.clearTimeout(timer);
       });
     },
   };

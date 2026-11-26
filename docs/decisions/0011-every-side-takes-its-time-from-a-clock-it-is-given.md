@@ -25,36 +25,39 @@ within one advance.
 Three ways were weighed:
 
 - **A fake clock installed on the globals of the TypeScript harness**, as `@sinonjs/fake-timers`'
-  `install()` does, changes no surface, and moves every library on the globals with Bead —
-  `node:http`'s timeouts, `ws`'s close, `undici`'s keep-alive — which a `TimeProvider` never reaches
-  on the C# side.
+  `install()` does, changes no surface. It also moves with Bead whatever else reads the globals:
+  `ws`'s close, `undici`'s timeouts, a turn Bead defers, and the test runner's own waits, which it
+  freezes. A `TimeProvider` never reaches any of these on the C# side.
 - **Short timeouts on the real clock, and bounded waits**, keeps every case at the mercy of a
   runner's load, its durations bent to fit.
 - **A clock given to every stack, in each platform's own shape**, reaches Bead's timers and nothing
   else, alike on every side, and lets an application advance its own.
 
+What bounds a platform's own close or socket runs on the platform's clock. A test that waits on such
+a bound in real time passes or fails with the machine's load as well. A test can step it only where
+the side holds the platform's clock as a value.
+
 ## Decision
 
 **What the spec times takes the clock; what bounds a platform's own close, or its socket, takes the
-real one.** The clock times everything the spec times — a call's timeout and a relay's leg B among
+platform's.** The clock times everything the spec times — a call's timeout and a relay's leg B among
 it — the bounds of section 15.12, a body's rate among them, but not those it holds a platform's
-socket and parser to, and a client's connect and its waits. The real clock times, alike on every
-side, what bounds a platform's close or stop against a peer that does not answer — a close
+socket and parser to, and a client's connect and its waits. The platform's clock times, alike on
+every side, what bounds a platform's close or stop against a peer that does not answer — a close
 handshake, a stop's grace, a disconnect's `DELETE`, a lingering close's 2 seconds — and a heartbeat:
-a WebSocket's ping, which the C# side's platform times, and a broker's, which each side times on its
-platform's timer, `heartbeat.ts` and `Heartbeat.cs` on `TimeProvider.System`, and the Rust side's
-`broker/heartbeat.rs` on its `SystemClock`, a ping on a connection silent for its `heartbeat` (spec
-15.21;
+a WebSocket's ping, which the C# side's platform library times, and a broker's, which each side
+times on its stack's platform clock, `heartbeat.ts`, `Heartbeat.cs` and `broker/heartbeat.rs`, a
+ping on a connection silent for its `heartbeat` (spec 15.21;
 [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
-each played in real time ([0004](0004-one-behaviour-in-every-language.md)). What the spec times over
-a broker beside it takes the clock: a half-open connection's `acceptTimeout`, and the rate of an
-envelope's parts (spec 15.18, 15.20). It times as well what 15.12 holds a platform's socket and
-parser to: what waits for a socket, its pace and its bound, since each bounds what the platform's
-socket does; and a head's `headersTimeout`, since the platform's parser alone sees a head before it
-is whole, and its check, Kestrel's heartbeat or Node's `connectionsCheckingInterval`, is internal
-([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). These run on the platforms' own timers,
-`node:http`'s, `undici`'s, `ws`'s, Kestrel's, `SocketsHttpHandler`'s, or on a side's own timer on
-the platform's clock, `globalThis` and `TimeProvider.System`.
+each played in real time by the conformance files ([0004](0004-one-behaviour-in-every-language.md)).
+What the spec times over a broker beside it takes the clock: a half-open connection's
+`acceptTimeout`, and the rate of an envelope's parts (spec 15.18, 15.20). It times as well what
+15.12 holds a platform's socket and parser to: what waits for a socket, its pace and its bound,
+since each bounds what the platform's socket does; and a head's `headersTimeout`, since the
+platform's parser alone sees a head before it is whole, and its check, Kestrel's heartbeat or Node's
+`connectionsCheckingInterval`, is internal ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
+These run on the platforms' own timers, `node:http`'s, `undici`'s, `ws`'s, Kestrel's,
+`SocketsHttpHandler`'s, hyper's, or on a side's own timer on its stack's platform clock.
 
 **Time has three uses.** A duration runs on a timer. A deadline of Bead's own, a call id's
 reservation, is compared on the monotonic reading. An instant from outside, a token's `exp` or
@@ -71,6 +74,24 @@ that transport's clock, and builds its sessions on it. On the TypeScript side th
 given it, and a session manager it builds on another is disposed of, then refused; on the C# and
 Rust sides their options' clock must be it, and options on another are refused before any session
 manager is built. The code the builder generates adds none: it runs on its transport's clock.
+
+**A stack holds its platform's clock beside it, and a test may replace it.** The platform's clock is
+`PLATFORM_CLOCK`, the globals, on the TypeScript side; `TimeProvider.System` on the C# side; and
+`SystemClock` on the Rust side. A stack holds it as one value, set where it starts. Bead's own
+timers that bound a platform run on it, and a stack given no clock runs on it. A test replaces it
+through a seam outside the public surface:
+
+- on the Rust side, the private `on_platform`;
+- on the TypeScript side, the option keyed by the symbol `PLATFORM`, which no entry of the package
+  exports;
+- on the C# side, the internal `Platform` of the options, which `InternalsVisibleTo` opens to the
+  tests.
+
+No clock is installed on the globals. A replaced platform clock is named "one of its own", as any
+clock that is not the platform's. A platform library's own timers stay on the real clock whatever
+the stack holds: `ws`'s close, the header and keep-alive timers of `node:http`, `undici`, Kestrel
+and hyper, .NET's WebSocket keep-alive, and the broker clients' own. So does a deferral to the next
+turn, which no clock times.
 
 **The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the Rust side it
 is a `Clock` trait, its monotonic reading, its wall clock and a timer armed, `SystemClock` the
@@ -153,27 +174,36 @@ given no `TimeProvider`. On the TypeScript side, oxlint's `no-restricted-globals
 `no-restricted-properties` refuse the globals' timers and clocks. On the Rust side, clippy's
 `disallowed-methods` and `disallowed-types` refuse tokio's sleeps, intervals and timeouts,
 `SystemTime::now` and the `Instant`s, so that time goes through the clock
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Each
-exception is suppressed where it stands, with its reason, as
-[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) overrules an analyzer.
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). The
+platform's clock is read where a stack starts and nowhere else: oxlint's `no-restricted-properties`
+refuses a member of `PLATFORM_CLOCK`, the banned-API analyzer refuses `TimeProvider.System`, and
+clippy's `disallowed-methods` refuses `SystemClock::on`. Each exception is suppressed where it
+stands, with its reason, as [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)
+overrules an analyzer.
 
 ## Consequences
 
 **The TypeScript side's tests take a development dependency**, `@sinonjs/fake-timers`, through its
-own lockfile ([0005](0005-a-toolchain-per-language.md)), never installed on the globals;
-`spyIntervals` watches the ping, which is the platform's.
+own lockfile ([0005](0005-a-toolchain-per-language.md)), never installed on the globals.
 
-**Advancing a clock is deterministic for the timers on the clock a side is given alone.** A
-platform's timer, and a bound on the platform's clock, still run on the real clock, and a case that
-waits on one is marked, played in real time, and bounded generously: a head's 408, its `after` and
-its `within` around its time ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
+**Advancing a clock is deterministic for the timers on the clocks a side holds.** A test that
+waits on a bound of Bead's own over a platform may step a test clock in the platform's place. It is
+deterministic when each step waits on what its due depends on, a timer armed, a frame or a pong
+read, never on a rest. A conformance case marked `realTime` plays on the platform's clock
+unreplaced, on every side: a head's 408, its `after` and its `within` around its time
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)), a WebSocket's ping, a broker's heartbeat.
+So does a test of a library's own timer, or of the default itself, each bounded generously. Where a
+heartbeat is its platform library's, the C# side's WebSocket keep-alive, its tests play it in real
+time: a platform row of the support matrix ("A WebSocket's heartbeat and close timeout, stepped by
+a test").
 
-**Every WebSocket end bounds its close on the real clock.** Each closing handshake it begins waits
-its close timeout at most, 5 seconds by default (spec 15.3,
+**Every WebSocket end bounds its close on its platform's clock.** Each closing handshake it begins
+waits its close timeout at most, 5 seconds by default (spec 15.3,
 [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s place
 `webSocketTransport.closeTimeout`), the TypeScript client handing it to `ws`; a client over the
 global `WebSocket` leaves its close to its platform, a platform row of the support matrix ("A
-WebSocket client's message limit, its ping and its close timeout").
+WebSocket client's message limit, its ping and its close timeout"). The TypeScript client's is
+`ws`'s own timer, which stays real.
 
 ## The Tenth Man
 
@@ -182,28 +212,28 @@ the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-four rounds here, and in two more on durations, which
+five rounds here, and in two more on durations, which
 [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md) holds. Its objections, each
 with the answer that holds:
 
 ### The clock
 
-| Objection                                                                                                                | Answer                                                                                                                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `advance` has no semantics, and the two test clocks already disagree on every timer armed or repeated within one advance | Accepted: `advance` steps from due to due on both sides, and both test clocks pass one shared table of clock cases.                                                               |
-| Across a socket, an `advance` can run before the server arms the timer it means to fire                                  | Accepted: each test clock counts its timers armed, `until` waits for one, and the check refuses an `advance` that none precedes.                                                  |
-| The TypeScript ping on the clock creates a difference, and drops its connections on any advance of two heartbeats        | Accepted: both pings stay on the real clock and play in real time; no row is added.                                                                                               |
-| The wall clock is not read "for what is reported alone": 0010 compares `exp` and `nbf`, and no start is stated           | Accepted: three uses of time, the wall clock's start in each file, a step that moves it alone, and 15.10's word.                                                                  |
-| The ceiling rests on a false premise about .NET, and the same long timeout meets three behaviours                        | Accepted: the ceiling is JavaScript's, kept for parity, refused everywhere, and _never_ is `Infinity` or `InfiniteTimeSpan`.                                                      |
-| `time`, `ITime` and `timestamp()` break one word, one meaning                                                            | Accepted: the word is _clock_, a timestamp is the monotonic reading, and the reported instants are `lastActivity`.                                                                |
-| The TypeScript clock copies a .NET type no JavaScript tool implements                                                    | Accepted: it is the globals' own shape, `globalThis` by default, and the test clock is `fake-timers`' `createClock()`, never installed.                                           |
-| A façade's one clock cannot reach layers given already built, and the draft decides the builder's surface                | Accepted: one clock a stack, read upward, a differing one refused, and the generated code adds none.                                                                              |
-| Bounding the WebSocket close at 5 seconds alike is a shared behaviour no clause states                                   | Accepted: 15.3 states the close timeout, 5 seconds by default, which both clients and both servers hold on the real clock ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)) |
-| What the clock reaches is drawn by an inventory, which misses a timer, with no gate                                      | Accepted: one rule, what the spec times against what bounds a platform's close, and the analyzers' gate.                                                                          |
-| The record lands with no shared case of `advance`, and 0010 says the clock lands with it                                 | Accepted: `advance` has its step, its rule, both test clocks and a case in each file.                                                                                             |
-| A timer-callback contract cannot be mirrored by a C side polling deadlines on a 1 kHz loop                               | Accepted: the shapes are the TypeScript and C# sides'; the contract every language plays is in readings and deadlines.                                                            |
-| Randomness is left on the platform, yet a TypeScript test swaps `Math.random`                                            | Accepted: both sides check a drawn wait by its bounds, and the swaps go.                                                                                                          |
-| The first cases close connections under exchanges cut after their head, which the clock does not order                   | Accepted in part: the clock does not order sockets, and such a case expects `orLost`, which the transports' file has; a lingering close is the transports' to weigh.              |
+| Objection                                                                                                                | Answer                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `advance` has no semantics, and the two test clocks already disagree on every timer armed or repeated within one advance | Accepted: `advance` steps from due to due on both sides, and both test clocks pass one shared table of clock cases.                                                                                                |
+| Across a socket, an `advance` can run before the server arms the timer it means to fire                                  | Accepted: each test clock counts its timers armed, `until` waits for one, and the check refuses an `advance` that none precedes.                                                                                   |
+| The TypeScript ping on the clock creates a difference, and drops its connections on any advance of two heartbeats        | Accepted: both pings run on the platform's clock, never the clock given, and the conformance files play them in real time; a side's own tests may step its platform's clock (see "The platform's clock in tests"). |
+| The wall clock is not read "for what is reported alone": 0010 compares `exp` and `nbf`, and no start is stated           | Accepted: three uses of time, the wall clock's start in each file, a step that moves it alone, and 15.10's word.                                                                                                   |
+| The ceiling rests on a false premise about .NET, and the same long timeout meets three behaviours                        | Accepted: the ceiling is JavaScript's, kept for parity, refused everywhere, and _never_ is `Infinity` or `InfiniteTimeSpan`.                                                                                       |
+| `time`, `ITime` and `timestamp()` break one word, one meaning                                                            | Accepted: the word is _clock_, a timestamp is the monotonic reading, and the reported instants are `lastActivity`.                                                                                                 |
+| The TypeScript clock copies a .NET type no JavaScript tool implements                                                    | Accepted: it is the globals' own shape, `globalThis` by default, and the test clock is `fake-timers`' `createClock()`, never installed.                                                                            |
+| A façade's one clock cannot reach layers given already built, and the draft decides the builder's surface                | Accepted: one clock a stack, read upward, a differing one refused, and the generated code adds none.                                                                                                               |
+| Bounding the WebSocket close at 5 seconds alike is a shared behaviour no clause states                                   | Accepted: 15.3 states the close timeout, 5 seconds by default, which both clients and both servers hold on the real clock ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md))                                  |
+| What the clock reaches is drawn by an inventory, which misses a timer, with no gate                                      | Accepted: one rule, what the spec times against what bounds a platform's close, and the analyzers' gate.                                                                                                           |
+| The record lands with no shared case of `advance`, and 0010 says the clock lands with it                                 | Accepted: `advance` has its step, its rule, both test clocks and a case in each file.                                                                                                                              |
+| A timer-callback contract cannot be mirrored by a C side polling deadlines on a 1 kHz loop                               | Accepted: the shapes are the TypeScript and C# sides'; the contract every language plays is in readings and deadlines.                                                                                             |
+| Randomness is left on the platform, yet a TypeScript test swaps `Math.random`                                            | Accepted: both sides check a drawn wait by its bounds, and the swaps go.                                                                                                                                           |
+| The first cases close connections under exchanges cut after their head, which the clock does not order                   | Accepted in part: the clock does not order sockets, and such a case expects `orLost`, which the transports' file has; a lingering close is the transports' to weigh.                                               |
 
 ### The test clocks
 
@@ -238,3 +268,18 @@ with the answer that holds:
 | The C# side changes two words, the layer and the one beneath, where the Rust side changes the layer alone                                         | Accepted: the change is stated as it is.                                                                                                                                                                                                                                                                                                                                                                     |
 | A message released on two sides changes, and the changelog says nothing                                                                           | Accepted: the changelog's fixes say it.                                                                                                                                                                                                                                                                                                                                                                      |
 | The record states a builder given the clock, the TypeScript side's mechanism, as every side's, though it is why the thing refused differs in kind | Accepted: the record states both, a session manager built then refused and disposed of on the TypeScript side, its options refused before any is built on the C# and Rust sides.                                                                                                                                                                                                                             |
+
+### The platform's clock in tests
+
+| Objection                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A simpler design was passed over: the Rust side passes the platform's clock through a private constructor, and the TypeScript side's equivalent is a seam outside the surface, not the globals installed | Accepted: the probes reproduce. The twin passes on installed globals, but an `expect.poll` inside the window breaks Playwright's runner and hangs the run. A stack holds its platform's clock as one value, set where it starts. A test replaces it through `on_platform` on the Rust side, the option keyed by `PLATFORM` on the TypeScript side and the internal `Platform` of the options on the C# side. Nothing is installed on the globals.                                                                        |
+| What an install reaches is not what 0011 says: not `node:http`'s timeouts, but `ws`, `undici`, `AbortSignal.timeout` by load order, and Bead's own deferrals to the next turn                            | Accepted: the reach is stated by ownership. Bead's own bounds of a platform run on the platform's clock the stack holds, and a library's timers stay real. The `DELETE`'s `AbortSignal.timeout` becomes a timer on that clock. Bead's deferrals to the next turn stay on the globals. The Context's list is corrected.                                                                                                                                                                                                   |
+| An install works only under a contract no gate keeps, and breaking it hangs the run rather than failing a test                                                                                           | Accepted: with the seam there is no install, so no contract. "Never installed on the globals" stays true in 0011 and in the code.                                                                                                                                                                                                                                                                                                                                                                                        |
+| The proposal leaves the conformance files' `realTime` cases undecided: one case cannot be stepped on two sides and real-time on the third                                                                | Accepted: the conformance files keep `realTime` on every side, and the players build their stacks on the platform's clock unreplaced. A replaced platform clock is for each side's own tests.                                                                                                                                                                                                                                                                                                                            |
+| "Rust shows it works" overstates: a stepping test still rests 50 ms on the real clock, Rust's broker heartbeat has no seam, and hyper's header timer is tokio's                                          | Accepted in part. Accepted: a stepped test is deterministic only when each step waits on what its due depends on, never on a rest; the rest before the next beat in the Rust twin becomes a wait on the pong being read; the broker's participant and the MQTT adapter gain `on_platform`; hyper's header timer is a library's and stays real, as Node's and Kestrel's do. Refused: the other rests cited do not precede a step. One is a poll within patience, and the rest prove that nothing comes within their time. |
+| "As its platform allows" brings back a per-side, per-timer inventory with no gate, which 0011's own round refused                                                                                        | Accepted: one rule by ownership, and its gate. oxlint refuses a member of `PLATFORM_CLOCK`; the banned-API analyzer refuses `TimeProvider.System`; clippy refuses `SystemClock::on`. Each read where a stack starts is suppressed with its reason. The record lists what stays real, the libraries' timers.                                                                                                                                                                                                              |
+| The C# cost is left out, and the seam's shape is not named under 0007                                                                                                                                    | Accepted: the seam is an `internal` init member `Platform` on each options record of a component that arms a platform's bound. Every one of Bead's own bounds of a platform moves to it in one stage. The keep-alive alone stays .NET's, a row of the support matrix.                                                                                                                                                                                                                                                    |
+| A replaced platform clock is named differently on each side, and "the real clock" becomes wrong once it can be replaced                                                                                  | Accepted in part. Accepted: the record says "the platform's clock". A stack given no clock runs on its platform's clock on every side, so a replaced one is named "one of its own" everywhere, as on the Rust side. Refused: renaming the `realTime` mark, or the titles that say "on the real clock". Each plays the platform's clock unreplaced, which is the real one.                                                                                                                                                |
+| The install turns many statements false, so the revision must bring every one along                                                                                                                      | Accepted: under the seam, the "never installed" sentences stay true. The revision changes 0011's Context, Decision, Consequences and the answer about both pings; 0004's paragraph on the heartbeats; 0044's sentence on the platform's socket; the TypeScript README; and the heartbeats' doc comments on every side. 0038, 0040, 0014 and 0033 still hold.                                                                                                                                                             |
+| The support row belongs in Differences, kind platform, not in Leveled down, and its cells depend on the mechanism                                                                                        | Accepted: a Differences row of kind platform, "A WebSocket's heartbeat and close timeout, stepped by a test", as "A session manager's timers" is. The TypeScript and Rust sides cite their stepped twins. The C# side cites its real-time twin and names .NET's keep-alive. The TypeScript client's close timeout is `ws`'s own timer, which no seam reaches.                                                                                                                                                            |

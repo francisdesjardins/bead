@@ -19,7 +19,7 @@ import {
   type WebSocketTransportClient,
 } from '../../client/websocket-transport-client';
 import * as constants from '../../shared/constants';
-import { LONGEST_TIMER, PLATFORM_CLOCK } from '../../shared/clock';
+import { LONGEST_TIMER, PLATFORM, PLATFORM_CLOCK } from '../../shared/clock';
 import { CancelError, ConnectError } from '../../shared/errors';
 import {
   allClosed,
@@ -27,7 +27,6 @@ import {
   duesOn,
   host,
   IMPLEMENTATIONS,
-  spyTimeouts,
   trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
@@ -2674,8 +2673,11 @@ test.describe('WebSocketTransportServer, with a scripted WebSocketServer', () =>
 
 test.describe('WebSocketTransportServer, heartbeat', () => {
   test('pings each connection silent for its heartbeat with data of its own, keeps one that echoes it, and drops one that left it unanswered, or could not be sent one', async () => {
+    // * its heartbeat runs on its platform's clock, here a test's, stepped a heartbeat at a time
+    const platform = createTestClock();
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({
+      [PLATFORM]: platform,
       heartbeat: 20,
       WebSocketServer: fake.FakeWebSocketServer,
     });
@@ -2711,11 +2713,9 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     (closing as { readyState: number }).readyState = 2;
 
     // a heartbeat past the ping each left unanswered, its peer dropped
-    await expect
-      .poll(() => {
-        return closes.length;
-      })
-      .toBe(2);
+    await platform.tickAsync(40);
+
+    expect(closes).toHaveLength(2);
     expect(
       closes.map(([, handle]) => {
         return handle;
@@ -2736,12 +2736,9 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     expect(errors).toEqual([]);
 
     // the one that echoes is pinged again once silent, each ping 8 bytes of a count from 1
-    await expect
-      .poll(() => {
-        return answering.pings;
-      })
-      .toBeGreaterThanOrEqual(3);
-    expect(answering.wasTerminated).toBe(false);
+    await platform.tickAsync(20);
+
+    expect([answering.pings, answering.wasTerminated]).toEqual([3, false]);
     expect(pinged.slice(0, 3)).toEqual([
       Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 1),
       Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 2),
@@ -2752,19 +2749,26 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
   });
 
   test('pings once silent for HEARTBEAT when told nothing', async () => {
-    using timeouts = spyTimeouts();
+    const platform = createTestClock();
     const fake = createFakeWebSocketServer();
-    const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const server = createWebSocketTransportServer({
+      [PLATFORM]: platform,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
 
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
 
-    const before = timeouts.delays.length;
+    const before = platform.armed.length;
 
     fake.connect(createFakeSocket(), { server });
 
-    expect(timeouts.delays.slice(before)).toEqual([HEARTBEAT]);
+    expect(
+      platform.armed.slice(before).map(({ delay }) => {
+        return delay;
+      })
+    ).toEqual([HEARTBEAT]);
 
     await server.stop();
   });
@@ -2775,9 +2779,10 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       [200, [200]],
       [Infinity, []],
     ] as const) {
-      using timeouts = spyTimeouts();
+      const platform = createTestClock();
       const fake = createFakeWebSocketServer();
       const server = createWebSocketTransportServer({
+        [PLATFORM]: platform,
         heartbeat,
         WebSocketServer: fake.FakeWebSocketServer,
       });
@@ -2787,11 +2792,16 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
       fake.instances[0]?.emit('listening');
       await starting;
 
-      const before = timeouts.delays.length;
+      const before = platform.armed.length;
       const connectionHandle = fake.connect(socket, { server });
 
       // no timer at all for Infinity: Node would fire one of Infinity at once
-      expect([heartbeat, timeouts.delays.slice(before)]).toEqual([heartbeat, delays]);
+      expect([
+        heartbeat,
+        platform.armed.slice(before).map(({ delay }) => {
+          return delay;
+        }),
+      ]).toEqual([heartbeat, delays]);
       expect([
         heartbeat,
         socket.pings,
@@ -3141,8 +3151,10 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
   });
 
   test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    const platform = createTestClock();
     const fake = createFakeWebSocketServer();
     const server = createWebSocketTransportServer({
+      [PLATFORM]: platform,
       heartbeat: 20,
       WebSocketServer: fake.FakeWebSocketServer,
     });
@@ -3164,11 +3176,11 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
     const connectionHandle = fake.connect(silent, { server });
 
     // a ping, then its drop a heartbeat past it
-    await expect
-      .poll(() => {
-        return silent.wasTerminated;
-      })
-      .toBe(true);
+    await platform.tickAsync(20);
+
+    expect([silent.pings, silent.wasTerminated]).toEqual([1, false]);
+
+    await platform.tickAsync(20);
 
     expect(silent.wasTerminated).toBe(true);
     expect(server.clients).toHaveLength(0);
@@ -3622,9 +3634,12 @@ test.describe('WebSocketTransportServer, the refusals it tells', () => {
 
 test.describe('WebSocketTransportServer, the address it listens on', () => {
   test('listens on localhost, port 80, and pings once silent for 30 seconds when told nothing', async () => {
-    using timeouts = spyTimeouts();
+    const platform = createTestClock();
     const fake = createFakeWebSocketServer();
-    const server = createWebSocketTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const server = createWebSocketTransportServer({
+      [PLATFORM]: platform,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
 
     expect([server.address, server.port, START_DEFAULTS]).toEqual([
       'localhost',
@@ -3638,11 +3653,16 @@ test.describe('WebSocketTransportServer, the address it listens on', () => {
     await fake.listenEach(2);
     await starting;
 
-    const before = timeouts.delays.length;
+    const before = platform.armed.length;
 
     fake.connect(createFakeSocket(), { server });
 
-    expect([server.address, timeouts.delays.slice(before)]).toEqual(['localhost', [30_000]]);
+    expect([
+      server.address,
+      platform.armed.slice(before).map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual(['localhost', [30_000]]);
 
     await server.stop();
   });

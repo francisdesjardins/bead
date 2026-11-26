@@ -44,7 +44,7 @@ public sealed record WebSocketTransportServerOptions
     /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
     /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
     /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
-    /// the platform's close, on the real clock.
+    /// the platform's close, on its platform's clock.
     /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -53,6 +53,9 @@ public sealed record WebSocketTransportServerOptions
     /// message; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
 
     /// <summary>
     /// What stands in front of it, which it cannot tell (spec 13.4): true for TLS terminated before
@@ -153,14 +156,14 @@ public sealed record WebSocketTransportServerOptions
     /// the connection, its close unclean, reported through
     /// <see cref="WebSocketTransportServer.Error"/> naming the bound. 0 holds none, on a network the
     /// application trusts; below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is
-    /// built. On the real clock, as what it bounds is the platform's socket.
+    /// built. On its platform's clock, as what it bounds is the platform's socket.
     /// </summary>
     public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
 
     /// <summary>
     /// The least time an envelope is given to be taken by its socket: 5 seconds by default; from 1
     /// to 2³¹ − 1 milliseconds, rounded to the nearest whole one; zero and infinite are refused (spec
-    /// 15.12). On the real clock.
+    /// 15.12). On its platform's clock.
     /// </summary>
     public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
 
@@ -260,6 +263,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private const int LingerReadBytes = 65_536;
 
     private readonly WebSocketTransportServerOptions _options;
+    // * the platform's clock its own bounds of a platform run on: its close timeout, its pace and
+    // its linger
+    private readonly TimeProvider _platform;
     private readonly TimeProvider _clock;
     // what its connections hold of messages partway, together (spec 15.12)
     private readonly MessageBudget _budget;
@@ -327,7 +333,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 (nameof(WebSocketTransportServerOptions.BodyGracePeriod), nameof(WebSocketTransportServerOptions.BodyGracePeriod)),
                 given.BodyGracePeriod),
         };
-        _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _clock = _options.Clock ?? _platform;
         _budget = new MessageBudget(_options.MessageBytesBudget);
         _isSecure = _options.Secure ?? false;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
@@ -943,21 +952,20 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // ! a refusal written before its body is whole closes its socket in stages (spec 15.2, 15.12;
     // RFC 9112 §9.6): flushed alone, since a completion would follow it at once with its socket's
     // close, a reset that erases the refusal its client has not read yet; then what still comes is
-    // read and dropped until its client closes or 2 seconds pass, on the real clock, since what it
-    // waits on is the network's. A body read whole ends at once. Kestrel's connection has no
+    // read and dropped until its client closes or 2 seconds pass, on its platform's clock, since
+    // what it waits on is the network's. A body read whole ends at once. Kestrel's connection has no
     // half-close, and a shutdown of its socket races the answer Kestrel still sends: its write side
     // ends with its close, never first
-    private static async Task Linger(HttpContext context)
+    private async Task Linger(HttpContext context)
     {
         if (!IsLingering(context))
         {
             return;
         }
 
-        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        using var bounded = new CancellationTokenSource(ServerBounds.Linger, _platform);
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, bounded.Token);
         var dropped = new byte[LingerReadBytes];
-
-        lingering.CancelAfter(ServerBounds.Linger);
 
         try
         {
@@ -1046,6 +1054,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         {
             MaximumMessageBytes = MaximumMessageBytes,
             CloseTimeout = _options.CloseTimeout,
+            Platform = _platform,
             Pace = new WebSocketConnection.Pacing
             {
                 MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,

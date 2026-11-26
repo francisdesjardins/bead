@@ -6,8 +6,9 @@
 //! network cut, a machine asleep — is dropped rather than kept for ever. Each ping carries 8 bytes
 //! of its own, a count from 1, big-endian, as .NET's keep-alive writes its own. It lives below the
 //! protocol, a WebSocket's own PING and PONG frames (RFC 6455 §5.5.2), which a page's browser
-//! answers by itself, and runs on the platform's clock, never the clock a side is given, as a ping
-//! plays in real time on every side (decision 0011); without end, it arms nothing.
+//! answers by itself, and runs on its stack's platform clock, never the clock a side is given
+//! (decision 0011), which a test replaces through its transport's `on_platform`; without end, it
+//! arms nothing.
 
 use core::fmt;
 use core::time::Duration;
@@ -148,6 +149,12 @@ impl Heartbeat {
         {
             state.pinged = None;
         }
+    }
+
+    /// Whether no ping of its waits for its echo: none went, or the last one's came.
+    #[cfg(test)]
+    pub(crate) fn is_answered(&self) -> bool {
+        locked(&self.inner.state).pinged.is_none()
     }
 
     /// It beats no more: its connection ended.

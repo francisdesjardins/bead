@@ -9,9 +9,8 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use super::dial;
-use crate::clock::SystemClock;
 use crate::net::racing::RacingOptions;
-use crate::testing::{patience, spawn, tls};
+use crate::testing::{patience, platform_clock, spawn, tls};
 
 const PATIENCE: Duration = Duration::from_secs(5);
 
@@ -53,7 +52,7 @@ async fn carries_bytes_both_ways_and_half_closes_its_socket_in_the_clear_and_und
             }
         });
         let config = secured.then(|| tls::client_config().unwrap());
-        let racing = RacingOptions::on(Arc::new(SystemClock::current().unwrap()));
+        let racing = RacingOptions::on(Arc::new(platform_clock().unwrap()));
         let mut socket = patience(
             PATIENCE,
             dial(("127.0.0.1", port), (&racing, config.as_ref())),

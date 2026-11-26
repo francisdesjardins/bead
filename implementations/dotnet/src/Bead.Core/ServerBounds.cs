@@ -122,10 +122,12 @@ internal sealed record SendPaceOptions
     public required TimeSpan SendGracePeriod { get; init; }
 
     /// <summary>
-    /// What it is judged on: the platform's clock, whatever clock the server is given, since it
-    /// bounds what the platform's socket does, as the heartbeat does (decision 0011).
+    /// What it is judged on: the platform's clock its server holds, whatever clock the server is
+    /// given, since it bounds what the platform's socket does (decision 0011).
     /// </summary>
+#pragma warning disable RS0030 // the unit's default, for a server that holds no platform's clock
     public TimeProvider Clock { get; init; } = TimeProvider.System;
+#pragma warning restore RS0030
 }
 
 /// <summary>

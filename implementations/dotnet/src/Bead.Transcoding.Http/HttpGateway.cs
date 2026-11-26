@@ -101,7 +101,9 @@ public sealed class HttpGateway : IAsyncDisposable
         _policy = PolicyOf(options);
         _options = options;
         _proxyTrust = Bead.TrustedProxies.TrustOf((_policy.TrustedProxies, nameof(HttpGatewayOptions.TrustedProxies)), (_policy.UnnamedProxies, nameof(HttpGatewayOptions.UnnamedProxies)));
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = options.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         Timeout = Clocks.AssertHeld((nameof(HttpGatewayOptions.Timeout), nameof(HttpGatewayOptions.Timeout)), options.Timeout);
         _heartbeat = Clocks.AssertHeld((nameof(HttpGatewayOptions.Heartbeat), nameof(HttpGatewayOptions.Heartbeat)), options.Heartbeat);
 

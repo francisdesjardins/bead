@@ -2615,7 +2615,7 @@ struct Breaking {
 impl Breaking {
     fn shared(breaks: fn(&bead::Schedule) -> Option<&'static str>) -> Arc<Self> {
         Arc::new(Self {
-            platform: bead::SystemClock::current().expect("the platform's clock"),
+            platform: bead::testing::platform_clock().expect("the platform's clock"),
             breaks,
             attempts: AtomicUsize::new(0),
         })
@@ -3060,7 +3060,7 @@ async fn reports_each_failure_it_answers_a_call_with_500_or_above_and_none_below
     // * a route of a procedure its server does not offer, 501; a call past its timeout, 504, on a
     // clock that moves only as the test moves it, so no call races its deadline
     let clock = Arc::new(Holding {
-        platform: bead::SystemClock::current().expect("the platform's clock"),
+        platform: bead::testing::platform_clock().expect("the platform's clock"),
         held: Duration::from_millis(50),
         callbacks: Mutex::new(Vec::new()),
     });
@@ -4608,7 +4608,7 @@ async fn writes_a_comment_on_a_quiet_stream_each_heartbeat_on_its_clock_and_drop
  {
     // * the Rust form: on its own listener, where the pace is its socket's
     let clock = Arc::new(Holding {
-        platform: bead::SystemClock::current().expect("the platform's clock"),
+        platform: bead::testing::platform_clock().expect("the platform's clock"),
         held: Duration::from_secs(1),
         callbacks: Mutex::new(Vec::new()),
     });
@@ -6865,7 +6865,7 @@ impl bead::Timer for BeatingTimer {
 impl Beating {
     fn shared(held: Duration) -> Arc<Self> {
         Arc::new(Self {
-            platform: bead::SystemClock::current().expect("the platform's clock"),
+            platform: bead::testing::platform_clock().expect("the platform's clock"),
             held,
             live: Arc::new(Mutex::new(Vec::new())),
             armed: AtomicUsize::new(0),

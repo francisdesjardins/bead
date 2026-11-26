@@ -22,14 +22,14 @@ internal sealed record HeartbeatOptions
 /// <c>heartbeat.ts</c>: it pings a connection once nothing of it has come for its heartbeat, and
 /// drops it when nothing of it has come by a heartbeat after that ping; anything heard of it
 /// answers, as TCP sends a keep-alive only when nothing came within its interval (RFC 9293 §3.8.4).
-/// It runs on the platform's timer, never the clock a side is given, as a WebSocket's ping does on
-/// either side (0011); without end, it arms nothing.
+/// It runs on its participant's platform clock, never the clock a side is given (0011); without
+/// end, it arms nothing.
 /// </summary>
 internal sealed class Heartbeat
 {
     private readonly TimeSpan _heartbeat;
     private readonly HeartbeatHooks _hooks;
-    // the platform's: what a heartbeat plays on in real time
+    // its stack's platform clock, the real one unless a test replaces it
     private readonly TimeProvider _clock;
     private readonly Lock _gate = new();
     private readonly ITimer? _timer;
@@ -42,7 +42,9 @@ internal sealed class Heartbeat
     {
         _heartbeat = heartbeat;
         _hooks = hooks;
+#pragma warning disable RS0030 // the unit's default, which its unit tests replace
         _clock = options?.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         _lastHeard = _clock.GetTimestamp();
 
         if (heartbeat != Timeout.InfiniteTimeSpan)

@@ -361,9 +361,14 @@ impl HttpCaller {
             .map_or_else(ClientTls::default, |config| {
                 ClientTls::Given(Arc::clone(config))
             });
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
+        let platform = SystemClock::on(runtime.clone());
         let racing = RacingOptions {
             resolve,
-            ..RacingOptions::on(Arc::new(SystemClock::on(runtime.clone())))
+            ..RacingOptions::on(Arc::new(platform))
         };
         let connector = Connector::new(tls, &racing);
         // * HTTP/1.1, a pooled connection let go once idle on Bead's timer, its executor Bead's;

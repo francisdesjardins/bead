@@ -106,12 +106,12 @@ fn refuses_a_zero_period_and_an_overflowing_deadline_at_the_call_without_keeping
 #[tokio::test]
 async fn arms_a_zero_due_and_a_positive_period_and_cancels_them() {
     use crate::clock::{Clock, Schedule};
-    use crate::testing::{patience, rest};
+    use crate::testing::{patience, platform_clock, rest};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use core::time::Duration;
     use std::sync::Arc;
 
-    let clock = SystemClock::current().expect("the clock");
+    let clock = platform_clock().expect("the clock");
     let (sent, received) = tokio::sync::oneshot::channel();
     let mut sent = Some(sent);
     let once = clock

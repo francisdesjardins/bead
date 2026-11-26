@@ -9,8 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tungstenite::protocol::{Message as Received, Role, WebSocket};
 
 use super::*;
-use crate::clock::SystemClock;
-use crate::testing::patience;
+use crate::testing::{patience, platform_clock};
 use crate::websocket::budget::{MessageBounds, MessageBudget};
 
 const PATIENCE: core::time::Duration = core::time::Duration::from_secs(10);
@@ -440,7 +439,7 @@ fn charges_each_byte_of_a_message_partway_and_128_a_head_a_pong_between_its_fram
 fn metering(is_upgrading: bool) -> Metering {
     Metering {
         read: Vec::new(),
-        reads: Reads::new(Arc::new(SystemClock::current().unwrap())),
+        reads: Reads::new(Arc::new(platform_clock().unwrap())),
         frames: FrameMeterOptions::new(!is_upgrading),
         holding: None,
         is_upgrading,
@@ -535,7 +534,7 @@ async fn hands_what_precedes_a_verdict_in_one_read_then_tells_its_reader_and_dro
 
 // a server's metering, its holding the one connection of a budget of `budget` bytes
 fn holding_metering(budget: u64) -> (Metering, Arc<MessageBudget>) {
-    let clock: crate::clock::SharedClock = Arc::new(SystemClock::current().unwrap());
+    let clock: crate::clock::SharedClock = Arc::new(platform_clock().unwrap());
     let budget = MessageBudget::new(MessageBounds {
         message_bytes_budget: budget,
         minimum_body_bytes_per_second: 240,

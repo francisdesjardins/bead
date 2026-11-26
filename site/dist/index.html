@@ -2410,7 +2410,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     <figure class="excerpt"><pre class="snippet" tabindex="0"><code class="language-toml"><span class="tok-comment"># The core spawns, yields and keeps time through one private module, `platform`, and the clock</span>
 <span class="tok-comment"># (decisions 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a</span>
 <span class="tok-comment"># test or a native target takes from its platform goes through the test kit, or is exempted once,</span>
-<span class="tok-comment"># with its reason, at its root</span>
+<span class="tok-comment"># with its reason, at its root; the platform's clock is built where a stack starts, and handed down</span>
 disallowed-methods = [
 …
   { path = <span class="tok-string">"tokio::runtime::Handle::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },
@@ -4743,7 +4743,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
     <figure class="excerpt"><pre class="snippet" tabindex="0"><code class="language-toml"><span class="tok-comment"># The core spawns, yields and keeps time through one private module, `platform`, and the clock</span>
 <span class="tok-comment"># (decisions 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a</span>
 <span class="tok-comment"># test or a native target takes from its platform goes through the test kit, or is exempted once,</span>
-<span class="tok-comment"># with its reason, at its root</span>
+<span class="tok-comment"># with its reason, at its root; the platform's clock is built where a stack starts, and handed down</span>
 disallowed-methods = [
 …
   { path = <span class="tok-string">"tokio::runtime::Handle::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },

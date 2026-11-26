@@ -6,6 +6,7 @@ use std::net::Ipv6Addr;
 use super::*;
 use crate::http::server::HttpTransportServer;
 use crate::testing::closed_port::started_alone_on;
+use crate::testing::platform_clock;
 use crate::testing::tls::{PkiLeaf, PkiServerOptions, pki, pki_server_config};
 use crate::transport::ServerTransport;
 
@@ -15,7 +16,7 @@ fn resolving_client(
     options: &HttpTransportClientOptions,
 ) -> HttpTransportClient {
     let runtime = platform::socket_runtime_of(None, "a test's client").unwrap();
-    let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+    let platform: SharedClock = Arc::new(platform_clock().unwrap());
 
     HttpTransportClient::resolving(
         (runtime, platform),

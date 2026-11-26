@@ -18,6 +18,8 @@ namespace Bead.Transport.WebSockets;
 internal sealed class WebSocketConnection
 {
     private readonly (int MaximumMessageBytes, TimeSpan CloseTimeout) _bounds;
+    // * the platform's clock its stack holds, which its close timeout and its pace run on
+    private readonly TimeProvider _platform;
     private readonly Pacing? _pace;
     private readonly SendPace? _sendPace;
     private readonly Channel<(ReadOnlyMemory<byte> Bytes, WebSocketCloseStatus? Close, TaskCompletionSource Done)> _outgoing =
@@ -49,16 +51,12 @@ internal sealed class WebSocketConnection
     private byte[]? _message;
     private int _messageBytes;
 
-    public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
-        : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
-    {
-    }
-
     // a connection whose bounds may hold what waits for its socket to a pace, a server's
     public WebSocketConnection(WebSocket socket, Bounds bounds)
     {
         Socket = socket;
         _bounds = (bounds.MaximumMessageBytes, bounds.CloseTimeout);
+        _platform = bounds.Platform;
         _pace = bounds.Pace;
         _read = bounds.Gate ?? new ReadGate();
 
@@ -66,7 +64,7 @@ internal sealed class WebSocketConnection
         // timer, or another connection's charge that casts it off
         _read.Meter?.Bind(Fail);
         _sendPace = bounds.Pace is { } pace
-            ? new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = pace.MinimumSendBytesPerSecond, SendGracePeriod = pace.SendGracePeriod })
+            ? new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = pace.MinimumSendBytesPerSecond, SendGracePeriod = pace.SendGracePeriod, Clock = _platform })
             : null;
         _ = Write();
     }
@@ -395,8 +393,8 @@ internal sealed class WebSocketConnection
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
-    // answer it within its timeout: on the real clock, since it bounds the platform's own close
-    // against a peer that does not answer, never what Bead times
+    // answer it within its timeout: on its platform's clock, since it bounds the platform's own
+    // close against a peer that does not answer, never what Bead times
     public async Task Close(WebSocketCloseStatus status)
     {
         // ! a connection this side closes reads on to its peer's Close, whatever its router paused:
@@ -407,7 +405,7 @@ internal sealed class WebSocketConnection
         // the wait is cancelled once the connection's end wins it: nothing lingers until the
         // timeout fires, and an endless timeout lingers nowhere
         using var elapsed = new CancellationTokenSource();
-        var waiting = Task.Delay(_bounds.CloseTimeout, TimeProvider.System, elapsed.Token);
+        var waiting = Task.Delay(_bounds.CloseTimeout, _platform, elapsed.Token);
 
         if (await Task.WhenAny(_ended.Task, waiting) == waiting)
         {
@@ -646,14 +644,17 @@ internal sealed class WebSocketConnection
     }
 
     /// <summary>
-    /// What a connection reads and closes within, what holds what waits for its socket, a
-    /// server's, and the gate its socket's stream is read through.
+    /// What a connection reads and closes within, the platform's clock its close and its pace run
+    /// on, what holds what waits for its socket, a server's, and the gate its socket's stream is
+    /// read through.
     /// </summary>
     internal sealed record Bounds
     {
         public required int MaximumMessageBytes { get; init; }
 
         public required TimeSpan CloseTimeout { get; init; }
+
+        public required TimeProvider Platform { get; init; }
 
         public Pacing? Pace { get; init; }
 

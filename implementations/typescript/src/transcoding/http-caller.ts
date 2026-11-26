@@ -10,6 +10,7 @@ import { FailureError } from '../router/shared/errors';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
 import { isFieldValue } from '../transport/client/transport-client';
+import { PLATFORM_CLOCK } from '../transport/shared/clock';
 import { createUndiciDialer, loopbackFailureOf } from '../transport/shared/loopback';
 import { isLoopbackUrl, isSecureUrl } from '../transport/shared/secure';
 import { isNode } from '../transport/shared/tls';
@@ -79,7 +80,8 @@ const ENCODER = new TextEncoder();
  * 13.4); any other, and every URL where undici does not resolve, through the global fetch.
  */
 const nodeFetchOf = (platformFetch: typeof fetch): typeof fetch => {
-  const dialer = createUndiciDialer({});
+  // a localhost name's race runs on the platform's clock, which a caller holds alone
+  const dialer = createUndiciDialer({ clock: PLATFORM_CLOCK, tls: {} });
 
   return (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;

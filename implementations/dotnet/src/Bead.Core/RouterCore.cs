@@ -90,7 +90,9 @@ internal sealed partial class RouterCore : IDisposable
         _port = port;
         _side = port.Side;
         Limits = (options?.Limits ?? RouterLimits.Default).Validate();
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = options?.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         Loop = options?.Scheduler ?? new SerialScheduler();
         Loop.OnUnhandled = (exception) =>
         {

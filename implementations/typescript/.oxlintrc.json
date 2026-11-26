@@ -16,8 +16,9 @@
   "overrides": [
     {
       // Bead takes its time from the clock it is given (decision 0011): a timer or a reading of the
-      // globals' is one no test clock reaches. What bounds a platform's own close stays on the real
-      // clock, each such call disabled where it stands with its reason; the platform's clock itself
+      // globals' is one no test clock reaches. What bounds a platform runs on the platform's clock a
+      // stack holds, `PLATFORM_CLOCK` by default, which a test replaces; a deferral to the next turn
+      // stays on the globals, disabled where it stands with its reason. The platform's clock itself
       // is `globalThis`, named once, in `clock.ts`.
       "files": ["src/**/*.ts", "interop/**/*.ts"],
       "rules": {
@@ -76,6 +77,36 @@
             "object": "AbortSignal",
             "property": "timeout",
             "message": "a signal's timeout is a timer, which runs on the clock given: `clock.setTimeout` and an `AbortController`"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "setTimeout",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.setTimeout` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "clearTimeout",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.clearTimeout` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "setInterval",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.setInterval` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "clearInterval",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.clearInterval` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "Date",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.Date.now()` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "performance",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.performance.now()` (decision 0011)"
           }
         ]
       }
@@ -125,6 +156,36 @@
             "object": "AbortSignal",
             "property": "timeout",
             "message": "a signal's timeout is a timer, which runs on the clock given: `clock.setTimeout` and an `AbortController`"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "setTimeout",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.setTimeout` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "clearTimeout",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.clearTimeout` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "setInterval",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.setInterval` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "clearInterval",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.clearInterval` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "Date",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.Date.now()` (decision 0011)"
+          },
+          {
+            "object": "PLATFORM_CLOCK",
+            "property": "performance",
+            "message": "a platform's bound runs on the platform's clock its stack holds: `platform.performance.now()` (decision 0011)"
           },
           {
             "property": "services",

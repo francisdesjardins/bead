@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from './clock';
+import { assertHeld, type IClock, type TimeoutId } from './clock';
 
 // interfaces
 
@@ -71,15 +71,15 @@ const isEcho = (data: Uint8Array, pinged: Uint8Array): boolean => {
  * other than its echo, and no other ping goes before. Each ping carries 8 bytes of its own, a count
  * from 1, big-endian, as .NET's keep-alive writes its own. Nothing at all for `Infinity`. It lives
  * below the protocol: a WebSocket's own PING and PONG frames (RFC 6455 §5.5.2), which a browser
- * answers by itself. It runs on the platform's timer, never a clock given, as a ping plays in real
- * time on every side (decision 0011), and keeps no process alive. Its unit tests may replace the
- * platform clock through `clock`.
+ * answers by itself. It runs on its stack's platform clock, never the clock given (decision 0011),
+ * which a test may replace through `clock`, and keeps no process alive.
  *
  * @example
- * const heartbeat = createHeartbeat(30_000, {
- *   drop: () => socket.terminate(),
- *   ping: (data) => socket.ping(data),
- * });
+ * const heartbeat = createHeartbeat(
+ *   30_000,
+ *   { drop: () => socket.terminate(), ping: (data) => socket.ping(data) },
+ *   { clock: platform }
+ * );
  * rawSocket.on('data', () => heartbeat.heard());
  * socket.on('pong', (data) => heartbeat.answer(data));
  * socket.on('close', () => heartbeat.stop());
@@ -87,7 +87,7 @@ const isEcho = (data: Uint8Array, pinged: Uint8Array): boolean => {
 export const createHeartbeat = (
   heartbeat: number,
   { drop, ping }: { drop: () => void; ping: (data: Uint8Array) => void },
-  { clock = PLATFORM_CLOCK }: { clock?: IClock } = {}
+  { clock }: { clock: IClock }
 ): IHeartbeat => {
   const now = (): number => {
     return clock.performance.now();
@@ -173,21 +173,22 @@ export const createHeartbeat = (
  * Pings a connection once nothing of it has come for `heartbeat` milliseconds, and drops it once
  * nothing has come by `heartbeat` after that ping; anything heard answers, as TCP sends a keep-alive
  * only when nothing came within its interval (RFC 9293 §3.8.4): a broker's connection, whose
- * parcels each tell it alive (spec 15.21). Nothing at all for `Infinity`. It runs on the platform's
- * timer, never a clock given, as the WebSocket's does (decision 0011), and keeps no process alive.
- * Its unit tests may replace the platform clock through `clock`.
+ * parcels each tell it alive (spec 15.21). Nothing at all for `Infinity`. It runs on its stack's
+ * platform clock, never the clock given, as the WebSocket's does (decision 0011), which a test may
+ * replace through `clock`, and keeps no process alive.
  *
  * @example
- * const heartbeat = createSilenceHeartbeat(30_000, {
- *   drop: () => connection.close(4001),
- *   ping: () => connection.ping(),
- * });
+ * const heartbeat = createSilenceHeartbeat(
+ *   30_000,
+ *   { drop: () => connection.close(4001), ping: () => connection.ping() },
+ *   { clock: platform }
+ * );
  * connection.onParcel(() => heartbeat.heard());
  */
 export const createSilenceHeartbeat = (
   heartbeat: number,
   { drop, ping }: { drop: () => void; ping: () => void },
-  { clock = PLATFORM_CLOCK }: { clock?: IClock } = {}
+  { clock }: { clock: IClock }
 ): ISilenceHeartbeat => {
   const now = (): number => {
     return clock.performance.now();

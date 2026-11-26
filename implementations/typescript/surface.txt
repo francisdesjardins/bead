@@ -3100,6 +3100,7 @@ src/transport/client/types.ts IHTTPTransportClientConnectOptions
     port: number
 src/transport/client/types.ts IHTTPTransportClientOptions
   interface IHTTPTransportClientOptions extends ITransportClientOptions
+    readonly [PLATFORM]?: IClock | undefined
     exchangeTimeout?: number | undefined
     fetch?: FetchLike | undefined
     inactivityTimeout?: number | undefined
@@ -3258,6 +3259,7 @@ src/transport/client/types.ts IWebSocketTransportClientConnectOptions
     port: number
 src/transport/client/types.ts IWebSocketTransportClientOptions
   interface IWebSocketTransportClientOptions extends ITransportClientOptions
+    readonly [PLATFORM]?: IClock | undefined
     binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
     closeTimeout?: number | undefined
     heartbeat?: number | undefined
@@ -3515,6 +3517,7 @@ src/transport/server/types.ts IHTTPServerLike
     requestTimeout?: number | undefined
 src/transport/server/types.ts IHTTPTransportServerOptions
   interface IHTTPTransportServerOptions extends ITransportServerOptions, IHTTPPolicyOption
+    readonly [PLATFORM]?: IClock | undefined
     bodyBytesBudget?: number | undefined
     bodyGracePeriod?: number | undefined
     createServer: (listener: HTTPRequestListener, options: {address: string}) => IHTTPServerLike
@@ -3719,6 +3722,7 @@ src/transport/server/types.ts IWebSocketServerLike
     on(event: 'wsClientError', listener: (error: Error, socket: IUpgradeSocketLike, request: IIncomingMessageLike) => void): unknown
 src/transport/server/types.ts IWebSocketTransportServerOptions
   interface IWebSocketTransportServerOptions extends ITransportServerOptions
+    readonly [PLATFORM]?: IClock | undefined
     binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
     bodyGracePeriod?: number | undefined
     closeTimeout?: number | undefined
@@ -3816,6 +3820,7 @@ src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapter
     unsubscribe(topic: BrokerTopic): Promise<void>
 src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapterOptions
   interface IAmqpBrokerAdapterOptions
+    readonly [PLATFORM]?: IClock | undefined
     connectTimeout?: number | undefined
     delivery?: BrokerDelivery | undefined
     id: string
@@ -3887,6 +3892,7 @@ src/transport/shared/broker-participant.ts IBrokerParticipant
     [Symbol.asyncDispose](): Promise<void>
 src/transport/shared/broker-participant.ts IBrokerParticipantOptions
   interface IBrokerParticipantOptions
+    readonly [PLATFORM]?: IClock | undefined
     adapter: IBrokerAdapter
     devtools?: boolean | undefined
     bodyGracePeriod?: number | undefined
@@ -4103,6 +4109,7 @@ src/transport/shared/mqtt-broker-adapter.ts IMqttBrokerAdapter
     unsubscribe(topic: BrokerTopic): Promise<void>
 src/transport/shared/mqtt-broker-adapter.ts IMqttBrokerAdapterOptions
   interface IMqttBrokerAdapterOptions
+    readonly [PLATFORM]?: IClock | undefined
     connectTimeout?: number | undefined
     delivery?: BrokerDelivery | undefined
     groups?: boolean | undefined

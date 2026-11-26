@@ -15,7 +15,7 @@ avoid-breaking-exported-api = false
 # The core spawns, yields and keeps time through one private module, `platform`, and the clock
 # (decisions 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a
 # test or a native target takes from its platform goes through the test kit, or is exempted once,
-# with its reason, at its root
+# with its reason, at its root; the platform's clock is built where a stack starts, and handed down
 disallowed-methods = [
   # a peer's lengths and offsets use checked forms; a checked zero-copy slice states its invariant
   { path = "bytes::Bytes::slice", reason = "check the slice bounds and expect this lint at the invariant" },
@@ -47,6 +47,8 @@ disallowed-methods = [
   { path = "tokio::time::timeout", reason = "time through the clock" },
   { path = "tokio::time::timeout_at", reason = "time through the clock" },
   { path = "std::time::SystemTime::now", reason = "time through the clock" },
+  { path = "bead::clock::SystemClock::on", reason = "the platform's clock is built where a stack starts, and handed down (decision 0011)" },
+  { path = "bead::clock::SystemClock::current", reason = "the platform's clock is built where a stack starts, and handed down (decision 0011)" },
   { path = "std::thread::spawn", reason = "no thread of Bead's own" },
   { path = "std::thread::sleep", reason = "a turn awaits nothing" },
 ]

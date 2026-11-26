@@ -21,7 +21,14 @@ import {
   WS_LARGEST_COUNT,
   WS_TOO_BIG_CODE,
 } from '../shared/constants';
-import { assertHeld, assertHeldFinite, LONGEST_TIMER, type TimeoutId } from '../shared/clock';
+import {
+  assertHeld,
+  assertHeldFinite,
+  LONGEST_TIMER,
+  PLATFORM,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { byteCountOf, closedWithOf, ProgrammerError, toError, tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
@@ -279,7 +286,6 @@ export const createWebSocketTransportServer = (
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     bodyGracePeriod: givenBodyGracePeriod = BODY_GRACE_PERIOD,
-    clock,
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     headersTimeout: givenHeadersTimeout = HEADERS_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
@@ -300,6 +306,9 @@ export const createWebSocketTransportServer = (
     unnamedProxies,
     WebSocketServer,
   } = options;
+  // * its own bounds of its platform run on its platform's clock, and so does a server given none
+  const platform = options[PLATFORM] ?? PLATFORM_CLOCK;
+  const clock = options.clock ?? platform;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
   const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
@@ -450,8 +459,8 @@ export const createWebSocketTransportServer = (
       };
 
       // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
-      // on the real clock, whatever the server's is, since it bounds the platform's own close against
-      // a peer that does not answer (decision 0011)
+      // on its platform's clock, whatever the server's is, since it bounds the platform's own close
+      // against a peer that does not answer (decision 0011)
       const closeSocket = (socket: IServerSocketLike, code: number): Promise<void> => {
         // ! a socket that closes reads on to its peer's Close, so its handshake never waits on its
         // own pause: what it held is dropped with it (RFC 6455 §7.1.1)
@@ -470,14 +479,10 @@ export const createWebSocketTransportServer = (
           };
           // `Infinity` waits on the peer without end, where Node's timer would take it for 1 ms
           const timeoutId =
-            closeTimeout === Infinity
-              ? undefined
-              : // oxlint-disable-next-line no-restricted-properties -- a close handshake's bound is the platform's
-                globalThis.setTimeout(dropSocket, closeTimeout);
+            closeTimeout === Infinity ? undefined : platform.setTimeout(dropSocket, closeTimeout);
 
           socket.once(CLOSE_EVENT, () => {
-            // oxlint-disable-next-line no-restricted-properties -- as its bound above
-            globalThis.clearTimeout(timeoutId);
+            platform.clearTimeout(timeoutId);
             resolve();
           });
 
@@ -489,8 +494,7 @@ export const createWebSocketTransportServer = (
             // ! what it threw is the connection's first error, a terminate's that throws after it
             // reported no more (spec 15.1); its close never went out, so no answer is waited on
             fail(socket, toError(reason));
-            // oxlint-disable-next-line no-restricted-properties -- as its bound above
-            globalThis.clearTimeout(timeoutId);
+            platform.clearTimeout(timeoutId);
             dropSocket();
           }
         });
@@ -769,7 +773,7 @@ export const createWebSocketTransportServer = (
               // * a refusal of an upgrade that declares a body closes its socket in stages, so a
               // client still sending reads it before the close (RFC 9112 §9.6; spec 15.12)
               if (hasContent(request)) {
-                lingerOn(request.socket, response);
+                lingerOn(request.socket, response, { clock: platform });
               }
 
               response.sendDate = false;
@@ -899,6 +903,7 @@ export const createWebSocketTransportServer = (
           socket,
           createSendPace(
             {
+              clock: platform,
               late: () => {
                 drop(connection, lateOf(pace));
               },
@@ -914,16 +919,20 @@ export const createWebSocketTransportServer = (
 
         // a socket that is closing has its close handshake, bounded by `closeTimeout`, to end it;
         // its ping goes to `ws` at once, ahead of what its queue holds (spec 15.3)
-        const beating = createHeartbeat(heartbeat, {
-          drop: () => {
-            terminate(socket);
+        const beating = createHeartbeat(
+          heartbeat,
+          {
+            drop: () => {
+              terminate(socket);
+            },
+            ping: (data) => {
+              if (socket.readyState === ReadyState.OPEN) {
+                socket.ping(data);
+              }
+            },
           },
-          ping: (data) => {
-            if (socket.readyState === ReadyState.OPEN) {
-              socket.ping(data);
-            }
-          },
-        });
+          { clock: platform }
+        );
 
         // * what is read of the connection: each read of its raw socket, a frame's part among it,
         // metered below `ws` where its upgrade gave the socket with `ws`'s own listener; a socket

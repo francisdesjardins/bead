@@ -4,8 +4,7 @@ use std::sync::Mutex;
 use tokio::net::TcpListener;
 
 use super::*;
-use crate::clock::SystemClock;
-use crate::testing::{Instant, patience};
+use crate::testing::{Instant, patience, platform_clock};
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -24,7 +23,7 @@ fn answering(addresses: &[IpAddr]) -> Resolve {
 }
 
 fn platform() -> SharedClock {
-    Arc::new(SystemClock::current().unwrap())
+    Arc::new(platform_clock().unwrap())
 }
 
 // says once it is dropped: an attempt given up

@@ -281,6 +281,10 @@ impl SessionState {
             "sessionInactivityTimeout",
             options.session_inactivity_timeout.unwrap_or(NEVER),
         )?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock = options.clock.as_ref().map_or_else(
             || {
                 SystemClock::current().map(|platform| {

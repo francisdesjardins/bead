@@ -2,6 +2,7 @@
 
 // dependencies
 
+import type { IClock } from '../shared/clock';
 import {
   BEAD_MEDIA_TYPE,
   CONNECTION_UNKNOWN,
@@ -349,10 +350,14 @@ export const endWith = (response: IHTTPResponseLike, { headers, reason, status }
 /**
  * Writes the end of an exchange whose body may still come, as `endWith` does; over HTTP/1 it says
  * `connection: close`, and its socket closes in stages, its write side first, reading on and
- * dropping what still comes, so its client reads it before the close (RFC 9112 §9.6). Over HTTP/2,
- * its stream ends alone.
+ * dropping what still comes, so its client reads it before the close (RFC 9112 §9.6), bounded on
+ * `clock`, its stack's platform clock. Over HTTP/2, its stream ends alone.
  */
-export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void => {
+export const endClosing = (
+  { request, response }: IExchangeIn,
+  end: IEnd,
+  { clock }: { clock: IClock }
+): void => {
   if (request.httpVersionMajor !== 1) {
     return (endWith(response, end), undefined);
   }
@@ -361,7 +366,7 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
 
   // a socket of the platform's alone: a fake of a test's lingers nothing
   if (typeof socket.removeListener === 'function' && typeof socket.destroy === 'function') {
-    lingerOn(socket as Parameters<typeof lingerOn>[0], response);
+    lingerOn(socket as Parameters<typeof lingerOn>[0], response, { clock });
   }
 
   endWith(response, { ...end, headers: { ...end.headers, connection: 'close' } });
@@ -372,10 +377,14 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
 /**
  * The fields of an answer that closes its connection behind a body it does not read whole: over
  * HTTP/1, `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes
- * is dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
- * whose stream ends alone. Whether it closes is its caller's to judge.
+ * is dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it, bounded on
+ * `clock`, its stack's platform clock; none over HTTP/2, whose stream ends alone. Whether it closes
+ * is its caller's to judge.
  */
-export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<string, string>> => {
+export const closingOf = (
+  { request, response }: IExchangeIn,
+  { clock }: { clock: IClock }
+): Readonly<Record<string, string>> => {
   if (request.httpVersionMajor !== 1) {
     return {};
   }
@@ -383,7 +392,7 @@ export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<s
   const { socket } = request;
 
   if (typeof socket.removeListener === 'function' && typeof socket.destroy === 'function') {
-    lingerOn(socket as Parameters<typeof lingerOn>[0], response);
+    lingerOn(socket as Parameters<typeof lingerOn>[0], response, { clock });
   }
 
   return { connection: 'close' };

@@ -316,11 +316,13 @@ internal sealed class FrameMeter
         }
     }
 
+    // the rate's clock, its server's
     private TimeProvider Clock
     {
         get
         {
-            return _options.Rate?.Clock ?? TimeProvider.System;
+            // ! read only while a message is timed, which a rate alone times
+            return _options.Rate!.Clock;
         }
     }
 
