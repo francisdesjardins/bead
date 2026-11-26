@@ -3486,13 +3486,14 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
                     var closing = client.CloseConnection();
                     Assert.Equal(0x8, (await FrameFrom(stream))?.Opcode);
                     var more = FrameFrom(stream);
-                    await Task.Delay(1100, Cancelled);
 
-                    Assert.Equal(ReadyState.Closing, client.ReadyState);
-                    Assert.False(more.IsCompleted);
-                    await stream.WriteAsync(new byte[] { 0x88, 0x02, 0x03, 0xe8 }, Cancelled);
+                    // ! its close unanswered, a beat comes due and sends no ping, and the heartbeat
+                    // drops it all the same, from twice the heartbeat after the pong was read (spec
+                    // 15.3): no wait on the clock can tell it still closing. Its close is told as the
+                    // disconnect asked, and nothing goes after its close
+                    Assert.Equal((true, false), await Next(closes));
                     await closing.WaitAsync(Patience, Cancelled);
-                    Assert.Null(await more);
+                    Assert.Null(await more.WaitAsync(Patience, Cancelled));
                 }
                 else if (ending == "dispose")
                 {
