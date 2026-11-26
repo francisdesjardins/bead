@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -154,6 +154,23 @@ const snapshot = (fixture) => {
   };
 };
 
+// the clone's files and index, including merge state, which a trial merge must leave untouched
+const cloneState = (fixture) => {
+  const read = (path) => {
+    const file = join(fixture.clone, path);
+    return existsSync(file) ? readFileSync(file) : null;
+  };
+  return {
+    ...snapshot(fixture),
+    index: read('.git/index'),
+    head: read('.git/HEAD'),
+    merge: read('.git/MERGE_HEAD'),
+    original: read('.git/ORIG_HEAD'),
+    a: read('a.txt'),
+    spaced: read('has space.txt'),
+  };
+};
+
 const featureRuns = (fixture, run) => {
   return (branch) => {
     return branch === BRANCH ? [run] : [passed(20, developOf(fixture.origin))];
@@ -223,6 +240,36 @@ describe('refusals', () => {
     await assert.rejects(run(fixture, { gh }).promise, /is not origin\/develop/);
   });
 
+  test('develop held by another worktree is refused with its path and the detach command, including --dry-run', async () => {
+    for (const dryRun of [false, true]) {
+      const fixture = flowing();
+      const held = join(fixture.base, 'develop elsewhere');
+      git(fixture.clone, 'checkout', '-q', 'main');
+      git(fixture.clone, 'worktree', 'add', '-q', held, 'develop');
+      const before = cloneState(fixture);
+      const { gh, calls } = standIn({ list: () => [] });
+      await assert.rejects(run(fixture, { gh, dryRun }).promise, {
+        message: `develop is checked out in another worktree, ${held.replaceAll('\\', '/')}: free it with git -C "${held.replaceAll('\\', '/')}" checkout --detach`,
+      });
+      assert.deepEqual(cloneState(fixture), before);
+      assert.deepEqual(calls, []);
+    }
+  });
+
+  test('develop forced into another worktree is refused even when the clone holds it too', async () => {
+    const fixture = flowing();
+    const held = join(fixture.base, 'develop elsewhere');
+    git(fixture.clone, 'worktree', 'add', '-q', '--force', held, 'develop');
+    const before = cloneState(fixture);
+    const { gh, calls } = standIn({ list: () => [] });
+    await assert.rejects(
+      run(fixture, { gh }).promise,
+      /develop is checked out in another worktree/
+    );
+    assert.deepEqual(cloneState(fixture), before);
+    assert.deepEqual(calls, []);
+  });
+
   test('release/*, hotfix/* and a name outside feature/* are refused, pointing at git flow and tools/release.mjs', async () => {
     const fixture = flowing();
     const { gh, calls } = standIn({ list: () => [] });
@@ -248,24 +295,48 @@ describe('refusals', () => {
     await assert.rejects(run(fixture, { gh }).promise, /holds commits origin's lacks/);
   });
 
-  test('a conflict is refused and the merge left to the human', async () => {
+  test('a conflict is refused before merging, names every file and the recovery, and leaves the clone and index untouched, including --dry-run', async () => {
+    for (const dryRun of [false, true]) {
+      const fixture = flowing();
+      write(fixture.worktree, { 'a.txt': 'feature\n', 'has space.txt': 'feature\n' });
+      git(fixture.worktree, 'add', '-A');
+      git(fixture.worktree, 'commit', '-qm', 'feat: three');
+      git(fixture.worktree, 'push', '-q', 'origin', BRANCH);
+      write(fixture.clone, { 'a.txt': 'develop\n', 'has space.txt': 'develop\n' });
+      git(fixture.clone, 'add', '-A');
+      git(fixture.clone, 'commit', '-qm', 'feat: four');
+      git(fixture.clone, 'push', '-q', 'origin', 'develop');
+      const head = git(fixture.worktree, 'rev-parse', 'HEAD');
+      git(fixture.clone, 'config', 'rerere.enabled', 'true');
+      const before = cloneState(fixture);
+      const { gh, calls } = standIn({ list: featureRuns(fixture, passed(11, head)) });
+      await assert.rejects(run(fixture, { gh, dryRun }).promise, {
+        message:
+          'merging feature/x into develop conflicts in a.txt, has space.txt: merge develop into feature/x, resolve and commit, push, let CI pass, then finish again',
+      });
+      assert.deepEqual(cloneState(fixture), before);
+      assert.equal(git(fixture.clone, 'ls-files', '-u'), '');
+      assert.equal(git(fixture.clone, 'status', '--porcelain'), '');
+      assert.equal(existsSync(join(fixture.clone, '.git/rr-cache')), false);
+      assert.deepEqual(calls, []);
+    }
+  });
+
+  test('a trial merge failure without conflicting files removes its temporary worktree and leaves the clone untouched', async () => {
     const fixture = flowing();
-    write(fixture.worktree, { 'a.txt': 'feature\n' });
-    git(fixture.worktree, 'add', '-A');
-    git(fixture.worktree, 'commit', '-qm', 'feat: three');
-    git(fixture.worktree, 'push', '-q', 'origin', BRANCH);
-    write(fixture.clone, { 'a.txt': 'develop\n' });
-    git(fixture.clone, 'commit', '-qam', 'feat: four');
-    git(fixture.clone, 'push', '-q', 'origin', 'develop');
+    git(fixture.worktree, 'checkout', '-q', '--orphan', 'feature/unrelated');
+    git(fixture.worktree, 'commit', '-qm', 'feat: unrelated');
     const head = git(fixture.worktree, 'rev-parse', 'HEAD');
-    const { gh } = standIn({ list: featureRuns(fixture, passed(11, head)) });
+    git(fixture.worktree, 'push', '-q', '--force', 'origin', `HEAD:${BRANCH}`);
+    git(fixture.clone, 'branch', '-f', BRANCH, head);
+    const before = cloneState(fixture);
+    const { gh, calls } = standIn({ list: featureRuns(fixture, passed(11, head)) });
     await assert.rejects(
-      run(fixture, { gh }).promise,
-      /conflicts in a\.txt: the merge is left to you/
+      run(fixture, { gh, dryRun: true }).promise,
+      /the trial merge of feature\/x failed: fatal: refusing to merge unrelated histories/
     );
-    assert.equal(git(fixture.clone, 'rev-parse', 'MERGE_HEAD'), head);
-    // nothing committed, nothing pushed
-    assert.equal(git(fixture.clone, 'rev-parse', 'HEAD'), developOf(fixture.origin));
+    assert.deepEqual(cloneState(fixture), before);
+    assert.deepEqual(calls, []);
   });
 });
 
@@ -432,12 +503,17 @@ describe('finish', () => {
 
   test('--dry-run makes every check, says what it would do, and changes nothing', async () => {
     const fixture = flowing();
-    const before = snapshot(fixture);
+    for (const hook of ['post-checkout', 'pre-merge-commit']) {
+      writeFileSync(join(fixture.clone, '.git/hooks', hook), '#!/bin/sh\nexit 42\n', {
+        mode: 0o755,
+      });
+    }
+    const before = cloneState(fixture);
     const { gh, calls } = standIn({ list: featureRuns(fixture, passed(11, fixture.feature)) });
     const { lines, promise } = run(fixture, { gh, dryRun: true });
     const result = await promise;
     assert.equal(result.dryRun, true);
-    assert.deepEqual(snapshot(fixture), before);
+    assert.deepEqual(cloneState(fixture), before);
     assert.match(
       lines.at(-1),
       /^dry run: would merge feature\/x \(\w{7}\) into develop with --no-ff, push develop, await its run of ci\.yml, then delete origin's feature\/x, the worktree .+, its node_modules first, the local feature\/x$/

@@ -9,8 +9,9 @@
 // From a clone on develop, or the clone --repo names. Each step is checked before the next:
 //   1. the branch is a feature/* branch on origin, after a fetch; develop is clean and at
 //      origin/develop; the branch is not merged yet; a local branch of that name holds nothing
-//      origin's lacks; a worktree that has it checked out is clean; and a run of CI's ci.yml for
-//      origin's head of the branch passed, a run still going awaited by its id;
+//      origin's lacks; no other worktree holds develop; a trial merge in a temporary detached
+//      worktree finds no conflict; a worktree that has the branch checked out is clean; and a run
+//      of CI's ci.yml for origin's head of the branch passed, a run still going awaited by its id;
 //   2. that head is merged into develop with --no-ff, git's hooks run; a conflict is left to the
 //      human, as git leaves it;
 //   3. develop is pushed, and CI's run of the merge awaited by its id; a run cancelled because a
@@ -23,7 +24,8 @@
 // Exit 1 on a refusal; exit 2 on a usage error.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
@@ -336,6 +338,62 @@ const developPassed = async (context, merge) => {
 
 // ── Finish ────────────────────────────────────────────────────────────────────
 
+// the clone alone may hold develop, even when another checkout was forced
+const developAvailable = (root) => {
+  const held = worktreesOf(root).find((worktree) => {
+    return (
+      worktree.branch === `refs/heads/${DEVELOP}` &&
+      relative(realOf(root), realOf(worktree.path)) !== ''
+    );
+  });
+  if (held !== undefined) {
+    throw new Error(
+      `develop is checked out in another worktree, ${held.path}: free it with git -C "${held.path}" checkout --detach`
+    );
+  }
+};
+
+// * Git 2.31 can try the merge in a detached worktree without touching the clone's index or files.
+// Hooks and rerere stay out of the trial; the temporary checkout is removed on every outcome.
+const mergeable = (root, { develop, sha, branch }) => {
+  const temporary = mkdtempSync(join(tmpdir(), 'bead-flow-merge-'));
+  const folder = join(temporary, 'worktree');
+  const withoutHooks = ['-c', `core.hooksPath=${temporary}`];
+  try {
+    git(root, [...withoutHooks, 'worktree', 'add', '--detach', folder, develop]);
+    const merging = gitRun(folder, [
+      ...withoutHooks,
+      '-c',
+      'rerere.enabled=false',
+      'merge',
+      '--no-commit',
+      '--no-ff',
+      sha,
+    ]);
+    if (merging.status !== 0) {
+      const conflicted = git(folder, ['diff', '--name-only', '--diff-filter=U', '-z'])
+        .split('\0')
+        .filter((path) => path !== '');
+      if (conflicted.length > 0) {
+        throw new Error(
+          `merging ${branch} into develop conflicts in ${conflicted.join(', ')}: merge develop into ${branch}, resolve and commit, push, let CI pass, then finish again`
+        );
+      }
+      throw new Error(
+        `the trial merge of ${branch} failed: ${reasonOf(merging.stderr) || reasonOf(merging.stdout)}`
+      );
+    }
+  } finally {
+    try {
+      if (existsSync(folder)) {
+        git(root, ['worktree', 'remove', '--force', folder]);
+      }
+    } finally {
+      rmSync(temporary, { recursive: true, force: true, maxRetries: 10 });
+    }
+  }
+};
+
 // what the branch's deletion meets: its worktrees, each clean, and the local branch, holding
 // nothing origin's lacks
 const deletable = (root, { branch, sha, cwd }) => {
@@ -417,6 +475,7 @@ export const finish = async (root, options) => {
   ) {
     throw new Error(`${branch}: not a feature/* branch`);
   }
+  developAvailable(root);
   const head = gitRun(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim();
   if (head !== DEVELOP) {
     throw new Error(
@@ -444,6 +503,7 @@ export const finish = async (root, options) => {
     throw new Error(`${branch}: already merged into develop`);
   }
   const { worktrees } = deletable(root, { branch, sha, cwd });
+  mergeable(root, { develop, sha, branch });
   const judged = await branchPassed(context, { branch, sha });
   log(`CI: run ${judged.databaseId} passed for ${branch} at ${short(sha)}`);
   // the run may have taken a while: origin's head is the one it judged, or nothing goes on
