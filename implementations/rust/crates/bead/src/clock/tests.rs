@@ -202,3 +202,52 @@ fn reads_a_wall_clock_in_milliseconds_rounded_down_before_the_epoch_too() {
         );
     }
 }
+
+// decision 0011: the platform's clock is a runtime's, one origin read by every one of them
+#[tokio::test]
+async fn takes_two_platform_clocks_on_one_runtime_as_one_and_a_runtime_apart_as_another() {
+    use std::sync::Arc;
+
+    use super::{SharedClock, is_same};
+    use crate::testing::SteppingClock;
+
+    let current = SystemClockOptions::default();
+    let first: SharedClock = Arc::new(SystemClock::new(&current).expect("a platform clock"));
+    let second: SharedClock =
+        Arc::new(SystemClock::new(&current).expect("another, on one runtime"));
+
+    assert!(is_same(&first, &second), "one runtime, one clock");
+
+    let before = first.monotonic();
+    let between = second.monotonic();
+    let after = first.monotonic();
+
+    assert!(
+        before <= between && between <= after,
+        "one origin: {before:?}, {between:?}, {after:?}"
+    );
+
+    let apart = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a second runtime");
+    let elsewhere: SharedClock = Arc::new(
+        SystemClock::new(&SystemClockOptions {
+            runtime: Some(apart.handle().clone()),
+            ..SystemClockOptions::default()
+        })
+        .expect("a platform clock on the second runtime"),
+    );
+
+    assert!(
+        !is_same(&first, &elsewhere),
+        "a runtime apart, another clock"
+    );
+
+    let stepping: SharedClock = SteppingClock::new(std::time::SystemTime::UNIX_EPOCH);
+
+    assert!(!is_same(&first, &stepping), "a test's, another clock");
+    assert!(is_same(&stepping, &stepping), "the same value");
+    // ! a runtime dropped within another's task would block it
+    apart.shutdown_background();
+}

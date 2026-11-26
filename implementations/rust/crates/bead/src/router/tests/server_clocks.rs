@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use crate::clock::{SharedClock, SystemClock, SystemClockOptions};
+use crate::memory::{MemoryTransportServer, MemoryTransportServerOptions};
 use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::testing::SteppingClock;
 use crate::testing::clockless::Clockless;
 use crate::testing::scripted::ScriptedServer;
+use crate::transport::ServerTransport;
 
 async fn server_transport_clock() {
     let clock: SharedClock = SteppingClock::new(super::january_first());
@@ -54,6 +56,16 @@ async fn server_transport_clock() {
         "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
     );
     assert_eq!(platform.listener_count(), 0);
+    let unclocked: Arc<dyn ServerTransport> = Arc::new(
+        MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+            .expect("a transport given no clock"),
+    );
+    assert_eq!(
+        RouterServer::new(unclocked, &given)
+            .expect_err("a transport given none and a clock of its own")
+            .to_string(),
+        "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
+    );
     for router in [on_transport, same, on_own] {
         router.dispose().await;
     }

@@ -1027,7 +1027,7 @@ impl RouterClientTransport for BrokerTransportClient {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.participant.config().given.clone()
+        Some(self.inner.participant.clock())
     }
 
     // its own leg, and its server's as its ACCEPT said, read per call (spec 15.22)

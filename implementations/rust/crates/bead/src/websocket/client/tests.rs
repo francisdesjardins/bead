@@ -3841,7 +3841,12 @@ async fn holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refus
             .is_some_and(|given| Arc::ptr_eq(&given, &shared)),
         "the clock it was given"
     );
-    assert!(client().clock().is_none(), "none given");
+    assert!(
+        client()
+            .clock()
+            .is_some_and(|platform| platform.description() == "the platform's"),
+        "none given"
+    );
 
     for (given, held) in [
         (Duration::from_micros(1_400), true),

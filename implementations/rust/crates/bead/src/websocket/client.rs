@@ -264,9 +264,8 @@ pub(crate) struct ClientInner {
     runtime: Handle,
     // the platform's clock, which its timers that bound the platform's socket run on
     platform: SharedClock,
-    // the clock its connect's timeout runs on, and the one it was given
+    // the clock its connect's timeout runs on: the one given, or the platform's
     clock: SharedClock,
-    given: Option<SharedClock>,
     settings: Settings,
     racing: RacingOptions,
     // the TLS its secured connects speak, built at the first
@@ -1011,7 +1010,6 @@ impl WebSocketTransportClient {
                 runtime,
                 platform,
                 clock,
-                given: options.clock.clone(),
                 settings: Settings {
                     close_timeout,
                     heartbeat,
@@ -1392,7 +1390,7 @@ impl RouterClientTransport for WebSocketTransportClient {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     // * judged from the options of its last connect, never from what its host resolves to (spec

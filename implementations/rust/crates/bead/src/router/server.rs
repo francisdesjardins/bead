@@ -100,7 +100,8 @@ pub struct SessionRequest<'a> {
 pub struct RouterServerOptions {
     /// The clock it runs on: its transport's, which one given must be; the platform's when none.
     pub clock: Option<SharedClock>,
-    /// The runtime its owner runs on: the current one when none.
+    /// The runtime its owner runs on: the current one when none. Its timers run on its clock, its
+    /// transport's, so on the runtime that clock arms on.
     pub runtime: Option<Handle>,
     /// How much it reads, writes and holds.
     pub limits: Option<RouterLimitsOptions>,

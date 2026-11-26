@@ -702,9 +702,8 @@ pub(crate) struct ClientInner {
     runtime: Handle,
     // the platform's clock, which its disconnect's bound runs on
     platform: SharedClock,
-    // the clock its timers run on, and the one it was given
+    // the clock its timers run on: the one given, or the platform's
     clock: SharedClock,
-    given: Option<SharedClock>,
     settings: Settings,
     client: Client<Connector, Sending>,
     state: Mutex<ClientState>,
@@ -1592,7 +1591,6 @@ impl HttpTransportClient {
                 runtime,
                 platform,
                 clock,
-                given: options.clock.clone(),
                 settings,
                 client,
                 state: Mutex::new(ClientState {
@@ -2030,7 +2028,7 @@ impl RouterClientTransport for HttpTransportClient {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     // by the URL its last connect named: under `https`, or to a host on the loopback

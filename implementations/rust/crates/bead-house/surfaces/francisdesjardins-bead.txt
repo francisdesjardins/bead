@@ -642,7 +642,7 @@ crate::clock
   type TimerCallback = Box<dyn FnMut() + Send>
   trait Timer: Send + Sync + fmt::Debug
     fn cancel(&self)
-  trait Clock: Send + Sync + fmt::Debug
+  trait Clock: Any + Send + Sync + fmt::Debug
     fn description(&self) -> &'static str
     fn monotonic(&self) -> Duration
     fn wall(&self) -> SystemTime

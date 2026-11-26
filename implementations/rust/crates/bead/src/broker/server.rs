@@ -1135,7 +1135,7 @@ impl ServerTransport for BrokerTransportServer {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.participant.config().given.clone()
+        Some(self.inner.participant.clock())
     }
 
     // its own leg, and its peer's, as its OPEN said (spec 15.22)

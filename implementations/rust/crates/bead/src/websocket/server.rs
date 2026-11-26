@@ -201,9 +201,8 @@ pub(crate) struct ServerInner {
     loopback_binding: Mutex<Option<crate::net::loopbacks::LoopbackBinding>>,
     // the platform's clock, which its timers that bound the platform's socket run on
     platform: SharedClock,
-    // the clock it stamps and dates on, and the one it was given
+    // the clock it stamps and dates on: the one given, or the platform's
     clock: SharedClock,
-    given: Option<SharedClock>,
     settings: Settings,
     // what its connections' messages partway hold, and the rate they come at
     budget: Arc<MessageBudget>,
@@ -937,7 +936,6 @@ impl WebSocketTransportServer {
             loopback_binding: Mutex::default(),
             platform,
             clock,
-            given: options.clock.clone(),
             settings: Settings {
                 close_timeout,
                 headers_timeout,
@@ -1099,7 +1097,7 @@ impl ServerTransport for WebSocketTransportServer {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     // as its application says of what stands in front of it, else by what it listens on
