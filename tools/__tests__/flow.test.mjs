@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import childProcess, { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
-import { after, describe, test } from 'node:test';
+import { after, describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { finish } from '../flow.mjs';
@@ -180,6 +181,34 @@ const featureRuns = (fixture, run) => {
 // ── Refusals ──────────────────────────────────────────────────────────────────
 
 describe('refusals', () => {
+  test('Git below the floor is refused before any other command, including --dry-run', async () => {
+    for (const dryRun of [false, true]) {
+      const fixture = flowing();
+      const before = cloneState(fixture);
+      const { gh, calls } = standIn({ list: () => [] });
+      const commands = [];
+      const replaced = mock.method(childProcess, 'spawnSync', (command, args) => {
+        commands.push([command, ...args]);
+        assert.equal(command, 'git');
+        assert.deepEqual(args, ['--version']);
+        return { status: 0, stdout: 'git version 2.55.9.windows.1\n', stderr: '' };
+      });
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(run(fixture, { gh, dryRun }).promise, {
+          message:
+            'Git 2.56 or newer is required; found git version 2.55.9.windows.1. Upgrade Git (Git for Windows: winget upgrade --id Git.Git).',
+        });
+      } finally {
+        replaced.mock.restore();
+        syncBuiltinESMExports();
+      }
+      assert.deepEqual(commands, [['git', '--version']]);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(cloneState(fixture), before);
+    }
+  });
+
   test('a branch whose run failed is refused, its failed jobs named, and nothing changes', async () => {
     const fixture = flowing();
     const before = snapshot(fixture);
@@ -322,7 +351,7 @@ describe('refusals', () => {
     }
   });
 
-  test('a trial merge failure without conflicting files removes its temporary worktree and leaves the clone untouched', async () => {
+  test('a trial merge failure without conflicting files leaves the clone untouched', async () => {
     const fixture = flowing();
     git(fixture.worktree, 'checkout', '-q', '--orphan', 'feature/unrelated');
     git(fixture.worktree, 'commit', '-qm', 'feat: unrelated');

@@ -7,11 +7,12 @@
 //   node tools/flow.mjs finish <feature/name> [--repo <path>] [--dry-run]
 //
 // From a clone on develop, or the clone --repo names. Each step is checked before the next:
-//   1. the branch is a feature/* branch on origin, after a fetch; develop is clean and at
-//      origin/develop; the branch is not merged yet; a local branch of that name holds nothing
-//      origin's lacks; no other worktree holds develop; a trial merge in a temporary detached
-//      worktree finds no conflict; a worktree that has the branch checked out is clean; and a run
-//      of CI's ci.yml for origin's head of the branch passed, a run still going awaited by its id;
+//   1. Git meets tools/git-floor.mjs's floor; the branch is a feature/* branch on origin, after a
+//      fetch; develop is clean and at origin/develop; the branch is not merged yet; a local branch
+//      of that name holds nothing origin's lacks; no other worktree holds develop;
+//      git merge-tree --write-tree finds no conflict without touching the index or files; a worktree
+//      that has the branch checked out is clean; and a run of CI's ci.yml for origin's head of the
+//      branch passed, a run still going awaited by its id;
 //   2. that head is merged into develop with --no-ff, git's hooks run; a conflict is left to the
 //      human, as git leaves it;
 //   3. develop is pushed, and CI's run of the merge awaited by its id; a run cancelled because a
@@ -24,11 +25,12 @@
 // Exit 1 on a refusal; exit 2 on a usage error.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
+
+import { requireGitFloor } from './git-floor.mjs';
 
 const REMOTE = 'origin';
 const DEVELOP = 'develop';
@@ -353,45 +355,26 @@ const developAvailable = (root) => {
   }
 };
 
-// * Git 2.31 can try the merge in a detached worktree without touching the clone's index or files.
-// Hooks and rerere stay out of the trial; the temporary checkout is removed on every outcome.
+// * merge-tree writes objects alone: the clone's files, index, hooks and rerere stay untouched.
 const mergeable = (root, { develop, sha, branch }) => {
-  const temporary = mkdtempSync(join(tmpdir(), 'bead-flow-merge-'));
-  const folder = join(temporary, 'worktree');
-  const withoutHooks = ['-c', `core.hooksPath=${temporary}`];
-  try {
-    git(root, [...withoutHooks, 'worktree', 'add', '--detach', folder, develop]);
-    const merging = gitRun(folder, [
-      ...withoutHooks,
-      '-c',
-      'rerere.enabled=false',
-      'merge',
-      '--no-commit',
-      '--no-ff',
-      sha,
-    ]);
-    if (merging.status !== 0) {
-      const conflicted = git(folder, ['diff', '--name-only', '--diff-filter=U', '-z'])
-        .split('\0')
-        .filter((path) => path !== '');
-      if (conflicted.length > 0) {
-        throw new Error(
-          `merging ${branch} into develop conflicts in ${conflicted.join(', ')}: merge develop into ${branch}, resolve and commit, push, let CI pass, then finish again`
-        );
-      }
+  const merging = gitRun(root, ['merge-tree', '--write-tree', '--name-only', '-z', develop, sha]);
+  if (merging.status === 0) {
+    return;
+  }
+  if (merging.status === 1) {
+    // the tree id, then paths up to an empty field; informational messages follow that field
+    const fields = merging.stdout.split('\0');
+    const end = fields.indexOf('', 1);
+    const conflicted = fields.slice(1, end === -1 ? undefined : end);
+    if (conflicted.length > 0) {
       throw new Error(
-        `the trial merge of ${branch} failed: ${reasonOf(merging.stderr) || reasonOf(merging.stdout)}`
+        `merging ${branch} into develop conflicts in ${conflicted.join(', ')}: merge develop into ${branch}, resolve and commit, push, let CI pass, then finish again`
       );
     }
-  } finally {
-    try {
-      if (existsSync(folder)) {
-        git(root, ['worktree', 'remove', '--force', folder]);
-      }
-    } finally {
-      rmSync(temporary, { recursive: true, force: true, maxRetries: 10 });
-    }
   }
+  throw new Error(
+    `the trial merge of ${branch} failed: ${reasonOf(merging.stderr) || reasonOf(merging.stdout) || `exit ${merging.status}`}`
+  );
 };
 
 // what the branch's deletion meets: its worktrees, each clean, and the local branch, holding
@@ -444,6 +427,7 @@ const deletable = (root, { branch, sha, cwd }) => {
 //   appearances how many times develop's runs are looked for one of the merge
 //   cwd         where the command runs, which a worktree it removes must not hold
 export const finish = async (root, options) => {
+  requireGitFloor();
   const {
     branch,
     dryRun = false,
@@ -646,6 +630,7 @@ if (import.meta.main) {
     usage();
   }
   try {
+    requireGitFloor();
     const where = values.repo === undefined ? process.cwd() : resolve(values.repo);
     if (!existsSync(where)) {
       throw new Error(`${where}: no such folder`);

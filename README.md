@@ -1028,6 +1028,10 @@ against each server.
 
 ## Repository checks
 
+A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet this floor.
+`tools/git-floor.mjs` holds that floor; `flow.mjs` checks it first. On Git for Windows,
+`winget upgrade --id Git.Git` upgrades Git.
+
 - `node tools/check-commits.mjs <range>`: every commit subject in the range is a Conventional
   Commit; merges are left out. With `--message <file>`, the message git is about to record, which
   must also be UTF-8 without a byte order mark.
@@ -1154,8 +1158,8 @@ A `feature/*` branch is finished by `tools/flow.mjs finish`, from a clone on `de
 `--repo` names, each step checked before the next. It holds the branch to being on `origin`,
 `develop` to being clean and at `origin/develop`, with no other worktree holding it, a worktree
 that has the branch checked out to being clean, and the branch's head on `origin` to a run of
-`ci.yml` that passed, awaiting one still going. A trial merge in a temporary detached worktree
-refuses a conflict before the clone's files or index change, naming the files and asking to merge
+`ci.yml` that passed, awaiting one still going. `git merge-tree --write-tree`
+refuses a conflict without touching the clone's files or index, naming the files and asking to merge
 `develop` into the feature branch, push and let CI pass before finishing again. It then merges that
 head into `develop` with `--no-ff`, git's hooks run. It pushes `develop` and awaits CI's run of the
 merge; when a newer push cancels that run, it follows the newest run whose commit contains the
