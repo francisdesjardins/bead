@@ -92,7 +92,7 @@
     "esbuild": "0.28.2",
     "mqtt": "5.16.1",
     "mqtt-packet": "9.0.2",
-    "oxfmt": "0.78.0",
+    "oxfmt": "0.79.0",
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "7.0.2007",
     "rhea": "3.0.5",
