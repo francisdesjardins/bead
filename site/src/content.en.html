@@ -886,7 +886,7 @@
           <tr>
             <td><code>headersTimeout</code></td>
             <td class="code-num">30 s</td>
-            <td>The time a request’s head has to come</td>
+            <td>The time a request’s head has to come, and an idle socket stays</td>
           </tr>
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
@@ -1767,7 +1767,8 @@
     <summary>A request’s timeouts, and WebSocket’s handshake</summary>
     <p>
       A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the HTTP server
-      answers 408 before the transport reads anything, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
+      answers 408 before the transport reads anything, unmarked. A socket or an HTTP/2 session with
+      nothing under way, or a TLS handshake, closes past the same 30 s. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
       receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
       or a byte past ASCII, is refused before anything else, 400 unmarked over HTTP/1.1 (§15.12).
     </p>

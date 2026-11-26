@@ -930,7 +930,7 @@
           <tr>
             <td><code>headersTimeout</code></td>
             <td class="code-num">30 s</td>
-            <td>Le temps qu’a la tête d’une requête pour venir</td>
+            <td>Le temps qu’a la tête d’une requête pour venir, et que reste un socket inactif</td>
           </tr>
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
@@ -1832,7 +1832,8 @@
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un socket ou une session HTTP/2
+      sans rien en cours, ou une poignée de main TLS, se ferme passé les mêmes 30 s. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
       reste, 400 non marqué sur HTTP/1.1 (§15.12).
