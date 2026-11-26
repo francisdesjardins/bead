@@ -1223,17 +1223,17 @@ impl Server {
         // * one clock for every layer: the transport's, or the one given, which the sessions and
         // the router are both handed
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock = clock_of(&LayeredClocks {
             beneath: transport.clock().as_ref(),
             given: options.clock.as_ref(),
             layer: "a server",
             below: "its transport",
         })?
-        .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
-
-            platform
-        });
+        .unwrap_or_else(|| -> SharedClock { Arc::new(SystemClock::on(runtime.clone())) });
         let sessions_options = options.sessions.clone().unwrap_or_default();
         let sessions = SessionState::new(&SessionManagerOptions {
             clock: clock_of(&LayeredClocks {

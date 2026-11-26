@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 
 import {
@@ -19,6 +19,7 @@ import {
   ROOT,
   RULES,
   ruleOf,
+  runSteps,
   stepsOf,
   verdictOf,
 } from '../ci-scope.mjs';
@@ -106,6 +107,130 @@ describe('ci.yml', () => {
     const ok = CI.get('ci-ok');
     assert.deepEqual(ok.needs.sort(), [...AREAS, ...Object.keys(PARTS), 'scope'].sort());
     assert.equal(ok.if, 'always()');
+  });
+});
+
+describe('running the local commands', () => {
+  test('prints each command before running it, in order, in its folder under the root', () => {
+    const steps = [
+      { area: 'commits', folder: '.', command: 'node tools/check-commits.mjs {base}..{head}' },
+      {
+        area: 'typescript',
+        folder: 'implementations/typescript',
+        command: 'yarn test --grep "a test"',
+        note: 'the environment comes from the caller',
+      },
+      { area: 'builder', folder: 'builder', command: "tool --pattern '*.txt'" },
+      { area: 'builder', folder: '.', command: 'node tools/check-links.mjs' },
+    ];
+    const lines = [];
+    const calls = [];
+    const code = runSteps(steps, {
+      base: 'base',
+      head: 'head',
+      log: (line) => {
+        lines.push(line);
+      },
+      spawn: (shell, args, options) => {
+        assert.equal(lines.at(-1), args[1]);
+        assert.equal(shell, process.platform === 'win32' ? 'bash' : '/bin/sh');
+        assert.equal(args[0], '-c');
+        assert.equal(options.env, process.env);
+        assert.equal(options.stdio, 'inherit');
+        calls.push({ command: args[1], cwd: options.cwd });
+        return { status: 0 };
+      },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(lines, linesOf(steps, 'base', 'head'));
+    assert.deepEqual(calls, [
+      { command: 'node tools/check-commits.mjs base..head', cwd: ROOT },
+      {
+        command: 'yarn test --grep "a test"',
+        cwd: resolve(ROOT, 'implementations/typescript'),
+      },
+      { command: "tool --pattern '*.txt'", cwd: resolve(ROOT, 'builder') },
+      { command: 'node tools/check-links.mjs', cwd: ROOT },
+    ]);
+  });
+
+  test('stops at the first failed command, names it and returns its exit code', () => {
+    const steps = ['first', 'second', 'third'].map((command) => {
+      return { area: 'commits', folder: '.', command };
+    });
+    const lines = [];
+    const errors = [];
+    const commands = [];
+    assert.equal(
+      runSteps(steps, {
+        log: (line) => {
+          lines.push(line);
+        },
+        error: (line) => {
+          errors.push(line);
+        },
+        spawn: (_shell, args) => {
+          commands.push(args[1]);
+          return { status: args[1] === 'second' ? 17 : 0 };
+        },
+      }),
+      17
+    );
+    assert.deepEqual(commands, ['first', 'second']);
+    assert.deepEqual(lines, ['# commits', 'first', 'second']);
+    assert.deepEqual(errors, ['ci-scope: second failed (exit 17)']);
+  });
+
+  test('a command that cannot start or ends by a signal fails and names the reason', () => {
+    for (const result of [
+      { status: null, error: new Error('shell unavailable') },
+      { status: null, signal: 'SIGTERM' },
+    ]) {
+      const errors = [];
+      assert.equal(
+        runSteps([{ area: 'commits', folder: '.', command: 'check' }], {
+          log: () => {},
+          error: (line) => {
+            errors.push(line);
+          },
+          spawn: () => {
+            return result;
+          },
+        }),
+        1
+      );
+      assert.deepEqual(errors, [
+        `ci-scope: check failed (${result.error?.message ?? result.signal})`,
+      ]);
+    }
+  });
+
+  test('runs the same selection as --local for --gates, --all and their combination', () => {
+    const paths = ['implementations/dotnet/tests/Bead.Core.Tests/A.cs'];
+    for (const options of [{}, { gates: true }, { all: true }, { all: true, gates: true }]) {
+      const steps = stepsOf(options.all ? AREAS : areasOf(paths), paths, options);
+      const commands = [];
+      const lines = [];
+      assert.equal(
+        runSteps(steps, {
+          log: (line) => {
+            lines.push(line);
+          },
+          spawn: (_shell, args) => {
+            commands.push(args[1]);
+            return { status: 0 };
+          },
+        }),
+        0
+      );
+      assert.deepEqual(lines, linesOf(steps, 'origin/develop'));
+      assert.deepEqual(
+        commands,
+        steps.map(({ command }) => {
+          return command.replace('{base}', 'origin/develop').replace('{head}', 'HEAD');
+        })
+      );
+    }
   });
 });
 

@@ -20,7 +20,7 @@ internal sealed record HappyEyeballsOptions
     /// <summary>How long an attempt goes unanswered before the next starts: 250 milliseconds, RFC 8305 §5's default.</summary>
     public TimeSpan AttemptDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>What the delay between attempts runs on: the system's clock when none.</summary>
+    /// <summary>What the delay between attempts runs on: the platform's clock its caller holds; the system's clock when none.</summary>
     public TimeProvider? Clock { get; init; }
 
     /// <summary>What gives the whole connect up, every attempt with it.</summary>
@@ -160,7 +160,9 @@ internal static class HappyEyeballs
         var host = read.StartsWith('[') && read.EndsWith(']') ? read[1..^1] : read;
         var resolve = given.Resolve ?? PlatformResolve;
         var connect = given.Connect ?? Attempt;
+#pragma warning disable RS0030 // the unit's default, for a caller that holds no platform's clock
         var clock = given.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
 
         // * a localhost name asks no resolver, whatever the platform's would answer (spec 13.4)
         var addresses = Interleave(IPAddress.TryParse(host, out var literal)
@@ -241,5 +243,21 @@ internal static class HappyEyeballs
         var socket = await ConnectAsync(context.DnsEndPoint, new HappyEyeballsOptions { CancellationToken = cancellationToken });
 
         return new NetworkStream(socket, ownsSocket: true);
+    }
+
+    /// <summary>
+    /// The connect of <see cref="ConnectCallback"/>, its delay between attempts on
+    /// <paramref name="clock"/>: the platform's clock the handler's stack holds.
+    /// </summary>
+    public static Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>> ConnectCallbackOn(TimeProvider clock)
+    {
+        return async (context, cancellationToken) =>
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            var socket = await ConnectAsync(context.DnsEndPoint, new HappyEyeballsOptions { Clock = clock, CancellationToken = cancellationToken });
+
+            return new NetworkStream(socket, ownsSocket: true);
+        };
     }
 }

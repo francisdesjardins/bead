@@ -14,7 +14,7 @@ use http_body::{Body, Frame, SizeHint};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::clock::SystemClock;
+use crate::testing::platform_clock;
 
 // a body of its own: the frames it gives, then its end or its failure, and the hints it shows, or
 // none where it forwards none
@@ -196,7 +196,7 @@ fn reading_of(maximum: u64, (budget, rate): (u64, u64)) -> Reading {
         budget: Arc::new(AtomicU64::new(0)),
         minimum_body_bytes_per_second: rate,
         body_grace_period: Duration::from_millis(50),
-        clock: Arc::new(SystemClock::current().expect("a runtime")),
+        clock: Arc::new(platform_clock().expect("a runtime")),
         ended: CancellationToken::new(),
         judged: None,
     }

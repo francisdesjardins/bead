@@ -114,7 +114,7 @@ What waits for a client's socket — what the server handed it that the socket h
 held to a pace, as Kestrel holds a response to its `MinResponseDataRate`: each envelope moves the
 connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`, 240, its grace
 `sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
-each second on the real clock, is dropped. An envelope that would take what waits past
+each second on its platform's clock, is dropped. An envelope that would take what waits past
 `maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
 184,551,424 bytes under the limits by default, which `createWebSocketServer` derives from its router's.
 Each drop is reported on `error` as its connection closes, naming its bound and its value, and its
@@ -290,10 +290,12 @@ never installed on the globals, is a test's. A stack has one clock, set where it
 upward: a router or a server built on a transport runs on the transport's, a server's session
 manager on the server's, a service manager on its router's, and one given that differs is a
 `ProgrammerError`. Each transport, router and session manager exposes the one it runs on as `clock`.
-What bounds a platform's own close stays on the real clock — a ping, a WebSocket's close handshake,
-its client's and its server's, the HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1
-milliseconds, is refused wherever one is taken; never is `Infinity`, which arms nothing of Bead's
-own: a close over `ws` still arms `ws`'s timer, held to `LONGEST_TIMER`.
+What bounds a platform's own close runs on the platform's clock, the globals, held where a stack
+starts — a ping, a WebSocket's close handshake, its server's, the HTTP client's disconnect — which a
+test replaces through the internal option `PLATFORM`; the client's close is `ws`'s own timer. A
+timeout past `LONGEST_TIMER`, 2³¹ − 1 milliseconds, is refused wherever one is taken; never is
+`Infinity`, which arms nothing of Bead's own: a close over `ws` still arms `ws`'s timer, held to
+`LONGEST_TIMER`.
 
 The router's layer sits under `src/router/`. Both sides build on one core, under `shared/`: it
 writes the envelopes that go out and reads those that come in, pairs each result and failure with
@@ -1410,8 +1412,8 @@ and reason. Each parcel is numbered: a copy a broker delivers again is dropped b
 sees it, and a gap loses the connection at once, a CLOSE of 4000, so nothing overtakes. An envelope
 past the peer's receive bound goes in parts, each as large as that bound lets it, held to
 `maximumEnvelopePartsBytes`, `heldBytesBudget` and `minimumBodyBytesPerSecond` once
-`bodyGracePeriod` passed. A connection silent for `heartbeat`, 30,000 ms by default on the
-platform's timer, is pinged, and one that answered nothing by the next is closed with 4001. A
+`bodyGracePeriod` passed. A connection silent for `heartbeat`, 30,000 ms by default on its
+platform's clock, is pinged, and one that answered nothing by the next is closed with 4001. A
 request's credential crosses in its DATA, toward the server alone, and a transport is secure while
 both legs are, each end marking its own in its OPEN or ACCEPT. Every link is a new incarnation that
 keeps no broker session: a link lost closes each of its connections, unclean, and its participant

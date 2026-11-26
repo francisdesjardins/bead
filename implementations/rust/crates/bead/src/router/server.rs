@@ -1787,16 +1787,18 @@ impl RouterServer {
             |last| crate::router::parts::PendingCalls::bounded(RouterSide::Server, last),
         )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
             beneath: transport.clock().as_ref(),
             given: options.clock.as_ref(),
             layer: "a server's router",
             below: "its transport",
         })?
-        .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
-
-            platform
+        .unwrap_or_else(|| -> SharedClock {
+            Arc::new(crate::clock::SystemClock::on(runtime.clone()))
         });
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let pacing = pacing_limits_of(&options.pacing.clone().unwrap_or_default())?;

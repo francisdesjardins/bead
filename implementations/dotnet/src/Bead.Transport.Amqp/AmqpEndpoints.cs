@@ -73,10 +73,11 @@ internal static class AmqpEndpoints
     }
 
     /// <summary>
-    /// Ends <paramref name="amqpObject"/> and awaits its peer's answer within <paramref name="bound"/>,
-    /// whatever ends it first; nothing it throws reaches the caller, since its end is what was asked.
+    /// Ends <paramref name="amqpObject"/> and awaits its peer's answer within its bound, on the
+    /// platform's clock its adapter holds, whatever ends it first; nothing it throws reaches the
+    /// caller, since its end is what was asked.
     /// </summary>
-    public static async Task Ending(AmqpObject amqpObject, TimeSpan bound)
+    public static async Task Ending(AmqpObject amqpObject, (TimeSpan Bound, TimeProvider Platform) within)
     {
         ArgumentNullException.ThrowIfNull(amqpObject);
 
@@ -85,7 +86,7 @@ internal static class AmqpEndpoints
         try
         {
             CloseAtOnce(amqpObject);
-            await ended.WaitAsync(bound, TimeProvider.System);
+            await ended.WaitAsync(within.Bound, within.Platform);
         }
         catch (Exception reason) when (reason is AmqpException or TimeoutException or ObjectDisposedException or InvalidOperationException or IOException)
         {

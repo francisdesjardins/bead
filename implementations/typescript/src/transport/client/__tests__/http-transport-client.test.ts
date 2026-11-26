@@ -19,7 +19,7 @@ import {
   ReconnectError,
   TimeoutError,
 } from '../../shared/errors';
-import { LONGEST_TIMER } from '../../shared/clock';
+import { LONGEST_TIMER, PLATFORM } from '../../shared/clock';
 import {
   createTestClock,
   delaysOn,
@@ -1371,32 +1371,36 @@ test.describe('createHTTPTransportClient', () => {
       method: 'DELETE',
     });
 
-    const { client: connected, fake } = await connectFake();
-    // how long it waits on the server, at most
-    const descriptor = Object.getOwnPropertyDescriptor(
-      AbortSignal,
-      'timeout'
-    ) as PropertyDescriptor;
-    const timeoutOf = AbortSignal.timeout.bind(AbortSignal);
-    const delays: number[] = [];
+    // * how long it waits on the server, at most: a bound on its platform's clock, here a test's
+    const platform = createTestClock();
+    const fake = createFakeFetch();
+    const connected = createHTTPTransportClient({
+      [PLATFORM]: platform,
+      clock: createTestClock(),
+      fetch: fake.fetch,
+      isListening: false,
+    });
+    const opening = connected.connect({ host, port: 8_080 });
 
-    AbortSignal.timeout = (delay) => {
-      delays.push(delay);
+    fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await opening;
 
-      return timeoutOf(delay);
-    };
-
-    try {
+    const { armed, cleared } = await timersUntil(platform, async () => {
       const disconnecting = connected.disconnect();
 
       fake.calls[1]?.fail();
 
       await disconnecting;
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', descriptor);
-    }
+    });
 
-    expect([connected.isClosed(), delays]).toEqual([true, [DISCONNECT_TIMEOUT]]);
+    // armed for the DELETE alone, and let go once it settled
+    expect([
+      connected.isClosed(),
+      armed.map(({ delay }) => {
+        return delay;
+      }),
+      cleared,
+    ]).toEqual([true, [DISCONNECT_TIMEOUT], [armed[0]?.handle]]);
   });
 
   test('bounds its disconnect on the real clock, whatever its own: a server that never answers the DELETE is let go once DISCONNECT_TIMEOUT has passed', async () => {

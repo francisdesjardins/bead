@@ -60,7 +60,7 @@ pub mod wire;
 pub(crate) use platform::alive_tasks;
 #[cfg(test)]
 pub(crate) use platform::blocking;
-pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};
+pub use platform::{Instant, patience, platform_clock, rest, spawn, wall_now, yield_now};
 pub use reading_clock::ReadingClock;
 
 /// The language a row of the support matrix names when it excuses this side from an entry.

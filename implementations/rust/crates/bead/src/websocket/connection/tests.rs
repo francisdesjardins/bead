@@ -3,8 +3,7 @@ use std::sync::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 use super::*;
-use crate::clock::SystemClock;
-use crate::testing::{patience, spawn};
+use crate::testing::{patience, platform_clock, spawn};
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -15,7 +14,7 @@ fn bounds_of(pacing: Option<Pacing>, close_timeout: Duration) -> ConnectionBound
         maximum_message_bytes: 64,
         close_timeout,
         pacing,
-        platform: Arc::new(SystemClock::current().unwrap()),
+        platform: Arc::new(platform_clock().unwrap()),
     }
 }
 

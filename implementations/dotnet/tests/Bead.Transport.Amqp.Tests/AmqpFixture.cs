@@ -72,12 +72,12 @@ internal static class AmqpFixture
             }
             finally
             {
-                await management.Close(TimeSpan.FromSeconds(5));
+                await management.Close((TimeSpan.FromSeconds(5), TimeProvider.System));
             }
         }
         finally
         {
-            await AmqpEndpoints.Ending(connection, TimeSpan.FromSeconds(5));
+            await AmqpEndpoints.Ending(connection, (TimeSpan.FromSeconds(5), TimeProvider.System));
         }
     }
 

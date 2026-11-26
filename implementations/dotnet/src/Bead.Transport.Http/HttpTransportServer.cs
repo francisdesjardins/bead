@@ -154,8 +154,8 @@ public sealed record HttpTransportServerOptions
     /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection dropped
     /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound and
     /// its grace with their values (spec 15.7). 0 holds none, on a network the application trusts;
-    /// below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real
-    /// clock, as what it bounds is the platform's socket.
+    /// below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is built. On its
+    /// platform's clock, as what it bounds is the platform's socket.
     /// </summary>
     public int MinimumSendBytesPerSecond
     {
@@ -175,7 +175,7 @@ public sealed record HttpTransportServerOptions
     /// <summary>
     /// The least time an answer is given to be taken by its socket: 5 seconds by default; from 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
-    /// infinite are refused (spec 15.12). On the real clock.
+    /// infinite are refused (spec 15.12). On its platform's clock.
     /// </summary>
     public TimeSpan SendGracePeriod
     {
@@ -391,9 +391,12 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// What the stack built on it runs on, its timers among them; the system's clock when none. A
-    /// stop's grace bounds the platform's own, on the real clock.
+    /// stop's grace bounds the platform's own, on its platform's clock.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
 
     /// <summary>
     /// The policy every listener of its application judges by (decision 0037): its hosts, its
@@ -516,6 +519,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     private static readonly End BusyExchanges = new(StatusCodes.Status429TooManyRequests, HttpRefusals.Busy) { Headers = new Dictionary<string, string> { ["retry-after"] = "1" } };
 
     private readonly HttpTransportServerOptions _options;
+    // * the platform's clock its own bounds of a platform run on: its pace, its linger and its
+    // stop's grace
+    private readonly TimeProvider _platform;
     private readonly TimeProvider _clock;
 
     // the networks of the proxies it believes X-Forwarded-For from
@@ -600,7 +606,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             BodyGracePeriod = bodyGracePeriod,
         };
         _isSecure = _options.Secure ?? _options.Certificate is not null;
-        _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _clock = _options.Clock ?? _platform;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
             ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
@@ -637,6 +646,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,
             SendGracePeriod = _options.SendGracePeriod,
             Clock = _clock,
+            Platform = _platform,
         });
     }
 
@@ -1159,10 +1169,11 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             exchanging = [.. _exchanging];
         }
 
-        // one grace for the whole stop, in real time, since what it waits on is the network's: the
-        // exchanges under way write their end, then Kestrel puts what they wrote on the wire before
-        // it closes their connections — cut at once, a 404 just written can go as a reset instead
-        using var grace = new CancellationTokenSource(EndsGrace, TimeProvider.System);
+        // one grace for the whole stop, on its platform's clock, since what it waits on is the
+        // network's: the exchanges under way write their end, then Kestrel puts what they wrote on
+        // the wire before it closes their connections — cut at once, a 404 just written can go as a
+        // reset instead
+        using var grace = new CancellationTokenSource(EndsGrace, _platform);
 
         try
         {
@@ -1243,23 +1254,22 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     }
 
     // ! an answer written before its body is whole closes its socket in stages (RFC 9112 §9.6):
-    // what still comes is read and dropped until its client closes or 2 seconds pass, on the real
-    // clock, since what it waits on is the network's, so no reset comes at once to erase an answer
+    // what still comes is read and dropped until its client closes or 2 seconds pass, on its
+    // platform's clock, since what it waits on is the network's, so no reset comes at once to erase an answer
     // its client has not read yet; a client still sending past 2 seconds may still be reset. A body
     // read whole ends at once. Kestrel's connection has no half-close, and
     // a shutdown of its socket races the answer Kestrel still sends: its write side ends with its
     // close, never first
-    private static async Task Linger(HttpContext context)
+    private async Task Linger(HttpContext context)
     {
         if (!HttpServerFields.IsLingering(context))
         {
             return;
         }
 
-        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        using var bounded = new CancellationTokenSource(ServerBounds.Linger, _platform);
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, bounded.Token);
         var dropped = new byte[LingerReadBytes];
-
-        lingering.CancelAfter(ServerBounds.Linger);
 
         try
         {
@@ -1281,14 +1291,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     }
 
     // * an answer's bytes written at its pace (spec 15.12): given the longer of its grace and its
-    // bytes at the rate, judged each second on the real clock, since what it bounds is the
+    // bytes at the rate, judged each second on its platform's clock, since what it bounds is the
     // platform's socket; its socket still holding them past that, its exchange is aborted, and
     // true. A rate of 0 holds none. Kestrel drops a write to a client gone without a word, before
     // its abort is told: a flush that finds nothing reading says the answer never went out whole,
     // an IOException
-    private static async Task<bool> WritePaced(HttpContext context, (ReadOnlyMemory<byte> Bytes, (int BytesPerSecond, TimeSpan Grace) Pace) answer)
+    private static async Task<bool> WritePaced(HttpContext context, (ReadOnlyMemory<byte> Bytes, (int BytesPerSecond, TimeSpan Grace, TimeProvider Platform) Pace) answer)
     {
-        var (bytes, (bytesPerSecond, grace)) = answer;
+        var (bytes, (bytesPerSecond, grace, platform)) = answer;
         var isLate = false;
         long unsent = bytes.Length;
 
@@ -1303,7 +1313,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return Interlocked.Read(ref unsent);
         }
 
-        var pace = new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = bytesPerSecond, SendGracePeriod = grace });
+        var pace = new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = bytesPerSecond, SendGracePeriod = grace, Clock = platform });
 
         pace.Hand(bytes.Length);
 
@@ -2114,7 +2124,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
                 // ! at its pace: past it, an answer that could not be written, its exchange lost, its
                 // connection dropped at both ends, reported (spec 15.7, 15.12)
-                if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
+                if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod, _platform))))
                 {
                     Drop((connection, ServerBounds.LateOf((_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))));
 

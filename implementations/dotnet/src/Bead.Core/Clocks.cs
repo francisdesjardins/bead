@@ -141,6 +141,8 @@ public static class Clocks
     // its reading rather than its name
     private static string NameOf(TimeProvider clock)
     {
+#pragma warning disable RS0030 // the platform's clock named, never read: a replaced one is one of its own
         return ReferenceEquals(clock, TimeProvider.System) ? "the platform's" : "one of its own";
+#pragma warning restore RS0030
     }
 }

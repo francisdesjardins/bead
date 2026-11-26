@@ -41,6 +41,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private static readonly TimeSpan PingCheck = TimeSpan.FromMilliseconds(250);
 
     private readonly MqttBrokerAdapterOptions _options;
+    // * the platform's clock its own bounds of a platform run on: its connect timeout, its pinger
+    // and its race
+    private readonly TimeProvider _platform;
+    // what races its broker's name over TCP, on its platform's clock
+    private readonly RacingStreamProvider _streams;
     private readonly bool _isSecure;
     // what its TLS holds, its key among it, read once and let go of at its dispose
     private readonly TlsCredentials? _tls;
@@ -116,6 +121,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             KeepAlive = Clocks.AssertHeldWithin((nameof(MqttBrokerAdapterOptions.KeepAlive), nameof(MqttBrokerAdapterOptions.KeepAlive)), (options.KeepAlive, LongestKeepAlive)),
             ConnectTimeout = Clocks.AssertHeldFinite((nameof(MqttBrokerAdapterOptions.ConnectTimeout), nameof(MqttBrokerAdapterOptions.ConnectTimeout)), options.ConnectTimeout),
         };
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _streams = new RacingStreamProvider(_platform);
         _isSecure = TransportSecurity.IsSecure((options.Uri.Scheme is "mqtts" or "wss", host));
         _tls = tls is null ? null : Tls.CredentialsOf(tls);
 
@@ -125,7 +134,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         _upgrading = new HttpMessageInvoker(new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
-            ConnectCallback = HappyEyeballs.ConnectCallback,
+            ConnectCallback = HappyEyeballs.ConnectCallbackOn(_platform),
             PooledConnectionLifetime = TimeSpan.Zero,
             Proxy = LoopbackBypassProxy.Instance,
             UseCookies = false,
@@ -287,7 +296,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             },
         }, _upgrading));
         var client = _options.ClientOf?.Invoke(made) ?? made;
-        var link = guarded = new Link(client);
+        var link = guarded = new Link(client, _platform);
 
         lock (_gate)
         {
@@ -314,7 +323,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var token = start?.CancellationToken ?? CancellationToken.None;
 
         // * one connectTimeout from its call: its password's ask, then its CONNACK
-        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
 
         // its provider's token, its start's, its timeout's and its stop's, cancelled once its start ends, linked or not
         var asking = _options.PasswordProvider is null ? null : CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
@@ -570,7 +579,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            await leaving.WaitAsync(_options.ConnectTimeout, TimeProvider.System);
+            await leaving.WaitAsync(_options.ConnectTimeout, _platform);
         }
         catch (TimeoutException reason)
         {
@@ -764,7 +773,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             // * one connectTimeout from its call: what it was handed, then its broker's let-go; and
             // its link's end, a packet its client cannot read among it, ending both waits at once
-            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, _platform);
             using var letting = CancellationTokenSource.CreateLinkedTokenSource(bounded.Token, life);
 
             // * what it was handed goes first, no new publication taken meanwhile: its quota drained,
@@ -818,7 +827,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // which MQTTnet may say connected a moment more
             if (!isLost && IsReading(link))
             {
-                using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+                using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
 
                 await Quietly(link.Client.DisconnectAsync(new MqttClientDisconnectOptionsBuilder().WithReason(MqttClientDisconnectOptionsReason.NormalDisconnection).Build(), timeout.Token));
             }
@@ -1054,7 +1063,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 .WithoutPacketFragmentation()
             : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port)
                 // * its broker's name raced, a localhost name connected to the loopback (spec 13.4)
-                .WithStreamProvider(RacingStreamProvider.Instance);
+                .WithStreamProvider(_streams);
 
         // * what its channel over TCP reads; over a WebSocket, the adapter's handler speaks its TLS
         if (isTls)
@@ -1131,7 +1140,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             if (inspected.Direction == MqttPacketFlowDirection.Outbound)
             {
-                Interlocked.Exchange(ref link.LastSent, TimeProvider.System.GetTimestamp());
+                Interlocked.Exchange(ref link.LastSent, _platform.GetTimestamp());
             }
             // ! judged whole, before MQTTnet decodes it: its end cancels what awaits it before
             // MQTTnet hands that a code, whatever context its caller resumes on
@@ -1280,7 +1289,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return;
         }
 
-        var pinger = TimeProvider.System.CreateTimer(
+        var pinger = _platform.CreateTimer(
             (_) =>
             {
                 if (link.IsEnded || Interlocked.CompareExchange(ref link.IsPinging, 1, 0) != 0)
@@ -1288,7 +1297,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     return;
                 }
 
-                if (TimeProvider.System.GetElapsedTime(Interlocked.Read(ref link.LastSent)) < serverKeepAlive)
+                if (_platform.GetElapsedTime(Interlocked.Read(ref link.LastSent)) < serverKeepAlive)
                 {
                     Interlocked.Exchange(ref link.IsPinging, 0);
 
@@ -1299,7 +1308,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     try
                     {
-                        using var deadline = new CancellationTokenSource(serverKeepAlive / 2, TimeProvider.System);
+                        using var deadline = new CancellationTokenSource(serverKeepAlive / 2, _platform);
                         using var waiting = CancellationTokenSource.CreateLinkedTokenSource(link.Life.Token, deadline.Token);
 
                         try
@@ -1437,9 +1446,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     // one incarnation: its client, what ends with it, its quota and bounds, and the filters it
     // asked, by topic, each until its broker let it go
-    private sealed class Link(IMqttClient client)
+    private sealed class Link(IMqttClient client, TimeProvider platform)
     {
-        public long LastSent = TimeProvider.System.GetTimestamp();
+        // what it last sent, on its adapter's platform clock
+        public long LastSent = platform.GetTimestamp();
 
         public int IsPinging;
 

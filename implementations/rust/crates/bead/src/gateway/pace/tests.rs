@@ -11,9 +11,8 @@ use bytes::Bytes;
 use http_body::Body;
 
 use super::*;
-use crate::clock::SystemClock;
 use crate::gateway::body::HttpGatewayBody;
-use crate::testing::patience;
+use crate::testing::{patience, platform_clock};
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -34,7 +33,7 @@ fn outlet_of(maximum: u64, (rate, grace): (u64, Duration)) -> Made {
             minimum_send_bytes_per_second: rate,
             send_grace_period: grace,
         },
-        platform: Arc::new(SystemClock::current().expect("a runtime")),
+        platform: Arc::new(platform_clock().expect("a runtime")),
         flow: None,
         report: Arc::new(move |error| {
             reporting.lock().unwrap().push(error.to_string());

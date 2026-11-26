@@ -133,7 +133,9 @@ public sealed class SessionManager<TData> : IDisposable
         _sessionTimeoutDefault = Clocks.AssertHeld(
             (nameof(SessionManagerOptions.SessionInactivityTimeout), nameof(SessionManagerOptions.SessionInactivityTimeout)),
             options?.SessionInactivityTimeout ?? Timeout.InfiniteTimeSpan);
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = options?.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
         _dataComparer = options?.DataComparer;
     }

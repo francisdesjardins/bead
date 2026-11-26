@@ -10,12 +10,12 @@ use std::time::SystemTime;
 
 use super::{locked, until};
 use crate::broker::heartbeat::{Heartbeat, HeartbeatHooks};
-use crate::clock::{Clock, Schedule, SharedClock, SystemClock, Timer, TimerCallback};
+use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::duration::{LONGEST_TIMER, NEVER};
-use crate::testing::Instant;
+use crate::testing::{Instant, platform_clock};
 
 fn platform() -> SharedClock {
-    Arc::new(SystemClock::current().expect("a runtime"))
+    Arc::new(platform_clock().expect("a runtime"))
 }
 
 fn counting(count: &Arc<AtomicUsize>) -> Arc<dyn Fn() + Send + Sync> {

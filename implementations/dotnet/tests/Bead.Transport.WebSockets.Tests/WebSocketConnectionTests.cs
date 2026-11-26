@@ -127,6 +127,7 @@ public sealed class WebSocketConnectionTests
         {
             MaximumMessageBytes = 64,
             CloseTimeout = Timeout.InfiniteTimeSpan,
+            Platform = TimeProvider.System,
             Pace = isPaced ? new WebSocketConnection.Pacing
             {
                 MaximumUnsentBytes = 64,
@@ -210,7 +211,12 @@ public sealed class WebSocketConnectionTests
     public async Task Gives_back_to_its_pool_the_buffer_of_a_message_of_several_reads_once_it_is_whole_renting_none_for_one_read()
     {
         using var socket = new HeldWebSocket();
-        var connection = new WebSocketConnection(socket, (1_048_576, Timeout.InfiniteTimeSpan));
+        var connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+        {
+            MaximumMessageBytes = 1_048_576,
+            CloseTimeout = Timeout.InfiniteTimeSpan,
+            Platform = TimeProvider.System,
+        });
         var messages = new List<TransportMessage>();
         // what its read held as each message was handed on
         var held = new List<int>();
@@ -295,6 +301,7 @@ public sealed class WebSocketConnectionTests
         {
             MaximumMessageBytes = 64,
             CloseTimeout = Timeout.InfiniteTimeSpan,
+            Platform = TimeProvider.System,
             Pace = new WebSocketConnection.Pacing
             {
                 MaximumUnsentBytes = 1,
@@ -327,7 +334,12 @@ public sealed class WebSocketConnectionTests
         // what no socket of the platform's throws: whatever its abort throws, the close settles
         var failure = new NotSupportedException("the socket cannot abort");
         using var socket = new HeldWebSocket { AbortFailure = failure };
-        var connection = new WebSocketConnection(socket, (64, TimeSpan.FromMilliseconds(1)));
+        var connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+        {
+            MaximumMessageBytes = 64,
+            CloseTimeout = TimeSpan.FromMilliseconds(1),
+            Platform = TimeProvider.System,
+        });
 
         try
         {

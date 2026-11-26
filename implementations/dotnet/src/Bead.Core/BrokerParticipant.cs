@@ -16,7 +16,7 @@ public sealed record BrokerParticipantOptions
     /// <summary>
     /// How long a connection is silent before it is pinged, and a ping unanswered before it is
     /// closed with 4001 (spec 15.21): 30 seconds unless told, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/>, never; on the platform's timer, whatever clock it is
+    /// <see cref="Timeout.InfiniteTimeSpan"/>, never; on its platform's clock, whatever clock it is
     /// given (0011).
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
@@ -65,6 +65,9 @@ public sealed record BrokerParticipantOptions
 
     /// <summary>Where its state is touched, one turn at a time: one of its own when none; the tests' way to share one with a broker in memory.</summary>
     internal SerialScheduler? Scheduler { get; init; }
+
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
 }
 
 /// <summary>
@@ -86,6 +89,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
 {
     private readonly IBrokerAdapter _adapter;
     private readonly BrokerParticipantOptions _options;
+    // * the platform's clock its own bounds of a platform run on: each connection's heartbeat
+    private readonly TimeProvider _platform;
     private readonly TimeProvider _clock;
     // where its state is touched, one turn at a time
     private readonly SerialScheduler _scheduler;
@@ -190,7 +195,10 @@ public sealed class BrokerParticipant : IAsyncDisposable
         };
         _adapter = adapter;
         _receiveBound = receiveBound;
-        _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _clock = _options.Clock ?? _platform;
         _scheduler = _options.Scheduler ?? new SerialScheduler();
         _budget = new BrokerBudget(_options.HeldBytesBudget);
         PartsBounds = new BrokerPartsBounds
@@ -448,6 +456,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
         get
         {
             return _options.Heartbeat;
+        }
+    }
+
+    // the platform's clock its connections' heartbeats run on
+    internal TimeProvider Platform
+    {
+        get
+        {
+            return _platform;
         }
     }
 

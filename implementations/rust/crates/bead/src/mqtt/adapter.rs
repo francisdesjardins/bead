@@ -329,6 +329,16 @@ impl MqttBrokerAdapter {
         resolve: Option<Resolve>,
         options: &MqttBrokerAdapterOptions,
     ) -> Result<Self, ProgrammerError> {
+        Self::on_platform((resolve, None), options)
+    }
+
+    /// An adapter whose connects ask `resolve`, and whose timers that bound its link, its connect
+    /// race among them, run on `platform`: the platform's resolver and clock when none, a test's
+    /// otherwise.
+    pub(crate) fn on_platform(
+        (resolve, platform): (Option<Resolve>, Option<SharedClock>),
+        options: &MqttBrokerAdapterOptions,
+    ) -> Result<Self, ProgrammerError> {
         // * in whole seconds rounded up, as its CONNECT announces it and its link runs it (spec
         // 15.26)
         let keep_alive = Duration::from_secs(u64::from(seconds_of(hold_within(
@@ -375,7 +385,12 @@ impl MqttBrokerAdapter {
         let has_certificate = tls.is_some_and(|tls| tls.certificate.is_some());
         let secret = secret_of((options, has_certificate))?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an MQTT 5 adapter")?;
-        let platform_clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
+        let platform_clock: SharedClock =
+            platform.unwrap_or_else(|| Arc::new(SystemClock::on(runtime.clone())));
         let clock = options
             .clock
             .clone()

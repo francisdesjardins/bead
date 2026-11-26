@@ -4,6 +4,7 @@ import { createServer as createTlsServer } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import * as undici from 'undici';
+import { PLATFORM_CLOCK } from '../clock';
 import {
   isConnectFailure,
   isLocalhostName,
@@ -64,7 +65,7 @@ const listenOn = async (address: string, port = 0) => {
 /** A race of `port` on the loopback, as a localhost name connects: the address reached, or the error. */
 const connectOf = async (port: number): Promise<{ address: string } | Error> => {
   try {
-    const socket = await raceLoopback(port, { timeout: 5_000 });
+    const socket = await raceLoopback(port, { clock: PLATFORM_CLOCK, timeout: 5_000 });
     const address = socket.remoteAddress ?? '';
 
     socket.destroy();
@@ -410,7 +411,10 @@ test.describe('loopback', () => {
     // * the replaced resolver answers the loopback, where the test listens
     using resolver = replaceResolver('127.0.0.1');
     await using listener = await listenOn('127.0.0.1');
-    const connector = loopbackConnector(undici as unknown as IUndici, {});
+    const connector = loopbackConnector(undici as unknown as IUndici, {
+      clock: PLATFORM_CLOCK,
+      tls: {},
+    });
     const connectedOf = (hostname: string) => {
       return new Promise<Error | Socket | null>((resolve) => {
         connector({ hostname, port: String(listener.port), protocol: 'http:' }, (error, socket) => {
@@ -495,7 +499,7 @@ test.describe('loopback', () => {
     // what `ws` hands `createConnection` for a `wss` URL to a localhost name, and what it creates
     const createdOf = (options: Record<string, unknown>) => {
       return new Promise<Error | Socket>((resolve) => {
-        loopbackCreateConnection('localhost', { timeout: 5_000 })(
+        loopbackCreateConnection('localhost', { clock: PLATFORM_CLOCK, timeout: 5_000 })(
           // * the test reads the name each handshake sends, names no certificate holds among them,
           // and trusts nothing it reads
           // nosemgrep: problem-based-packs.insecure-transport.js-node.bypass-tls-verification.bypass-tls-verification
@@ -555,7 +559,7 @@ test.describe('loopback', () => {
         };
       },
     } as unknown as IUndici;
-    const connector = loopbackConnector(undici, {});
+    const connector = loopbackConnector(undici, { clock: PLATFORM_CLOCK, tls: {} });
     const connectedOf = (options: IUndiciConnectOptions) => {
       return new Promise<Error | Socket | null>((resolve) => {
         connector(options, (error, socket) => {

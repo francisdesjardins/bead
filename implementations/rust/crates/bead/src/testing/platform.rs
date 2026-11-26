@@ -1,11 +1,12 @@
 //! What a test takes from its platform: a task spawned, a turn yielded, a rest, a patience, a
-//! monotonic instant and the wall clock's reading, natively tokio's and std's (decision 0044). A
-//! test names no platform's spawn, yield or time of its own, as clippy's `disallowed-methods` and
-//! `disallowed-types` hold it, so a test reads the same wherever the core runs.
+//! monotonic instant, the wall clock's reading, natively tokio's and std's, and the platform's clock
+//! (decisions 0044 and 0011). A test names no platform's spawn, yield or time of its own, and builds
+//! no platform's clock but here, as clippy's `disallowed-methods` and `disallowed-types` hold it, so
+//! a test reads the same wherever the core runs.
 #![expect(
     clippy::disallowed_methods,
     clippy::disallowed_types,
-    reason = "the test kit's funnel: a test's one way to tokio's spawn, yield and time and to std's"
+    reason = "the test kit's funnel: a test's one way to tokio's spawn, yield and time, to std's, and to the platform's clock"
 )]
 
 use core::future::{Future, IntoFuture};
@@ -14,6 +15,9 @@ use std::time::SystemTime;
 
 use tokio::task::JoinHandle;
 use tokio::time::{Sleep, Timeout};
+
+use crate::clock::SystemClock;
+use crate::errors::ProgrammerError;
 
 /// Spawns `future` on the current runtime, as `tokio::spawn` does.
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
@@ -54,6 +58,16 @@ pub fn rest(duration: Duration) -> Sleep {
 /// `Elapsed`.
 pub fn patience<F: IntoFuture>(duration: Duration, future: F) -> Timeout<F::IntoFuture> {
     tokio::time::timeout(duration, future)
+}
+
+/// The platform's clock on the current runtime, as [`SystemClock::current`] builds it: what a test
+/// holds where no stack it starts built one.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
+pub fn platform_clock() -> Result<SystemClock, ProgrammerError> {
+    SystemClock::current()
 }
 
 /// The wall clock's reading, as `SystemTime::now` gives it.

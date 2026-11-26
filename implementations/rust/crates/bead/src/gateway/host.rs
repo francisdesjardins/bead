@@ -2882,6 +2882,10 @@ impl HttpGateway {
     /// and two routes of one method that tie, each naming its route.
     pub fn new(options: &HttpGatewayOptions) -> Result<Self, ProgrammerError> {
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP gateway")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let settings = settings_of(options)?;
         let clock = options

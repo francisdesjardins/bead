@@ -149,6 +149,10 @@ async fn transcoding_of(origins: Vec<String>) -> Result<TranscodingFixture, Stri
 async fn served(port: u16) -> Result<Served, String> {
     let origins = origins_of_environment();
     // the interop service's credentials, on the clock both servers run on, the platform's
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "where a stack starts: its platform's clock"
+    )]
     let clock: SharedClock = Arc::new(SystemClock::current().map_err(|error| error.to_string())?);
     let credentials = interop_credentials_of(&clock, &RouterLimitsOptions::default())
         .map_err(|error| error.to_string())?;

@@ -57,6 +57,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   call to `Connect` or `Start`.
 - An HTTP caller gives one detail for raw event data that is not standard padded base64, on every
   side: `an HTTP raw event holds standard padded base64`.
+- Each side's tests may replace the platform's clock that Bead's own bounds of a platform run on: a
+  heartbeat, a close timeout, a disconnect's `DELETE`, a socket's pace. Each stack holds it where it
+  starts, the real clock unless a test replaces it (decision 0011).
 
 ### Fixed
 

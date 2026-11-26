@@ -153,6 +153,10 @@ fn handle_of(ordinal: usize) -> ConnectionHandle {
 }
 
 async fn round((layer, connections): (Layer, usize)) -> Result<Round, String> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "where a stack starts: its platform's clock"
+    )]
     let clock: SharedClock = Arc::new(SystemClock::current().map_err(|error| error.to_string())?);
     let stage = Arc::new(Stage {
         clock,

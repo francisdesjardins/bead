@@ -302,7 +302,7 @@ internal sealed class BrokerConnection
                     }
                 });
             },
-        });
+        }, new HeartbeatOptions { Clock = _participant.Platform });
     }
 
     /// <summary>Sends a PING, the next of its sequence: the client's third leg (spec 15.18).</summary>

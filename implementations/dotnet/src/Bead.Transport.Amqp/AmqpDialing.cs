@@ -14,11 +14,17 @@ namespace Bead.Transport.Amqp;
 /// </summary>
 internal sealed class RacingTransportProvider : TransportProvider
 {
+    // the platform's clock its adapter holds, which its race runs on
+    private readonly TimeProvider _platform;
     private readonly CancellationToken _cancellationToken;
 
-    /// <summary>A provider of <c>AMQP</c> and <c>AMQPS</c>, whose connect <paramref name="cancellationToken"/> gives up.</summary>
-    public RacingTransportProvider(CancellationToken cancellationToken)
+    /// <summary>
+    /// A provider of <c>AMQP</c> and <c>AMQPS</c>, its race on <paramref name="platform"/>, its
+    /// adapter's platform clock, whose connect <paramref name="cancellationToken"/> gives up.
+    /// </summary>
+    public RacingTransportProvider(TimeProvider platform, CancellationToken cancellationToken)
     {
+        _platform = platform;
         _cancellationToken = cancellationToken;
         AddressSchemes = ["AMQP", "AMQPS"];
     }
@@ -34,7 +40,7 @@ internal sealed class RacingTransportProvider : TransportProvider
     {
         ArgumentNullException.ThrowIfNull(address);
 
-        var socket = await HappyEyeballs.ConnectAsync(new DnsEndPoint(address.Host, address.Port), new HappyEyeballsOptions { CancellationToken = _cancellationToken });
+        var socket = await HappyEyeballs.ConnectAsync(new DnsEndPoint(address.Host, address.Port), new HappyEyeballsOptions { Clock = _platform, CancellationToken = _cancellationToken });
         Stream stream = new NetworkStream(socket, ownsSocket: true);
 
         try

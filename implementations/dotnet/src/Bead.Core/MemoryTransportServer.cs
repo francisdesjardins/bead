@@ -82,7 +82,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     public MemoryTransportServer(MemoryTransportServerOptions? options = null)
     {
         _procedures = ProceduresTaken.Of(options?.Procedures, ("an in-memory transport server", nameof(options)));
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = options?.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         _scheduler = options?.Scheduler ?? new SerialScheduler();
         _accepting = options?.Accepting;
         _listeners = new ListenerGuard((reason, connectionHandle) =>

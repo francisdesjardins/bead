@@ -25,8 +25,8 @@ public sealed partial class HttpTransportServer
             _maximumBodyBytes = bounds.MaximumBodyBytes;
         }
 
-        // what bounds an exchange's body as it comes, and its answer as it goes (spec 15.12), and the
-        // server's clock its body's rate is held on
+        // what bounds an exchange's body as it comes, and its answer as it goes (spec 15.12), the
+        // server's clock its body's rate is held on, and the platform's its answer's pace is
         internal sealed record Bounds
         {
             internal required int MaximumBodyBytes { get; init; }
@@ -40,6 +40,8 @@ public sealed partial class HttpTransportServer
             internal required TimeSpan SendGracePeriod { get; init; }
 
             internal required TimeProvider Clock { get; init; }
+
+            internal required TimeProvider Platform { get; init; }
         }
 
         // what the first 8 bytes say: a request waits under its call id from now on; or how the
@@ -499,7 +501,7 @@ public sealed partial class HttpTransportServer
                 }
 
                 // * at its pace: past it, its exchange is lost, its connection dropped, reported
-                if (await WritePaced(context, (ending.Bytes, (_bounds.MinimumSendBytesPerSecond, _bounds.SendGracePeriod))))
+                if (await WritePaced(context, (ending.Bytes, (_bounds.MinimumSendBytesPerSecond, _bounds.SendGracePeriod, _bounds.Platform))))
                 {
                     waiting.Written.TrySetException(new IOException("the exchange's socket held its answer past its deadline"));
                     _port.Drop((connection, ServerBounds.LateOf((_bounds.MinimumSendBytesPerSecond, _bounds.SendGracePeriod))));

@@ -180,11 +180,11 @@ internal sealed class AmqpManagement
         }
     }
 
-    /// <summary>Ends its session, and with it both links, awaiting its peer's END within <paramref name="bound"/>.</summary>
-    public async Task Close(TimeSpan bound)
+    /// <summary>Ends its session, and with it both links, awaiting its peer's END within its bound, on the platform's clock its adapter holds.</summary>
+    public async Task Close((TimeSpan Bound, TimeProvider Platform) within)
     {
         End(new IOException("its management ended"));
-        await AmqpEndpoints.Ending(_session, bound);
+        await AmqpEndpoints.Ending(_session, within);
     }
 
     // a paired link's ATTACH: settled both ways, first, paired, the management node its source and target

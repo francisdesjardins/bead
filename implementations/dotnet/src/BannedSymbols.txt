@@ -1,6 +1,7 @@
-// What Bead times runs on the clock its stack is given, a TimeProvider, and what bounds a platform's
-// own close runs on TimeProvider.System, said where it stands (0011). The banned-API analyzer
-// (RS0030) refuses every reading and timer that takes neither.
+// What Bead times runs on the clock its stack is given, a TimeProvider, and what bounds a platform
+// runs on the platform's clock a stack holds, TimeProvider.System read where the stack starts
+// (0011). The banned-API analyzer (RS0030) refuses every reading and timer that takes neither.
+P:System.TimeProvider.System;the platform's clock is read where a stack starts, and held there (0011)
 P:System.DateTime.Now;the clock it is given: its GetUtcNow
 P:System.DateTime.UtcNow;the clock it is given: its GetUtcNow
 P:System.DateTimeOffset.Now;the clock it is given: its GetUtcNow
@@ -13,9 +14,9 @@ M:System.Threading.Timer.#ctor(System.Threading.TimerCallback,System.Object,Syst
 M:System.Threading.Timer.#ctor(System.Threading.TimerCallback,System.Object,System.Int64,System.Int64);the clock it is given: its CreateTimer
 M:System.Threading.Timer.#ctor(System.Threading.TimerCallback,System.Object,System.TimeSpan,System.TimeSpan);the clock it is given: its CreateTimer
 M:System.Threading.Timer.#ctor(System.Threading.TimerCallback,System.Object,System.UInt32,System.UInt32);the clock it is given: its CreateTimer
-M:System.Threading.Tasks.Task.Delay(System.Int32);a Task.Delay given the clock, or TimeProvider.System
-M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);a Task.Delay given the clock, or TimeProvider.System
-M:System.Threading.Tasks.Task.Delay(System.TimeSpan);a Task.Delay given the clock, or TimeProvider.System
-M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);a Task.Delay given the clock, or TimeProvider.System
-M:System.Threading.CancellationTokenSource.#ctor(System.Int32);a CancellationTokenSource given the clock, or TimeProvider.System
-M:System.Threading.CancellationTokenSource.#ctor(System.TimeSpan);a CancellationTokenSource given the clock, or TimeProvider.System
+M:System.Threading.Tasks.Task.Delay(System.Int32);a Task.Delay given the clock, or the platform's clock its stack holds
+M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);a Task.Delay given the clock, or the platform's clock its stack holds
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan);a Task.Delay given the clock, or the platform's clock its stack holds
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);a Task.Delay given the clock, or the platform's clock its stack holds
+M:System.Threading.CancellationTokenSource.#ctor(System.Int32);a CancellationTokenSource given the clock, or the platform's clock its stack holds
+M:System.Threading.CancellationTokenSource.#ctor(System.TimeSpan);a CancellationTokenSource given the clock, or the platform's clock its stack holds
