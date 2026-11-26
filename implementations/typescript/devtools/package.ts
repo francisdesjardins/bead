@@ -37,8 +37,8 @@ export const RELEASE = join(DEVTOOLS, 'release');
 
 /**
  * ! every file the zip holds, by its path in `dist/`: the build's scripts, its pages, its manifest,
- * its messages, its icons and penumbra's two sheets the panel links. A file the build leaves that is
- * not here, a source map or a test, is a refusal, never a file shipped.
+ * its messages, its icons and the skin's two base sheets the panel links. A file the build leaves
+ * that is not here, a source map or a test, is a refusal, never a file shipped.
  */
 export const FILES: readonly string[] = Object.freeze([
   '_locales/en/messages.json',
@@ -55,8 +55,8 @@ export const FILES: readonly string[] = Object.freeze([
   'manifest.json',
   'panel.html',
   'panel.js',
-  'penumbra/tokens.skin.base.css',
-  'penumbra/tokens.system.css',
+  'skin/tokens.skin.base.css',
+  'skin/tokens.system.css',
 ]);
 
 /** The files read as text, whose line breaks are LF on every checkout. */

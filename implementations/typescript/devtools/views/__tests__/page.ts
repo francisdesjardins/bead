@@ -16,8 +16,10 @@ const panelPageOf = async (scheme: 'dark' | 'light'): Promise<string> => {
     .replace('<html lang="en">', `<html lang="en" data-color-scheme="${scheme}">`)
     .replace('<script src="panel.js"></script>', '');
 
+  // ! each link names the skin where the build leaves it, beside the panel: `skin/`, which is the
+  // package's own folder here
   for (const [link, href] of links) {
-    page = page.replace(link, `<style>${await readFile(`devtools/${href ?? ''}`, 'utf8')}</style>`);
+    page = page.replace(link, `<style>${await readFile(href ?? '', 'utf8')}</style>`);
   }
 
   return page;

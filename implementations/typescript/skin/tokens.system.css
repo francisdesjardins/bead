@@ -1,16 +1,8 @@
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the system half of the design system.
- *
- * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
- * point: consumers import this file unchanged and write their own skin beside it. Anything that
- * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
- * split has failed and the file has stopped being portable — `yarn check` refuses it.
- *
- * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
- * saying why it is off-scale — a measured geometry, a UA constant.
- */
+/* The system half of Bead's skin: scale, rhythm, motion and stacking. No colour and no typeface
+   live here. Each surface takes its colours from `tokens.skin.base.css` and a skin over it:
+   `tokens.skin.css` on the page, the demo and the not-found page, and the DevTools panel's own in
+   `panel.html`. A component asks for a step, never a pixel count. An off-scale literal carries a
+   comment that says why, a measured geometry or a UA constant. */
 
 :root {
   /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */

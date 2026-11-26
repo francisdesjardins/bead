@@ -2220,14 +2220,13 @@ HTTP form, the sign-up's OpenAPI document, the server and its metrics, and `exam
 sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fragment names the
 scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
 Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
-and radii are penumbra's, the DevTools panel's copy of its two sheets, and its colours and faces
-are Bead's skin over them, `devtools/penumbra/tokens.skin.css`, which Bead's page shares. Its top
-bar is the page's, `devtools/penumbra/chrome.css`: Bead's mark and name, a link to the page, the
-theme. Under it, the demo's own strip, as `demo/strip.ts` mounts it: the transport in use among the
-others, the connection's light, who the calls are made as, and the wire; on a phone, one compact
-row whose chip opens the other transports and whose light opens the connection's sentence and the
-identity. The internal demo serves the five sheets, and the static build writes them into the
-page.
+and radii come from the skin's two base sheets, which the DevTools panel links too, and its colours
+and faces are Bead's skin over them, `skin/tokens.skin.css`, which Bead's page shares. Its top bar
+is the page's, `skin/chrome.css`: Bead's mark and name, a link to the page, the theme. Under it,
+the demo's own strip, as `demo/strip.ts` mounts it: the transport in use among the others, the
+connection's light, who the calls are made as, and the wire; on a phone, one compact row whose chip
+opens the other transports and whose light opens the connection's sentence and the identity. The
+internal demo serves the five sheets, and the static build writes them into the page.
 
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
@@ -2346,9 +2345,9 @@ extension's world, which alone may open a runtime port, and closes it while the 
 back/forward cache; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
 panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its type scale
-and spacing are penumbra's, its two sheets copied whole into `devtools/penumbra/` with the commit
-they came from; the panel's skin over them, in `panel.html`, sets every colour the panel draws with,
-DevTools' own.
+and spacing come from the skin's two base sheets, `skin/tokens.system.css` and
+`skin/tokens.skin.base.css`, which the page and the demo share; the panel's skin over them, in
+`panel.html`, sets every colour the panel draws with, DevTools' own.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's

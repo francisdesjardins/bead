@@ -76,31 +76,31 @@ const FILES = Object.freeze({
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
   '/over-mqtt.js': { path: new URL('./over-mqtt.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
-  // penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them, Bead's skin and
-  // Bead's top bar, under the page's own styles
-  '/penumbra/chrome.css': {
-    path: new URL('../../devtools/penumbra/chrome.css', import.meta.url),
+  // the skin's two base sheets, which the DevTools panel links too, Bead's overrides of them, Bead's
+  // skin and Bead's top bar, under the page's own styles
+  '/skin/chrome.css': {
+    path: new URL('../../skin/chrome.css', import.meta.url),
     type: 'text/css',
   },
-  '/penumbra/tokens.skin.base.css': {
-    path: new URL('../../devtools/penumbra/tokens.skin.base.css', import.meta.url),
+  '/skin/tokens.skin.base.css': {
+    path: new URL('../../skin/tokens.skin.base.css', import.meta.url),
     type: 'text/css',
   },
-  '/penumbra/tokens.skin.css': {
-    path: new URL('../../devtools/penumbra/tokens.skin.css', import.meta.url),
+  '/skin/tokens.skin.css': {
+    path: new URL('../../skin/tokens.skin.css', import.meta.url),
     type: 'text/css',
   },
-  '/penumbra/tokens.system.css': {
-    path: new URL('../../devtools/penumbra/tokens.system.css', import.meta.url),
+  '/skin/tokens.system.css': {
+    path: new URL('../../skin/tokens.system.css', import.meta.url),
     type: 'text/css',
   },
-  '/penumbra/tokens.system.overrides.css': {
-    path: new URL('../../devtools/penumbra/tokens.system.overrides.css', import.meta.url),
+  '/skin/tokens.system.overrides.css': {
+    path: new URL('../../skin/tokens.system.overrides.css', import.meta.url),
     type: 'text/css',
   },
   // the theme as the page keeps it, before the first paint
-  '/penumbra/theme.js': {
-    path: new URL('../../devtools/penumbra/theme.js', import.meta.url),
+  '/skin/theme.js': {
+    path: new URL('../../skin/theme.js', import.meta.url),
     type: 'text/javascript',
   },
   // the page's faces, where beadproto.dev serves them

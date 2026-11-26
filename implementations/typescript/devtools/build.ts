@@ -36,10 +36,10 @@ const PAGES: Readonly<Record<string, string>> = Object.freeze({
   'panel.html': 'panel.html',
 });
 
-/** Penumbra's two sheets, which the panel links under its own skin. */
+/** The skin's two base sheets, its scale and its neutrals, which the panel links under its own. */
 const STYLES: readonly string[] = Object.freeze([
-  'penumbra/tokens.skin.base.css',
-  'penumbra/tokens.system.css',
+  'skin/tokens.skin.base.css',
+  'skin/tokens.system.css',
 ]);
 
 /**
@@ -120,9 +120,9 @@ await Promise.all(
   })
 );
 
-await mkdir(new URL('penumbra/', OUT), { recursive: true });
+await mkdir(new URL('skin/', OUT), { recursive: true });
 await Promise.all(
   STYLES.map((path) => {
-    return copyFile(pathOf(path), pathOf(path, OUT));
+    return copyFile(pathOf(path, PACKAGE), pathOf(path, OUT));
   })
 );

@@ -1,4 +1,4 @@
-// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// Before the first paint: the language, as the page chooses it. The theme is `skin/theme.js`'s,
 // which the build inlines beside this script.
 (function () {
   var root = document.documentElement;

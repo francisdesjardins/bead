@@ -1,0 +1,10 @@
+/* What the page, the demo and the not-found page add to the system half's scale; the DevTools
+   panel keeps the scale alone. The demo links it under the two base sheets, and Bead's page and
+   its not-found page inline it ahead of Bead's skin. */
+
+:root {
+  /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
+  --app-touch: 44px;
+  /* a block of code, on the page and the demo alike; code inline in prose is 0.875em of its text */
+  --app-text-code: var(--app-text-sm);
+}

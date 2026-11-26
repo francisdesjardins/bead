@@ -50,11 +50,10 @@ import { FACE_NAMES } from '../implementations/typescript/skin/mascot.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
-// penumbra's two sheets, Bead's overrides of them, Bead's skin and Bead's top bar, which the demo
-// links too: the page's styles come on top of them, and the not-found page's own; and beside them
-// the theme's script, which the demo loads too
-const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
-// Bead's skin: the mascot, which the demo and the DevTools panel bundle, and the page inlines
+// the skin the page shares with the demo and the DevTools panel: the two base sheets, Bead's
+// overrides of them, Bead's skin and Bead's top bar, which the demo links too, under the page's
+// styles and the not-found page's own; the theme's script, which the demo loads too; and the
+// mascot, which the demo and the panel bundle, and the page inlines
 const SKIN = join(ROOT, 'implementations', 'typescript', 'skin');
 const STACK = [
   'tokens.system.css',
@@ -63,7 +62,7 @@ const STACK = [
   'tokens.skin.css',
   'chrome.css',
 ].map((name) => {
-  return join(PENUMBRA, name);
+  return join(SKIN, name);
 });
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
@@ -1031,7 +1030,7 @@ const sheetsOf = (paths) => {
     .join('\n\n');
 };
 
-// the not-found page: Bead's skin and its bar on penumbra's sheets, under its own styles, and no
+// the not-found page: Bead's skin and its bar on the base sheets, under its own styles, and no
 // script
 export const buildNotFound = () => {
   return fill(read(join(SRC, '404.html')), {
@@ -1087,7 +1086,7 @@ const documentOf = ({ address, strings, contents }) => {
   );
   return fill(read(join(SRC, 'shell.html')), {
     style: raw(() => {
-      // * Bead's skin and its bar on penumbra's sheets, as the demo has them, then the page's styles
+      // * Bead's skin and its bar on the base sheets, as the demo has them, then the page's styles
       // over them
       return sheetsOf([...STACK, join(SRC, 'styles.css')]);
     }),
@@ -1096,7 +1095,7 @@ const documentOf = ({ address, strings, contents }) => {
     }),
     'theme-script': raw(() => {
       // * the theme as the demo keeps it too, one script for both
-      return read(join(PENUMBRA, 'theme.js')).trim();
+      return read(join(SKIN, 'theme.js')).trim();
     }),
     'page-script': raw(() => {
       return read(join(SRC, 'page.js')).trim();

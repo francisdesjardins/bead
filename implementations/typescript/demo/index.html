@@ -13,14 +13,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- before the first paint: the theme, as the page keeps it -->
-    <script src="penumbra/theme.js"></script>
-    <link rel="stylesheet" href="penumbra/tokens.system.css" />
-    <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
-    <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
-    <link rel="stylesheet" href="penumbra/tokens.skin.css" />
-    <link rel="stylesheet" href="penumbra/chrome.css" />
+    <script src="skin/theme.js"></script>
+    <link rel="stylesheet" href="skin/tokens.system.css" />
+    <link rel="stylesheet" href="skin/tokens.skin.base.css" />
+    <link rel="stylesheet" href="skin/tokens.system.overrides.css" />
+    <link rel="stylesheet" href="skin/tokens.skin.css" />
+    <link rel="stylesheet" href="skin/chrome.css" />
     <style>
-      /* the demo's own, over Bead's skin, its bar and penumbra's sheets: a write's mark, the shadow
+      /* the demo's own, over Bead's skin, its bar and the base sheets: a write's mark, the shadow
          the wire's sheet casts over the page, and the height of the strip under the bar */
       :root {
         /* a board of rows reads denser than a page of prose */
@@ -50,7 +50,7 @@
         margin: 0;
         background: var(--app-bg);
         color: var(--app-text);
-        /* ! on the body, never the root: penumbra's scale is in rem, which the root's size sets */
+        /* ! on the body, never the root: the skin's scale is in rem, which the root's size sets */
         font: var(--app-text-md) / var(--app-lh-body) var(--app-font-body);
       }
 
@@ -491,7 +491,7 @@
         grid-template-columns: minmax(0, 1fr);
         gap: var(--app-space-8);
         align-items: start;
-        /* the frame Bead's page shares: penumbra's content width, the same
+        /* the frame Bead's page shares: the skin's content width, the same
            gutter at its sides */
         max-width: var(--app-content-max-width);
         margin: 0 auto;

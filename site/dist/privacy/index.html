@@ -22,7 +22,7 @@
     <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <script>
-// Before the first paint: the language, as the page chooses it. The theme is `penumbra/theme.js`'s,
+// Before the first paint: the language, as the page chooses it. The theme is `skin/theme.js`'s,
 // which the build inlines beside this script.
 (function () {
   var root = document.documentElement;
@@ -134,19 +134,11 @@
 })();
     </script>
     <style>
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the system half of the design system.
- *
- * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
- * point: consumers import this file unchanged and write their own skin beside it. Anything that
- * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
- * split has failed and the file has stopped being portable — `yarn check` refuses it.
- *
- * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
- * saying why it is off-scale — a measured geometry, a UA constant.
- */
+/* The system half of Bead's skin: scale, rhythm, motion and stacking. No colour and no typeface
+   live here. Each surface takes its colours from `tokens.skin.base.css` and a skin over it:
+   `tokens.skin.css` on the page, the demo and the not-found page, and the DevTools panel's own in
+   `panel.html`. A component asks for a step, never a pixel count. An off-scale literal carries a
+   comment that says why, a measured geometry or a UA constant. */
 
 :root {
   /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */
@@ -232,32 +224,13 @@
   --app-scrollbar-width: 10px;
 }
 
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
- *
- * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
- * nothing that says which product is being painted. What it carries is the part every project needs
- * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
- * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
- * lift that stands in for elevation.
- *
- * Import it after `tokens.system.css` and write the brand over it:
- *
- * ```css
- * @import 'penumbra/tokens.system.css';
- * @import 'penumbra/tokens.skin.base.css';
- * @import './tokens.skin.css';       // yours: a typeface, and eight colours
- * ```
- *
- * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
- * names a project paints itself with, and refuses any token the system half already declares. The
- * complementary rule guards the system file, which refuses colour.
- *
- * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
- * reads as chosen, where an alpha ladder reads as whatever is behind it.
- */
+/* The neutral half of Bead's skin, after `tokens.system.css`: a paper, a ground, three ranks of
+   text, a divider, a control edge, the four semantic colours with their washes, a scrim, the
+   scrollbar, and the one soft lift that stands in for elevation. No brand and no typeface live
+   here. `tokens.skin.css` paints the page, the demo and the not-found page over it, and the
+   DevTools panel paints its own in `panel.html`. Neutrals carry a slate bias rather than black at
+   an opacity: a grey mixed toward the ground reads as chosen, where an alpha ladder reads as
+   whatever is behind it. */
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────────────────── */
@@ -346,10 +319,9 @@
   --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
 }
 
-/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
-   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
-   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
-   skin. */
+/* What the page, the demo and the not-found page add to the system half's scale; the DevTools
+   panel keeps the scale alone. The demo links it under the two base sheets, and Bead's page and
+   its not-found page inline it ahead of Bead's skin. */
 
 :root {
   /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
@@ -358,7 +330,7 @@
   --app-text-code: var(--app-text-sm);
 }
 
-/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+/* Bead's skin over the two base sheets and Bead's overrides of them: francisdesjardins.ca's brand,
    its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
    on, and the colours of code. The page, the demo and the not-found page take this one copy; the
    DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
@@ -509,12 +481,12 @@
 /* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
    the name, a link to the page, a context word where there is one, and a row of tools at the right,
    each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
-   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   is fixed and keeps the skin's bar height at every width, on one line: what does not fit is a
    surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
    demo links it. */
 
 :root {
-  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  /* the frame the page and the demo share: the skin's content width, the same gutter at its sides */
   --frame-gutter: max(var(--app-space-4), 3vw);
 }
 
@@ -667,8 +639,8 @@ body {
   }
 }
 
-/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
-   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+/* The page's own styles, over the skin's two base sheets, Bead's overrides of them, Bead's skin and
+   its top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
    diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
    the system where no script set it. */
 
@@ -783,7 +755,7 @@ a code {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-/* the bar is `penumbra/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
+/* the bar is `skin/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
    left, its name left to the section read, which names the button that opens the contents; the
    language in the contents' foot. Where they are a column: the bar as the demo has it, the
    language by its two letters */
@@ -2165,7 +2137,7 @@ footer {
     <script type="application/json" id="heads">{"en":{"title":"Bead DevTools: privacy policy","description":"What the Bead DevTools extension reads, keeps and sends: it reads the Bead debug records of the page you inspect, keeps them in its panel, and sends nothing out of your browser.","canonical":"https://beadproto.dev/privacy/"},"fr":{"title":"Bead DevTools : politique de confidentialité","description":"Ce que lit, garde et envoie l’extension Bead DevTools : elle lit les enregistrements de débogage Bead de la page que vous inspectez, les garde dans son panneau, et n’envoie rien hors de votre navigateur.","canonical":"https://beadproto.dev/privacy/?lng=fr"}}</script>
     <script>
 // At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
-// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
+// folded block opened when a link lands in it. The theme's toggle is `skin/theme.js`'s.
 (() => {
   // each language's title, description and canonical address, which the build writes beside this
   // script

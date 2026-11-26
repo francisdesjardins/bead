@@ -1,12 +1,12 @@
 /* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
    the name, a link to the page, a context word where there is one, and a row of tools at the right,
    each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
-   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   is fixed and keeps the skin's bar height at every width, on one line: what does not fit is a
    surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
    demo links it. */
 
 :root {
-  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  /* the frame the page and the demo share: the skin's content width, the same gutter at its sides */
   --frame-gutter: max(var(--app-space-4), 3vw);
 }
 
