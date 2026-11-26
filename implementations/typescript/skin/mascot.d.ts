@@ -6,7 +6,7 @@ export type FaceName = 'listening' | 'focused' | 'surprised' | 'happy' | 'mischi
 /**
  * A face on the skeleton every face shares: each eye `[cx, cy, rx, top, bottom]`, each pupil
  * `[x, y, r]`, each brow `[x1, y1, cx, cy, x2, y2, opacity]`, the mouth `[lx, ly, rx, ry, ux, uy,
- * dx, dy]` and the monocle `[opacity]`.
+ * dx, dy, round]` and the monocle `[opacity]`.
  */
 export interface IFace {
   readonly eL: readonly number[];
@@ -49,19 +49,70 @@ export interface IMotionOptions {
   readonly reduced?: boolean;
 }
 
-/** A bead of the mark, during an eclipse. */
+/** A bead of the mark, during an eclipse: its light, its size as a share of its own. */
 export interface IBeadAt {
-  readonly opacity: number;
-  readonly radius: number;
+  readonly light: number;
 }
 
-/** The eclipse at an instant: each bead, the flare, the corona and the faces it lends. */
+/** The rim during an eclipse: from where to where along its length it is drawn, as shares of it. */
+export interface IRimAt {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** The eclipse at an instant: each bead, the rim, the flare, the corona and the faces it lends. */
 export interface IEclipse {
   readonly beads: readonly IBeadAt[];
+  readonly rim: IRimAt;
   readonly flare: number;
   readonly corona: number;
   readonly mischief: number;
   readonly serene: number;
+}
+
+/** The face's strokes, in its skeleton's units. */
+export interface IStrokes {
+  readonly eye: number;
+  readonly brow: number;
+  readonly monocle: number;
+  readonly mouth: number;
+}
+
+/** A circle, in the drawing's units. */
+export interface ICircle {
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+}
+
+/** A ray of the corona, from the disc outward. */
+export interface IRay {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/** The corona about the disc, and the box of the drawing that holds it. */
+export interface ICorona {
+  readonly centre: { readonly x: number; readonly y: number };
+  readonly halo: { readonly r: number; readonly width: number };
+  readonly rays: readonly IRay[];
+  readonly rayWidth: number;
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+/** The corona's and the flare's colours in the light theme. */
+export interface ICoronaColours {
+  readonly flare: string;
+  readonly halo: string;
+  readonly haloOpacity: number;
+  readonly ray: string;
 }
 
 /** Where the mascot reads a page, each a selector. */
@@ -90,6 +141,11 @@ export declare const FACES: Readonly<Record<FaceName, IFace>>;
 export declare const FACE_NAMES: readonly FaceName[];
 export declare const DEFAULT_FACE: FaceName;
 export declare const ECLIPSE_MS: number;
+export declare const FACE_SCALE: number;
+export declare const STROKES: IStrokes;
+export declare const MONOCLE: ICircle;
+export declare const CORONA: ICorona;
+export declare const CORONA_LIGHT: ICoronaColours;
 export declare const blend: (from: IFace, to: IFace, options: IBlendOptions) => IFace;
 export declare const keyframesOf: (sections: readonly ISectionBox[]) => IKeyframe[];
 export declare const readingAt: (

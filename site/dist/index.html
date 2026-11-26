@@ -385,6 +385,9 @@
   --app-text-tertiary: #6d6278;
   --app-divider: rgb(23 17 29 / 0.12);
 
+  /* the mark's disc, the mascot's own, so the bar's mark and the mascot are one Moon */
+  --mark-moon: #17111d;
+
   /* the ground of what is code, an inset in a card; and a refusal's wash */
   --raised: #f1ecf5;
   --bad-soft: rgb(185 28 28 / 0.1);
@@ -418,6 +421,7 @@
   --app-text-secondary: #b2a7bf;
   --app-text-tertiary: #8d8199;
   --app-divider: rgb(242 236 245 / 0.14);
+  --mark-moon: #15111c;
 
   --raised: #1c1625;
   --bad-soft: rgb(248 113 113 / 0.12);
@@ -447,6 +451,7 @@
     --app-text-secondary: #b2a7bf;
     --app-text-tertiary: #8d8199;
     --app-divider: rgb(242 236 245 / 0.14);
+    --mark-moon: #15111c;
 
     --raised: #1c1625;
     --bad-soft: rgb(248 113 113 / 0.12);
@@ -551,7 +556,7 @@ body {
 }
 
 .mark .moon {
-  fill: var(--app-body);
+  fill: var(--mark-moon);
   stroke: var(--app-text-tertiary);
   stroke-width: 1;
 }
@@ -6731,9 +6736,10 @@ offerHello(server);
 
 // every face on one skeleton, so that any two interpolate point by point: an eye `[cx, cy, rx, top,
 // bottom]`, its two halves a cubic each (a circle of r: top = bottom = 4r/3; an arc: top =
-// -bottom); a pupil `[x, y, r]`; a brow `[x1, y1, cx, cy, x2, y2, opacity]`, a quadratic; the
-// mouth `[lx, ly, rx, ry, ux, uy, dx, dy]`, two quadratics from corner to corner; the monocle
-// `[opacity]`, on the right eye as seen
+// -bottom); a pupil `[x, y, r]`, inside its eye and clear of its ring; a brow `[x1, y1, cx, cy, x2,
+// y2, opacity]`, a quadratic; the mouth `[lx, ly, rx, ry, ux, uy, dx, dy, round]`, two cubics from
+// corner to corner, each the quadratic through `u` or `d` at `round` 0 and upright at its corners
+// at 1; the monocle `[opacity]`, on the right eye as seen
 const faceOf = (parts) => {
   return Object.freeze(
     Object.fromEntries(
@@ -6749,22 +6755,22 @@ export const FACES = Object.freeze({
   listening: faceOf({
     eL: [10.2, 18, 1.45, 1.93, 1.93],
     eR: [16.6, 18, 1.45, 1.93, 1.93],
-    pL: [10.8, 17.4, 0.55],
-    pR: [17.2, 17.4, 0.55],
+    pL: [10.5, 17.7, 0.48],
+    pR: [16.9, 17.7, 0.48],
     bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
     bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
-    m: [12.2, 22.4, 14.6, 22.4, 13.4, 23.1, 13.4, 23.1],
+    m: [12.2, 22.4, 14.6, 22.4, 13.4, 23.1, 13.4, 23.1, 0],
     g: [0],
   }),
   // the spec and its conformance: the monocle, the brows flat, the eyes on the line
   focused: faceOf({
-    eL: [10.2, 18.1, 1.25, 1.67, 1.67],
-    eR: [16.6, 18.1, 1.25, 1.67, 1.67],
-    pL: [9.85, 18.55, 0.52],
-    pR: [16.25, 18.55, 0.52],
-    bL: [8.7, 15.1, 10.2, 14.7, 11.7, 15.1, 1],
-    bR: [15.1, 15.1, 16.6, 14.7, 18.1, 15.1, 1],
-    m: [12.4, 22.5, 14.7, 22.1, 13.5, 22.7, 13.5, 22.7],
+    eL: [10.2, 18.1, 1.15, 1.53, 1.53],
+    eR: [16.6, 18.1, 1.15, 1.53, 1.53],
+    pL: [10.04, 18.31, 0.36],
+    pR: [16.44, 18.31, 0.36],
+    bL: [8.7, 14.7, 10.2, 14.3, 11.7, 14.7, 1],
+    bR: [15.1, 14.7, 16.6, 14.3, 18.1, 14.7, 1],
+    m: [12.4, 22.5, 14.7, 22.1, 13.5, 22.7, 13.5, 22.7, 0],
     g: [1],
   }),
   // refusals, errors, security: round eyes, the brows high, the mouth an o
@@ -6775,7 +6781,7 @@ export const FACES = Object.freeze({
     pR: [16.6, 18, 0.45],
     bL: [8.7, 15.0, 10.2, 14.0, 11.7, 15.0, 1],
     bR: [15.1, 15.0, 16.6, 14.0, 18.1, 15.0, 1],
-    m: [12.5, 22.6, 14.3, 22.6, 13.4, 21.2, 13.4, 24.0],
+    m: [12.65, 22.6, 14.15, 22.6, 13.4, 21.1, 13.4, 24.1, 1],
     g: [0],
   }),
   // a call that succeeded: the eyes two arcs, a wide smile
@@ -6786,7 +6792,7 @@ export const FACES = Object.freeze({
     pR: [16.6, 18.0, 0],
     bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
     bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
-    m: [11.0, 21.5, 15.8, 21.5, 13.4, 22.6, 13.4, 24.3],
+    m: [11.0, 21.5, 15.8, 21.5, 13.4, 22.2, 13.4, 25.0, 0],
     g: [0],
   }),
   // the click: a wink, a brow raised, a smile at one corner
@@ -6794,10 +6800,10 @@ export const FACES = Object.freeze({
     eL: [10.2, 18.3, 1.3, 0.8, -0.8],
     eR: [16.6, 18, 1.45, 1.93, 1.93],
     pL: [10.2, 18.0, 0],
-    pR: [17.1, 17.6, 0.55],
+    pR: [16.94, 17.73, 0.48],
     bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
     bR: [15.2, 15.4, 16.7, 14.5, 18.2, 15.1, 1],
-    m: [11.6, 22.1, 16.2, 21.5, 13.6, 23.6, 13.6, 23.6],
+    m: [11.6, 22.1, 16.2, 21.5, 13.6, 23.6, 13.6, 23.6, 0],
     g: [0],
   }),
   // the end of the page, what is ahead, and totality: the eyes closed, a small smile
@@ -6808,7 +6814,7 @@ export const FACES = Object.freeze({
     pR: [16.6, 18.0, 0],
     bL: [8.9, 15.4, 10.2, 14.9, 11.5, 15.4, 0],
     bR: [15.3, 15.4, 16.6, 14.9, 17.9, 15.4, 0],
-    m: [11.9, 21.9, 14.9, 21.9, 13.4, 23.2, 13.4, 23.2],
+    m: [11.9, 21.9, 14.9, 21.9, 13.4, 23.2, 13.4, 23.2, 0],
     g: [0],
   }),
 });
@@ -6889,6 +6895,9 @@ const BEADS = Object.freeze([
 const LARGEST = 1;
 const FADE_MS = 250;
 const TWINKLE_MS = 1250;
+// how much of its size a bead gives up at the bottom of a twinkle: the smallest still covers the
+// rim's end
+const TWINKLE_DEPTH = 0.15;
 const RETURN_AT = 5500;
 const RETURN_STEP = 180;
 const RETURN_MS = 350;
@@ -6899,10 +6908,11 @@ export const ECLIPSE_MS = RETURN_AT + (BEADS.length - 1) * RETURN_STEP + RETURN_
 
 const AT_REST = Object.freeze({
   beads: Object.freeze(
-    BEADS.map(({ r }) => {
-      return Object.freeze({ opacity: 1, radius: r });
+    BEADS.map(() => {
+      return Object.freeze({ light: 1 });
     })
   ),
+  rim: Object.freeze({ from: 0, to: 1 }),
   flare: 0,
   corona: 0,
   mischief: 0,
@@ -6913,8 +6923,10 @@ const AT_REST = Object.freeze({
  * The eclipse `elapsed` ms after its click. The beads twinkle, then go out one by one, the
  * smallest first, until the largest alone flares, the diamond ring; at totality the corona opens
  * and the face goes serene; then the three beads come back one after another where they were. It
- * adds no bead of its own, and the flare never comes back with them. With reduced motion, it is the
- * corona alone.
+ * adds no bead of its own, and the flare never comes back with them. A bead's light is its size, so
+ * nothing shows through it; the rim ends where the lit beads end, drawing back to the largest as the
+ * others go out, and growing back from it as the corona closes. Each changes smoothly, from the
+ * mark at rest to the mark at rest. With reduced motion, it is the corona alone.
  */
 export const eclipseAt = (elapsed, options = {}) => {
   if (!(elapsed >= 0 && elapsed < ECLIPSE_MS)) {
@@ -6922,45 +6934,100 @@ export const eclipseAt = (elapsed, options = {}) => {
   }
   if (options.reduced === true) {
     const corona = elapsed < REDUCED_TOTALITY_MS ? 1 : 0;
-    return { ...AT_REST, corona, serene: corona };
+    const rim = corona === 1 ? { from: 0.5, to: 0.5 } : AT_REST.rim;
+    return { ...AT_REST, rim, corona, serene: corona };
   }
   const flare = clamp((elapsed - 1500) / 300) * (1 - clamp((elapsed - 1950) / 250));
-  const total = clamp((elapsed - 1900) / 500) * (1 - clamp((elapsed - 4100) / 400));
-  const beads = BEADS.map(({ r, out }, index) => {
-    const twinkle = elapsed < TWINKLE_MS ? 0.75 + 0.25 * Math.cos(elapsed / 160 + index * 2.1) : 1;
-    const goes = clamp((elapsed - out + FADE_MS) / FADE_MS);
-    const back = clamp((elapsed - (RETURN_AT + index * RETURN_STEP)) / RETURN_MS);
-    return {
-      opacity: clamp(twinkle * (1 - goes) + back * goes),
-      radius: r * (1 - 0.35 * goes * (1 - back)),
-    };
+  const shut = clamp((elapsed - 4100) / 400);
+  const total = clamp((elapsed - 1900) / 500) * (1 - shut);
+  // * the twinkle swells from nothing and dies down to nothing, so no bead jumps as it starts or ends
+  const swell =
+    smooth(clamp(elapsed / FADE_MS)) *
+    (1 - smooth(clamp((elapsed - TWINKLE_MS + FADE_MS) / FADE_MS)));
+  const goes = BEADS.map(({ out }) => {
+    return clamp((elapsed - out + FADE_MS) / FADE_MS);
   });
+  const beads = goes.map((gone, index) => {
+    const twinkle = 1 - (TWINKLE_DEPTH * swell * (1 - Math.cos(elapsed / 160 + index * 2.1))) / 2;
+    const back = clamp((elapsed - (RETURN_AT + index * RETURN_STEP)) / RETURN_MS);
+    return { light: twinkle * (1 - gone) + back * gone };
+  });
+  // the rim's ends as shares of its length: its middle is the largest bead's
+  const rim = {
+    from: 0.5 * ((goes[0] ?? 1) - shut),
+    to: 1 - 0.5 * ((goes[BEADS.length - 1] ?? 1) - shut),
+  };
   // the click's wink, gone before totality
   const mischief = smooth(clamp(elapsed / FADE_MS)) * (1 - smooth(clamp((elapsed - 1250) / 650)));
-  return { beads, flare, corona: total, mischief, serene: smooth(total) };
+  return { beads, rim, flare, corona: total, mischief, serene: smooth(total) };
 };
 
 // ── Drawing ───────────────────────────────────────────────────────────────────
 
 const SVG = 'http://www.w3.org/2000/svg';
-// the mark's box, and a wider one that holds the corona
+// the mark's box
 const MARK_BOX = '2.6 4.7 25 25';
-const CORONA_BOX = '-1 1 30 31';
 const CENTRE = Object.freeze({ x: 14, y: 18 });
 const RIM = 'M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46';
-// the face's centre, between its eyes and halfway from its brows to its mouth, and the one factor
-// every face is drawn at about it
+// the rim's width, and its length along the disc's edge, from the first bead to the last
+const RIM_WIDTH = 0.9;
+const RIM_LENGTH = 10.5 * (Math.atan2(15.46 - 18, 24.19 - 14) - Math.atan2(7.66 - 18, 15.82 - 14));
+// the face's centre, between its eyes and halfway from its brows to its mouth
 const FACE_CENTRE = Object.freeze({ x: 13.4, y: 19 });
-const FACE_SCALE = 1.2;
-const MONOCLE =
-  'M 18.75 18.1 A 2.15 2.15 0 1 1 14.45 18.1 A 2.15 2.15 0 1 1 18.75 18.1 Z M 18.55 19.05 Q 19.9 19.6 20.3 20.7';
+
+/** The one factor every face is drawn at, about its centre. */
+export const FACE_SCALE = 1.2;
+
+/** The face's strokes, in its skeleton's units. */
+export const STROKES = Object.freeze({ eye: 0.62, brow: 0.55, monocle: 0.5, mouth: 0.6 });
+
+/** The monocle's ring, about the right eye of the face that wears it, in the skeleton's units. */
+export const MONOCLE = Object.freeze({ x: 16.6, y: 18.1, r: 2.55 });
+
+const onRim = (degrees, radius) => {
+  const angle = (degrees * Math.PI) / 180;
+  return { x: CENTRE.x + radius * Math.cos(angle), y: CENTRE.y + radius * Math.sin(angle) };
+};
+
+/**
+ * The corona about the disc: its halo, its sixteen rays, and the box of the drawing that holds it,
+ * centred on the disc.
+ */
+export const CORONA = Object.freeze({
+  centre: CENTRE,
+  halo: Object.freeze({ r: 12.6, width: 2.4 }),
+  rays: Object.freeze(
+    Array.from({ length: 16 }, (_, index) => {
+      const inner = onRim(index * 22.5, 11.3);
+      const outer = onRim(index * 22.5, index % 2 === 0 ? 14.6 : 13.2);
+      return Object.freeze({ x1: inner.x, y1: inner.y, x2: outer.x, y2: outer.y });
+    })
+  ),
+  rayWidth: 0.35,
+  box: Object.freeze({ x: -1, y: 3, width: 30, height: 30 }),
+});
+
+/**
+ * The corona's and the flare's colours in the light theme, the halo's at its opacity: each at 3:1
+ * or more on the page and on its bar (WCAG 1.4.11).
+ */
+export const CORONA_LIGHT = Object.freeze({
+  flare: '#d9519f',
+  halo: '#c13584',
+  haloOpacity: 0.75,
+  ray: '#9d2a6b',
+});
+
 const STYLE_ID = 'bead-mascot-style';
 
 // the mark's colours in either theme, as `favicon.svg` has them: its own drawing's; the bar's mark
 // keeps the colours its page gives it
 const MARK_LIGHT = Object.freeze([
   ['.moon', 'fill: #17111d;'],
-  ['.rim', 'fill: none; stroke: #c13584; stroke-width: 0.9;'],
+  [
+    '.rim',
+    `fill: none; stroke: #c13584; stroke-width: ${String(RIM_WIDTH)}; stroke-linecap: round;`,
+  ],
   ['.bead', 'fill: #c13584;'],
 ]);
 const MARK_DARK = Object.freeze([
@@ -6968,17 +7035,24 @@ const MARK_DARK = Object.freeze([
   ['.rim', 'stroke: #ff8bc4;'],
   ['.bead', 'fill: #ff8bc4;'],
 ]);
-// the face in the beads' colour, its flare and its corona, on its own drawing and on the bar's mark
+// the face in the beads' colour, and its flare and its corona, on its own drawing and on the bar's
+// mark
 const FACE_LIGHT = Object.freeze([
-  ['.flare', 'fill: #fde7f2;'],
-  ['.halo', 'fill: none; stroke: #f3a6cd; stroke-width: 2.4; stroke-opacity: 0.35;'],
-  ['.ray', 'fill: none; stroke: #f3a6cd; stroke-width: 0.35; stroke-linecap: round;'],
+  ['.flare', `fill: ${CORONA_LIGHT.flare};`],
+  [
+    '.halo',
+    `fill: none; stroke: ${CORONA_LIGHT.halo}; stroke-width: ${String(CORONA.halo.width)}; stroke-opacity: ${String(CORONA_LIGHT.haloOpacity)};`,
+  ],
+  [
+    '.ray',
+    `fill: none; stroke: ${CORONA_LIGHT.ray}; stroke-width: ${String(CORONA.rayWidth)}; stroke-linecap: round;`,
+  ],
   ['.line', 'fill: none; stroke: #f3a6cd; stroke-linecap: round; stroke-linejoin: round;'],
   ['.pupil', 'fill: #f3a6cd;'],
 ]);
 const FACE_DARK = Object.freeze([
   ['.flare', 'fill: #ffe3f1;'],
-  ['.halo', 'stroke: #ff8bc4;'],
+  ['.halo', 'stroke: #ff8bc4; stroke-opacity: 0.35;'],
   ['.ray', 'stroke: #ff8bc4;'],
   ['.line', 'stroke: #ff8bc4;'],
   ['.pupil', 'fill: #ff8bc4;'],
@@ -7042,6 +7116,9 @@ ${rulesOf(FACE_DARK, { scope: SYSTEM_DARK, drawings: BOTH })}
 .bead-mark .halo {
   vector-effect: non-scaling-stroke;
   stroke-width: 3px;
+}
+.bead-mark .rim {
+  stroke-linecap: round;
 }
 .bead-mascot {
   position: fixed;
@@ -7126,8 +7203,29 @@ const browOf = ([x1, y1, cx, cy, x2, y2]) => {
   return `M ${fixed(x1)} ${fixed(y1)} Q ${fixed(cx)} ${fixed(cy)} ${fixed(x2)} ${fixed(y2)}`;
 };
 
-const mouthOf = ([lx, ly, rx, ry, ux, uy, dx, dy]) => {
-  return `M ${fixed(lx)} ${fixed(ly)} Q ${fixed(ux)} ${fixed(uy)} ${fixed(rx)} ${fixed(ry)} Q ${fixed(dx)} ${fixed(dy)} ${fixed(lx)} ${fixed(ly)} Z`;
+// a mouth's half from corner `a` to corner `b` through `[x, y]`: the quadratic's own cubic at
+// `round` 0, its handles upright over the corners at 1, its middle as high either way
+const halfOf = ([ax, ay], [bx, by], { through: [x, y], round }) => {
+  const pull = (2 / 3) * (1 - round);
+  const first = `${fixed(ax + pull * (x - ax))} ${fixed(ay + (2 / 3) * (y - ay))}`;
+  const second = `${fixed(bx + pull * (x - bx))} ${fixed(by + (2 / 3) * (y - by))}`;
+  return `C ${first} ${second} ${fixed(bx)} ${fixed(by)}`;
+};
+
+const mouthOf = ([lx, ly, rx, ry, ux, uy, dx, dy, round]) => {
+  const left = [lx, ly];
+  const right = [rx, ry];
+  return `M ${fixed(lx)} ${fixed(ly)} ${halfOf(left, right, { through: [ux, uy], round })} ${halfOf(right, left, { through: [dx, dy], round })} Z`;
+};
+
+// the monocle's ring, and its handle from the ring toward the cheek
+const monocleOf = () => {
+  const { x, y, r } = MONOCLE;
+  const angle = (26 * Math.PI) / 180;
+  const sx = x + r * Math.cos(angle);
+  const sy = y + r * Math.sin(angle);
+  const ring = `M ${fixed(x + r)} ${fixed(y)} A ${fixed(r)} ${fixed(r)} 0 1 1 ${fixed(x - r)} ${fixed(y)} A ${fixed(r)} ${fixed(r)} 0 1 1 ${fixed(x + r)} ${fixed(y)} Z`;
+  return `${ring} M ${fixed(sx)} ${fixed(sy)} Q ${fixed(sx + 1.35)} ${fixed(sy + 0.55)} ${fixed(sx + 1.75)} ${fixed(sy + 1.65)}`;
 };
 
 // the diamond ring's flare, an eight-pointed star of `size` at the largest bead
@@ -7141,39 +7239,32 @@ const flareOf = (size) => {
   return `M ${points.join(' L ')} Z`;
 };
 
-const onRim = (degrees, radius) => {
-  const angle = (degrees * Math.PI) / 180;
-  return { x: CENTRE.x + radius * Math.cos(angle), y: CENTRE.y + radius * Math.sin(angle) };
-};
-
 // the corona, its halo and its rays, shut
 const coronaOf = () => {
   const corona = element('g', { opacity: 0 });
-  corona.append(element('circle', { class: 'halo', cx: CENTRE.x, cy: CENTRE.y, r: 12.6 }));
-  for (let index = 0; index < 16; index += 1) {
-    const inner = onRim(index * 22.5, 11.3);
-    const outer = onRim(index * 22.5, index % 2 === 0 ? 14.6 : 13.2);
-    corona.append(
-      element('path', {
+  corona.append(
+    element('circle', { class: 'halo', cx: CENTRE.x, cy: CENTRE.y, r: CORONA.halo.r }),
+    ...CORONA.rays.map(({ x1, y1, x2, y2 }) => {
+      return element('path', {
         class: 'ray',
-        d: `M ${fixed(inner.x)} ${fixed(inner.y)} L ${fixed(outer.x)} ${fixed(outer.y)}`,
-      })
-    );
-  }
+        d: `M ${fixed(x1)} ${fixed(y1)} L ${fixed(x2)} ${fixed(y2)}`,
+      });
+    })
+  );
   return corona;
 };
 
 // the face's parts by name, the flare beside them
 const facePartsOf = () => {
   const parts = {
-    eL: element('path', { class: 'line', 'stroke-width': 0.62 }),
-    eR: element('path', { class: 'line', 'stroke-width': 0.62 }),
+    eL: element('path', { class: 'line', 'stroke-width': STROKES.eye }),
+    eR: element('path', { class: 'line', 'stroke-width': STROKES.eye }),
     pL: element('circle', { class: 'pupil' }),
     pR: element('circle', { class: 'pupil' }),
-    bL: element('path', { class: 'line', 'stroke-width': 0.55 }),
-    bR: element('path', { class: 'line', 'stroke-width': 0.55 }),
-    g: element('path', { class: 'line', d: MONOCLE, 'stroke-width': 0.5 }),
-    m: element('path', { class: 'line', 'stroke-width': 0.6 }),
+    bL: element('path', { class: 'line', 'stroke-width': STROKES.brow }),
+    bR: element('path', { class: 'line', 'stroke-width': STROKES.brow }),
+    g: element('path', { class: 'line', d: monocleOf(), 'stroke-width': STROKES.monocle }),
+    m: element('path', { class: 'line', 'stroke-width': STROKES.mouth }),
   };
   // * every face drawn FACE_SCALE times its skeleton's size about its centre, one factor for all six
   const face = element('g', {
@@ -7189,7 +7280,7 @@ const drawingOf = (hasCorona) => {
   styled();
   const svg = element('svg', {
     class: 'bead-moon',
-    viewBox: hasCorona ? CORONA_BOX : MARK_BOX,
+    viewBox: hasCorona ? Object.values(CORONA.box).join(' ') : MARK_BOX,
     'aria-hidden': 'true',
     focusable: 'false',
   });
@@ -7212,6 +7303,29 @@ const drawingOf = (hasCorona) => {
   return { svg, corona, rim, beads, flare, parts };
 };
 
+// ! styles, not attributes: the bar's mark takes its rim's from its page's sheet. The rim from
+// `from` to `to` of its length, whole as it is drawn; shorter than it is wide, it narrows with its
+// length, so its round ends never pop in as a dot
+const rimOf = (rim, { from, to }) => {
+  const { style } = rim;
+  if (from <= 0 && to >= 1) {
+    style.removeProperty('stroke-dasharray');
+    style.removeProperty('stroke-dashoffset');
+    style.removeProperty('stroke-width');
+    style.removeProperty('visibility');
+    return;
+  }
+  const length = Math.max(0, to - from) * RIM_LENGTH;
+  style.strokeDasharray = `${fixed(length)} ${fixed(2 * RIM_LENGTH)}`;
+  style.strokeDashoffset = fixed(-from * RIM_LENGTH);
+  if (length < RIM_WIDTH) {
+    style.strokeWidth = fixed(length);
+  } else {
+    style.removeProperty('stroke-width');
+  }
+  style.visibility = length > 0.001 ? 'visible' : 'hidden';
+};
+
 // what the mascot drew into a mark it took over, so it gives the mark back as it was
 const TAKEN = 'data-bead-part';
 
@@ -7221,10 +7335,12 @@ const giveBack = (svg) => {
     part.remove();
   }
   svg.querySelectorAll('.bead').forEach((bead, index) => {
-    bead.removeAttribute('opacity');
     bead.setAttribute('r', String(BEADS[index]?.r ?? 1));
   });
-  svg.querySelector('.rim')?.style.removeProperty('stroke-opacity');
+  const rim = svg.querySelector('.rim');
+  if (rim !== null) {
+    rimOf(rim, AT_REST.rim);
+  }
   svg.classList.remove('bead-mark');
   svg.removeAttribute('data-face');
   svg.removeAttribute('data-face-shown');
@@ -7273,15 +7389,13 @@ const paint = (drawing, { face, eclipse }) => {
   parts.g.setAttribute('opacity', fixed(face.g[0]));
   parts.m.setAttribute('d', mouthOf(face.m));
   drawing.beads.forEach((bead, index) => {
-    const { opacity, radius } = eclipse.beads[index] ?? { opacity: 1, radius: 1 };
-    bead.setAttribute('opacity', fixed(opacity));
-    bead.setAttribute('r', fixed(radius));
+    const light = eclipse.beads[index]?.light ?? 1;
+    bead.setAttribute('r', fixed((BEADS[index]?.r ?? 1) * light));
   });
   drawing.flare.setAttribute('opacity', fixed(eclipse.flare));
   drawing.flare.setAttribute('d', flareOf(0.6 + 0.6 * eclipse.flare));
   drawing.corona.setAttribute('opacity', fixed(eclipse.corona));
-  // ! a style, not an attribute: the bar's mark takes its rim's from its page's sheet
-  drawing.rim.style.strokeOpacity = fixed(1 - eclipse.corona);
+  rimOf(drawing.rim, eclipse.rim);
 };
 
 /** The mark with face `name`, still, for a page to place: an empty state's, say. */
@@ -7606,10 +7720,15 @@ export const mountMascot = (options = {}) => {
       return face[part].map(fixed).join(',');
     })
       .concat(
-        eclipse.beads.map(({ opacity, radius }) => {
-          return `${fixed(opacity)}:${fixed(radius)}`;
+        eclipse.beads.map(({ light }) => {
+          return fixed(light);
         }),
-        [fixed(eclipse.flare), fixed(eclipse.corona)]
+        [
+          fixed(eclipse.rim.from),
+          fixed(eclipse.rim.to),
+          fixed(eclipse.flare),
+          fixed(eclipse.corona),
+        ]
       )
       .join(';');
     if (place.dock === 'mark' && mark !== null) {

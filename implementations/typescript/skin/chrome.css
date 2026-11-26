@@ -71,7 +71,7 @@ body {
 }
 
 .mark .moon {
-  fill: var(--app-body);
+  fill: var(--mark-moon);
   stroke: var(--app-text-tertiary);
   stroke-width: 1;
 }

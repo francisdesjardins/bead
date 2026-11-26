@@ -385,6 +385,9 @@
   --app-text-tertiary: #6d6278;
   --app-divider: rgb(23 17 29 / 0.12);
 
+  /* the mark's disc, the mascot's own, so the bar's mark and the mascot are one Moon */
+  --mark-moon: #17111d;
+
   /* the ground of what is code, an inset in a card; and a refusal's wash */
   --raised: #f1ecf5;
   --bad-soft: rgb(185 28 28 / 0.1);
@@ -418,6 +421,7 @@
   --app-text-secondary: #b2a7bf;
   --app-text-tertiary: #8d8199;
   --app-divider: rgb(242 236 245 / 0.14);
+  --mark-moon: #15111c;
 
   --raised: #1c1625;
   --bad-soft: rgb(248 113 113 / 0.12);
@@ -447,6 +451,7 @@
     --app-text-secondary: #b2a7bf;
     --app-text-tertiary: #8d8199;
     --app-divider: rgb(242 236 245 / 0.14);
+    --mark-moon: #15111c;
 
     --raised: #1c1625;
     --bad-soft: rgb(248 113 113 / 0.12);
@@ -551,7 +556,7 @@ body {
 }
 
 .mark .moon {
-  fill: var(--app-body);
+  fill: var(--mark-moon);
   stroke: var(--app-text-tertiary);
   stroke-width: 1;
 }
