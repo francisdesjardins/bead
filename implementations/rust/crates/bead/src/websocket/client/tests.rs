@@ -14,7 +14,7 @@ use tungstenite::handshake::server::{
 use tungstenite::protocol::Message;
 
 use super::*;
-use crate::testing::closed_port::closed_port;
+use crate::testing::closed_port::{closed_port, started_alone_on};
 use crate::testing::{Instant, SteppingClock, patience, spawn, yield_now};
 use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
@@ -2051,13 +2051,9 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
             ..WebSocketTransportServerOptions::default()
         })
         .unwrap();
-        let TransportServerAddress { port, .. } = patience(
+        let held = patience(
             PATIENCE,
-            server.start(&TransportServerStartOptions {
-                address: Some(address.to_owned()),
-                find_open_port: Some(true),
-                ..TransportServerStartOptions::default()
-            }),
+            started_alone_on(|options| server.start(options), address),
         )
         .await
         .unwrap()
@@ -2067,7 +2063,7 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
 
         settled(client.connect(&WebSocketTransportClientConnectOptions::new(
             "localhost",
-            port,
+            held.port(),
         )))
         .await
         .unwrap();

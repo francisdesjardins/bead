@@ -5,8 +5,9 @@ use std::net::Ipv6Addr;
 
 use super::*;
 use crate::http::server::HttpTransportServer;
+use crate::testing::closed_port::started_alone_on;
 use crate::testing::tls::{PkiLeaf, PkiServerOptions, pki, pki_server_config};
-use crate::transport::{ServerTransport, TransportServerStartOptions};
+use crate::transport::ServerTransport;
 
 // a client of `options` whose resolver answers 192.0.2.7 and records each name it is asked
 fn resolving_client(
@@ -35,20 +36,18 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
 
     for address in addresses {
         let server = HttpTransportServer::new(&HttpTransportServerOptions::default()).unwrap();
-        let port = within(server.start(&TransportServerStartOptions {
-            address: Some(address.to_owned()),
-            find_open_port: Some(true),
-            ..TransportServerStartOptions::default()
-        }))
-        .await
-        .unwrap()
-        .port;
+        let held = within(started_alone_on(|options| server.start(options), address))
+            .await
+            .unwrap();
         let client = client_of(&not_listening());
         let began = crate::testing::Instant::now();
 
-        settled(client.connect(&HttpTransportClientConnectOptions::new("localhost", port)))
-            .await
-            .unwrap();
+        settled(client.connect(&HttpTransportClientConnectOptions::new(
+            "localhost",
+            held.port(),
+        )))
+        .await
+        .unwrap();
 
         // the families raced, as RFC 8305 asks: no wait on the one that is refused
         assert_eq!(
