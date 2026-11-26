@@ -210,6 +210,7 @@ export const RULES = Object.freeze([
         'surface-lists',
         'release',
         'flow',
+        'git-floor',
         'bench-compare',
         'bench-release',
         'fuzz',
