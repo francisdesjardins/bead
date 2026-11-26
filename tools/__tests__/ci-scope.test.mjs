@@ -241,6 +241,7 @@ const CASES = [
   ['tools/ci-scope.mjs', AREAS],
   ['.gitattributes', AREAS],
   ['docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md', ['commits']],
+  ['.github/workflows/drift.yml', ['commits']],
   ['README.md', ['commits', 'spec']],
   ['tools/twins.tsv', ['commits']],
   ['tools/check-versions.mjs', ['commits', 'spec']],
