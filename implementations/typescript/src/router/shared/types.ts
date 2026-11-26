@@ -1635,10 +1635,7 @@ export interface IProcedure extends IProcedureAddress {
 }
 
 export interface IServiceManagerOptions<Handle extends string = ConnectionHandle> {
-  /**
-   * The clock its traces read: its router's, which one given must be; the platform's when neither
-   * has one.
-   */
+  /** The clock its traces read: its router's, which one given must be. */
   clock?: IClock | undefined;
   /**
    * Closes a connection that let a request naming it — a command — go unanswered, when the call's

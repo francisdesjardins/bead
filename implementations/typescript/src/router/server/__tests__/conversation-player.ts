@@ -187,7 +187,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
  * `namesProcedures`, the procedures each takes, as its open gave them, every one where it gave none:
  * a router asks as it is built, before any open, whether its transport names any.
  */
-const createScriptedConnections = (namesProcedures: boolean) => {
+const createScriptedConnections = (clock: TestClock, namesProcedures: boolean) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -241,6 +241,7 @@ const createScriptedConnections = (namesProcedures: boolean) => {
     carriesCredential: (connectionHandle) => {
       return !carryingNone.has(connectionHandle);
     },
+    clock,
     // * a connection the server closes of its own accord is told closed in a later turn, as every
     // transport tells it
     close: (connectionHandle) => {
@@ -821,6 +822,7 @@ export const playConversation = async (
     : inMemory
       ? createMemoryConnections(clock, proceduresOf(conversation))
       : createScriptedConnections(
+          clock,
           steps.some((step) => {
             return step.procedures !== undefined;
           })

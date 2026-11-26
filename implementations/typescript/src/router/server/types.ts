@@ -561,10 +561,7 @@ export interface IRouterServerDebugInfo {
 
 /** What a server's router is built with. */
 export interface IRouterServerOptions {
-  /**
-   * The clock it runs on: its transport's, which one given must be; the platform's when neither
-   * has one.
-   */
+  /** The clock it runs on: its transport's, which one given must be. */
   clock?: IClock | undefined;
   /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
@@ -705,8 +702,8 @@ export interface IRelayOptions {
 
 /** The part of a transport server this router uses — met by this package's. */
 export interface IRouterServerTransportLike {
-  /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
-  readonly clock?: IClock | undefined;
+  /** The clock it runs on, which the router runs on too. */
+  readonly clock: IClock;
   off(
     event: 'close',
     listener: EmitterListener<

@@ -139,7 +139,7 @@ const notificationEnvelopeOf = (callId: number, payload = Uint8Array.of(5)): Out
 /**
  * A transport that records what is sent, read as the server reads it, and the credential carried
  * beside it, delivers what a test gives, and carries a credential, securely, unless told otherwise.
- * Paused by its router, it holds what the test delivers, in order, until resumed; `pauses` holds
+ * It runs on the clock it is given, the platform's by default. Paused by its router, it holds what the test delivers, in order, until resumed; `pauses` holds
  * each pause, `true`, and resume. Its `control.readyState` other than open refuses a send as every
  * client transport refuses one while not open.
  */
@@ -147,8 +147,13 @@ const createScriptedTransport = ({
   carries = () => {
     return true;
   },
+  clock = PLATFORM_CLOCK,
   isSecure = true,
-}: { carries?: (credential: string) => boolean; isSecure?: boolean } = {}) => {
+}: {
+  carries?: (credential: string) => boolean;
+  clock?: IClock | undefined;
+  isSecure?: boolean;
+} = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
     message: [message: ITransportMessage];
@@ -169,6 +174,7 @@ const createScriptedTransport = ({
 
   const transport: IRouterClientTransportLike = {
     carries,
+    clock,
     isSecure,
     off: emitter.off,
     on: emitter.on,
@@ -457,16 +463,12 @@ test.describe('createRouterClient', () => {
 
   test('runs on its transport’s clock and refuses another', () => {
     const clock = createTestClock();
-    const { transport } = createScriptedTransport();
     using onItsTransport = createRouterClient(createWebSocketTransportClient({ clock }));
-    using onItsOwn = createRouterClient(transport, { clock });
-    using alone = createRouterClient(transport);
+    using same = createRouterClient(createWebSocketTransportClient({ clock }), { clock });
+    // a transport given no clock runs on the platform's
+    using alone = createRouterClient(createScriptedTransport().transport);
 
-    expect([onItsTransport.clock, onItsOwn.clock, alone.clock]).toEqual([
-      clock,
-      clock,
-      PLATFORM_CLOCK,
-    ]);
+    expect([onItsTransport.clock, same.clock, alone.clock]).toEqual([clock, clock, PLATFORM_CLOCK]);
     expect(() => {
       createRouterClient(createWebSocketTransportClient({ clock }), { clock: PLATFORM_CLOCK });
     }).toThrow(
@@ -474,6 +476,21 @@ test.describe('createRouterClient', () => {
         "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
       )
     );
+  });
+
+  test('refuses a transport that names no clock, which only a caller past its types can give', () => {
+    const { transport } = createScriptedTransport();
+    const clockless = { ...transport, clock: undefined } as unknown as IRouterClientTransportLike;
+    const refusal = new ProgrammerError(
+      "a client's router runs on the clock of its transport, which names none"
+    );
+
+    expect(() => {
+      createRouterClient(clockless);
+    }).toThrow(refusal);
+    expect(() => {
+      createRouterClient(clockless, { clock: PLATFORM_CLOCK });
+    }).toThrow(refusal);
   });
 
   test.describe('requests', () => {
@@ -560,8 +577,8 @@ test.describe('createRouterClient', () => {
     });
 
     test('times out and cancels its call; a result too late says nothing while its call id is reserved', async () => {
-      const { deliver, sent, transport } = createScriptedTransport();
       const clock = createTestClock();
+      const { deliver, sent, transport } = createScriptedTransport({ clock });
       using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const failing = router
@@ -1600,8 +1617,8 @@ test.describe('createRouterClient', () => {
     });
 
     test('a subscription refused lets go of its call id; one that times out is cancelled, its call id reserved a while', async () => {
-      const { deliver, sent, transport } = createScriptedTransport();
       const clock = createTestClock();
+      const { deliver, sent, transport } = createScriptedTransport({ clock });
       using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const triggered: Uint8Array[] = [];
@@ -1697,8 +1714,8 @@ test.describe('createRouterClient', () => {
 
     // spec 11.7, 12.9.2 and 12.9.3
     test('keeps the call id of a subscription let go of a while, silent on what comes under it, then reports it', async () => {
-      const { deliver, transport } = createScriptedTransport();
       const clock = createTestClock();
+      const { deliver, transport } = createScriptedTransport({ clock });
       using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const notification = notificationOf([]);
@@ -1741,8 +1758,8 @@ test.describe('createRouterClient', () => {
     });
 
     test('a subscription that waits without end, let go of, is cancelled and its call id reserved 5 s, or until the connection closes', async () => {
-      const { close, deliver, sent, transport } = createScriptedTransport();
       const clock = createTestClock();
+      const { close, deliver, sent, transport } = createScriptedTransport({ clock });
       using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const notification = notificationOf([]);
@@ -2108,8 +2125,8 @@ test.describe('createRouterClient', () => {
     });
 
     test('clears the timers of its reservations with the connection', async () => {
-      const { close, deliver, transport } = createScriptedTransport();
       const clock = createTestClock();
+      const { close, deliver, transport } = createScriptedTransport({ clock });
       using router = createRouterClient(transport, { clock });
       const notification = notificationOf([]);
 
@@ -3148,8 +3165,9 @@ test.describe('createRouterClient', () => {
     // debugging 4.4
     test('two calls to one procedure started in one millisecond and answered in one batch name each its own call id', async () => {
       const start = Date.UTC(2026, 0, 1);
-      const { deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport, { clock: createTestClock(start) });
+      const clock = createTestClock(start);
+      const { deliver, transport } = createScriptedTransport({ clock });
+      using router = createRouterClient(transport, { clock });
       const services = createServiceManager(router);
       const asking = services.getRequest(service, { serializer: text });
       const steps: [
@@ -3345,8 +3363,9 @@ test.describe('createRouterClient', () => {
     // debugging 9.3, 9.6.1 and 9.6.2
     test('counts a call refused before it goes, SESSION_REQUIRED or DESTINATION_UNREACHABLE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { transport } = createScriptedTransport({ carries: CARRIES_NONE });
-      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const clock = createTestClock();
+      const { transport } = createScriptedTransport({ carries: CARRIES_NONE, clock });
+      using router = createRouterClient(transport, { clock, metricsRegistry });
       const series = router.declareRequester(service);
       const ask = (
         asked: {
@@ -3412,8 +3431,9 @@ test.describe('createRouterClient', () => {
     // debugging 9.6, 9.7
     test('counts a call to a client not open by its transport state, error before the open and closed after it', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { control, sent, transport } = createScriptedTransport();
-      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const clock = createTestClock();
+      const { control, sent, transport } = createScriptedTransport({ clock });
+      using router = createRouterClient(transport, { clock, metricsRegistry });
       const series = router.declareRequester(service);
       const failures: [string, number | undefined][] = [];
 
@@ -3461,9 +3481,10 @@ test.describe('createRouterClient', () => {
     // debugging 9.3, spec 13.4
     test('counts a call that would present a withdrawn default as started and ended in the turn it started, SESSION_REQUIRED', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const scripted = createScriptedTransport();
+      const clock = createTestClock();
+      const scripted = createScriptedTransport({ clock });
       using router = createRouterClient(scripted.transport, {
-        clock: createTestClock(),
+        clock,
         credential: JWT,
         metricsRegistry,
       });
@@ -3491,8 +3512,9 @@ test.describe('createRouterClient', () => {
     // debugging 9.6.12
     test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { control, transport } = createScriptedTransport();
-      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const clock = createTestClock();
+      const { control, transport } = createScriptedTransport({ clock });
+      using router = createRouterClient(transport, { clock, metricsRegistry });
       const series = router.declareRequester(service);
       const controller = new AbortController();
       const cancelled = router.request(new Uint8Array(0), {
@@ -3521,8 +3543,9 @@ test.describe('createRouterClient', () => {
     // debugging 9.1.6, 10.2 and 10.3.3
     test('counts a notification heard under a subscription it holds, and a subscription dropped at this end by the failure that ends it or with its connection, never by its own cancel', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { close, deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const clock = createTestClock();
+      const { close, deliver, sent, transport } = createScriptedTransport({ clock });
+      using router = createRouterClient(transport, { clock, metricsRegistry });
       const errors = recordErrors(router);
       const news = notificationOf([]);
       // subscribed under `callId`, once its answer came
@@ -3587,7 +3610,7 @@ test.describe('createRouterClient', () => {
       const clock = createTestClock();
       const read: Pick<IClock, 'performance'> = clock;
       const fine = read.performance.now.bind(read.performance);
-      const { deliver, transport } = createScriptedTransport();
+      const { deliver, transport } = createScriptedTransport({ clock });
 
       // coarsened as W3C High Resolution Time coarsens a browser's reading
       read.performance.now = () => {

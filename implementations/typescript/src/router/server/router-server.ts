@@ -194,8 +194,8 @@ const subscribingOf = (
  * names a destination goes on through the relay to the destination registered, as `options.relay`
  * admits it; while none is registered, it is refused: this router relays nothing.
  *
- * It runs on its transport's clock, and on the one its options give when its transport has none: a
- * clock given that differs from its transport's is a {@link ProgrammerError}.
+ * It runs on its transport's clock: one given that differs, or a transport that names none, is a
+ * {@link ProgrammerError}.
  *
  * @example
  * import { createRouterServer } from '@francisdesjardins/bead/router-server';

@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { noop } from '../../../transport/shared/noop';
 import { expect, test } from '@playwright/test';
+import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
 import type { IRouterClientTransportLike } from '../../client/types';
@@ -99,9 +100,15 @@ const REASONS: readonly string[] = Object.values(IdentityRefusal);
 
 // helpers
 
-/** A client's transport that sends nothing anywhere: a declaration never sends. */
-const clientTransport = (): IRouterClientTransportLike => {
+/**
+ * A client's transport that sends nothing anywhere, on the clock it is given, the platform's by
+ * default: a declaration never sends.
+ */
+const clientTransport = ({
+  clock = PLATFORM_CLOCK,
+}: { clock?: IClock | undefined } = {}): IRouterClientTransportLike => {
   return {
+    clock,
     off: () => {
       return undefined;
     },
@@ -117,8 +124,11 @@ const clientTransport = (): IRouterClientTransportLike => {
 };
 
 /** A server's transport, likewise. */
-const serverTransport = (): IRouterServerTransportLike => {
+const serverTransport = ({
+  clock = PLATFORM_CLOCK,
+}: { clock?: IClock | undefined } = {}): IRouterServerTransportLike => {
   return {
+    clock,
     off: () => {
       return undefined;
     },

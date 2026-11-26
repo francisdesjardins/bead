@@ -195,8 +195,8 @@ const isSameCredential = (first: DefaultCredential, second: DefaultCredential): 
  * the resolvers registered, by service and procedure, and its notifications to the notification
  * whose subscription opened their call. What no call waits on is reported as `error`.
  *
- * It runs on its transport's clock, and on the one its options give when its transport has none: a
- * clock given that differs from its transport's is a {@link ProgrammerError}.
+ * It runs on its transport's clock: one given that differs, or a transport that names none, is a
+ * {@link ProgrammerError}.
  *
  * @example
  * import { createRouterClient } from '@francisdesjardins/bead/router-client';

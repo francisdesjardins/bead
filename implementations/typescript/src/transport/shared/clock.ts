@@ -75,18 +75,22 @@ const nameOf = (clock: IClock): string => {
 };
 
 /**
- * The clock of a layer built on another: the one beneath it, unless it was given one — the one
- * given when there is none beneath, and the platform's when neither is. One given that differs is a
- * {@link ProgrammerError} naming both: `"a server runs on the clock of its transport, one of its
- * own, and was given another, the platform's"`. A layer is named in the singular, which the
- * refusal's verbs agree with.
+ * The clock of a layer built on another: the one beneath it, unless it was given one. One given that
+ * differs is a {@link ProgrammerError} naming both: `"a server runs on the clock of its transport,
+ * one of its own, and was given another, the platform's"`. So is a layer beneath that names none,
+ * which only a caller past the types can give: `"a server runs on the clock of its transport, which
+ * names none"`. A layer is named in the singular, which the refusal's verbs agree with.
  */
 export const clockOf = (
   { beneath, given }: { beneath: IClock | undefined; given: IClock | undefined },
   { below, layer }: { below: string; layer: string }
 ): IClock => {
-  if (given === undefined || beneath === undefined || given === beneath) {
-    return beneath ?? given ?? PLATFORM_CLOCK;
+  if (beneath === undefined) {
+    throw new ProgrammerError(`${layer} runs on the clock of ${below}, which names none`);
+  }
+
+  if (given === undefined || given === beneath) {
+    return beneath;
   }
 
   throw new ProgrammerError(

@@ -1128,8 +1128,8 @@ export type BrokerTransportServer = ITransportServer<IBrokerPeer, undefined>;
  * handles open with, its connections' flags, sends and closes, its events, its gauges and its stop.
  */
 export interface IJoinableTransportServer {
-  /** The clock it runs on, which every transport joined shares; none, and it names none. */
-  readonly clock?: IClock | undefined;
+  /** The clock it runs on, which every transport joined shares. */
+  readonly clock: IClock;
   /** What each handle it draws opens with, `type=…;`, which no other transport joined shares. */
   readonly type: string;
   carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
@@ -1166,8 +1166,8 @@ export interface IJoinableTransportServer {
 export interface IJoinedTransportServer<
   Transports extends readonly IJoinableTransportServer[] = readonly IJoinableTransportServer[],
 > extends IEventMethods<TransportServerEventMap, IJoinedTransportServer<Transports>> {
-  /** The clock every transport joined runs on; none when none names one. */
-  readonly clock: IClock | undefined;
+  /** The clock every transport joined runs on: its first's. */
+  readonly clock: IClock;
   /** The transports it joins, in the order it was given them: what an application starts. */
   readonly transports: Transports;
 

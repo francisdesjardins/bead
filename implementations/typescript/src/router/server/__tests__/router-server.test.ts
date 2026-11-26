@@ -65,6 +65,7 @@ import {
   FailureError,
   FailureScope,
   LIMIT_DEFAULTS,
+  PLATFORM_CLOCK,
   ProgrammerError,
   ProtocolCode,
   requireCredential,
@@ -72,6 +73,7 @@ import {
   SERVER_FAILURES,
   shareLegBSession,
   TimeoutError,
+  type IClock,
   type IJwtKey,
   type IJwtSetKey,
   type IRouterServerTransportLike,
@@ -277,12 +279,14 @@ const resultOf = (callId: number, payload = new Uint8Array(0)): OutgoingEnvelope
  * A transport server that records what it sends, read as a client reads it, and the credential it
  * is given beside it, delivers what a test gives, with what its transport carried, and carries a
  * credential, securely, unless told otherwise. A connection its router paused holds what the test
- * delivers, in order, until resumed; `paces` holds each pause and resume, by connection.
+ * delivers, in order, until resumed; `paces` holds each pause and resume, by connection. It runs
+ * on the clock it is given, the platform's by default.
  */
 const createScriptedTransport = ({
   carriesCredential = true,
+  clock = PLATFORM_CLOCK,
   isSecure = true,
-}: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
+}: { carriesCredential?: boolean; clock?: IClock | undefined; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [connection: ITransportServerConnection, connectionHandle: Handle];
@@ -323,6 +327,7 @@ const createScriptedTransport = ({
     carriesCredential: () => {
       return carriesCredential;
     },
+    clock,
     isSecure: () => {
       return isSecure;
     },
@@ -651,16 +656,15 @@ test.describe('createRouterServer', () => {
 
   test('runs on its transport’s clock and refuses another', () => {
     const clock = createTestClock();
-    const { transport } = createScriptedTransport();
     using onItsTransport = createRouterServer(
       createWebSocketTransportServer({ clock, WebSocketServer })
     );
-    using onItsOwn = createRouterServer(transport, { clock });
+    using onScripted = createRouterServer(createScriptedTransport({ clock }).transport);
     using same = createRouterServer(createWebSocketTransportServer({ clock, WebSocketServer }), {
       clock,
     });
 
-    expect([onItsTransport.clock, onItsOwn.clock, same.clock]).toEqual([clock, clock, clock]);
+    expect([onItsTransport.clock, onScripted.clock, same.clock]).toEqual([clock, clock, clock]);
     expect(() => {
       createRouterServer(createWebSocketTransportServer({ WebSocketServer }), { clock });
     }).toThrow(
@@ -668,6 +672,21 @@ test.describe('createRouterServer', () => {
         "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
       )
     );
+  });
+
+  test('refuses a transport that names no clock, which only a caller past its types can give', () => {
+    const { transport } = createScriptedTransport();
+    const clockless = { ...transport, clock: undefined } as unknown as IRouterServerTransportLike;
+    const refusal = new ProgrammerError(
+      "a server's router runs on the clock of its transport, which names none"
+    );
+
+    expect(() => {
+      createRouterServer(clockless);
+    }).toThrow(refusal);
+    expect(() => {
+      createRouterServer(clockless, { clock: PLATFORM_CLOCK });
+    }).toThrow(refusal);
   });
 
   test.describe('a connection’s requests', () => {
@@ -3099,7 +3118,7 @@ test.describe('createRouterServer, credentials', () => {
     verify: NonNullable<ICredentials['verify']>,
     { clock }: { clock?: TestClock } = {}
   ) => {
-    const scripted = createScriptedTransport();
+    const scripted = createScriptedTransport({ clock });
     const router = createRouterServer(scripted.transport, {
       clock,
       credentials: { verify },
@@ -3209,9 +3228,10 @@ test.describe('createRouterServer, credentials', () => {
   });
 
   test('answers an admission’s SESSION_REQUIRED to a call that presented a credential ACCESS_DENIED, and to one that presented none SESSION_REQUIRED', async () => {
-    const { carry, deliver, sent, transport } = createScriptedTransport();
+    const clock = createTestClock(NOW);
+    const { carry, deliver, sent, transport } = createScriptedTransport({ clock });
     using router = createRouterServer(transport, {
-      clock: createTestClock(NOW),
+      clock,
       credentials: {
         audience: AUDIENCE,
         keys: [KEY],
@@ -3765,7 +3785,7 @@ test.describe('createRouterServer, credentials', () => {
 
   test('answers a subscribing call whose JWT’s end passes before its answer with its RESULT, then SESSION_REQUIRED, and its client withdraws nothing', async () => {
     const clock = createTestClock(NOW);
-    const pipe = createPipedTransports({ connectionHandle: first });
+    const pipe = createPipedTransports({ clock, connectionHandle: first });
     // its end, exp plus 60 s, two minutes on
     const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 60) } as const;
     using server = createRouterServer(pipe.server, {
@@ -3890,9 +3910,10 @@ test.describe('createRouterServer, credentials', () => {
 
   test('answers nothing to a call cancelled while it waits on its key set, whose ask goes on for the others', async () => {
     const { asks, keySet } = createKeySet();
-    const { deliver, sent, transport } = createScriptedTransport();
+    const clock = createTestClock(NOW);
+    const { deliver, sent, transport } = createScriptedTransport({ clock });
     using router = createRouterServer(transport, {
-      clock: createTestClock(NOW),
+      clock,
       credentials: { audience: AUDIENCE, keySet },
     });
     const errors = recordErrors(router);
@@ -3935,17 +3956,19 @@ test.describe('createRouterServer, credentials', () => {
 
   test('dispatches nothing and runs no resolver for a JWT call that waits on its key set as the router is disposed', async () => {
     const { asks, keySet } = createKeySet();
-    const { deliver, sent, transport } = createScriptedTransport();
+    const clock = createTestClock(NOW);
+    const { deliver, sent, transport } = createScriptedTransport({ clock });
     const router = createRouterServer(transport, {
-      clock: createTestClock(NOW),
+      clock,
       credentials: { audience: AUDIENCE, keySet },
     });
     const errors = recordErrors(router);
     // a router left live, given the same call: once it answered, the disposed one had its key and
     // its signature verified as long, had its call gone on
-    const live = createScriptedTransport();
+    const liveClock = createTestClock(NOW);
+    const live = createScriptedTransport({ clock: liveClock });
     using liveRouter = createRouterServer(live.transport, {
-      clock: createTestClock(NOW),
+      clock: liveClock,
       credentials: { audience: AUDIENCE, keySet },
     });
     const request = requestOf(1, {
@@ -3992,7 +4015,7 @@ test.describe('createRouterServer, credentials', () => {
 
   test('answers SESSION_REQUIRED from the admission of a resolver registered on it ACCESS_DENIED to a call that presented a JWT that holds, whose client keeps its default, and SESSION_REQUIRED to one that presented none', async () => {
     const clock = createTestClock(NOW);
-    const pipe = createPipedTransports({ connectionHandle: first });
+    const pipe = createPipedTransports({ clock, connectionHandle: first });
     const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) } as const;
     using server = createRouterServer(pipe.server, {
       clock,
@@ -4049,7 +4072,7 @@ test.describe('createRouterServer, credentials', () => {
 
   test('answers a JWT call past the calls its key set lets wait for an issuer’s deadline CAPACITY_EXCEEDED, reporting nothing, and its client keeps its default', async () => {
     const clock = createTestClock(NOW);
-    const pipe = createPipedTransports({ connectionHandle: first });
+    const pipe = createPipedTransports({ clock, connectionHandle: first });
     const { asks, keySet } = createKeySet();
     // the client's default names a kid the key set's first answer does not
     const credential = {
@@ -4133,10 +4156,11 @@ test.describe('createRouterServer, credentials', () => {
   });
 
   test('ends every credential’s session of an issuer by that issuer on every connection, its sid’s and its sub’s alike, and nothing of another issuer’s nor an ELSEWHERE’s whose id is that issuer; an issuer none names ends nothing', async () => {
-    const { carry, deliver, sent, transport } = createScriptedTransport();
+    const clock = createTestClock(NOW);
+    const { carry, deliver, sent, transport } = createScriptedTransport({ clock });
     const otherIssuer = 'https://other.example';
     using router = createRouterServer(transport, {
-      clock: createTestClock(NOW),
+      clock,
       credentials: {
         audience: AUDIENCE,
         keys: [KEY, { ...KEY, issuer: otherIssuer }],
@@ -4235,9 +4259,10 @@ test.describe('createRouterServer, credentials', () => {
   });
 
   test('refuses endSessionsOf an issuer that is no string, ending nothing', async () => {
-    const { deliver, sent, transport } = createScriptedTransport();
+    const clock = createTestClock(NOW);
+    const { deliver, sent, transport } = createScriptedTransport({ clock });
     using router = createRouterServer(transport, {
-      clock: createTestClock(NOW),
+      clock,
       credentials: { audience: AUDIENCE, keys: [KEY] },
     });
     const errors = recordErrors(router);
@@ -4298,7 +4323,7 @@ test.describe('createRouterServer, relaying', () => {
     isDeferred?: boolean | undefined;
     limits?: RouterLimitsOptions | undefined;
   } = {}) => {
-    const pipe = createPipedTransports({ connectionHandle: device, isDeferred });
+    const pipe = createPipedTransports({ clock, connectionHandle: device, isDeferred });
     const toDevice = createRouterClient(pipe.client, { clock, limits });
     const deviceRouter = createRouterServer(pipe.server, { clock, limits });
     const services = createServiceManager(deviceRouter);
@@ -4356,7 +4381,7 @@ test.describe('createRouterServer, relaying', () => {
     relay?: IRelayOptions;
     sessionOf?: SessionOf<Handle>;
   } = {}) => {
-    const legA = createScriptedTransport();
+    const legA = createScriptedTransport({ clock });
     const router = createRouterServer(legA.transport, { clock, limits, relay, sessionOf });
     const { [Symbol.dispose]: disposeDevice, ...behind } = createDevice({
       clock,
@@ -4586,7 +4611,7 @@ test.describe('createRouterServer, relaying', () => {
 
   test('answers a JWT past the calls its key set lets wait CAPACITY_EXCEEDED at its first step, reporting nothing, as a relay that verifies', async () => {
     const clock = createTestClock(NOW);
-    const legA = createScriptedTransport();
+    const legA = createScriptedTransport({ clock });
     const { asks, keySet } = createKeySet();
     using router = createRouterServer(legA.transport, {
       clock,
@@ -5719,8 +5744,9 @@ test.describe('createRouterServer, its metrics', () => {
   // debugging 9.7
   test('counts a command to a connection not open as started and closed in the turn it started', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const series = router.declareRequester(echo);
     const asking = router.request(new Uint8Array(0), {
       options: { ...options, connectionHandle: first },
@@ -5743,9 +5769,10 @@ test.describe('createRouterServer, its metrics', () => {
   // debugging 9.2
   test('counts a notification it cannot hand to its transport as failed, and one its transport refuses once it has it as sent', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { control, deliver, open, transport } = createScriptedTransport();
+    const clock = createTestClock();
+    const { control, deliver, open, transport } = createScriptedTransport({ clock });
     using router = createRouterServer(transport, {
-      clock: createTestClock(),
+      clock,
       // a notification of 100 bytes goes in no envelope of 64
       limits: { chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 },
       metricsRegistry,
@@ -5781,8 +5808,9 @@ test.describe('createRouterServer, its metrics', () => {
   // spec 17.2.6
   test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, reports why once, and fails no caller', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, sent, transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { deliver, open, sent, transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const errors = recordErrors(router);
     const refusal = new TypeError('this value does not write');
     const services = createServiceManager(router);
@@ -5827,7 +5855,8 @@ test.describe('createRouterServer, its metrics', () => {
   // debugging 9.4.6
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, sent, transport } = createScriptedTransport();
+    const clock = createTestClock();
+    const { deliver, open, sent, transport } = createScriptedTransport({ clock });
     using router = createRouterServer(
       {
         ...transport,
@@ -5835,7 +5864,7 @@ test.describe('createRouterServer, its metrics', () => {
           return false;
         },
       },
-      { clock: createTestClock(), metricsRegistry }
+      { clock, metricsRegistry }
     );
     const errors = recordErrors(router);
     const services = createServiceManager(router);
@@ -5883,8 +5912,9 @@ test.describe('createRouterServer, its metrics', () => {
     dependencies: IRequestResolverDependencies<string, string, Handle>
   ) => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, sent, transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { deliver, open, sent, transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const errors = recordErrors(router);
     const reached: string[] = [];
     const services = createServiceManager(router);
@@ -5958,7 +5988,7 @@ test.describe('createRouterServer, its metrics', () => {
   test('one registry given to a client’s router and a server’s counts a call at each of its ends, a command among them', async () => {
     const metricsRegistry = createMetricsRegistry();
     const clock = createTestClock();
-    const pipe = createPipedTransports({ connectionHandle: first });
+    const pipe = createPipedTransports({ clock, connectionHandle: first });
     using server = createRouterServer(pipe.server, { clock, metricsRegistry });
     using client = createRouterClient(pipe.client, { clock, metricsRegistry });
     const ask: IProcedure = { ...echo, procedureId: 2, procedureName: 'ask' };
@@ -6026,8 +6056,9 @@ test.describe('createRouterServer, its metrics', () => {
 
   test('answers a call whose handler fails before it answers PROCEDURE_FAILED, and counts it so', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, sent, transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { deliver, open, sent, transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const errors = recordErrors(router);
     const other: IProcedure = { ...echo, procedureId: 7, procedureName: 'other' };
     const answered = lineOf('bead_server_call_', 'service="2",procedure="other",type="request"');
@@ -6056,8 +6087,9 @@ test.describe('createRouterServer, its metrics', () => {
 
   test('drops each subscription a close or its disposal ends with no code, and none its client cancels', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { close, deliver, open, transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { close, deliver, open, transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     const droppedOf = () => {
       return countedOf(metricsRegistry).filter((line) => {
@@ -6104,8 +6136,9 @@ test.describe('createRouterServer, its metrics', () => {
 
   test('counts a subscription its application drops under the code of the failure that ends it, whatever its code', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, sent, transport } = createScriptedTransport();
-    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const clock = createTestClock();
+    const { deliver, open, sent, transport } = createScriptedTransport({ clock });
+    using router = createRouterServer(transport, { clock, metricsRegistry });
     const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     // a protocol code, a code of the procedure's own, and a code section 8 names none of
     const ending: [Handle, IFailure][] = [
@@ -6159,9 +6192,10 @@ test.describe('createRouterServer, its metrics', () => {
 
   // spec 16.7
   test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded', () => {
-    const { transport } = createScriptedTransport();
+    const clock = createTestClock();
+    const { transport } = createScriptedTransport({ clock });
     using router = createRouterServer(transport, {
-      clock: createTestClock(),
+      clock,
       metricsRegistry: createMetricsRegistry(),
     });
     const services = createServiceManager(router);
@@ -6212,7 +6246,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
   }: NonNullable<Parameters<typeof createRouterServer>[1]> & {
     beforeRequest?: IBeforeRequest<Handle>;
   } = {}) => {
-    const scripted = createScriptedTransport();
+    const scripted = createScriptedTransport({ clock: options.clock });
     const router = createRouterServer(scripted.transport, options);
     const services = createServiceManager(router);
     const told: unknown[] = [];

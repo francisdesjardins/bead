@@ -6,7 +6,7 @@ import type { IProcedure, IProcedureAddress } from '../../../router/shared/types
 import { createServer } from '../../../server/server';
 import { createMemoryTransportClient } from '../../client/memory-transport-client';
 import { createWorkerTransportClient } from '../../client/worker-transport-client';
-import { PLATFORM_CLOCK } from '../../shared/clock';
+import { type IClock, PLATFORM_CLOCK } from '../../shared/clock';
 import { createEmitter } from '../../shared/emitter';
 import { ProgrammerError } from '../../shared/errors';
 import { gaugesOf } from '../../shared/gauges';
@@ -40,12 +40,13 @@ const turn = (): Promise<void> => {
 /**
  * A transport server of `type` the test drives: it tells what the test emits, says of each
  * connection what `flags` say, takes the procedures `takes` says when given, and records what it was
- * asked to send, close and stop.
+ * asked to send, close and stop. It runs on the clock it is given, the platform's by default.
  */
 const createFake = (
   type: string,
   {
     anomalies = [],
+    clock = PLATFORM_CLOCK,
     counts = {},
     ceilings = {},
     flags,
@@ -54,6 +55,7 @@ const createFake = (
   }: {
     anomalies?: string[];
     ceilings?: Record<string, number>;
+    clock?: IClock | undefined;
     counts?: Record<string, number>;
     flags: { carriesCredential?: boolean; isSecure?: boolean; isTwoWay?: boolean };
     stopping?: Promise<void>;
@@ -64,6 +66,7 @@ const createFake = (
   const asked: unknown[][] = [];
   const handles = new Set<TransportServerConnectionHandle>();
   const transport: IJoinableTransportServer = {
+    clock,
     type,
 
     ...(flags.carriesCredential === undefined
@@ -426,10 +429,10 @@ test.describe('joinTransports', () => {
       ]);
     }).toThrow(new ProgrammerError("a join's transports run on one clock"));
 
-    // one clock, or none named beside it, is the join's
+    // one clock is the join's
     const joined = joinTransports([
       createMemoryTransportServer({ clock }),
-      createFake('WS', { flags: {} }).transport,
+      createFake('WS', { clock, flags: {} }).transport,
     ]);
 
     expect(joined.clock).toBe(clock);

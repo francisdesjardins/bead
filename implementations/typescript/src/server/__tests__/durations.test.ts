@@ -84,7 +84,7 @@ import {
   createFakeSocket,
   createFakeWebSocketServer,
 } from '../../transport/server/__tests__/fake-websocket-server';
-import { LONGEST_TIMER } from '../../transport/shared/clock';
+import { type IClock, LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import {
   CancelError,
@@ -739,8 +739,13 @@ const resetOf = (name: SessionTimeout): Way => {
   };
 };
 
-/** A transport server a test opens a connection on, which keeps each connection it closes. */
-const createScriptedTransport = () => {
+/**
+ * A transport server a test opens a connection on, which keeps each connection it closes, on the
+ * clock it is given: the platform's by default.
+ */
+const createScriptedTransport = ({
+  clock = PLATFORM_CLOCK,
+}: { clock?: IClock | undefined } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [connection: ITransportServerConnection, connectionHandle: Handle];
@@ -749,6 +754,7 @@ const createScriptedTransport = () => {
   }>();
   const closed: Handle[] = [];
   const transport: IServerTransportLike = {
+    clock,
     off: emitter.off,
     on: emitter.on,
     close: (connectionHandle) => {
@@ -772,7 +778,7 @@ const createScriptedTransport = () => {
 // a server layer's own, as it is built: a silent connection closed at its due
 const serverOfOptions: Way = async (given) => {
   const clock = createTestClock();
-  const { closed, emitter, transport } = createScriptedTransport();
+  const { closed, emitter, transport } = createScriptedTransport({ clock });
   const building = attempt(() => {
     return createServer(
       { transport },

@@ -43,8 +43,11 @@ interface IEchoTransport extends IClientTransportLike {
   }): Promise<void>;
 }
 
-/** A transport that records its calls, and answers each request with its own payload. */
-const createEchoTransport = () => {
+/**
+ * A transport that records its calls, and answers each request with its own payload, on the clock
+ * it is given: the platform's by default.
+ */
+const createEchoTransport = ({ clock = PLATFORM_CLOCK }: { clock?: IClock | undefined } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
     message: [message: ITransportMessage];
@@ -52,6 +55,7 @@ const createEchoTransport = () => {
   const calls: unknown[][] = [];
 
   const transport: IEchoTransport = {
+    clock,
     off: emitter.off,
     on: emitter.on,
     connect: (options) => {
@@ -154,21 +158,14 @@ test.describe('createClient', () => {
       createWebSocketClient({ transport: { clock } }),
       createHTTPClient({ transport: { clock } }),
       createWorkerClient({ transport: { clock, worker } }),
-      createClient({ transport: { ...createEchoTransport().transport, clock } }),
+      createClient({ transport: createEchoTransport({ clock }).transport }),
     ]) {
       expect([client.transport.clock, client.router.clock]).toEqual([clock, clock]);
       await client[Symbol.asyncDispose]();
     }
 
-    // a transport with no clock leaves its router its own
-    expect(createClient({ transport: createEchoTransport().transport }).router.clock).toBe(
-      PLATFORM_CLOCK
-    );
     // a router a builder made on another clock is refused
-    const clocked: IEchoTransport & { clock: IClock } = {
-      ...createEchoTransport().transport,
-      clock,
-    };
+    const clocked = createEchoTransport({ clock }).transport;
 
     expect(() => {
       return createClient({
@@ -258,7 +255,7 @@ test.describe('createClient', () => {
       );
     };
 
-    expect(given).toEqual([{ limits }]);
+    expect(given).toEqual([{ clock: PLATFORM_CLOCK, limits }]);
     await expect(echoOf(limited)('much too long')()).rejects.toMatchObject({
       detail: 'a payload is 8 bytes at most, not 13',
     });
