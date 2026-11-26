@@ -556,12 +556,29 @@ public sealed class MemoryTransportServerTests
         Assert.Empty(atServer);
 
         // * handed in a turn of its own, never within the resume; what comes meanwhile waits behind it
-        server.Resume(ConnectionHandle);
-        await client.Send(new TransportMessage(new byte[] { 6 }, false));
+        // ! the scheduler held while the test looks: free, the turn that hands what was held may run
+        // before the test looks
+        using (var held = new ManualResetEventSlim())
+        {
+            scheduler.Post(() =>
+            {
+                held.Wait(Patience, Cancelled);
+            });
 
-        Assert.Empty(atServer);
+            try
+            {
+                server.Resume(ConnectionHandle);
+                await client.Send(new TransportMessage(new byte[] { 6 }, false));
 
-        await Turn();
+                Assert.Empty(atServer);
+            }
+            finally
+            {
+                held.Set();
+            }
+
+            await Turn();
+        }
 
         Assert.Equal([1, 2, 3], atServer);
 
