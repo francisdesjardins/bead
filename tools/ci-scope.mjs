@@ -272,6 +272,11 @@ export const RULES = Object.freeze([
     areas: ['commits', 'protovalidate-differential'],
   },
   {
+    why: 'the pinned download, which reaches the jobs of each Node tool that makes one',
+    patterns: tool('fetch-pinned'),
+    areas: ['commits', ...BUILDER_SOURCE, 'rust'],
+  },
+  {
     why: 'the spec and its conformance files, which every side reads',
     patterns: ['spec/**'],
     areas: AREAS,

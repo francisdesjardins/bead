@@ -85,6 +85,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { fetchPinned } from './fetch-pinned.mjs';
+
 // ── Places ────────────────────────────────────────────────────────────────────
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -761,21 +763,8 @@ const fetchFuzzer = async () => {
   const exe = join(FUZZER, libfuzzerDotnet.asset);
 
   if (!existsSync(exe) || sha256Of(readFileSync(exe)) !== libfuzzerDotnet.sha256) {
-    const response = await fetch(libfuzzerDotnet.url);
-
-    if (!response.ok) {
-      throw new Error(`${libfuzzerDotnet.url}: ${String(response.status)} ${response.statusText}`);
-    }
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const actual = sha256Of(bytes);
-
-    // ! nothing of the fuzzer is written before its SHA-256 is the pin's
-    if (actual !== libfuzzerDotnet.sha256) {
-      throw new Error(
-        `${libfuzzerDotnet.url}: ${actual}, where the pin says ${libfuzzerDotnet.sha256}`
-      );
-    }
+    // ! nothing of the fuzzer is written before its SHA-256 is the pin's, which fetchPinned holds
+    const bytes = await fetchPinned(libfuzzerDotnet.url, libfuzzerDotnet.sha256);
 
     mkdirSync(FUZZER, { recursive: true });
     writeFileSync(exe, bytes);
