@@ -2086,7 +2086,7 @@ async fn refuses_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it
         WebSocketTransportServer::new(&WebSocketTransportServerOptions::default())
             .unwrap()
             .clock()
-            .is_none(),
+            .is_some_and(|platform| platform.description() == "the platform's"),
         "none given"
     );
 }

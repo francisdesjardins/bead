@@ -99,7 +99,6 @@ struct ServerState {
 }
 
 struct ServerInner {
-    given: Option<SharedClock>,
     // the procedures its connections take, every one when none
     procedures: Option<BTreeSet<ProcedureAddress>>,
     clock: SharedClock,
@@ -331,7 +330,6 @@ impl MemoryTransportServer {
 
         Ok(Self {
             inner: Arc::new(ServerInner {
-                given: options.clock.clone(),
                 procedures,
                 clock,
                 pipe,
@@ -505,7 +503,7 @@ impl ServerTransport for MemoryTransportServer {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
@@ -704,7 +702,6 @@ struct ClientState {
 }
 
 struct ClientInner {
-    given: Option<SharedClock>,
     clock: SharedClock,
     runtime: Handle,
     state: Mutex<ClientState>,
@@ -1010,7 +1007,6 @@ impl MemoryTransportClient {
 
         Ok(Self {
             inner: Arc::new(ClientInner {
-                given: options.clock.clone(),
                 clock,
                 runtime,
                 state: Mutex::new(ClientState {
@@ -1493,7 +1489,7 @@ impl RouterClientTransport for MemoryTransportClient {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     fn is_secure(&self) -> bool {

@@ -774,6 +774,58 @@ async fn refuses_to_join_two_transports_of_one_type() {
 
 // spec 15.14
 #[tokio::test]
+async fn joins_two_transports_given_no_clock_on_the_platform_s() {
+    let memory =
+        MemoryTransportServer::new(&MemoryTransportServerOptions::default()).expect("a server");
+    let broker = MemoryBroker::new(&MemoryBrokerOptions::default()).expect("a broker");
+    let adapter: Arc<dyn BrokerAdapter> = Arc::new(
+        broker
+            .adapter(&MemoryBrokerAdapterOptions::new("server"))
+            .expect("an adapter"),
+    );
+    // * no heartbeat: its PINGs, on the platform's timer, have nothing to reach
+    let participant = BrokerParticipant::new(
+        adapter,
+        &BrokerParticipantOptions {
+            heartbeat: Some(NEVER),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let brokered = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+    let clocks = [
+        memory
+            .clock()
+            .expect("the memory transport's platform clock"),
+        brokered
+            .clock()
+            .expect("the broker transport's platform clock"),
+    ];
+    let joined = JoinedServerTransport::new(vec![Arc::new(memory), Arc::new(brokered)])
+        .expect("one clock, the platform's");
+    let clock = joined.clock().expect("the join's clock");
+
+    assert_eq!(clock.description(), "the platform's", "the platform's");
+
+    for each in &clocks {
+        assert!(crate::clock::is_same(&clock, each), "each transport's");
+    }
+
+    let server =
+        Server::new(Arc::new(joined), &ServerOptions::default()).expect("a server on the join");
+
+    assert!(
+        crate::clock::is_same(&server.router().clock(), &clock),
+        "a server over the join runs on it"
+    );
+    server.dispose().await.expect("disposed");
+    participant.stop().await;
+}
+
+// spec 15.14
+#[tokio::test]
 async fn stops_every_transport_it_joined_and_sums_their_gauges() {
     let clock = SteppingClock::new(january_first());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);

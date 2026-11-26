@@ -45,7 +45,8 @@ pub type SessionListener = Arc<dyn Fn(&SessionEvent) + Send + Sync>;
 pub struct ServerOptions {
     /// The clock every layer runs on: its transport's, which one given must be.
     pub clock: Option<SharedClock>,
-    /// The runtime its owner runs on: the current one when none.
+    /// The runtime its owner runs on: the current one when none. Its timers run on its clock, its
+    /// transport's, so on the runtime that clock arms on.
     pub runtime: Option<Handle>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,

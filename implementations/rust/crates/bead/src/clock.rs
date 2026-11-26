@@ -2,6 +2,7 @@
 //! Bead's own is compared on; its wall clock's, which an instant a side reports is; and its timers.
 //! A stack has one clock, set where it starts and read upward.
 
+use core::any::Any;
 use core::fmt;
 use core::time::Duration;
 use std::sync::Arc;
@@ -44,15 +45,15 @@ pub trait Timer: Send + Sync + fmt::Debug {
     fn cancel(&self);
 }
 
-/// What Bead takes its time from: the platform's, [`SystemClock`], or a test's.
-pub trait Clock: Send + Sync + fmt::Debug {
+/// What Bead takes its time from: the platform's, [`SystemClock`], one per runtime, or a test's.
+pub trait Clock: Any + Send + Sync + fmt::Debug {
     /// How a refusal names it: one of the application's own, or the platform's.
     fn description(&self) -> &'static str {
         "one of its own"
     }
 
-    /// Its monotonic reading, since an origin of its own: what a deadline of Bead's own is
-    /// compared on.
+    /// Its monotonic reading, since an origin of its own, the process's for the platform's clock:
+    /// what a deadline of Bead's own is compared on.
     fn monotonic(&self) -> Duration;
 
     /// Its wall clock's reading: what an instant a side reports is.
@@ -89,7 +90,7 @@ pub type SharedClock = Arc<dyn Clock>;
 )]
 mod native {
     use core::time::Duration;
-    use std::sync::{Arc, Mutex, PoisonError};
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
     use std::time::{Instant, SystemTime};
 
     use tokio::task::AbortHandle;
@@ -98,11 +99,14 @@ mod native {
     use crate::errors::ProgrammerError;
     use crate::platform::{self, Handle};
 
-    /// The platform's clock, on tokio's timers and the system's wall clock.
+    // the process's one monotonic origin, which every platform's clock reads from
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+
+    /// The platform's clock of a runtime, on its timers and the system's wall clock: two on one
+    /// runtime are one clock, read from one monotonic origin, the process's.
     #[derive(Debug, Clone)]
     pub struct SystemClock {
         handle: Handle,
-        origin: Instant,
     }
 
     impl SystemClock {
@@ -128,10 +132,16 @@ mod native {
 
         // the platform's clock on `handle`, a runtime its part checked as it was built
         pub(crate) fn on(handle: Handle) -> Self {
-            Self {
-                handle,
-                origin: Instant::now(),
-            }
+            ORIGIN.get_or_init(Instant::now);
+
+            Self { handle }
+        }
+
+        /// Whether `other` is this clock: the platform's on the same runtime.
+        pub(crate) fn is_one_with(&self, other: &Self) -> bool {
+            // ! tokio's ids are unique among the runtimes running, an ended one's free for a later
+            // one: two live clocks are compared, never one kept for later
+            self.handle.id() == other.handle.id()
         }
     }
 
@@ -161,7 +171,7 @@ mod native {
         }
 
         fn monotonic(&self) -> Duration {
-            self.origin.elapsed()
+            ORIGIN.get_or_init(Instant::now).elapsed()
         }
 
         fn wall(&self) -> SystemTime {
@@ -286,6 +296,24 @@ pub(crate) fn instant_of_milliseconds(milliseconds: i64) -> SystemTime {
     instant.unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
+/// Whether two clocks are one: the same value, or the platform's on one runtime.
+pub(crate) fn is_same(first: &SharedClock, second: &SharedClock) -> bool {
+    if Arc::ptr_eq(first, second) {
+        return true;
+    }
+
+    let first: &dyn Any = &**first;
+    let second: &dyn Any = &**second;
+
+    match (
+        first.downcast_ref::<SystemClock>(),
+        second.downcast_ref::<SystemClock>(),
+    ) {
+        (Some(first), Some(second)) => first.is_one_with(second),
+        _ => false,
+    }
+}
+
 /// A layer built on another, as its clock is chosen: the clock beneath it and the one it was given,
 /// each by its name, and the two layers' names.
 pub(crate) struct LayeredClocks<'clocks> {
@@ -318,7 +346,7 @@ pub(crate) fn clock_of(
     } = *layered;
 
     match (beneath, given) {
-        (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => {
+        (Some(beneath), Some(given)) if !is_same(beneath, given) => {
             Err(ProgrammerError::new(format!(
                 "{layer} runs on the clock of {below}, {}, and was given another, {}",
                 beneath.description(),

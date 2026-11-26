@@ -463,9 +463,8 @@ pub(crate) struct ServerInner {
     loopback_binding: Mutex<Option<crate::net::loopbacks::LoopbackBinding>>,
     // the platform's clock, which its timers that bound the platform's socket run on
     platform: SharedClock,
-    // the clock it stamps and times bodies on, and the one it was given
+    // the clock it stamps and times bodies on: the one given, or the platform's
     clock: SharedClock,
-    given: Option<SharedClock>,
     settings: Settings,
     life: Life,
     state: Mutex<ServerState>,
@@ -2572,7 +2571,6 @@ impl HttpTransportServer {
             loopback_binding: Mutex::default(),
             platform,
             clock,
-            given: options.clock.clone(),
             settings,
             life: Life::new(Box::new(move |future| {
                 drop(platform::spawn(&covering, future));
@@ -2786,7 +2784,7 @@ impl ServerTransport for HttpTransportServer {
     }
 
     fn clock(&self) -> Option<SharedClock> {
-        self.inner.given.clone()
+        Some(Arc::clone(&self.inner.clock))
     }
 
     // its client said at connect that it listens: the server may send of its own

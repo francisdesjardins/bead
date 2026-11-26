@@ -101,17 +101,6 @@ impl WebSocketServer {
         let limits = limits_of(&server_options.limits.clone().unwrap_or_default())?;
         let mut transport_options = options.transport.clone().unwrap_or_default();
 
-        // ! every layer runs on its transport's clock: a server given another, its transport on the
-        // platform's, would come apart from it
-        if let Some(given) = server_options.clock.as_ref()
-            && transport_options.clock.is_none()
-        {
-            return Err(ProgrammerError::new(format!(
-                "a WebSocket server runs on the clock of its transport, the platform's, and was given another, {}",
-                given.description()
-            )));
-        }
-
         // * every layer on one runtime: the transport's own where its options name one, else the
         // server's
         if transport_options.runtime.is_none() {

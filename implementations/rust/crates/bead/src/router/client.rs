@@ -91,7 +91,8 @@ pub type WithdrawnListener = Arc<dyn Fn(CredentialScheme) + Send + Sync>;
 pub struct RouterClientOptions {
     /// The clock it runs on: its transport's, which one given must be.
     pub clock: Option<SharedClock>,
-    /// The runtime its owner runs on: the current one when none.
+    /// The runtime its owner runs on: the current one when none. Its timers run on its clock, its
+    /// transport's, so on the runtime that clock arms on.
     pub runtime: Option<Handle>,
     /// The credential every call presents but one that gives its own: a `JWT` or an `ELSEWHERE`.
     pub credential: Option<RequestCredential>,

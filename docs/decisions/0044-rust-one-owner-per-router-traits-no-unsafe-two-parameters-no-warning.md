@@ -454,9 +454,9 @@ hold.
 
 ### The clock and the durations
 
-A `Clock` trait, `Send + Sync + Debug`, gives the monotonic reading, the wall clock and a timer
-armed ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)); **`SystemClock`**, the
-platform's, runs on tokio's timers and `SystemTime::now()`, one clock a stack, a second refused.
+A `Clock` trait, `Any + Send + Sync + Debug`, gives the monotonic reading, the wall clock and a
+timer armed ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)); **`SystemClock`**,
+the platform's, runs on tokio's timers and `SystemTime::now()`, one clock a stack, a second refused.
 **tokio's paused time is not the test clock**: it moves no wall clock, fires every timer due at once
 in its own order and settles nothing between them, where `spec/clocks.json` asks the armed order, a
 periodic timer armed again before its callback and a settle between timers. The stepping clock is

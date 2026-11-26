@@ -23,7 +23,8 @@ mod tests;
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct ClientOptions {
-    /// The runtime its owner runs on: the current one when none.
+    /// The runtime its owner runs on: the current one when none. Its timers run on its clock, its
+    /// transport's, so on the runtime that clock arms on.
     pub runtime: Option<Handle>,
     /// The credential every call presents but one that gives its own.
     pub credential: Option<RequestCredential>,

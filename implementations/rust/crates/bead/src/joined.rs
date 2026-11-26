@@ -228,7 +228,7 @@ impl JoinedServerTransport {
     /// # Errors
     ///
     /// A [`ProgrammerError`] for none, one that names no type — a join among them — two of one type,
-    /// and two on different clocks.
+    /// and two on different clocks, two platform clocks on one runtime being one.
     pub fn new(transports: Vec<Arc<dyn ServerTransport>>) -> Result<Self, ProgrammerError> {
         if transports.is_empty() {
             return Err(ProgrammerError::new("a join takes one transport at least"));
@@ -254,7 +254,7 @@ impl JoinedServerTransport {
 
             if let Some(given) = transport.clock() {
                 match &clock {
-                    Some(held) if !Arc::ptr_eq(held, &given) => {
+                    Some(held) if !crate::clock::is_same(held, &given) => {
                         return Err(ProgrammerError::new("a join's transports run on one clock"));
                     }
                     Some(_) => {}

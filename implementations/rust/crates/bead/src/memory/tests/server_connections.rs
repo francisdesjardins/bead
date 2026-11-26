@@ -129,8 +129,7 @@ async fn counts_the_connections_it_holds_and_gives_their_handles_for_no_one_outs
     }
 }
 
-// * a transport gives the clock it was given, or none; a server over one that gives none runs on
-// the platform's
+// * a transport gives the clock it was given, or its platform's, which a server over it runs on
 #[tokio::test]
 async fn runs_on_the_clock_its_transport_supplies_the_platform_s_when_it_supplies_none() {
     let ends = Ends::unstarted();
@@ -140,12 +139,16 @@ async fn runs_on_the_clock_its_transport_supplies_the_platform_s_when_it_supplie
 
     let unclocked = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
         .expect("a server on no clock of its own");
+    let unclocked_clock = unclocked.clock().expect("its platform's clock");
 
-    assert!(unclocked.clock().is_none(), "none supplied");
+    assert_eq!(unclocked_clock.description(), "the platform's");
 
     let server = Server::new(Arc::new(unclocked), &ServerOptions::default())
         .expect("a server on the platform's clock");
 
-    assert_eq!(server.router().clock().description(), "the platform's");
+    assert!(
+        Arc::ptr_eq(&unclocked_clock, &server.router().clock()),
+        "the server runs on the clock its transport supplies"
+    );
     server.dispose().await.expect("disposed");
 }

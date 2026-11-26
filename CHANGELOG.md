@@ -60,6 +60,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's tests may replace the platform's clock that Bead's own bounds of a platform run on: a
   heartbeat, a close timeout, a disconnect's `DELETE`, a socket's pace. Each stack holds it where it
   starts, the real clock unless a test replaces it (decision 0011).
+- The Rust side's transports expose the clock they run on, their platform's when given none, as
+  the other sides' do. A server or a router given another clock over one of them is now refused,
+  where it ran on the clock it was given: give that clock to the transport instead. Two platform
+  clocks on one runtime are one clock, read from one monotonic origin, so two transports given none
+  still join. `Clock` is now `Any`.
+- The Rust side's HTTP and WebSocket server facades refuse a server given a clock over a transport
+  given none in the words every side's server writes: "a server runs on the clock of its
+  transport, the platform's, and was given another, one of its own".
 
 ### Fixed
 

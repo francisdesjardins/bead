@@ -27,8 +27,8 @@ use crate::testing::SteppingClock;
 use crate::testing::wire::{Exchange, ExchangeOptions};
 use crate::transport::{ClientListener, RouterClientTransport, ServerTransport};
 
-#[test]
-fn runs_its_router_on_its_transports_clock_which_a_facade_is_given_through_its_transports_options_and_refuses_a_router_on_another()
+#[tokio::test]
+async fn runs_its_router_on_its_transports_clock_which_a_facade_is_given_through_its_transports_options_and_refuses_a_router_on_another()
  {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let description = crate::clock::Clock::description(clock.as_ref());
@@ -44,7 +44,7 @@ fn runs_its_router_on_its_transports_clock_which_a_facade_is_given_through_its_t
     assert_eq!(
         refused.message(),
         format!(
-            "an HTTP server runs on the clock of its transport, the platform's, and was given another, {description}"
+            "a server runs on the clock of its transport, the platform's, and was given another, {description}"
         ),
         "the facade refuses clocks that split its layers"
     );
