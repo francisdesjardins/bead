@@ -95,7 +95,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
 
         Assert.Equal(("GET", "/queues/bead.i.ada", "200"), (request.Method, request.Path, answer.Status));
         Assert.Single(scripted.Of<AmqpTransfer>());
-        await management.Close(Patience);
+        await management.Close((Patience, TimeProvider.System));
         await scripted.Next<End>();
         AmqpEndpoints.CloseAtOnce(connection);
     }
@@ -155,7 +155,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         Assert.Equal("201", (await second.WaitAsync(Patience, Cancelled)).Status);
         Assert.Equal("404, queue 'bead.s.first' in vhost '/' not found", (await first.WaitAsync(Patience, Cancelled)).Said);
 
-        await management.Close(Patience);
+        await management.Close((Patience, TimeProvider.System));
         await scripted.Next<End>();
         AmqpEndpoints.CloseAtOnce(connection);
     }
@@ -215,7 +215,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         var abandoned = ended.Request(("GET", "/queues/bead.s.first"), null, Cancelled);
         var (abandonedRequest, _) = await sharedScript.NextRequest(0);
 
-        await ended.Close(Patience);
+        await ended.Close((Patience, TimeProvider.System));
         Assert.IsType<IOException>(await FailureOf(abandoned));
 
         var later = await AmqpManagement.Open(shared, Cancelled);
@@ -227,7 +227,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         Assert.False(asked.IsCompleted);
         await sharedScript.Answer(askedTransfer, ("404", "not found"));
         Assert.Equal("404", (await asked.WaitAsync(Patience, Cancelled)).Status);
-        await later.Close(Patience);
+        await later.Close((Patience, TimeProvider.System));
         AmqpEndpoints.CloseAtOnce(shared);
 
         // and one given up as it opens fails, its session ended
@@ -288,7 +288,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         var result = await asking.WaitAsync(Patience, Cancelled);
 
         Assert.Equal(("200", "matched"), (result.Status, result.Body));
-        await management.Close(Patience);
+        await management.Close((Patience, TimeProvider.System));
         AmqpEndpoints.CloseAtOnce(connection);
     }
 }

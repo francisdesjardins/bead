@@ -92,7 +92,9 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// <summary>A transport client, not yet connected.</summary>
     public MemoryTransportClient(MemoryTransportClientOptions? options = null)
     {
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = options?.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         _scheduler = options?.Scheduler ?? new SerialScheduler();
         _listeners = new ListenerGuard((reason, _) =>
         {

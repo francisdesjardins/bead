@@ -19,12 +19,14 @@ internal sealed class RacingStreamProvider : IMqttClientStreamProvider
     // the socket's settings, MQTTnet's own TCP channel's defaults
     private static readonly MqttClientTcpOptions Defaults = new();
 
-    private RacingStreamProvider()
-    {
-    }
+    // the platform's clock its adapter holds, which its race runs on
+    private readonly TimeProvider _platform;
 
-    /// <summary>The one every link shares: it holds nothing of a link's.</summary>
-    public static RacingStreamProvider Instance { get; } = new();
+    /// <summary>The one every link of an adapter shares, its race on <paramref name="platform"/>, the adapter's platform clock.</summary>
+    public RacingStreamProvider(TimeProvider platform)
+    {
+        _platform = platform;
+    }
 
     // one attempt at an address, its socket set before it connects, as MQTTnet's own channel sets it
     private static async Task<Socket> Attempt(IPEndPoint endPoint, CancellationToken cancellationToken)
@@ -66,6 +68,7 @@ internal sealed class RacingStreamProvider : IMqttClientStreamProvider
         var socket = await HappyEyeballs.ConnectAsync(target, new HappyEyeballsOptions
         {
             Connect = Attempt,
+            Clock = _platform,
             CancellationToken = cancellationToken,
         }).ConfigureAwait(false);
 

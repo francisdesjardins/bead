@@ -95,7 +95,9 @@ public sealed class MemoryBroker
         ServerBounds.AssertCount((nameof(MemoryBrokerOptions.MaximumMessageBytes), _options.MaximumMessageBytes ?? 1));
         ServerBounds.AssertCount((nameof(MemoryBrokerOptions.MaximumQueuedMessages), _options.MaximumQueuedMessages ?? 1));
 
+#pragma warning disable RS0030 // the clock given defaults to the platform's, read where the stack starts
         _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning restore RS0030
         _scheduler = _options.Scheduler ?? new SerialScheduler();
     }
 

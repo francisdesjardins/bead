@@ -77,9 +77,13 @@ public sealed record HttpTransportClientOptions
 
     /// <summary>
     /// What the stack built on it runs on, its timeouts and waits among them; the system's clock when
-    /// none. A disconnect's wait on the server bounds the platform's exchange, on the real clock.
+    /// none. A disconnect's wait on the server bounds the platform's exchange, on its platform's
+    /// clock.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
 }
 
 /// <summary>Where a client connects — <c>http://host:port/pathname</c>, or <c>https://</c> when secured — and how long it waits.</summary>
@@ -151,7 +155,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private const int LengthBytes = 4;
 
     // how long a disconnect waits on the server before it lets the connection go all the same: on
-    // the real clock, since it bounds the platform's exchange against a server that does not
+    // its platform's clock, since it bounds the platform's exchange against a server that does not
     // answer, never what Bead times
     private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(5);
 
@@ -164,6 +168,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private static readonly TimeSpan RetryAfterDefault = TimeSpan.FromSeconds(1);
 
     private readonly HttpTransportClientOptions _options;
+    // * the platform's clock its own bounds of a platform run on: its disconnect's DELETE and its race
+    private readonly TimeProvider _platform;
     private readonly TimeProvider _clock;
     private readonly int _maximumBodyBytes;
 
@@ -222,7 +228,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             Pause = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Pause), nameof(HttpTransportClientOptions.Pause)), given.Pause),
             Wait = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Wait), nameof(HttpTransportClientOptions.Wait)), given.Wait),
         };
-        _clock = _options.Clock ?? TimeProvider.System;
+#pragma warning disable RS0030 // the platform's clock, read where the stack starts and held there
+        _platform = _options.Platform ?? TimeProvider.System;
+#pragma warning restore RS0030
+        _clock = _options.Clock ?? _platform;
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
         _listeners = new ListenerGuard((reason, _) =>
         {
@@ -447,7 +456,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
         else
         {
-            using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
+            using var deleting = new CancellationTokenSource(DisconnectTimeout, _platform);
             try
             {
                 using var deleted = await Deleting(connection, deleting.Token);
@@ -745,7 +754,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
         }
 
-        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
+        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallbackOn(_platform), Proxy = LoopbackBypassProxy.Instance };
 
         if (_options.Tls is { } given)
         {
@@ -795,7 +804,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             try
             {
-                using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
+                using var deleting = new CancellationTokenSource(DisconnectTimeout, _platform);
                 using var request = RequestOf(connection, (HttpMethod.Delete, connection.Uri));
                 using var deleted = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deleting.Token);
             }

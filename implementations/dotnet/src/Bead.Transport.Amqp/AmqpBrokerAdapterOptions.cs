@@ -79,6 +79,9 @@ public sealed record AmqpBrokerAdapterOptions
     /// <summary>Its broker's virtual host, its OPEN's hostname <c>vhost:</c> and it; its broker's default when none.</summary>
     public string? VirtualHost { get; init; }
 
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
+
     // every member as the compiler writes it, but its password and its provider, of which whether one is set
     private bool PrintMembers(StringBuilder builder)
     {

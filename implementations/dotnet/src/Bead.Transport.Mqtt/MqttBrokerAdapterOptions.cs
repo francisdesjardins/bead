@@ -75,6 +75,9 @@ public sealed record MqttBrokerAdapterOptions
     // a test's: the client it links through, around MQTTnet's own
     internal Func<IMqttClient, IMqttClient>? ClientOf { get; init; }
 
+    /// <summary>The platform's clock its own bounds of a platform run on: <c>TimeProvider.System</c> unless a test replaces it.</summary>
+    internal TimeProvider? Platform { get; init; }
+
     // every member as the compiler writes it, but its password and its provider, of which whether one is set
     private bool PrintMembers(StringBuilder builder)
     {
