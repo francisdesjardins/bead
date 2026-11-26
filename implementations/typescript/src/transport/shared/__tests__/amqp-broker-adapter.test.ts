@@ -30,6 +30,7 @@ import { ParcelKind, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
 import { CancelError, GenericError, ProgrammerError } from '../errors';
+import { PLATFORM } from '../clock';
 import type { BrokerTopic, IBrokerDown, IBrokerMessage } from '../types';
 import {
   createAmqpScript,
@@ -45,6 +46,7 @@ import {
   watchResolver,
 } from './loopback-fixtures';
 import { PKI } from './tls-front';
+import { createTestClock, duesOn } from './fixtures';
 
 // constants
 
@@ -1866,7 +1868,8 @@ test.describe('createAmqpBrokerAdapter', () => {
   test('sends what waits on its link credit before its stop’s close, within its connectTimeout, and fails what has not gone by then', async () => {
     script.policy.credit = 1;
 
-    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const clock = createTestClock();
+    const adapter = adapterOf(script, { connectTimeout: 1_000, [PLATFORM]: clock });
     const { downs } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
     const publishing = [1, 2, 3].map((index) => {
@@ -1926,10 +1929,17 @@ test.describe('createAmqpBrokerAdapter', () => {
       return silent.deliveries.length === 1;
     });
 
-    const startedAt = Date.now();
+    let isStopped = false;
+    const stoppingSilent = adapter.stop().then(() => {
+      isStopped = true;
+    });
 
-    await adapter.stop();
-    expect(Date.now() - startedAt, 'its connectTimeout waited').toBeGreaterThanOrEqual(900);
+    expect(duesOn(clock)).toContain(1_000);
+    await clock.tickAsync(999);
+    expect(isStopped, 'its connectTimeout waited').toBe(false);
+    expect(silent.closeFrame, 'not closed while one waits').toBeUndefined();
+    await clock.tickAsync(1);
+    await stoppingSilent;
     expect(await Promise.all(unanswered), 'each failed').toEqual([
       expect.objectContaining({ message: 'the link of ada stopped' }),
       expect.objectContaining({ message: 'the link of ada stopped' }),
@@ -2517,15 +2527,28 @@ test.describe('createAmqpBrokerAdapter', () => {
   });
 
   test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
+    const clock = createTestClock();
     const late = Promise.withResolvers<string>();
     const adapter = adapterOf(script, {
+      [PLATFORM]: clock,
       connectTimeout: 200,
       passwordProvider: () => {
         return late.promise;
       },
     });
     const { downs } = heardOf(adapter);
-    const error = await settledOf(adapter.start());
+    let isSettled = false;
+    const failing = settledOf(adapter.start()).then((error) => {
+      isSettled = true;
+
+      return error;
+    });
+
+    await clock.tickAsync(199);
+    expect(isSettled, 'its password still awaited').toBe(false);
+    await clock.tickAsync(1);
+
+    const error = await failing;
 
     expect(error).toBeInstanceOf(GenericError);
     expect((error as Error).message).toBe(
@@ -2543,21 +2566,40 @@ test.describe('createAmqpBrokerAdapter', () => {
     };
 
     const slow = adapterOf(script, {
+      [PLATFORM]: clock,
       connectTimeout: 600,
       passwordProvider: async () => {
-        await sleep(450);
+        await new Promise<void>((resolve) => {
+          clock.setTimeout(() => {
+            resolve();
+          }, 450);
+        });
 
         return PASSWORD;
       },
     });
-    const began = performance.now();
-    const waiting = settledOf(slow.start());
+    const began = clock.now;
+
+    isSettled = false;
+
+    const waiting = settledOf(slow.start()).then((error) => {
+      isSettled = true;
+
+      return error;
+    });
+
+    await clock.tickAsync(449);
+    expect(isSettled, 'its password still awaited').toBe(false);
+    await clock.tickAsync(1);
     const held = await script.link();
 
+    await clock.tickAsync(149);
+    expect(isSettled, 'its OPEN and sessions still awaited').toBe(false);
+    await clock.tickAsync(1);
     expect(String(await waiting)).toContain(
       'the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout'
     );
-    expect(performance.now() - began).toBeLessThan(900);
+    expect(clock.now - began, 'one connectTimeout from its call').toBe(600);
     await held.closed;
   });
 

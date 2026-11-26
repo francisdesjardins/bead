@@ -23,6 +23,7 @@ use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransport
 use crate::broker::parcel::{Parcel, ParcelRead, kinds, read_parcel, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
 use crate::broker::server::BrokerTransportServerOptions;
+use crate::clock::{Clock, Schedule};
 use crate::duration::NEVER;
 use crate::mqtt::adapter::{MqttBrokerAdapter, MqttBrokerAdapterOptions, TRANSPORT_MQTT};
 use crate::mqtt::packets::{
@@ -36,7 +37,7 @@ use crate::testing::mqtt_script::{
     disconnect, pingresp, puback, publish, suback, unsuback, unsubscribe_bytes,
 };
 use crate::testing::parcels::{self, ParcelFields, ParcelReading};
-use crate::testing::{Instant, rest, spawn, tls};
+use crate::testing::{Instant, SteppingClock, rest, spawn, tls};
 use crate::transport::{ClientListener, ReadyState, RouterClientTransport};
 
 mod fixture;
@@ -2273,9 +2274,11 @@ async fn lets_go_at_its_stop_of_each_subscription_its_link_holds_once_what_it_wa
 async fn sends_its_stops_disconnect_of_0x00_all_the_same_where_an_unsuback_refuses_or_none_comes_what_it_was_handed_and_its_unsubacks_awaited_within_one_connect_timeout_of_its_call()
  {
     let script = script().await;
+    let clock = SteppingClock::new(std::time::UNIX_EPOCH);
     let mut options = options_of(&script);
 
     options.connect_timeout = Some(Duration::from_secs(1));
+    options.clock = Some(Arc::<SteppingClock>::clone(&clock));
 
     let adapter = adapter_of(&options);
     let heard = heard_of(&adapter);
@@ -2290,11 +2293,17 @@ async fn sends_its_stops_disconnect_of_0x00_all_the_same_where_an_unsuback_refus
 
     let publishing = spawn(adapter.publish(publication(topic(&["bead", "i", "bob"]), &[1])));
     let sent = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
-    let started = Instant::now();
+    let started = clock.monotonic();
     let stopping = spawn(adapter.stop());
 
     // * most of its connect timeout spent on what it was handed
-    rest(Duration::from_millis(700)).await;
+    until(|| clock.dues().contains(&Duration::from_secs(1))).await;
+    assert!(
+        clock.dues().contains(&Duration::from_secs(1)),
+        "its stop armed"
+    );
+    clock.advance(Duration::from_millis(700)).await;
+    assert!(!stopping.is_finished(), "still draining");
     link.send(puback(sent.identifier(), 0));
     assert_eq!(
         publishing.await.unwrap().unwrap(),
@@ -2307,17 +2316,15 @@ async fn sends_its_stops_disconnect_of_0x00_all_the_same_where_an_unsuback_refus
     link.next(Some(Kind::Unsubscribe), PATIENCE).await.unwrap();
     // the second's UNSUBACK withheld
     link.send(unsuback(refused.identifier(), 0x80));
+    clock.advance(Duration::from_millis(299)).await;
+    assert!(!stopping.is_finished(), "its connect timeout waited");
+    clock.advance(Duration::from_millis(1)).await;
     stopping.await.unwrap();
 
-    let waited = started.elapsed();
-
-    assert!(
-        waited >= Duration::from_millis(950),
-        "its connect timeout waited: {waited:?}"
-    );
-    assert!(
-        waited < Duration::from_millis(1_500),
-        "one connect timeout from its call, not one after its drain: {waited:?}"
+    assert_eq!(
+        clock.monotonic().saturating_sub(started),
+        Duration::from_secs(1),
+        "one connect timeout from its call"
     );
     assert_eq!(
         link.next(Some(Kind::Disconnect), PATIENCE).await.unwrap(),
@@ -4320,10 +4327,12 @@ async fn asks_its_password_provider_outside_the_call_to_start_before_the_start_s
 async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
  {
     let script = script().await;
+    let clock = SteppingClock::new(std::time::UNIX_EPOCH);
     let (late, answered) = tokio::sync::watch::channel(None::<String>);
     let mut options = MqttBrokerAdapterOptions::new(script.url(), ID);
 
     options.connect_timeout = Some(Duration::from_millis(200));
+    options.clock = Some(Arc::<SteppingClock>::clone(&clock));
     options.password_provider = Some(provider_of(move |_signal| {
         let mut answered = answered.clone();
 
@@ -4338,7 +4347,18 @@ async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout
 
     let adapter = adapter_of(&options);
     let heard = heard_of(&adapter);
-    let failed = adapter.start(BrokerStart::default()).await.unwrap_err();
+    let failing = spawn(adapter.start(BrokerStart::default()));
+
+    until(|| clock.dues().contains(&Duration::from_millis(200))).await;
+    assert!(
+        clock.dues().contains(&Duration::from_millis(200)),
+        "its start armed"
+    );
+    clock.advance(Duration::from_millis(199)).await;
+    assert!(!failing.is_finished(), "its password still awaited");
+    clock.advance(Duration::from_millis(1)).await;
+
+    let failed = failing.await.unwrap().unwrap_err();
 
     assert!(matches!(failed, BrokerError::Failed { .. }), "failed");
     assert_eq!(
@@ -4360,21 +4380,48 @@ async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout
 
     // * one connect timeout from its start's call: its CONNACK waits what its ask left of it
     let mut slow = MqttBrokerAdapterOptions::new(script.url(), ID);
+    let provider_clock = Arc::clone(&clock);
 
     slow.connect_timeout = Some(Duration::from_millis(600));
-    slow.password_provider = Some(provider_of(|_signal| {
-        Box::pin(async {
-            rest(Duration::from_millis(450)).await;
+    slow.clock = Some(Arc::<SteppingClock>::clone(&clock));
+    slow.password_provider = Some(provider_of(move |_signal| {
+        let clock = Arc::clone(&provider_clock);
+
+        Box::pin(async move {
+            let answered = CancellationToken::new();
+            let firing = answered.clone();
+            let timer = clock
+                .arm(
+                    Schedule::Once(Duration::from_millis(450)),
+                    Box::new(move || {
+                        firing.cancel();
+                    }),
+                )
+                .unwrap();
+
+            answered.cancelled().await;
+            timer.cancel();
 
             Ok(PASSWORD.to_owned())
         })
     }));
 
     let slow = adapter_of(&slow);
-    let began = Instant::now();
+    let began = clock.monotonic();
     let waiting = spawn(slow.start(BrokerStart::default()));
 
+    until(|| clock.dues().contains(&Duration::from_millis(450))).await;
+    assert!(
+        clock.dues().contains(&Duration::from_millis(450)),
+        "its provider armed"
+    );
+    clock.advance(Duration::from_millis(449)).await;
+    assert!(!waiting.is_finished(), "its password still awaited");
+    clock.advance(Duration::from_millis(1)).await;
     let _held = script.link(PATIENCE).await.unwrap();
+    clock.advance(Duration::from_millis(149)).await;
+    assert!(!waiting.is_finished(), "its CONNACK still awaited");
+    clock.advance(Duration::from_millis(1)).await;
 
     let failed = message_of(&waiting.await.unwrap().unwrap_err());
 
@@ -4382,9 +4429,10 @@ async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout
         failed.contains("the link of ada had no CONNACK within 600 ms, its connectTimeout"),
         "{failed}"
     );
-    assert!(
-        began.elapsed() < Duration::from_millis(900),
-        "one connect timeout"
+    assert_eq!(
+        clock.monotonic().saturating_sub(began),
+        Duration::from_millis(600),
+        "one connect timeout from its call"
     );
 }
 
